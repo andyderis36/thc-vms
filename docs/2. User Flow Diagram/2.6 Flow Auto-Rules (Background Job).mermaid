@@ -1,0 +1,19 @@
+flowchart TD
+    Start([Cron Job Trigger]) --> CekRequested{Cek requested > 7 hari?}
+    CekRequested -- Ya --> AutoCancel[Auto Cancel]
+    CekRequested -- Tidak --> CekApproved
+    
+    CekApproved{Cek approved H-1?} -- Ya --> ReminderH1[Kirim Reminder H-1]
+    CekApproved -- Tidak --> CekVisiting
+    
+    CekVisiting{Cek visiting lewat end_date + 24 jam?} -- Ya --> AutoComplete[Auto Complete + Flag Anomali]
+    CekVisiting -- Tidak --> CekSLA
+    
+    CekSLA{Cek SLA approval > 1x24 jam?} -- Ya --> ReminderAdmin[Reminder ke Admin]
+    CekSLA -- Tidak --> Selesai([Selesai])
+    
+    AutoCancel --> Notif[Kirim Notifikasi]
+    ReminderH1 --> Notif
+    AutoComplete --> Notif
+    ReminderAdmin --> Notif
+    Notif --> Selesai

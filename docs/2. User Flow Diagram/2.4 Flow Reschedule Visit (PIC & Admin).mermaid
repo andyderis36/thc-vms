@@ -1,0 +1,15 @@
+flowchart TD
+    Start([PIC/Admin Request Reschedule]) --> FormReschedule[Isi Form Reschedule]
+    FormReschedule --> Alasan[Isi Alasan & Tanggal Baru]
+    Alasan --> Submit[Submit Reschedule]
+    Submit --> StatusRescheduled[Status: rescheduled]
+    StatusRescheduled --> NotifAdmin[Notifikasi ke Admin]
+    NotifAdmin --> Review[Admin Review]
+    Review --> CekApprove{Setuju?}
+    
+    CekApprove -- Ya --> StatusApproved[Status: approved]
+    CekApprove -- Tidak --> StatusCancelled[Status: cancelled]
+    
+    StatusApproved --> NotifSemua[Notifikasi ke Semua Pihak]
+    StatusCancelled --> NotifSemua
+    NotifSemua --> Selesai([Selesai])

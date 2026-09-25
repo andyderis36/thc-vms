@@ -1,0 +1,25 @@
+flowchart TD
+    Start([Admin Login via SSO]) --> Dashboard[Dashboard Internal]
+    Dashboard --> CekQueue[Lihat Approval Queue]
+    CekQueue --> PilihRequest[Pilih Request]
+    PilihRequest --> Review[Review Detail Request]
+    Review --> CekData{Data Lengkap & Valid?}
+    
+    CekData -- Tidak --> Reject[Reject dengan Alasan]
+    CekData -- Ya --> CekLokasi{Lokasi Tersedia?}
+    
+    CekLokasi -- Tidak --> Reschedule[Reschedule]
+    CekLokasi -- Ya --> Approve[Approve Request]
+    
+    Reject --> StatusRejected[Status: rejected]
+    Reschedule --> StatusRescheduled[Status: rescheduled]
+    Approve --> StatusApproved[Status: approved]
+    
+    StatusRejected --> NotifPIC[Notifikasi ke PIC]
+    StatusRescheduled --> NotifPIC
+    StatusApproved --> NotifPIC
+    
+    NotifPIC --> Selesai([Selesai])
+    
+    Reschedule --> TungguApproval[Approval Ulang]
+    TungguApproval --> StatusApproved

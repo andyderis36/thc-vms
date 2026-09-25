@@ -1,0 +1,33 @@
+flowchart TD
+    Start([Security Login]) --> Dashboard[Dashboard Security]
+    Dashboard --> LihatHariIni[Lihat Visit Hari Ini]
+    LihatHariIni --> VisitorDatang{Visitor Datang?}
+    
+    VisitorDatang -- Ya --> ScanQR[Scan QR Code Visitor]
+    VisitorDatang -- Tidak --> CekManual[Cek Manual by Visit ID]
+    
+    ScanQR --> QRValid{QR Valid?}
+    QRValid -- Tidak --> CekManual
+    QRValid -- Ya --> Verifikasi[Verifikasi Identitas]
+    
+    CekManual --> Verifikasi
+    Verifikasi --> CekIdentitas{Identitas Cocok?}
+    
+    CekIdentitas -- Tidak --> Tolak[Tolak Masuk]
+    CekIdentitas -- Ya --> FotoVisitor[Ambil Foto Visitor]
+    FotoVisitor --> TandaTangan[NDA Digital Signature]
+    TandaTangan --> CetakBadge[Cetak Badge]
+    CetakBadge --> CheckIn[Check-in]
+    CheckIn --> StatusVisiting[Status: visiting]
+    StatusVisiting --> VisitorMasuk[Visitor Masuk]
+    
+    VisitorMasuk --> SelesaiKunjungan{Selesai?}
+    SelesaiKunjungan -- Ya --> ScanQRKeluar[Scan QR Keluar]
+    SelesaiKunjungan -- Tidak --> Tunggu[Tunggu]
+    Tunggu --> SelesaiKunjungan
+    
+    ScanQRKeluar --> CheckOut[Check-out]
+    CheckOut --> StatusCompleted[Status: completed]
+    StatusCompleted --> Selesai([Selesai])
+    
+    Tolak --> Selesai

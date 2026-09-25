@@ -1,0 +1,1601 @@
+openapi: 3.1.0
+
+info:
+  title: THC Visitor Management API
+  version: 1.0.0
+  description: |
+    API untuk sistem THC Visitor Management.
+    Mendukung pengajuan site visit, approval, check-in/out, reporting, dan audit log.
+
+    ## Konvensi
+    - Versioning: `/api/v1/...`
+    - Error format: `{ code, message, details }`
+    - Pagination: cursor-based (`?cursor=&limit=`)
+    - Filtering: `?status=approved&location=medan`
+    - Sorting: `?sort=created_at:desc`
+    - Idempotency: header `Idempotency-Key` untuk POST
+    - Rate limit headers: `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+
+    ## Auth
+    - Internal: SSO / OAuth2 / OIDC
+    - Eksternal: Email + OTP / magic link
+    - Session: JWT access token (15 menit) + refresh token (7 hari) via httpOnly cookie
+
+  contact:
+    name: THC Engineering
+    email: engineering@thc.local
+
+  license:
+    name: Proprietary
+    url: https://thc.local/license
+
+servers:
+  - url: https://api.thc.local/api/v1
+    description: Production
+  - url: https://staging-api.thc.local/api/v1
+    description: Staging
+  - url: http://localhost:8080/api/v1
+    description: Local Development
+
+tags:
+  - name: Health
+    description: Health & readiness check
+  - name: Auth
+    description: Autentikasi internal & eksternal
+  - name: Visit
+    description: Manajemen site visit
+  - name: CheckIn
+    description: Check-in / check-out visitor
+  - name: MasterData
+    description: Master data (lokasi, purpose, user, role, vendor)
+  - name: Reporting
+    description: Laporan & export
+  - name: Audit
+    description: Audit log
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ============================================================
+  # HEALTH
+  # ============================================================
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      security: []
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness check (DB, Redis)
+      security: []
+      responses:
+        '200':
+          description: Service ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+                  checks:
+                    type: object
+                    properties:
+                      database:
+                        type: string
+                        example: ok
+                      redis:
+                        type: string
+                        example: ok
+        '503':
+          description: Service not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================
+  # AUTH
+  # ============================================================
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login internal via SSO callback
+      security: []
+      description: |
+        Endpoint untuk callback SSO internal. Menerima authorization code dari IdP THC,
+        memverifikasi, lalu mengembalikan JWT access token dan set refresh token di httpOnly cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, redirect_uri]
+              properties:
+                code:
+                  type: string
+                  description: Authorization code dari IdP
+                redirect_uri:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: Login berhasil
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: Refresh token di httpOnly cookie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/otp/request:
+    post:
+      tags: [Auth]
+      summary: Request OTP untuk user eksternal
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                captcha_token:
+                  type: string
+                  description: Token dari CAPTCHA
+      responses:
+        '200':
+          description: OTP terkirim
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: OTP telah dikirim ke email
+                  expires_in:
+                    type: integer
+                    example: 300
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/otp/verify:
+    post:
+      tags: [Auth]
+      summary: Verifikasi OTP & login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, otp]
+              properties:
+                email:
+                  type: string
+                  format: email
+                otp:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+      responses:
+        '200':
+          description: Login berhasil
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: Refresh token di httpOnly cookie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      security: []
+      description: Menggunakan refresh token dari httpOnly cookie untuk mendapatkan access token baru.
+      responses:
+        '200':
+          description: Token baru
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout & revokasi token
+      responses:
+        '204':
+          description: Logout berhasil
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/2fa/setup:
+    post:
+      tags: [Auth]
+      summary: Setup 2FA (wajib untuk Admin & Super Admin)
+      responses:
+        '200':
+          description: Secret 2FA
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    type: string
+                  qr_url:
+                    type: string
+                    format: uri
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/2fa/verify:
+    post:
+      tags: [Auth]
+      summary: Verifikasi 2FA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+      responses:
+        '200':
+          description: 2FA terverifikasi
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================
+  # VISIT
+  # ============================================================
+  /visits:
+    get:
+      tags: [Visit]
+      summary: List site visit
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Sort'
+        - name: location_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: purpose_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/VisitStatus'
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: search
+          in: query
+          description: Cari berdasarkan Visit ID atau nama PIC
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List visit
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VisitRequest'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [Visit]
+      summary: Buat request site visit
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisitCreateRequest'
+      responses:
+        '201':
+          description: Request dibuat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Konflik (quota penuh / blacklist)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /visits/{id}:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    get:
+      tags: [Visit]
+      summary: Detail visit
+      responses:
+        '200':
+          description: Detail visit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags: [Visit]
+      summary: Update request (jika belum approved)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisitUpdateRequest'
+      responses:
+        '200':
+          description: Visit updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /visits/{id}/approve:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    post:
+      tags: [Visit]
+      summary: Approve request (THC Admin)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Status tidak valid untuk approve
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /visits/{id}/reject:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    post:
+      tags: [Visit]
+      summary: Reject request (THC Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /visits/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    post:
+      tags: [Visit]
+      summary: Cancel request (PIC/Admin)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /visits/{id}/reschedule:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    post:
+      tags: [Visit]
+      summary: Reschedule visit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [start_date, end_date, reason]
+              properties:
+                start_date:
+                  type: string
+                  format: date-time
+                end_date:
+                  type: string
+                  format: date-time
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Rescheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /visits/{id}/qr:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    get:
+      tags: [Visit]
+      summary: Get QR code untuk check-in
+      responses:
+        '200':
+          description: QR code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  qr_url:
+                    type: string
+                    format: uri
+                  qr_data:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /visits/{id}/nda:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    post:
+      tags: [Visit]
+      summary: Submit NDA acceptance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visitor_id, signature]
+              properties:
+                visitor_id:
+                  type: string
+                  format: uuid
+                signature:
+                  type: string
+                  description: Base64 signature image
+      responses:
+        '201':
+          description: NDA accepted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /visits/{id}/feedback:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    post:
+      tags: [Visit]
+      summary: Submit feedback post-visit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                comment:
+                  type: string
+      responses:
+        '201':
+          description: Feedback submitted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /visits/{id}/incident:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    post:
+      tags: [Visit]
+      summary: Submit incident report
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description, severity]
+              properties:
+                description:
+                  type: string
+                severity:
+                  type: string
+                  enum: [low, medium, high]
+      responses:
+        '201':
+          description: Incident reported
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================
+  # CHECK-IN / CHECK-OUT
+  # ============================================================
+  /visits/{id}/checkin:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    post:
+      tags: [CheckIn]
+      summary: Check-in visitor (Security)
+      description: |
+        Security scan QR code atau input manual Visit ID, verifikasi identitas,
+        ambil foto, tanda tangan NDA, lalu check-in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visitor_id]
+              properties:
+                visitor_id:
+                  type: string
+                  format: uuid
+                photo:
+                  type: string
+                  description: Base64 photo
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Check-in berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckIn'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Sudah check-in atau status tidak valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /visits/{id}/checkout:
+    parameters:
+      - $ref: '#/components/parameters/VisitId'
+    post:
+      tags: [CheckIn]
+      summary: Check-out visitor (Security)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Check-out berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckOut'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Belum check-in atau status tidak valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================
+  # MASTER DATA
+  # ============================================================
+  /locations:
+    get:
+      tags: [MasterData]
+      summary: List lokasi THC
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: List lokasi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Location'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /purposes:
+    get:
+      tags: [MasterData]
+      summary: List purpose
+      responses:
+        '200':
+          description: List purpose
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Purpose'
+
+  /users:
+    get:
+      tags: [MasterData]
+      summary: List user (Super Admin)
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: role_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [internal, external]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, blacklisted]
+      responses:
+        '200':
+          description: List user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /roles:
+    get:
+      tags: [MasterData]
+      summary: List role
+      responses:
+        '200':
+          description: List role
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Role'
+
+  /vendors:
+    get:
+      tags: [MasterData]
+      summary: List vendor
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: is_blacklisted
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: List vendor
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Vendor'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /vendors/{id}/blacklist:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [MasterData]
+      summary: Blacklist vendor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Vendor blacklisted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # REPORTING
+  # ============================================================
+  /reports/visits:
+    get:
+      tags: [Reporting]
+      summary: Laporan kunjungan
+      parameters:
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: location_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/VisitStatus'
+      responses:
+        '200':
+          description: Laporan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_visits:
+                    type: integer
+                  completion_rate:
+                    type: number
+                    format: float
+                  average_duration_minutes:
+                    type: number
+                    format: float
+                  no_show_rate:
+                    type: number
+                    format: float
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VisitRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /reports/export:
+    get:
+      tags: [Reporting]
+      summary: Export laporan (CSV/Excel)
+      parameters:
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [csv, xlsx]
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: File laporan
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /reports/emergency-list:
+    get:
+      tags: [Reporting]
+      summary: Emergency evacuation list (visitor aktif)
+      parameters:
+        - name: location_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Daftar visitor aktif
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location:
+                    $ref: '#/components/schemas/Location'
+                  visitors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Visitor'
+                  total:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ============================================================
+  # AUDIT
+  # ============================================================
+  /audit-logs:
+    get:
+      tags: [Audit]
+      summary: List audit log (THC Admin)
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: entity
+          in: query
+          schema:
+            type: string
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: List audit log
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditLog'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+# ============================================================
+# COMPONENTS
+# ============================================================
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token di header `Authorization: Bearer <token>`
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: Cursor untuk pagination
+      schema:
+        type: string
+
+    Limit:
+      name: limit
+      in: query
+      description: Jumlah item per halaman (max 100)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+
+    Sort:
+      name: sort
+      in: query
+      description: Sorting, contoh `created_at:desc`
+      schema:
+        type: string
+        pattern: '^[a-z_]+:(asc|desc)$'
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: Unique key untuk mencegah double submit
+      schema:
+        type: string
+        format: uuid
+
+    VisitId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Request tidak valid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: BAD_REQUEST
+            message: Validasi gagal
+            details:
+              field: start_date
+              reason: Tanggal tidak boleh masa lalu
+
+    Unauthorized:
+      description: Tidak terautentikasi
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHORIZED
+            message: Token tidak valid atau expired
+
+    Forbidden:
+      description: Tidak punya akses
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: FORBIDDEN
+            message: Role tidak diizinkan untuk aksi ini
+
+    NotFound:
+      description: Resource tidak ditemukan
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: NOT_FOUND
+            message: Visit tidak ditemukan
+
+    TooManyRequests:
+      description: Rate limit terlampaui
+      headers:
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: RATE_LIMITED
+            message: Terlalu banyak permintaan
+
+  schemas:
+
+    # --------------------------------------------------------
+    # CORE
+    # --------------------------------------------------------
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: BAD_REQUEST
+        message:
+          type: string
+          example: Validasi gagal
+        details:
+          type: object
+          additionalProperties: true
+
+    Pagination:
+      type: object
+      properties:
+        next_cursor:
+          type: string
+          nullable: true
+        prev_cursor:
+          type: string
+          nullable: true
+        limit:
+          type: integer
+        has_more:
+          type: boolean
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          example: 900
+        user:
+          $ref: '#/components/schemas/User'
+
+    # --------------------------------------------------------
+    # USER & ROLE
+    # --------------------------------------------------------
+    Role:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: THC Admin
+        permissions:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        type:
+          type: string
+          enum: [internal, external]
+        status:
+          type: string
+          enum: [active, inactive, blacklisted]
+        vendor_id:
+          type: string
+          format: uuid
+          nullable: true
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Vendor:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        contact_person:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        is_blacklisted:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # --------------------------------------------------------
+    # MASTER DATA
+    # --------------------------------------------------------
+    Location:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: THC Jakarta - Karet
+        address:
+          type: string
+        city:
+          type: string
+        timezone:
+          type: string
+          enum: [WIB, WITA, WIT]
+        is_active:
+          type: boolean
+
+    Purpose:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          enum: [Survey, Troubleshoot, Maintenance, Operation]
+        is_active:
+          type: boolean
+
+    # --------------------------------------------------------
+    # VISIT
+    # --------------------------------------------------------
+    VisitStatus:
+      type: string
+      enum:
+        - requested
+        - approved
+        - visiting
+        - completed
+        - not_visit
+        - rejected
+        - cancelled
+        - rescheduled
+
+    Visitor:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        visit_request_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        id_number:
+          type: string
+        phone:
+          type: string
+        photo_url:
+          type: string
+          format: uri
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    VisitRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        visit_id:
+          type: string
+          description: Human-readable ID
+          example: VST-9548545669
+        pic_user_id:
+          type: string
+          format: uuid
+        pic:
+          $ref: '#/components/schemas/User'
+        vendor:
+          $ref: '#/components/schemas/Vendor'
+        location:
+          $ref: '#/components/schemas/Location'
+        purposes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Purpose'
+        visitors:
+          type: array
+          items:
+            $ref: '#/components/schemas/Visitor'
+        start_date:
+          type: string
+          format: date-time
+        end_date:
+          type: string
+          format: date-time
+        is_multi_day:
+          type: boolean
+        status:
+          $ref: '#/components/schemas/VisitStatus'
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    VisitCreateRequest:
+      type: object
+      required:
+        - location_id
+        - purpose_ids
+        - start_date
+        - end_date
+        - visitors
+      properties:
+        location_id:
+          type: string
+          format: uuid
+        purpose_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+        start_date:
+          type: string
+          format: date-time
+        end_date:
+          type: string
+          format: date-time
+        is_multi_day:
+          type: boolean
+          default: false
+        notes:
+          type: string
+        visitors:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: object
+            required: [name, id_number, phone]
+            properties:
+              name:
+                type: string
+              id_number:
+                type: string
+              phone:
+                type: string
+              photo:
+                type: string
+                description: Base64 photo (opsional)
+        nda_accepted:
+          type: boolean
+          default: false
+
+    VisitUpdateRequest:
+      type: object
+      properties:
+        location_id:
+          type: string
+          format: uuid
+        purpose_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        start_date:
+          type: string
+          format: date-time
+        end_date:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        visitors:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              id_number:
+                type: string
+              phone:
+                type: string
+
+    CheckIn:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        visit_request_id:
+          type: string
+          format: uuid
+        checked_in_at:
+          type: string
+          format: date-time
+        checked_in_by:
+          type: string
+          format: uuid
+        photo_url:
+          type: string
+          format: uri
+          nullable: true
+        badge_url:
+          type: string
+          format: uri
+          nullable: true
+
+    CheckOut:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        visit_request_id:
+          type: string
+          format: uuid
+        checked_out_at:
+          type: string
+          format: date-time
+        checked_out_by:
+          type: string
+          format: uuid
+
+    # --------------------------------------------------------
+    # AUDIT
+    # --------------------------------------------------------
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          example: visit.approve
+        entity:
+          type: string
+          example: VisitRequest
+        entity_id:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        ip:
+          type: string
+        user_agent:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true

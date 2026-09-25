@@ -1,0 +1,168 @@
+erDiagram
+    ROLE ||--o{ USER : "has"
+    VENDOR ||--o{ USER : "employs"
+    VENDOR ||--o{ VISIT_REQUEST : "requests"
+    USER ||--o{ VISIT_REQUEST : "creates (PIC)"
+    LOCATION ||--o{ VISIT_REQUEST : "hosts"
+    VISIT_REQUEST ||--o{ VISITOR : "includes"
+    VISIT_REQUEST ||--o{ VISIT_PURPOSE : "has"
+    PURPOSE ||--o{ VISIT_PURPOSE : "tagged"
+    VISIT_REQUEST ||--o{ STATUS_HISTORY : "logs"
+    VISIT_REQUEST ||--o| CHECK_IN : "has"
+    VISIT_REQUEST ||--o| CHECK_OUT : "has"
+    VISIT_REQUEST ||--o{ NDA_ACCEPTANCE : "requires"
+    VISIT_REQUEST ||--o| FEEDBACK : "receives"
+    VISIT_REQUEST ||--o{ INCIDENT_REPORT : "may have"
+    VISITOR ||--o{ NDA_ACCEPTANCE : "signs"
+    USER ||--o{ NOTIFICATION : "receives"
+    USER ||--o{ AUDIT_LOG : "triggers"
+    USER ||--o{ STATUS_HISTORY : "changes"
+
+    ROLE {
+        uuid id PK
+        string name
+        jsonb permissions
+        timestamp created_at
+    }
+
+    USER {
+        uuid id PK
+        string name
+        string email UK
+        string phone
+        uuid role_id FK
+        string type "internal | external"
+        string status "active | inactive | blacklisted"
+        uuid vendor_id FK
+        timestamp last_login
+        timestamp created_at
+        timestamp updated_at
+        timestamp deleted_at
+    }
+
+    VENDOR {
+        uuid id PK
+        string name
+        string contact_person
+        string email
+        string phone
+        boolean is_blacklisted
+        timestamp created_at
+    }
+
+    LOCATION {
+        uuid id PK
+        string name
+        string address
+        string city
+        string timezone "WIB | WITA | WIT"
+        boolean is_active
+    }
+
+    PURPOSE {
+        uuid id PK
+        string name "Survey | Troubleshoot | Maintenance | Operation"
+        boolean is_active
+    }
+
+    VISIT_REQUEST {
+        uuid id PK
+        string visit_id UK "human-readable"
+        uuid pic_user_id FK
+        uuid vendor_id FK
+        uuid location_id FK
+        timestamptz start_date
+        timestamptz end_date
+        boolean is_multi_day
+        string status "requested | approved | visiting | completed | not_visit | rejected | cancelled | rescheduled"
+        text notes
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    VISITOR {
+        uuid id PK
+        uuid visit_request_id FK
+        string name
+        string id_number
+        string phone
+        string photo_url
+        timestamp created_at
+    }
+
+    VISIT_PURPOSE {
+        uuid visit_request_id FK
+        uuid purpose_id FK
+    }
+
+    STATUS_HISTORY {
+        uuid id PK
+        uuid visit_request_id FK
+        string status
+        uuid changed_by FK
+        timestamptz changed_at
+        text notes
+    }
+
+    CHECK_IN {
+        uuid id PK
+        uuid visit_request_id FK
+        timestamptz checked_in_at
+        uuid checked_in_by FK
+        string photo_url
+        string badge_url
+    }
+
+    CHECK_OUT {
+        uuid id PK
+        uuid visit_request_id FK
+        timestamptz checked_out_at
+        uuid checked_out_by FK
+    }
+
+    NDA_ACCEPTANCE {
+        uuid id PK
+        uuid visit_request_id FK
+        uuid visitor_id FK
+        timestamptz signed_at
+        string signature_url
+    }
+
+    FEEDBACK {
+        uuid id PK
+        uuid visit_request_id FK
+        int rating "1-5"
+        text comment
+        timestamp created_at
+    }
+
+    INCIDENT_REPORT {
+        uuid id PK
+        uuid visit_request_id FK
+        text description
+        string severity "low | medium | high"
+        uuid reported_by FK
+        timestamp created_at
+    }
+
+    NOTIFICATION {
+        uuid id PK
+        uuid user_id FK
+        string title
+        text message
+        string channel "email | in_app | wa | sms"
+        boolean is_read
+        timestamp created_at
+    }
+
+    AUDIT_LOG {
+        uuid id PK
+        uuid user_id FK
+        string action
+        string entity
+        uuid entity_id
+        timestamptz timestamp
+        string ip
+        string user_agent
+        jsonb metadata
+    }

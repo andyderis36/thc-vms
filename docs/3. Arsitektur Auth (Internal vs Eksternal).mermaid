@@ -1,0 +1,36 @@
+flowchart LR
+    subgraph Internal["User Internal"]
+        I1[THC Admin]
+        I2[Security]
+        I3[Super Admin]
+    end
+    
+    subgraph Eksternal["User Eksternal"]
+        E1[PIC/Vendor]
+        E2[Visitor]
+    end
+    
+    subgraph Auth["Auth Layer"]
+        SSO[SSO / OIDC IdP]
+        OTP[Email + OTP]
+        MFA[2FA Wajib]
+    end
+    
+    subgraph App["Aplikasi"]
+        FE[Next.js Portal Internal]
+        FE2[Next.js Portal Eksternal]
+        BE[Go Gin API]
+    end
+    
+    I1 --> SSO
+    I2 --> SSO
+    I3 --> SSO
+    SSO --> MFA
+    MFA --> FE
+    
+    E1 --> OTP
+    E2 --> OTP
+    OTP --> FE2
+    
+    FE --> BE
+    FE2 --> BE

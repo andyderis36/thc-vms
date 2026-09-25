@@ -1,0 +1,42 @@
+flowchart TD
+    Start([Mulai]) --> Login[Login via Email + OTP]
+    Login --> CekOTP{OTP Valid?}
+    CekOTP -- Tidak --> Login
+    CekOTP -- Ya --> Consent{Setuju Privacy Policy?}
+    Consent -- Tidak --> Logout([Logout])
+    Consent -- Ya --> Dashboard[Dashboard Eksternal]
+    Dashboard --> PilihAksi{Pilih Aksi}
+    
+    PilihAksi -- Buat Request --> FormRequest[Isi Form Request Site Visit]
+    PilihAksi -- Lihat Status --> DetailVisit[Lihat Detail Visit]
+    PilihAksi -- Feedback --> Feedback[Isi Feedback Post-Visit]
+    
+    FormRequest --> Validasi{Validasi Form}
+    Validasi -- Gagal --> FormRequest
+    Validasi -- Sukses --> CekQuota{Cek Quota & Blacklist}
+    CekQuota -- Gagal --> Error[Pesan Error]
+    Error --> FormRequest
+    CekQuota -- Sukses --> Submit[Submit Request]
+    Submit --> StatusRequested[Status: requested]
+    StatusRequested --> NotifAdmin[Notifikasi ke THC Admin]
+    NotifAdmin --> TungguApproval[Tunggu Approval]
+    
+    TungguApproval --> CekApproval{Approval?}
+    CekApproval -- Approved --> StatusApproved[Status: approved]
+    CekApproval -- Rejected --> StatusRejected[Status: rejected]
+    CekApproval -- Timeout 7 hari --> AutoCancel[Status: cancelled]
+    
+    StatusApproved --> NotifPIC[Notifikasi ke PIC & Visitor]
+    NotifPIC --> ReminderH1[Reminder H-1]
+    ReminderH1 --> HariH[Datang ke Lokasi]
+    HariH --> CheckIn[Check-in di Security]
+    CheckIn --> StatusVisiting[Status: visiting]
+    StatusVisiting --> SelesaiVisit[Selesai Kunjungan]
+    SelesaiVisit --> CheckOut[Check-out]
+    CheckOut --> StatusCompleted[Status: completed]
+    StatusCompleted --> Feedback
+    Feedback --> Selesai([Selesai])
+    
+    StatusRejected --> Selesai
+    AutoCancel --> Selesai
+    DetailVisit --> Selesai

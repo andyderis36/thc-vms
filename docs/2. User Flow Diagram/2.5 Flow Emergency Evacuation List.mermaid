@@ -1,0 +1,10 @@
+flowchart TD
+    Start([Emergency Terjadi]) --> Trigger[Trigger Emergency Alert]
+    Trigger --> SecurityAkses[Security Akses Emergency List]
+    SecurityAkses --> AmbilData[Ambil Data Visitor Aktif]
+    AmbilData --> TampilList[Tampilkan List Visitor di Lokasi]
+    TampilList --> Evakuasi[Evakuasi Visitor]
+    Evakuasi --> UpdateStatus[Update Status Check-out]
+    UpdateStatus --> NotifAdmin[Notifikasi ke Admin]
+    NotifAdmin --> Laporan[Laporan Emergency]
+    Laporan --> Selesai([Selesai])
