@@ -1,36 +1,57 @@
-flowchart LR
-    subgraph Internal["User Internal"]
-        I1[THC Admin]
-        I2[Security]
-        I3[Super Admin]
+flowchart TD
+    subgraph Client["Frontend Client (Next.js 16.3+ / React 19.3)"]
+        UI1["SCR-01: Login Terpadu (Superadmin, Admin, Security, PIC)"]
+        UI2["Role & Branch Route Guards (Context: role & location_id)"]
+        UI3["TanStack Query (Client-Side Caching & Scoped Queries)"]
+        UI1 --> UI2 --> UI3
     end
-    
-    subgraph Eksternal["User Eksternal"]
-        E1[PIC/Vendor]
-        E2[Visitor]
+
+    subgraph AuthLayer["Auth & Middleware Layer (Go Gin)"]
+        MW1["Rate Limiter (Anti-Bruteforce Guard)"]
+        MW2["JWT Authenticator (Claims: sub, role, location_id, location_name)"]
+        MW3["RBAC & Branch Scope Enforcer"]
+        
+        subgraph PolicyRules["Scope Isolation Rules"]
+            R1["Superadmin: Bypass Location Filter (Global Control)"]
+            R2["Admin: Scoped to location_id (Approval, Security Mgmt & Check-in)"]
+            R3["Security: Scoped to location_id (Gate Ops & Check-in Only)"]
+            R4["PIC: Scoped to pic_user_id == user.id"]
+        end
+
+        subgraph Adapters["Modular Auth Adapter (KISS & Extensible)"]
+            A1["[MVP ACTIVE] PasswordAuthAdapter (Email + Bcrypt Hash)"]
+            A2["[Phase 2 Ready] SSOAuthAdapter (THC IdP / OIDC)"]
+            A3["[Phase 2 Ready] OTPAuthAdapter (Email / WA Gateway)"]
+        end
     end
-    
-    subgraph Auth["Auth Layer"]
-        SSO[SSO / OIDC IdP]
-        OTP[Email + OTP]
-        MFA[2FA Wajib]
+
+    subgraph CoreServices["Backend Clean Architecture (Go Gin Services)"]
+        S1["Auth & Session Service"]
+        S2["Visit & Approval Service (Branch-Scoped)"]
+        S3["Security Check-in & Gate Service (Branch-Scoped)"]
+        S4["Branch Security User Management Service"]
+        S5["Media & Storage Service (minio-go/v7)"]
     end
-    
-    subgraph App["Aplikasi"]
-        FE[Next.js Portal Internal]
-        FE2[Next.js Portal Eksternal]
-        BE[Go Gin API]
+
+    subgraph Persistence["Persistence & Object Storage Layer"]
+        POOL["pgxpool Connection Pool (MaxConns: 50, Timeout: 5s)"]
+        PG[("PostgreSQL 18.6 (Indexed B-Tree)") ]
+        MINIO[("MinIO / AWS S3 (Surat Tugas, KTP, Foto)") ]
+        POOL --> PG
     end
+
+    UI3 -- "HTTPS REST Request (Bearer JWT)" --> MW1
+    MW1 --> MW2 --> MW3
+    MW3 -.-> PolicyRules
+    MW3 --> Adapters
+    Adapters --> S1
+    MW3 --> S2
+    MW3 --> S3
+    MW3 --> S4
+    MW3 --> S5
     
-    I1 --> SSO
-    I2 --> SSO
-    I3 --> SSO
-    SSO --> MFA
-    MFA --> FE
-    
-    E1 --> OTP
-    E2 --> OTP
-    OTP --> FE2
-    
-    FE --> BE
-    FE2 --> BE
+    S1 --> POOL
+    S2 --> POOL
+    S3 --> POOL
+    S4 --> POOL
+    S5 --> MINIO

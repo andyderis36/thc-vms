@@ -1,26 +1,35 @@
 erDiagram
+    %% ============================================================
+    %% CORE MVP RELATIONSHIPS
+    %% ============================================================
     ROLE ||--o{ USER : "has"
+    LOCATION ||--o{ USER : "stationed at (admin/security)"
     VENDOR ||--o{ USER : "employs"
     VENDOR ||--o{ VISIT_REQUEST : "requests"
-    USER ||--o{ VISIT_REQUEST : "creates (PIC)"
+    USER ||--o{ VISIT_REQUEST : "creates (PIC/Admin)"
     LOCATION ||--o{ VISIT_REQUEST : "hosts"
     VISIT_REQUEST ||--o{ VISITOR : "includes"
     VISIT_REQUEST ||--o{ VISIT_PURPOSE : "has"
     PURPOSE ||--o{ VISIT_PURPOSE : "tagged"
     VISIT_REQUEST ||--o{ STATUS_HISTORY : "logs"
-    VISIT_REQUEST ||--o| CHECK_IN : "has"
-    VISIT_REQUEST ||--o| CHECK_OUT : "has"
-    VISIT_REQUEST ||--o{ NDA_ACCEPTANCE : "requires"
-    VISIT_REQUEST ||--o| FEEDBACK : "receives"
-    VISIT_REQUEST ||--o{ INCIDENT_REPORT : "may have"
-    VISITOR ||--o{ NDA_ACCEPTANCE : "signs"
-    USER ||--o{ NOTIFICATION : "receives"
-    USER ||--o{ AUDIT_LOG : "triggers"
-    USER ||--o{ STATUS_HISTORY : "changes"
+    VISIT_REQUEST ||--o| CHECK_IN : "records"
+    VISIT_REQUEST ||--o| CHECK_OUT : "records"
+
+    %% ============================================================
+    %% PHASE 2 EXTENSION RELATIONSHIPS (Optional for future scale)
+    %% ============================================================
+    VISIT_REQUEST ||--o| FEEDBACK : "phase_2"
+    VISIT_REQUEST ||--o{ INCIDENT_REPORT : "phase_2"
+    USER ||--o{ NOTIFICATION : "phase_2"
+    USER ||--o{ AUDIT_LOG : "phase_2"
+
+    %% ============================================================
+    %% CORE MVP ENTITIES
+    %% ============================================================
 
     ROLE {
         uuid id PK
-        string name
+        string name "super_admin | admin | security | pic"
         jsonb permissions
         timestamp created_at
     }
@@ -28,16 +37,17 @@ erDiagram
     USER {
         uuid id PK
         string name
-        string email UK
+        string email UK "Indexed for fast login"
+        string password_hash "Bcrypt hash"
         string phone
         uuid role_id FK
+        uuid location_id FK "Nullable: required for admin & security, null for super_admin & pic"
         string type "internal | external"
         string status "active | inactive | blacklisted"
-        uuid vendor_id FK
+        uuid vendor_id FK "Nullable for internal staff"
         timestamp last_login
         timestamp created_at
         timestamp updated_at
-        timestamp deleted_at
     }
 
     VENDOR {
@@ -46,47 +56,51 @@ erDiagram
         string contact_person
         string email
         string phone
-        boolean is_blacklisted
+        boolean is_blacklisted "Default false"
         timestamp created_at
     }
 
     LOCATION {
         uuid id PK
-        string name
+        string name "e.g. Kantor Cabang Surabaya | POP Rungkut | miniPOP Waru"
+        string type "pusat | cabang | pop | minipop"
         string address
         string city
         string timezone "WIB | WITA | WIT"
-        boolean is_active
+        boolean is_active "Default true"
     }
 
     PURPOSE {
         uuid id PK
         string name "Survey | Troubleshoot | Maintenance | Operation"
-        boolean is_active
+        boolean is_active "Default true"
     }
 
     VISIT_REQUEST {
         uuid id PK
-        string visit_id UK "human-readable"
-        uuid pic_user_id FK
+        string visit_id UK "Indexed: VST-XXXXXXXXXX"
+        uuid pic_user_id FK "Indexed for PIC history"
         uuid vendor_id FK
-        uuid location_id FK
-        timestamptz start_date
-        timestamptz end_date
-        boolean is_multi_day
-        string status "requested | approved | visiting | completed | not_visit | rejected | cancelled | rescheduled"
+        uuid location_id FK "Indexed for site visits"
+        timestamptz start_date "Indexed for schedule"
+        timestamptz end_date "Indexed for auto-complete"
+        boolean is_multi_day "Default false"
+        string status "Indexed: requested|approved|visiting|completed|not_visit|rejected|cancelled|rescheduled"
+        string assignment_letter_url "MinIO/S3 URL Surat Tugas/SPK (PDF/Gambar)"
+        boolean is_nda_accepted "MVP digital legal agreement"
         text notes
-        timestamp created_at
+        timestamp created_at "Indexed for sorting"
         timestamp updated_at
     }
 
     VISITOR {
         uuid id PK
-        uuid visit_request_id FK
+        uuid visit_request_id FK "Indexed"
         string name
-        string id_number
+        string id_number "KTP / SIM / Passport"
         string phone
-        string photo_url
+        string id_card_photo_url "MinIO/S3 URL Foto KTP/SIM"
+        string photo_url "Optional MinIO/S3 URL Foto Profil"
         timestamp created_at
     }
 
@@ -97,7 +111,7 @@ erDiagram
 
     STATUS_HISTORY {
         uuid id PK
-        uuid visit_request_id FK
+        uuid visit_request_id FK "Indexed"
         string status
         uuid changed_by FK
         timestamptz changed_at
@@ -106,27 +120,23 @@ erDiagram
 
     CHECK_IN {
         uuid id PK
-        uuid visit_request_id FK
+        uuid visit_request_id FK UK "1 visit = 1 check-in record"
         timestamptz checked_in_at
-        uuid checked_in_by FK
-        string photo_url
-        string badge_url
+        uuid checked_in_by FK "Security or Admin user ID"
+        string photo_url "MinIO/S3 URL bukti verifikasi gerbang"
+        string badge_code "Digital badge identifier"
     }
 
     CHECK_OUT {
         uuid id PK
-        uuid visit_request_id FK
+        uuid visit_request_id FK UK "1 visit = 1 check-out record"
         timestamptz checked_out_at
-        uuid checked_out_by FK
+        uuid checked_out_by FK "Security or Admin user ID"
     }
 
-    NDA_ACCEPTANCE {
-        uuid id PK
-        uuid visit_request_id FK
-        uuid visitor_id FK
-        timestamptz signed_at
-        string signature_url
-    }
+    %% ============================================================
+    %% PHASE 2 SCHEMA (Maintained for Forward Compatibility)
+    %% ============================================================
 
     FEEDBACK {
         uuid id PK
@@ -150,8 +160,8 @@ erDiagram
         uuid user_id FK
         string title
         text message
-        string channel "email | in_app | wa | sms"
-        boolean is_read
+        string channel "in_app | email | wa"
+        boolean is_read "Default false"
         timestamp created_at
     }
 

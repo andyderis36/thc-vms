@@ -1,19 +1,11 @@
 flowchart TD
-    Start([Cron Job Trigger]) --> CekRequested{Cek requested > 7 hari?}
-    CekRequested -- Ya --> AutoCancel[Auto Cancel]
-    CekRequested -- Tidak --> CekApproved
+    Start([Periodic Scheduler: Go Background Goroutine / Cron]) --> CekExpired{Cek Kunjungan 'requested' > 7 Hari?}
+    CekExpired -- Ya --> AutoCancel[Update Status: cancelled & Log History]
+    CekExpired -- Tidak --> CekOverstay
     
-    CekApproved{Cek approved H-1?} -- Ya --> ReminderH1[Kirim Reminder H-1]
-    CekApproved -- Tidak --> CekVisiting
+    CekOverstay{Cek Kunjungan 'visiting' > end_date + 24 Jam?}
+    CekOverstay -- Ya --> AutoComplete[Update Status: completed & Flag Selesai Otomatis]
+    CekOverstay -- Tidak --> Selesai([Selesai])
     
-    CekVisiting{Cek visiting lewat end_date + 24 jam?} -- Ya --> AutoComplete[Auto Complete + Flag Anomali]
-    CekVisiting -- Tidak --> CekSLA
-    
-    CekSLA{Cek SLA approval > 1x24 jam?} -- Ya --> ReminderAdmin[Reminder ke Admin]
-    CekSLA -- Tidak --> Selesai([Selesai])
-    
-    AutoCancel --> Notif[Kirim Notifikasi]
-    ReminderH1 --> Notif
-    AutoComplete --> Notif
-    ReminderAdmin --> Notif
-    Notif --> Selesai
+    AutoCancel --> Selesai
+    AutoComplete --> Selesai

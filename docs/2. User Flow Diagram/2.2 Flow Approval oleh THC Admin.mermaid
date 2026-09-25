@@ -1,25 +1,29 @@
 flowchart TD
-    Start([Admin Login via SSO]) --> Dashboard[Dashboard Internal]
-    Dashboard --> CekQueue[Lihat Approval Queue]
-    CekQueue --> PilihRequest[Pilih Request]
-    PilihRequest --> Review[Review Detail Request]
-    Review --> CekData{Data Lengkap & Valid?}
+    Start([Admin / Superadmin Login via Kredensial THC]) --> Dashboard[SCR-02: Dashboard Kunjungan]
+    Dashboard --> ScopeCheck{Role Pengguna}
+    ScopeCheck -- Superadmin Pusat --> AllBranches[Dapat Lihat & Filter Semua Cabang/POP]
+    ScopeCheck -- Admin Cabang --> BranchOnly[Otomatis Terkunci ke Cabang Penugasan]
+    AllBranches --> TabAntrean[Pilih Tab Menunggu Approval]
+    BranchOnly --> TabAntrean
+    TabAntrean --> PilihKunjungan[Pilih Request Kunjungan Sesuai Cabang]
+    PilihKunjungan --> ReviewData[Review PIC, Lokasi, Jadwal & Rombongan Tamu]
     
-    CekData -- Tidak --> Reject[Reject dengan Alasan]
-    CekData -- Ya --> CekLokasi{Lokasi Tersedia?}
+    ReviewData --> Evaluasi{Keputusan Admin}
     
-    CekLokasi -- Tidak --> Reschedule[Reschedule]
-    CekLokasi -- Ya --> Approve[Approve Request]
+    Evaluasi -- Data Valid & Kuota Tersedia --> ModalApprove[Klik Tombol Approve]
+    ModalApprove --> SimpanApprove[Update Status: approved]
+    SimpanApprove --> LogHistoryApprove[Catat Status History]
     
-    Reject --> StatusRejected[Status: rejected]
-    Reschedule --> StatusRescheduled[Status: rescheduled]
-    Approve --> StatusApproved[Status: approved]
+    Evaluasi -- Ditolak --> ModalReject[Klik Tombol Reject]
+    ModalReject --> InputAlasan[Wajib Isi Alasan Penolakan]
+    InputAlasan --> SimpanReject[Update Status: rejected]
+    SimpanReject --> LogHistoryReject[Catat Status History]
     
-    StatusRejected --> NotifPIC[Notifikasi ke PIC]
-    StatusRescheduled --> NotifPIC
-    StatusApproved --> NotifPIC
+    Evaluasi -- Bentrok Jadwal / Perlu Geser --> ModalReschedule[Klik Tombol Reschedule]
+    ModalReschedule --> InputJadwalBaru[Pilih Rentang Tanggal Baru & Catatan]
+    InputJadwalBaru --> SimpanReschedule[Update Status: rescheduled]
+    SimpanReschedule --> LogHistoryReschedule[Catat Status History]
     
-    NotifPIC --> Selesai([Selesai])
-    
-    Reschedule --> TungguApproval[Approval Ulang]
-    TungguApproval --> StatusApproved
+    LogHistoryApprove --> Selesai([Selesai: Toast Notifikasi & Refresh Data])
+    LogHistoryReject --> Selesai
+    LogHistoryReschedule --> Selesai

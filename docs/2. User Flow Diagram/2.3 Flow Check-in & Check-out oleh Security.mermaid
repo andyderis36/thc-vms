@@ -1,33 +1,29 @@
 flowchart TD
-    Start([Security Login]) --> Dashboard[Dashboard Security]
-    Dashboard --> LihatHariIni[Lihat Visit Hari Ini]
-    LihatHariIni --> VisitorDatang{Visitor Datang?}
+    Start([Security / Admin Cabang Akses Layar Check-in]) --> GateDashboard[SCR-05: Layar Security Gate / Site Check-in]
+    GateDashboard --> AntreanHariIni[Tampil Antrean Tamu Hari Ini di Cabang]
     
-    VisitorDatang -- Ya --> ScanQR[Scan QR Code Visitor]
-    VisitorDatang -- Tidak --> CekManual[Cek Manual by Visit ID]
+    AntreanHariIni --> OpsiVerifikasi{Metode Verifikasi}
+    OpsiVerifikasi -- 1. Kamera Langsung --> PindaiQR[Arahkan Kamera ke QR Code Tamu]
+    OpsiVerifikasi -- 2. Upload Gambar dari Galeri --> UploadQR[Pilih File Gambar Screenshot QR dari Chat/Galeri]
+    OpsiVerifikasi -- 3. Input Manual --> KetikID[Ketik Visit ID: VST-XXXXXXXXXX]
     
-    ScanQR --> QRValid{QR Valid?}
-    QRValid -- Tidak --> CekManual
-    QRValid -- Ya --> Verifikasi[Verifikasi Identitas]
+    PindaiQR --> ValidasiData{Status Approved & Masuk Rentang ±2 Jam?}
+    UploadQR --> ValidasiData
+    KetikID --> ValidasiData
     
-    CekManual --> Verifikasi
-    Verifikasi --> CekIdentitas{Identitas Cocok?}
+    ValidasiData -- Di Luar Toleransi / Data Salah --> TolakMasuk[Tolak: Di Luar Jam Toleransi / Tidak Valid]
+    TolakMasuk --> GateDashboard
     
-    CekIdentitas -- Tidak --> Tolak[Tolak Masuk]
-    CekIdentitas -- Ya --> FotoVisitor[Ambil Foto Visitor]
-    FotoVisitor --> TandaTangan[NDA Digital Signature]
-    TandaTangan --> CetakBadge[Cetak Badge]
-    CetakBadge --> CheckIn[Check-in]
-    CheckIn --> StatusVisiting[Status: visiting]
-    StatusVisiting --> VisitorMasuk[Visitor Masuk]
+    ValidasiData -- Valid & Sesuai Jadwal --> VerifikasiIdentitas[Cocokkan Identitas KTP/SIM dengan Daftar Rombongan]
+    VerifikasiIdentitas --> KonfirmasiCheckin[Klik Tombol Check-in]
+    KonfirmasiCheckin --> UpdateVisiting[Database Update: Status visiting & Rekam Waktu Check-in]
+    UpdateVisiting --> OtomatisLiveMonitoring[Tamu Otomatis Masuk ke Tab 'Sedang di Lokasi' Cabang]
+    OtomatisLiveMonitoring --> ToastSukses[Toast Sukses & Refresh Antrean Gate]
+    ToastSukses --> GateDashboard
     
-    VisitorMasuk --> SelesaiKunjungan{Selesai?}
-    SelesaiKunjungan -- Ya --> ScanQRKeluar[Scan QR Keluar]
-    SelesaiKunjungan -- Tidak --> Tunggu[Tunggu]
-    Tunggu --> SelesaiKunjungan
-    
-    ScanQRKeluar --> CheckOut[Check-out]
-    CheckOut --> StatusCompleted[Status: completed]
-    StatusCompleted --> Selesai([Selesai])
-    
-    Tolak --> Selesai
+    GateDashboard --> TamuKeluar{Tamu Selesai Pekerjaan?}
+    TamuKeluar -- Ya --> CariDataKeluar[Pilih Tamu di Tab 'Sedang di Lokasi']
+    CariDataKeluar --> KonfirmasiCheckout[Klik Tombol Check-out]
+    KonfirmasiCheckout --> UpdateCompleted[Database Update: Status completed & Rekam Waktu Check-out]
+    UpdateCompleted --> OtomatisSelesai[Tamu Otomatis Pindah ke Riwayat Selesai]
+    OtomatisSelesai --> GateDashboard
