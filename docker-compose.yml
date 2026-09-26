@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: thc-vms-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: thc_user
+      POSTGRES_PASSWORD: thc_password_local
+      POSTGRES_DB: thc_vms_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_local:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U thc_user -d thc_vms_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    pull_policy: never
+    container_name: thc-vms-minio
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata_local:/data
+
+volumes:
+  pgdata_local:
+  miniodata_local:
