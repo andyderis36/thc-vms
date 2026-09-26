@@ -1,2 +1,16 @@
 .omo/run-continuation/
 thc-notepad.txt
+
+# Local runtime state written by vms.ps1 (pids, logs, the compiled server).
+.runtime/
+
+# Local secrets. .env.example is committed; .env is never.
+backend/.env
+frontend/.env.local
+
+# Playwright MCP scratch artifacts (console logs + traces)
+.playwright-mcp/
+
+# QA run outputs (logs, screenshots) — local only, never commit.
+*.log
+qa-evidence/
