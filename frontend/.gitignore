@@ -12,6 +12,7 @@ next-env.d.ts
 
 # testing
 coverage/
+.vitest/
 
 # QA evidence (screenshots captured during manual verification)
 qa-evidence/
