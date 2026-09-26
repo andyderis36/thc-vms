@@ -103,7 +103,7 @@ go run cmd/server/main.go
 cd ../frontend
 npm install
 npm run dev
-# Web aktif di http://localhost:3000
+# Web aktif di http://localhost:3210
 ```
 
 ---
