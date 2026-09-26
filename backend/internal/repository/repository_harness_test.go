@@ -1,0 +1,383 @@
+package repository
+
+// Integration harness for the PostgreSQL adapters. Every test runs against a
+// real scratch database (default thc_vms_t03_test) and skips when it is
+// unreachable, so `go test ./...` stays green without Docker.
+//
+// DISCLOSED EXCEPTION TO "NO HAND-WRITTEN SQL": production adapters call only
+// the generated db.Querier. These *_test.go seed helpers use pool.Exec for the
+// tables no generated write covers (role, location, vendor, purpose, general
+// users, status-seeded visits). There is no other way to stage fixtures, and
+// the exception is confined to test setup/teardown — never to a code path.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"thc-vms/backend/internal/domain"
+	"thc-vms/backend/internal/repository/db"
+)
+
+// sharedPool is the single scratch-database pool for the whole package,
+// opened once by TestMain so the suite does not churn one pool per test
+// through the Docker NAT on every run.
+var sharedPool *pgxpool.Pool
+
+// TestMain prepares the scratch database once: it provisions the database when
+// it is missing, applies the migration, and only then runs the suite.
+//
+// The distinction matters. A PostgreSQL server that cannot be reached at all is
+// an environment gap and the suite skips so `go test ./...` stays usable without
+// Docker. But a reachable server with a missing database is a SETUP ERROR, and
+// reporting it as a skip would be a lie: the atomicity, row-lock and branch
+// isolation proofs would silently never run while the package still printed "ok".
+// So the harness provisions what it needs and fails loudly if it cannot.
+func TestMain(m *testing.M) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := openScratchPool(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr,
+			"repository: cannot reach PostgreSQL at all, skipping integration tests: %v\n"+
+				"repository: start it with `docker compose up -d postgres` to exercise these tests\n", err)
+		os.Exit(0)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		fmt.Fprintf(os.Stderr,
+			"repository: cannot reach PostgreSQL at all, skipping integration tests: %v\n"+
+				"repository: start it with `docker compose up -d postgres` to exercise these tests\n", err)
+		os.Exit(0)
+	}
+	if err := applySchema(ctx, pool); err != nil {
+		pool.Close()
+		fmt.Fprintf(os.Stderr, "repository: FATAL harness setup failed: %v\n", err)
+		os.Exit(1)
+	}
+	sharedPool = pool
+	code := m.Run()
+	pool.Close()
+	os.Exit(code)
+}
+
+// openScratchPool connects to the scratch database, creating it first when the
+// server is reachable but the database does not exist yet.
+func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(ctx, testDSN())
+	if err != nil {
+		return nil, err
+	}
+	if pingErr := pool.Ping(ctx); pingErr == nil {
+		return pool, nil
+	}
+	pool.Close()
+
+	// The database may simply not exist yet. Connect to the maintenance
+	// database and create it. A failure here is propagated so the caller
+	// distinguishes "no server" from "server present, provisioning failed".
+	admin, err := pgxpool.New(ctx, adminDSN())
+	if err != nil {
+		return nil, err
+	}
+	defer admin.Close()
+	if err := admin.Ping(ctx); err != nil {
+		return nil, err
+	}
+	name := scratchDatabaseName()
+	if _, err := admin.Exec(ctx, `CREATE DATABASE `+pgxIdentifier(name)); err != nil {
+		// 42P04 = duplicate_database: another run created it first, which is fine.
+		if !isDuplicateDatabase(err) {
+			return nil, fmt.Errorf("create scratch database %q: %w", name, err)
+		}
+	}
+	created, err := pgxpool.New(ctx, testDSN())
+	if err != nil {
+		return nil, err
+	}
+	if err := created.Ping(ctx); err != nil {
+		created.Close()
+		return nil, err
+	}
+	return created, nil
+}
+
+// applySchema makes the scratch database match the migration. It is idempotent
+// at the harness level: an already-migrated database yields no error, because
+// the migration is applied inside a transaction that rolls back on failure.
+func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, migrationSQL)
+	if err == nil {
+		return nil
+	}
+	// 42P07 duplicate_table / 42710 duplicate_object: the schema is already
+	// there, which is the normal case on a second run.
+	if isDuplicateObject(err) {
+		return nil
+	}
+	return fmt.Errorf("apply migration: %w", err)
+}
+
+// migrationSQL is loaded once from the migration the application itself runs,
+// so the integration tests can never drift from the shipped schema.
+var migrationSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000001_init_schema.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		// Leave the SQL empty: applySchema then surfaces the read failure as a
+		// setup error instead of silently testing against a half-built schema.
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// scratchDatabaseName is the database name embedded in the DSN.
+func scratchDatabaseName() string {
+	name := os.Getenv("THC_VMS_TEST_DBNAME")
+	if name == "" {
+		name = "thc_vms_t03_test"
+	}
+	return name
+}
+
+// adminDSN points at the maintenance database so the scratch database can be
+// created when it is absent.
+func adminDSN() string {
+	return "postgres://thc_user:thc_password_local@localhost:5432/postgres?sslmode=disable"
+}
+
+// pgxIdentifier quotes an identifier that is concatenated into DDL. The name
+// comes from the environment, so it is validated rather than trusted.
+func pgxIdentifier(name string) string {
+	return pgx.Identifier{name}.Sanitize()
+}
+
+// isDuplicateDatabase reports SQLSTATE 42P04.
+func isDuplicateDatabase(err error) bool { return hasSQLState(err, "42P04") }
+
+// isDuplicateObject reports the SQLSTATEs Postgres raises when the schema is
+// already present: 42P07 duplicate_table (a CREATE TABLE already ran),
+// 42710 duplicate_object (a CREATE TRIGGER/FUNCTION already ran) and
+// 42P06 duplicate_schema. The migration is not written to be re-runnable, so
+// these are the "second run" signal rather than a failure.
+func isDuplicateObject(err error) bool {
+	return hasSQLState(err, "42P07") || hasSQLState(err, "42710") || hasSQLState(err, "42P06")
+}
+
+func hasSQLState(err error, code string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == code
+}
+
+// testDSN reads the scratch database from the environment with a default that
+// matches the local docker compose credentials.
+func testDSN() string {
+	if dsn := os.Getenv("THC_VMS_TEST_DSN"); dsn != "" {
+		return dsn
+	}
+	return "postgres://thc_user:thc_password_local@localhost:5432/thc_vms_t03_test?sslmode=disable"
+}
+
+// testPool returns the shared scratch-database pool. TestMain already
+// skipped the run when Docker is down, so a nil pool here is a setup bug.
+func testPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	if sharedPool == nil {
+		t.Fatalf("shared scratch pool is nil: TestMain should have skipped the run")
+	}
+	return sharedPool
+}
+
+// testContext bounds every database call so a wedged lock fails loudly.
+func testContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// resetTables wipes every transactional table; roles are re-seeded idempotently.
+func resetTables(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := testContext(t)
+	_, err := pool.Exec(ctx, `TRUNCATE visit_request, users, status_history,
+		check_in, check_out, visitor, visit_purpose, vendor, location, purpose RESTART IDENTITY CASCADE`)
+	if err != nil {
+		t.Fatalf("truncate scratch tables: %v", err)
+	}
+	_, err = pool.Exec(ctx, `INSERT INTO role (name) VALUES
+		('super_admin'), ('admin'), ('security'), ('pic')
+		ON CONFLICT (name) DO NOTHING`)
+	if err != nil {
+		t.Fatalf("seed roles: %v", err)
+	}
+}
+
+// uuidArg maps an optional domain id to a driver argument: empty means NULL,
+// never the zero UUID.
+func uuidArg(id domain.UUID) any {
+	if id == "" {
+		return nil
+	}
+	parsed, err := uuid.Parse(string(id))
+	if err != nil {
+		return nil
+	}
+	return parsed
+}
+
+// seedLocation inserts one active facility and returns its id.
+func seedLocation(t *testing.T, pool *pgxpool.Pool, name, locType string) domain.UUID {
+	t.Helper()
+	var id uuid.UUID
+	err := pool.QueryRow(testContext(t),
+		`INSERT INTO location (name, type, timezone) VALUES ($1, $2, 'WIB') RETURNING id`,
+		name, locType).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed location: %v", err)
+	}
+	return toDomainUUID(id)
+}
+
+// seedInactiveLocation inserts one disabled facility.
+func seedInactiveLocation(t *testing.T, pool *pgxpool.Pool, name string) domain.UUID {
+	t.Helper()
+	var id uuid.UUID
+	err := pool.QueryRow(testContext(t),
+		`INSERT INTO location (name, type, timezone, is_active) VALUES ($1, 'cabang', 'WIB', false) RETURNING id`,
+		name).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed inactive location: %v", err)
+	}
+	return toDomainUUID(id)
+}
+
+// seedVendor inserts one partner company.
+func seedVendor(t *testing.T, pool *pgxpool.Pool, name string) domain.UUID {
+	t.Helper()
+	var id uuid.UUID
+	err := pool.QueryRow(testContext(t),
+		`INSERT INTO vendor (name) VALUES ($1) RETURNING id`, name).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed vendor: %v", err)
+	}
+	return toDomainUUID(id)
+}
+
+// seedPurpose inserts one active visit reason.
+func seedPurpose(t *testing.T, pool *pgxpool.Pool, name string) domain.UUID {
+	t.Helper()
+	var id uuid.UUID
+	err := pool.QueryRow(testContext(t),
+		`INSERT INTO purpose (name) VALUES ($1) RETURNING id`, name).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed purpose: %v", err)
+	}
+	return toDomainUUID(id)
+}
+
+// seedUserParams stages one account of any role.
+type seedUserParams struct {
+	Name     string
+	Email    string
+	Role     string
+	Location domain.UUID
+	Type     string
+}
+
+// seedUser inserts one account; empty Location means SQL NULL.
+func seedUser(t *testing.T, pool *pgxpool.Pool, p seedUserParams) domain.UUID {
+	t.Helper()
+	var id uuid.UUID
+	err := pool.QueryRow(testContext(t),
+		`INSERT INTO users (name, email, password_hash, role_id, location_id, type, status)
+		 SELECT $1, $2, 'hash-test', r.id, $3, $4, 'active' FROM role r WHERE r.name = $5
+		 RETURNING id`,
+		p.Name, p.Email, uuidArg(p.Location), p.Type, p.Role).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed user %s: %v", p.Email, err)
+	}
+	return toDomainUUID(id)
+}
+
+// seedVisitParams stages one visit row with an explicit status and code.
+type seedVisitParams struct {
+	Code      string
+	PIC       domain.UUID
+	Vendor    domain.UUID
+	Location  domain.UUID
+	Start     time.Time
+	End       time.Time
+	Status    domain.VisitStatus
+	CreatedAt *time.Time
+}
+
+// seedVisit inserts one visit_request row; tests that need a status other
+// than requested (or a backdated created_at) use this instead of Create.
+func seedVisit(t *testing.T, pool *pgxpool.Pool, p seedVisitParams) domain.UUID {
+	t.Helper()
+	var id uuid.UUID
+	var created any
+	if p.CreatedAt != nil {
+		created = *p.CreatedAt
+	} else {
+		created = time.Now().UTC()
+	}
+	err := pool.QueryRow(testContext(t),
+		`INSERT INTO visit_request
+			(visit_id, pic_user_id, vendor_id, location_id, start_date, end_date, status, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+		p.Code, uuidArg(p.PIC), uuidArg(p.Vendor), uuidArg(p.Location),
+		p.Start.UTC(), p.End.UTC(), string(p.Status), created).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed visit %s: %v", p.Code, err)
+	}
+	return toDomainUUID(id)
+}
+
+// roleIDOf resolves a role name to its id for Create calls (the generated
+// user INSERT takes the role id as a bound parameter).
+func roleIDOf(t *testing.T, pool *pgxpool.Pool, name string) domain.UUID {
+	t.Helper()
+	var id uuid.UUID
+	err := pool.QueryRow(testContext(t),
+		`SELECT id FROM role WHERE name = $1`, name).Scan(&id)
+	if err != nil {
+		t.Fatalf("resolve role %s: %v", name, err)
+	}
+	return toDomainUUID(id)
+}
+
+// historyRows reads the audit trail through the generated query (no hand SQL
+// on the read path under test).
+func historyRows(t *testing.T, pool *pgxpool.Pool, visitID domain.UUID) []db.ListStatusHistoryRow {
+	t.Helper()
+	parsed, err := fromDomainUUID(visitID)
+	if err != nil {
+		t.Fatalf("parse visit id: %v", err)
+	}
+	rows, err := db.New(pool).ListStatusHistory(testContext(t), db.ListStatusHistoryParams{VisitRequestID: parsed})
+	if err != nil {
+		t.Fatalf("list status history: %v", err)
+	}
+	return rows
+}
+
+// requireErrIs fails the test unless err wraps the sentinel.
+func requireErrIs(t *testing.T, err error, sentinel error, what string) {
+	t.Helper()
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("%s: got %v, want error wrapping %v", what, err, sentinel)
+	}
+}

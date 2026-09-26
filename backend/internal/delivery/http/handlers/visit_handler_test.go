@@ -1,0 +1,234 @@
+package handlers_test
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+
+	"thc-vms/backend/internal/delivery/http/handlers"
+	"thc-vms/backend/internal/domain"
+)
+
+func newVisitEngine(svc *fakeVisitService, role domain.RoleName, loc string) *gin.Engine {
+	engine := gin.New()
+	engine.Use(withActor(role, loc))
+	h := handlers.NewVisitHandler(svc)
+	engine.GET("/visits", h.List)
+	engine.POST("/visits", h.Create)
+	engine.GET("/visits/:id", h.Get)
+	engine.POST("/visits/:id/approve", h.Approve)
+	engine.POST("/visits/:id/reject", h.Reject)
+	engine.POST("/visits/:id/reschedule", h.Reschedule)
+	engine.POST("/visits/:id/cancel", h.Cancel)
+	engine.GET("/visits/:id/qr", h.QR)
+	return engine
+}
+
+func TestListVisits_ReturnsItemsTotalPageLimit(t *testing.T) {
+	svc := &fakeVisitService{
+		listItems: []domain.VisitRequest{cannedVisit(), cannedVisit()},
+		listTotal: 42,
+	}
+	engine := newVisitEngine(svc, domain.RoleSuperAdmin, "")
+
+	rec := serve(engine, "GET", "/visits?page=2&limit=2", nil, "")
+	mustStatus(t, rec, 200)
+	env := mustSuccess(t, rec)
+
+	// The data member must be an OBJECT with the four envelope keys,
+	// never a bare array.
+	var data map[string]json.RawMessage
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("list data is not an object (bare array?): %v: %q", err, string(env.Data))
+	}
+	for _, key := range []string{"items", "total", "page", "limit"} {
+		if _, ok := data[key]; !ok {
+			t.Fatalf("list data missing key %q: %q", key, string(env.Data))
+		}
+	}
+	var page struct {
+		Items []map[string]any `json:"items"`
+		Total int64            `json:"total"`
+		Page  int              `json:"page"`
+		Limit int              `json:"limit"`
+	}
+	if err := json.Unmarshal(env.Data, &page); err != nil {
+		t.Fatalf("list data shape wrong: %v", err)
+	}
+	if page.Total != 42 || page.Page != 2 || page.Limit != 2 {
+		t.Fatalf("got total=%d page=%d limit=%d, want 42/2/2", page.Total, page.Page, page.Limit)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("got %d items, want 2", len(page.Items))
+	}
+	if svc.lastListIn.Page != 2 || svc.lastListIn.Limit != 2 {
+		t.Fatalf("usecase got page=%d limit=%d, want 2/2", svc.lastListIn.Page, svc.lastListIn.Limit)
+	}
+}
+
+func TestListVisits_DefaultsPageAndLimit(t *testing.T) {
+	svc := &fakeVisitService{}
+	engine := newVisitEngine(svc, domain.RoleAdmin, "loc-A")
+
+	rec := serve(engine, "GET", "/visits", nil, "")
+	mustStatus(t, rec, 200)
+	env := mustSuccess(t, rec)
+	var page struct {
+		Page  int `json:"page"`
+		Limit int `json:"limit"`
+	}
+	if err := json.Unmarshal(env.Data, &page); err != nil {
+		t.Fatalf("list data shape wrong: %v", err)
+	}
+	if page.Page != 1 || page.Limit != 20 {
+		t.Fatalf("got page=%d limit=%d, want defaults 1/20", page.Page, page.Limit)
+	}
+}
+
+func TestGetVisit_ResolvesBothUUIDAndVisitCode(t *testing.T) {
+	v := cannedVisit()
+	svc := &fakeVisitService{visitByKey: map[string]domain.VisitRequest{
+		"visit-1":        v,
+		"VST-0000000001": v,
+	}}
+	engine := newVisitEngine(svc, domain.RoleAdmin, "loc-A")
+
+	recUUID := serve(engine, "GET", "/visits/visit-1", nil, "")
+	mustStatus(t, recUUID, 200)
+	envUUID := mustSuccess(t, recUUID)
+
+	recCode := serve(engine, "GET", "/visits/VST-0000000001", nil, "")
+	mustStatus(t, recCode, 200)
+	envCode := mustSuccess(t, recCode)
+
+	var gotUUID, gotCode map[string]any
+	if err := json.Unmarshal(envUUID.Data, &gotUUID); err != nil {
+		t.Fatalf("uuid detail broken: %v", err)
+	}
+	if err := json.Unmarshal(envCode.Data, &gotCode); err != nil {
+		t.Fatalf("code detail broken: %v", err)
+	}
+	if gotUUID["visit_id"] != "VST-0000000001" || gotCode["visit_id"] != "VST-0000000001" {
+		t.Fatalf("visit_id mismatch: uuid=%v code=%v", gotUUID["visit_id"], gotCode["visit_id"])
+	}
+}
+
+func TestCreateVisit_Returns201WithDetail(t *testing.T) {
+	svc := &fakeVisitService{}
+	engine := newVisitEngine(svc, domain.RolePIC, "")
+
+	payload := `{
+		"location_id": "11111111-1111-1111-1111-111111111111",
+		"purpose_ids": ["22222222-2222-2222-2222-222222222222"],
+		"start_date": "2026-10-01T09:00:00Z",
+		"end_date": "2026-10-01T17:00:00Z",
+		"is_nda_accepted": true,
+		"notes": "splicing FO",
+		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
+	}`
+	rec := serveJSON(engine, "POST", "/visits", payload)
+	mustStatus(t, rec, 201)
+	env := mustSuccess(t, rec)
+	var detail map[string]any
+	if err := json.Unmarshal(env.Data, &detail); err != nil {
+		t.Fatalf("create detail broken: %v", err)
+	}
+	if detail["visit_id"] != "VST-0000000001" {
+		t.Fatalf("visit_id = %v, want VST-0000000001", detail["visit_id"])
+	}
+	if len(svc.lastCreateIn.Visitors) != 1 || len(svc.lastCreateIn.PurposeIDs) != 1 {
+		t.Fatalf("usecase input not mapped: %+v", svc.lastCreateIn)
+	}
+}
+
+func TestReject_RequiresFiveCharacterReason(t *testing.T) {
+	svc := &fakeVisitService{}
+	engine := newVisitEngine(svc, domain.RoleAdmin, "loc-A")
+
+	rec := serveJSON(engine, "POST", "/visits/visit-1/reject", `{"reason": "abcd"}`)
+	mustStatus(t, rec, 400)
+
+	rec = serveJSON(engine, "POST", "/visits/visit-1/reject", `{"reason": "abcde"}`)
+	mustStatus(t, rec, 200)
+	if svc.lastReason != "abcde" {
+		t.Fatalf("usecase reason = %q, want abcde", svc.lastReason)
+	}
+}
+
+func TestReschedule_RequiresAllThreeFields(t *testing.T) {
+	cases := map[string]string{
+		"missing start": `{"end_date": "2026-10-02T17:00:00Z", "reason": "jadwal molor"}`,
+		"missing end":   `{"start_date": "2026-10-02T09:00:00Z", "reason": "jadwal molor"}`,
+		"missing notes": `{"start_date": "2026-10-02T09:00:00Z", "end_date": "2026-10-02T17:00:00Z"}`,
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := &fakeVisitService{}
+			engine := newVisitEngine(svc, domain.RolePIC, "")
+			rec := serveJSON(engine, "POST", "/visits/visit-1/reschedule", payload)
+			mustStatus(t, rec, 400)
+		})
+	}
+
+	svc := &fakeVisitService{}
+	engine := newVisitEngine(svc, domain.RolePIC, "")
+	rec := serveJSON(engine, "POST", "/visits/visit-1/reschedule",
+		`{"start_date": "2026-10-02T09:00:00Z", "end_date": "2026-10-02T17:00:00Z", "reason": "jadwal molor"}`)
+	mustStatus(t, rec, 200)
+	if svc.lastResReason != "jadwal molor" {
+		t.Fatalf("usecase reason = %q", svc.lastResReason)
+	}
+}
+
+func TestApproveAndCancel_Smoke(t *testing.T) {
+	svc := &fakeVisitService{}
+	engine := newVisitEngine(svc, domain.RoleAdmin, "loc-A")
+
+	rec := serveJSON(engine, "POST", "/visits/visit-1/approve", `{"notes": "ok"}`)
+	mustStatus(t, rec, 200)
+	if string(svc.lastApproveID) != "visit-1" {
+		t.Fatalf("approve id = %q", svc.lastApproveID)
+	}
+
+	rec = serveJSON(engine, "POST", "/visits/visit-1/cancel", `{}`)
+	mustStatus(t, rec, 200)
+	if string(svc.lastCancelID) != "visit-1" {
+		t.Fatalf("cancel id = %q", svc.lastCancelID)
+	}
+}
+
+func TestQR_ReturnsVisitIDAndPayloadEqualToVisitID(t *testing.T) {
+	svc := &fakeVisitService{}
+	engine := newVisitEngine(svc, domain.RolePIC, "")
+
+	rec := serve(engine, "GET", "/visits/visit-1/qr", nil, "")
+	mustStatus(t, rec, 200)
+	env := mustSuccess(t, rec)
+
+	var qr map[string]json.RawMessage
+	if err := json.Unmarshal(env.Data, &qr); err != nil {
+		t.Fatalf("qr data is not an object: %v", err)
+	}
+	if len(qr) != 2 {
+		keys := make([]string, 0, len(qr))
+		for k := range qr {
+			keys = append(keys, k)
+		}
+		t.Fatalf("qr data must have exactly two keys, got %v", keys)
+	}
+	var visitID, payload string
+	if err := json.Unmarshal(qr["visit_id"], &visitID); err != nil {
+		t.Fatalf("visit_id missing/not a string: %q", string(env.Data))
+	}
+	if err := json.Unmarshal(qr["qr_code_payload"], &payload); err != nil {
+		t.Fatalf("qr_code_payload missing/not a string: %q", string(env.Data))
+	}
+	if visitID != "VST-0000000001" || payload != visitID {
+		t.Fatalf("visit_id=%q payload=%q, want payload == visit_id == VST-0000000001", visitID, payload)
+	}
+	if strings.Contains(string(env.Data), "format") {
+		t.Fatalf("qr data must not carry a format field: %q", string(env.Data))
+	}
+}

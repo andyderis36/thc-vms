@@ -1,0 +1,80 @@
+# =============================================================================
+# sqlc codegen configuration - THC Visitor Management System (VMS)
+#
+# Codegen is fully OFFLINE: sqlc reads only this file, the up-migration (schema)
+# and the query files. It never connects to PostgreSQL and never reads go.mod,
+# so this config is valid before the module manifest exists.
+#
+# Regenerate with:  sqlc generate   (run from backend/)
+#
+# CONFIG SHAPE (sqlc v1.31.1)
+#   `version: "2"` uses the nested shape: `sql` is a LIST of database configs and
+#   the type `overrides` live under the per-target `gen.go` block. The flat v1
+#   shape (top-level engine/schema/queries/gen) is rejected by this version.
+#   All paths are resolved relative to this file.
+# =============================================================================
+version: "2"
+
+sql:
+  - engine: "postgresql"
+    # Only the UP migration is the schema. The .down.sql file is teardown DDL and
+    # must never be parsed as schema (it would drop everything sqlc needs).
+    schema: "migrations/000001_init_schema.up.sql"
+    queries: "internal/repository/db/queries"
+
+    gen:
+      go:
+        package: "db"
+        out: "internal/repository/db"
+        sql_package: "pgx/v5"
+        # Every generated struct carries `json:"snake_case"` tags so the Gin
+        # delivery layer can serialise sqlc rows directly (openapi is snake_case
+        # throughout).
+        emit_json_tags: true
+        # Emits db.Querier - the interface the T03 repository structs satisfy.
+        emit_interface: true
+        # `:many` results are always []Row and never nil, so the API layer can
+        # return `"data": []` instead of `"data": null` (openapi L709, L744, L764).
+        emit_empty_slices: true
+        # A visit carries up to 10 visitors + several purposes + a full status
+        # history; no join-table expansion is configured on purpose.
+        # ListVisitors / ListVisitPurposes / ListStatusHistory batch-load with a
+        # single IN (...) per page instead, which keeps row shapes flat and
+        # avoids an N+1 across the visit list.
+        query_parameter_limit: 0
+
+        # ---------------------------------------------------------------------
+        # Type overrides.
+        # The ERD writes its uuid columns as "uuid" and its temporal columns as
+        # "timestamp"/"timestamptz". Mermaid has no timestamp-with-time-zone
+        # notation, so the migration normalises every temporal column to
+        # timestamptz (see the migration header); one override covers them all.
+        #
+        # MEASURED BEHAVIOUR (sqlc v1.31.1, verified against the emitted
+        # models.go): an override applies to a column only when that column is
+        # NOT NULL. Nullable columns keep the pgx/v5 default, which is also the
+        # only correct choice for them, because a NULL-safe Go type must be able
+        # to represent absence:
+        #     users.role_id   (NOT NULL) -> uuid.UUID          <- override
+        #     users.location_id (NULL)  -> pgtype.UUID         <- pgx default
+        #     visit_request.created_at   -> time.Time          <- override
+        #     users.last_login (NULL)    -> pgtype.Timestamptz <- pgx default
+        #     visitor.photo_url (NULL)   -> pgtype.Text        <- pgx default
+        # Both halves are scanned correctly, so a NULL audit timestamp or an
+        # absent profile photo cannot fail a row scan. The same applies to
+        # arrays: `uuid[]` honours the override and becomes []uuid.UUID.
+        # ---------------------------------------------------------------------
+        overrides:
+          # pgx/v5 scans uuid natively; google/uuid.UUID is a value type, so sqlc
+          # emits it directly instead of the pointer-to-pgtype.UUID default.
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+          # timestamptz -> time.Time instead of pgtype.Timestamptz, so every
+          # non-null timestamp in models.go is a plain time.Time.
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+
+        # role.permissions (nullable jsonb) is intentionally left un-overridden:
+        # an override would not apply to a nullable column anyway, and sqlc's
+        # pgx/v5 default ([]byte) is already NULL-safe and is what the seeds
+        # program writes.
