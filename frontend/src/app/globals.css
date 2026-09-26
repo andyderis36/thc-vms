@@ -1,0 +1,136 @@
+/* =============================================================================
+ * THC Visitor Management System (VMS) — Design Tokens
+ * Source of truth: docs/stitch-ui/02-design-system.md
+ *
+ * Tailwind CSS v4 CSS-FIRST configuration.
+ *   - entrypoint is `@import "tailwindcss";`  (v3 `@tailwind base;` is REMOVED)
+ *   - tokens live HERE in `@theme`, there is NO tailwind.config.js
+ *   - namespace -> utility mapping:
+ *       --color-*    -> bg-*, text-*, border-*, ring-*
+ *       --radius-*   -> rounded-*
+ *       --shadow-*   -> shadow-*
+ *       --spacing-*  -> w-*, h-*, p-*, gap-*
+ *       --text-*     -> text-<name> (font size)
+ *   - opacity uses slash syntax: bg-brand/50   (v3 `bg-opacity-50` is REMOVED)
+ * ========================================================================== */
+
+@import 'tailwindcss';
+
+@theme {
+  /* --- Typography --------------------------------------------------------- */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --text-label: 0.8125rem; /* 13px — form labels, small button text */
+  --text-badge: 0.6875rem; /* 11px — status badge (uppercase, bold) */
+
+  /* --- Brand (Merah THC) --------------------------------------------------- */
+  --color-brand: #de1b1b;
+  --color-brand-dark: #b91616; /* hover / active */
+  --color-brand-soft: #fee2e2; /* sidebar active bg, soft fills */
+  --color-brand-contrast: #ffffff; /* text on brand */
+
+  /* --- Neutrals ----------------------------------------------------------- */
+  --color-page: #f5f7fa; /* background halaman */
+  --color-surface: #ffffff; /* background kartu & panel */
+  --color-border-light: #e5e7eb;
+  --color-border-mid: #d1d5db;
+  --color-ink: #1a1a1a; /* teks utama */
+  --color-ink-secondary: #6b7280; /* teks sekunder */
+  --color-ink-muted: #9ca3af; /* placeholder / caption */
+
+  /* --- Shell surfaces ----------------------------------------------------- */
+  --color-sidebar-dark: #0f172a; /* SHELL-01 superadmin sidebar */
+  --color-sidebar-dark-active: #1e293b; /* item aktif di sidebar gelap */
+  --color-kiosk-topbar: #1e293b; /* SHELL-03 topbar kios industrial */
+
+  /* --- Semantic pairs (teks / background) --------------------------------- */
+  --color-success-text: #166534;
+  --color-success-bg: #dcfce7;
+  --color-warning-text: #92400e;
+  --color-warning-bg: #fef3c7;
+  --color-danger-text: #991b1b;
+  --color-danger-bg: #fee2e2;
+  --color-info-text: #1e40af;
+  --color-info-bg: #dbeafe;
+  --color-neutral-text: #6b7280;
+  --color-neutral-bg: #f3f4f6;
+
+  /* --- Action buttons (SCR-05 gerbang) ------------------------------------- */
+  --color-checkin: #16a34a; /* tombol "CHECK-IN MASUK" */
+  --color-checkout: #dc2626; /* tombol "CHECK-OUT KELUAR" / Reject */
+
+  /* --- Border radius ------------------------------------------------------ */
+  --radius-badge: 0.375rem; /* 6px  */
+  --radius-control: 0.5rem; /* 8px  button & input */
+  --radius-card: 0.75rem; /* 12px card */
+  --radius-modal: 1rem; /* 16px modal */
+
+  /* --- Elevation ---------------------------------------------------------- */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-modal: 0 10px 25px rgba(0, 0, 0, 0.1);
+  --shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+  /* --- Layout metrics (design system §4) ----------------------------------- */
+  --spacing-sidebar: 250px; /* SHELL-02 admin cabang */
+  --spacing-sidebar-wide: 260px; /* SHELL-01 superadmin */
+  --spacing-topbar: 64px; /* topbar desktop */
+  --spacing-topbar-kiosk: 70px; /* SHELL-03 kios */
+  --spacing-bottomnav: 64px; /* SHELL-04 bottom nav */
+  --spacing-touch: 44px; /* target sentuh minimum */
+  --spacing-touch-lg: 52px; /* target sentuh aksi gate */
+}
+
+/* =============================================================================
+ * Base layer
+ * ========================================================================== */
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-page);
+    color: var(--color-ink);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* Visible keyboard focus everywhere (accessibility: WCAG 2.1 AA) */
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+
+  /* Kill the iOS/Android tap highlight so kiosk buttons feel solid */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* =============================================================================
+ * Reusable component classes
+ * NOTE: variant-aware custom utilities must use `@utility`, NOT `@layer utilities`.
+ * ========================================================================== */
+@layer components {
+  /* Card surface used across SCR-02 / SCR-03 / SCR-04 */
+  .card {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Status badge: 11px uppercase bold, per design system §3 */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: var(--radius-badge);
+    padding: 4px 8px;
+    font-size: var(--text-badge);
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    line-height: 1.4;
+  }
+}
