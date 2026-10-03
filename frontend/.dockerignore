@@ -1,0 +1,5 @@
+# Keep local overrides, mocks and build noise out of the frontend image.
+.env*.local
+.next/
+node_modules/
+screenshots/

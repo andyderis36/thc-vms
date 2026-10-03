@@ -1,0 +1,104 @@
+# THC-VMS production stack for VPS — self-contained (infra + app).
+# Secrets: ONE file, repo-root `.env` (cp .env.prod.example .env, fill CHANGEME).
+# Never commit `.env`. Start: docker compose -f docker-compose.prod.yml up -d --build
+# Order is deterministic: postgres healthy -> migrate (one-shot) -> backend -> frontend.
+# Infra ports are NOT published; expose via reverse proxy (nginx/caddy) + TLS.
+name: thc-vms-prod
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    volumes:
+      - pgdata_prod:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - miniodata_prod:/data
+
+  # One-shot: bucket privat bila belum ada. Tetap privat (tanpa mc anonymous)
+  # karena backend melayani berkas lewat presigned URL ber-TTL.
+  # Retry hingga 60 dtk karena image minio tidak menyediakan healthcheck
+  # bawaan; backend juga EnsureBucket saat start sebagai jaring pengaman.
+  minio-init:
+    image: minio/mc:latest
+    restart: "no"
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-thc-vms-bucket}
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set localminio http://minio:9000 \"$MINIO_ROOT_USER\" \"$MINIO_ROOT_PASSWORD\";
+      for i in $$(seq 1 30); do
+        /usr/bin/mc mb localminio/\"$S3_BUCKET_NAME\" --ignore-existing && exit 0;
+        sleep 2;
+      done;
+      exit 1;
+      "
+
+  # One-shot: migrasi embedded (backend/cmd/migrate). Wajib sebelum backend
+  # karena server production (APP_ENV=production) tidak auto-migrate.
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: "no"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["./migrate"]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?set NEXT_PUBLIC_API_BASE_URL in .env}
+        NEXT_PUBLIC_STORAGE_BASE_URL: ${NEXT_PUBLIC_STORAGE_BASE_URL:?set NEXT_PUBLIC_STORAGE_BASE_URL in .env}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-THC Visitor Management System}
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata_prod:
+  miniodata_prod:

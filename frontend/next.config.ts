@@ -12,6 +12,9 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: true,
+  // Production image (frontend/Dockerfile) memakai runner standalone:
+  // WTO .next/standalone/server.js. Tanpa ini image prod tidak viable.
+  output: 'standalone',
   // Demo via Cloudflare quick tunnel: izinkan origin *.trycloudflare.com
   // mengakses endpoint dev (HMR/RSC). Tanpa ini dev server memblokir
   // request cross-origin ("Blocked cross-origin request") dan halaman

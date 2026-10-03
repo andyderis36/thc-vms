@@ -7,6 +7,9 @@ thc-notepad.txt
 # Local secrets. .env.example is committed; .env is never.
 backend/.env
 frontend/.env.local
+# Production secrets (docker-compose.prod.yml reads repo-root .env).
+/.env
+.env.prod.local
 
 # Playwright MCP scratch artifacts (console logs + traces)
 .playwright-mcp/

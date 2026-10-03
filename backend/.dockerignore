@@ -1,0 +1,5 @@
+# Keep secrets and build noise out of the backend image context.
+.env
+.runtime/
+*.log
+*test.go
