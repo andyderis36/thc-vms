@@ -9,18 +9,18 @@ import (
 
 func TestListVisits_BuildsTheCorrectScopePerRole(t *testing.T) {
 	locA := domain.UUID("loc-A")
-	picID := domain.UUID("pic-1")
+	vendorID := domain.UUID("pic-1")
 
 	cases := []struct {
 		name         string
 		actor        Actor
 		wantLocation *domain.UUID
-		wantPIC      *domain.UUID
+		wantVendor   *domain.UUID
 	}{
 		{"super_admin sees all", testActor(domain.RoleSuperAdmin, "super-1", ""), nil, nil},
 		{"admin locked to branch", testActor(domain.RoleAdmin, "admin-1", "loc-A"), &locA, nil},
 		{"security locked to branch", testActor(domain.RoleSecurity, "sec-1", "loc-A"), &locA, nil},
-		{"pic locked to own visits", testActor(domain.RolePIC, "pic-1", ""), nil, &picID},
+		{"vendor locked to own visits", testActor(domain.RoleVendor, "pic-1", ""), nil, &vendorID},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,16 +44,16 @@ func TestListVisits_BuildsTheCorrectScopePerRole(t *testing.T) {
 					t.Errorf("LocationID = %q, want %q", *got.LocationID, *tc.wantLocation)
 				}
 			}
-			if tc.wantPIC == nil {
+			if tc.wantVendor == nil {
 				if got.PICUserID != nil {
 					t.Errorf("PICUserID = %q, want nil", *got.PICUserID)
 				}
 			} else {
 				if got.PICUserID == nil {
-					t.Fatalf("PICUserID = nil, want %q", *tc.wantPIC)
+					t.Fatalf("PICUserID = nil, want %q", *tc.wantVendor)
 				}
-				if *got.PICUserID != *tc.wantPIC {
-					t.Errorf("PICUserID = %q, want %q", *got.PICUserID, *tc.wantPIC)
+				if *got.PICUserID != *tc.wantVendor {
+					t.Errorf("PICUserID = %q, want %q", *got.PICUserID, *tc.wantVendor)
 				}
 			}
 		})

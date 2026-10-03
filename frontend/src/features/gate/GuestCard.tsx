@@ -1,10 +1,11 @@
 'use client'
 
-import { AlertTriangle, Building2, Clock, MapPin, Truck } from 'lucide-react'
+import { AlertTriangle, Building2, CircleCheck, Clock, LogIn, MapPin, Truck } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/Badge'
 import { getCheckinBlockReason, isWithinCheckinWindow } from '@/lib/visits/tolerance'
+import { primaryVendorDisplay } from '@/lib/visits/vendor-display'
 import type { VisitDetail } from '@/lib/api/types'
 import { formatTanggalWaktu } from '@/features/visits/detail/Timeline'
 
@@ -29,8 +30,16 @@ export function GuestCard({ visit, pending, onCheckIn, onCheckOut }: GuestCardPr
   const withinWindow = isWithinCheckinWindow(now, visit.start_date, visit.end_date)
   const checkInAllowed = visit.status === 'approved' && withinWindow
   const checkOutAllowed = visit.status === 'visiting'
+  /** Tab `Selesai`: tidak ada aksi gerbang sama sekali — jangan menampilkan
+   * dinding tombol check-in disabled (SCR-05 tab Selesai = readout netral). */
+  const completed = visit.status === 'completed'
+  const checkOutAtText =
+    completed && visit.check_out_at != null && visit.check_out_at !== ''
+      ? ` \u2014 keluar ${formatTanggalWaktu(visit.check_out_at)}`
+      : ''
 
   const technicianNames = visit.visitors.map((visitor) => visitor.name).join(', ')
+  const vendorDisplay = primaryVendorDisplay(visit.visitors)
 
   return (
     <Card>
@@ -47,7 +56,7 @@ export function GuestCard({ visit, pending, onCheckIn, onCheckOut }: GuestCardPr
           <div className="flex items-center gap-2">
             <Truck className="size-4 shrink-0" aria-hidden="true" />
             <dt className="sr-only">Vendor</dt>
-            <dd className="truncate">{visit.vendor_name}</dd>
+            <dd className="truncate">{vendorDisplay}</dd>
           </div>
           <div className="flex items-center gap-2">
             <Building2 className="size-4 shrink-0" aria-hidden="true" />
@@ -61,6 +70,15 @@ export function GuestCard({ visit, pending, onCheckIn, onCheckOut }: GuestCardPr
               {formatTanggalWaktu(visit.start_date)} - {formatTanggalWaktu(visit.end_date)}
             </dd>
           </div>
+          {visit.check_in_at !== null &&
+          visit.check_in_at !== undefined &&
+          visit.check_in_at !== '' ? (
+            <div className="flex items-center gap-2">
+              <LogIn className="size-4 shrink-0" aria-hidden="true" />
+              <dt className="sr-only">Waktu masuk aktual</dt>
+              <dd>Masuk {formatTanggalWaktu(visit.check_in_at)}</dd>
+            </div>
+          ) : null}
         </dl>
 
         {blockReason !== null && checkInAllowed === false && visit.status === 'approved' ? (
@@ -81,9 +99,18 @@ export function GuestCard({ visit, pending, onCheckIn, onCheckOut }: GuestCardPr
             onClick={() => onCheckOut(visit)}
             className="mt-1"
           >
-            <MapPin className="size-5" aria-hidden="true" />
+            <MapPin className="size-5 shrink-0" aria-hidden="true" />
             Check-out Keluar
           </Button>
+        ) : completed ? (
+          // Cabang no-action: status readout netral, bukan tombol disabled.
+          <p
+            role="status"
+            className="mt-1 flex items-start gap-2 rounded-control bg-neutral-bg px-3 py-2.5 text-sm font-semibold text-neutral-text"
+          >
+            <CircleCheck className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span>Kunjungan selesai{checkOutAtText}</span>
+          </p>
         ) : (
           <Button
             variant="success"

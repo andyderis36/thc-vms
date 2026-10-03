@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useState, type ReactNode } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   AlertTriangle,
   CalendarDays,
@@ -10,19 +10,17 @@ import {
   Inbox,
   MapPin,
   Plus,
-  Search,
-  Shield,
 } from 'lucide-react'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
 import { PicMobileShell } from '@/components/layouts/PicMobileShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
+import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Input } from '@/components/ui/Input'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Tabs, type TabItem } from '@/components/ui/Tabs'
-import { SecurityUserModal } from '@/features/security/components/SecurityUserModal'
 import { ApproveModal, apiErrorMessage } from '@/features/visits/components/ApproveModal'
 import { RejectModal } from '@/features/visits/components/RejectModal'
 import { VisitCards } from '@/features/visits/components/VisitCards'
@@ -50,9 +48,19 @@ import { VISIT_STATUS_META } from '@/lib/visits/status-badge'
  */
 export default function DashboardPage() {
   // Tanpa provider ganda: pakai SessionProvider + QueryClient + Toaster milik root layout.
+  // Suspense wajib: DashboardScreen memakai useSearchParams (?focus= dari menu sidebar),
+  // dan Next menolak prerender halaman tanpa batas Suspense.
   return (
     <RequireAuth>
-      <DashboardScreen />
+      <Suspense
+        fallback={
+          <div className="flex min-h-[40vh] items-center justify-center">
+            <Spinner size="lg" label="Memuat dashboard…" />
+          </div>
+        }
+      >
+        <DashboardScreen />
+      </Suspense>
     </RequireAuth>
   )
 }
@@ -63,7 +71,7 @@ function DashboardScreen() {
 
   // Filter fasilitas bersatu: sentinel 'all' sama dengan switcher SuperadminShell.
   const [facilityFilter, setFacilityFilter] = useState<string>(
-    user !== null && user.role !== 'super_admin' && user.role !== 'pic'
+    user !== null && user.role !== 'super_admin' && user.role !== 'vendor'
       ? (user.location_id ?? 'all')
       : 'all',
   )
@@ -73,7 +81,18 @@ function DashboardScreen() {
   const [search, setSearch] = useState('')
   const [approveTarget, setApproveTarget] = useState<VisitDetail | null>(null)
   const [rejectTarget, setRejectTarget] = useState<VisitDetail | null>(null)
-  const [securityOpen, setSecurityOpen] = useState(false)
+
+  // Deep-link menu sidebar (?focus=): Tab "Menunggu Approval" untuk
+  // approvals. Berjalan SETIAP fokus berubah (bukan sekali saat mount)
+  // supaya klik menu saat sudah di dashboard tetap beralih — navigasi SPA
+  // tidak me-remount halaman. URL tanpa focus tidak mereset pilihan
+  // pengguna yang sedang aktif.
+  const focus = useSearchParams().get('focus')
+  useEffect(() => {
+    if (focus === 'approvals') {
+      setStatusFilter('requested')
+    }
+  }, [focus])
 
   // Debounce pencarian 300ms supaya setiap ketikan tidak memicu request.
   useEffect(() => {
@@ -100,7 +119,6 @@ function DashboardScreen() {
 
   const role = user.role
   const allowApproval = can(role, 'approveVisit')
-  const canManageSecurity = can(role, 'manageSecurity')
   const canSubmit = can(role, 'submitVisit')
 
   const rows: VisitDetail[] = listQuery.data?.items ?? []
@@ -186,13 +204,53 @@ function DashboardScreen() {
             Pantau izin akses & antrean persetujuan fasilitas THC.
           </p>
         </div>
-        {canManageSecurity && role === 'super_admin' ? (
-          <Button variant="secondary" className="min-h-touch" onClick={() => setSecurityOpen(true)}>
-            <Shield className="size-4" aria-hidden="true" />
-            Kelola Satpam Cabang
-          </Button>
-        ) : null}
       </div>
+
+      {/* Entry "Buat Kunjungan" mobile (<768px): inline full-width di atas
+          konten — pelengkap `hidden md:block` pada filter bar. Berada di alur
+          dokumen (bukan fixed) sehingga tidak pernah menutupi kartu/aksi
+          approve-reject, langsung above-the-fold di 375px (1 ketukan), dan
+          bebas berebut z-index/offset dengan BottomNav (z-30, 64px).
+          Vendor/Mitra dikecualikan: punya aksi sendiri di PicMobileShell. */}
+      {canSubmit && role !== 'vendor' ? (
+        <div className="mb-5 md:hidden">
+          <Button
+            fullWidth
+            className="min-h-touch"
+            aria-label="Buat kunjungan baru"
+            onClick={goCreateVisit}
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            Buat Kunjungan Baru
+          </Button>
+        </div>
+      ) : null}
+
+      {/* Kartu identitas Vendor/Mitra — di atas metrik, ikut PicMobileShell. */}
+      {role === 'vendor' ? (
+        <section aria-label="Identitas Vendor/Mitra" className="card mb-5 flex items-center gap-4 p-4">
+          <span
+            aria-hidden="true"
+            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-brand text-lg font-bold text-brand-contrast"
+          >
+            {(user.name.charAt(0) || 'P').toUpperCase()}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold text-ink">{user.name}</p>
+            <p className="truncate text-xs text-ink-secondary">
+              {user.vendor_name ?? 'Vendor'}
+              {' · '}
+              {user.email}
+            </p>
+            <p className="mt-0.5 truncate text-xs text-ink-muted">
+              {user.nik !== null ? `NIK ${user.nik}` : 'NIK —'}
+            </p>
+          </div>
+          <Badge tone={user.status === 'active' ? 'success' : 'neutral'}>
+            {user.status === 'active' ? 'AKTIF' : 'NONAKTIF'}
+          </Badge>
+        </section>
+      ) : null}
 
       {/* Baris metrik — grid 2x2 di mobile, 4 kolom di desktop (larangan scroll). */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
@@ -212,9 +270,9 @@ function DashboardScreen() {
         ))}
       </div>
 
-      {/* Filter bar: Fasilitas (super_admin aktif, admin terkunci, PIC sembunyi). */}
+      {/* Filter bar: Fasilitas (super_admin aktif, admin terkunci, Vendor/Mitra sembunyi). */}
       <div className="card mt-5 flex flex-wrap items-end gap-3 p-4">
-        {role !== 'pic' ? (
+        {role !== 'vendor' ? (
           <div className="min-w-40 flex-1 sm:w-56 sm:flex-none">
             <Select
               label="Fasilitas"
@@ -236,20 +294,18 @@ function DashboardScreen() {
             }}
           />
         </div>
-        <div className="relative min-w-48 flex-1">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-[2.1rem] size-4 -translate-y-1/2 text-ink-muted"
-          />
-          <Input
+        {/* SearchBox bersama (components/ui/SearchInput): ikon dipusatkan
+            otomatis terhadap tinggi field (h-10/h-12) — tanpa offset rem
+            hardcode — dan pl-9 menjaga teks placeholder tidak tertimpa ikon. */}
+        <div className="min-w-48 flex-1">
+          <SearchInput
             aria-label="Cari kunjungan"
-            placeholder="Cari Visit ID, PIC, atau vendor…"
-            className="pl-9"
+            placeholder="Cari Visit ID, Vendor/Mitra, atau vendor…"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
-        {canSubmit && role !== 'pic' ? (
+        {canSubmit && role !== 'vendor' ? (
           <div className="hidden md:block">
             <Button className="min-h-touch" onClick={goCreateVisit}>
               <Plus className="size-4" aria-hidden="true" />
@@ -274,7 +330,7 @@ function DashboardScreen() {
               Gagal memuat daftar kunjungan
             </p>
             <p className="mt-2 text-sm text-ink-secondary">{apiErrorMessage(listQuery.error)}</p>
-            <Button variant="secondary" className="mt-4" onClick={() => void listQuery.refetch()}>
+            <Button variant="secondary" className="mt-4 min-h-touch" onClick={() => void listQuery.refetch()}>
               Coba Lagi
             </Button>
           </div>
@@ -304,17 +360,9 @@ function DashboardScreen() {
         )}
       </div>
 
-      {/* FAB penciptaan kunjungan khusus mobile (PIC sudah punya tombol + di shell). */}
-      {canSubmit && role !== 'pic' ? (
-        <Button
-          className="fixed bottom-20 right-4 z-40 min-h-touch shadow-modal md:hidden"
-          aria-label="Buat kunjungan baru"
-          onClick={goCreateVisit}
-        >
-          <Plus className="size-5" aria-hidden="true" />
-          Buat Kunjungan
-        </Button>
-      ) : null}
+      {/* Aksi Buat Kunjungan mobile kini entry inline di atas (lihat komentar
+          pada tombol `md:hidden` di awal konten) — FAB fixed dihapus agar tidak
+          menumpuk dua pola dan tidak menutupi kartu yang men-scroll di bawahnya. */}
 
       {allowApproval && approveTarget !== null ? (
         <ApproveModal open visit={approveTarget} onClose={() => setApproveTarget(null)} />
@@ -322,13 +370,10 @@ function DashboardScreen() {
       {allowApproval && rejectTarget !== null ? (
         <RejectModal open visit={rejectTarget} onClose={() => setRejectTarget(null)} />
       ) : null}
-      {canManageSecurity ? (
-        <SecurityUserModal open={securityOpen} onClose={() => setSecurityOpen(false)} />
-      ) : null}
     </>
   )
 
-  if (role === 'pic') {
+  if (role === 'vendor') {
     return <PicMobileShell activeHref="/dashboard">{content}</PicMobileShell>
   }
 
@@ -346,12 +391,7 @@ function DashboardScreen() {
   }
 
   return (
-    <AdminBranchShell
-      pendingCount={pendingCount}
-      activeHref="/dashboard"
-      onQuickCreateVisit={canSubmit ? goCreateVisit : undefined}
-      onQuickAddSecurity={canManageSecurity ? () => setSecurityOpen(true) : undefined}
-    >
+    <AdminBranchShell pendingCount={pendingCount} activeHref="/dashboard">
       {content}
     </AdminBranchShell>
   )

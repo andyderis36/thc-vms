@@ -32,19 +32,19 @@ function emptyContentFor(tab: KioskTabId): EmptyContent {
   switch (tab) {
     case 'upcoming':
       return {
-        icon: <CalendarClock className="size-10" />,
+        icon: <CalendarClock aria-hidden="true" className="size-10" />,
         title: 'Belum ada kunjungan yang akan hadir',
         description: 'Kunjungan terjadwal yang sudah disetujui hari ini akan muncul di sini.',
       }
     case 'on-site':
       return {
-        icon: <UserCheck className="size-10" />,
+        icon: <UserCheck aria-hidden="true" className="size-10" />,
         title: 'Belum ada teknisi di lokasi',
         description: 'Teknisi yang sudah check-in dan berada di area pos akan tampil di sini.',
       }
     case 'completed':
       return {
-        icon: <Inbox className="size-10" />,
+        icon: <Inbox aria-hidden="true" className="size-10" />,
         title: 'Belum ada kunjungan selesai',
         description: 'Kunjungan yang sudah check-out hari ini akan muncul di daftar ini.',
       }
@@ -103,15 +103,17 @@ export function GateQueue({
 
   return (
     <section aria-label="Daftar kunjungan gerbang" className="flex min-w-0 flex-col gap-3">
+      {/* <li> membungkus tiap kartu agar struktur <ul> sah (semantic HTML). */}
       <ul className="flex flex-col gap-3">
         {visits.map((visit) => (
-          <GuestCard
-            key={visit.id}
-            visit={visit}
-            pending={pendingVisitId === visit.id}
-            onCheckIn={onCheckIn}
-            onCheckOut={onCheckOut}
-          />
+          <li key={visit.id} className="min-w-0">
+            <GuestCard
+              visit={visit}
+              pending={pendingVisitId === visit.id}
+              onCheckIn={onCheckIn}
+              onCheckOut={onCheckOut}
+            />
+          </li>
         ))}
       </ul>
     </section>

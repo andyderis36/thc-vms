@@ -144,8 +144,8 @@ func TestApplySendsTriggerSatisfyingArguments(t *testing.T) {
 			continue
 		}
 		inserts++
-		if len(st.args) != 8 {
-			t.Errorf("user insert has %d args, want 8 (name, email, hash, role, location, type, status, vendor)", len(st.args))
+		if len(st.args) != 9 {
+			t.Errorf("user insert has %d args, want 9 (name, email, hash, role, location, type, status, vendor, nik)", len(st.args))
 			continue
 		}
 		hash, _ := st.args[2].(string)
@@ -168,9 +168,17 @@ func TestApplySendsTriggerSatisfyingArguments(t *testing.T) {
 		if _, ok := st.args[7].(*uuid.UUID); !ok {
 			t.Errorf("vendor_id arg is %T, want *uuid.UUID", st.args[7])
 		}
+		// An absent NIK (security, super_admin) reaches pgx as a typed nil
+		// *string (SQL NULL); a populated one (admin, vendor) as its digits.
+		nik, ok := st.args[8].(*string)
+		if !ok {
+			t.Errorf("nik arg is %T, want *string", st.args[8])
+		} else if nik != nil && *nik == "" {
+			t.Errorf("nik arg is an empty string: absence must be SQL NULL, never ''")
+		}
 	}
-	if inserts != 7 {
-		t.Errorf("recorded %d user inserts, want 7", inserts)
+	if inserts != 26 {
+		t.Errorf("recorded %d user inserts, want 26", inserts)
 	}
 }
 

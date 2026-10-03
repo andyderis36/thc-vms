@@ -42,12 +42,14 @@ func NewUploadHandler(storage domain.IStorageService, maxBytes int64) *UploadHan
 	return &UploadHandler{storage: storage, maxBytes: maxBytes}
 }
 
-// Upload serves POST /uploads (multipart/form-data with a file part, a
-// category part, and an owner_id part).
+// Upload serves POST /uploads (multipart/form-data with a file part and a
+// category part; owner_id is optional).
 //
 // Owner-id choice: assignment_letter and checkin_photo are visit-scoped while
 // id_card is visitor-scoped, so the caller passes the owning visit id (uuid
-// or VST- code) or visitor id as the owner_id form field. The handler joins
+// or VST- code) or visitor id as the optional owner_id form field. The
+// pre-create flow (/visits/new) has no visit id yet, so an empty owner_id
+// stages under "pending" (assignment_letters/pending/...). The handler joins
 // it into a "category/ownerID" HINT; the adapter re-expands the hint into
 // the mandated assignment_letters/{id}/... layout itself.
 //
@@ -75,8 +77,11 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 		return
 	}
 	ownerID := strings.TrimSpace(firstFormValue(form.Value, "owner_id"))
+	if ownerID == "" {
+		ownerID = "pending"
+	}
 	if !validOwnerID(ownerID) {
-		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "ID pemilik berkas wajib diisi dengan format yang valid.")
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "ID pemilik berkas tidak valid.")
 		return
 	}
 	files := form.File["file"]

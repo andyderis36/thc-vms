@@ -74,15 +74,15 @@ func TestGetVisit_ReadScope(t *testing.T) {
 		t.Errorf("cross-branch read error = %v, want forbidden branch", err)
 	}
 
-	otherPIC := testActor(domain.RolePIC, "pic-9", "")
-	if _, err := svc.GetVisit(context.Background(), otherPIC, "visit-1"); err == nil {
-		t.Error("other PIC read must be refused, got nil error")
+	otherVendor := testActor(domain.RoleVendor, "pic-9", "")
+	if _, err := svc.GetVisit(context.Background(), otherVendor, "visit-1"); err == nil {
+		t.Error("other vendor read must be refused, got nil error")
 	} else if !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("other PIC read error = %v, want not found", err)
+		t.Errorf("other vendor read error = %v, want not found", err)
 	}
 
-	owner := testActor(domain.RolePIC, "pic-1", "")
+	owner := testActor(domain.RoleVendor, "pic-1", "")
 	if _, err := svc.GetVisit(context.Background(), owner, "visit-1"); err != nil {
-		t.Errorf("owning PIC read returned error: %v", err)
+		t.Errorf("owning vendor read returned error: %v", err)
 	}
 }

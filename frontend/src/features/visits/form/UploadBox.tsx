@@ -25,6 +25,10 @@ export interface UploadBoxProps {
   category?: UploadCategory
   /** Mode ringkas untuk kartu teknisi: tombol pilih + chip nama berkas. */
   compact?: boolean
+  /** Label tombol saat belum ada berkas (mode ringkas + mode penuh). */
+  idleButtonLabel?: string
+  /** Label tombol saat berkas sudah ada (mode ringkas + mode penuh). */
+  changeButtonLabel?: string
 }
 
 const ACCEPT_TYPES = ALLOWED_MIME_TYPES.join(',')
@@ -45,6 +49,8 @@ export function UploadBox({
   onChange,
   category = 'assignment_letter',
   compact = false,
+  idleButtonLabel = 'Unggah Foto KTP',
+  changeButtonLabel = 'Ganti Foto KTP',
 }: UploadBoxProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
@@ -174,7 +180,7 @@ export function UploadBox({
             onClick={pickFile}
             loading={upload.isPending}
           >
-            {value === null ? 'Unggah Foto KTP' : 'Ganti Foto KTP'}
+            {value === null ? idleButtonLabel : changeButtonLabel}
           </Button>
           {chip}
           {clearButton}
@@ -209,8 +215,8 @@ export function UploadBox({
             <Upload aria-hidden="true" className="size-6 text-ink-muted" />
             <p className="max-w-sm text-sm text-ink-secondary">
               {value === null
-                ? 'Seret berkas ke sini, atau pilih dari perangkat Anda.'
-                : 'Seret berkas baru ke sini untuk mengganti lampiran.'}
+                ? 'Seret berkas ke sini, atau pilih dari galeri, kamera, maupun berkas perangkat Anda.'
+                : 'Seret berkas baru ke sini, atau pilih dari galeri untuk mengganti lampiran.'}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
               <Button
@@ -219,8 +225,8 @@ export function UploadBox({
                 className="min-h-touch"
                 onClick={pickFile}
               >
-                <Upload aria-hidden="true" className="size-4" />
-                {value === null ? 'Pilih Berkas' : 'Ganti Berkas'}
+                <Upload aria-hidden="true" className="size-4 shrink-0" />
+                {value === null ? idleButtonLabel : changeButtonLabel}
               </Button>
               {clearButton}
             </div>

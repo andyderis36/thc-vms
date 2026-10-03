@@ -18,7 +18,7 @@ const (
 	// VisitStatusNone is the pseudo-origin of a brand-new submission: a visit
 	// that has never held a status can only become requested.
 	VisitStatusNone VisitStatus = ""
-	// VisitStatusRequested is assigned when a PIC or admin submits the form.
+	// VisitStatusRequested is assigned when a vendor or admin submits the form.
 	VisitStatusRequested VisitStatus = "requested"
 	// VisitStatusApproved is assigned when a branch admin approves.
 	VisitStatusApproved VisitStatus = "approved"

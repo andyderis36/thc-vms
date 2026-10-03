@@ -1,5 +1,5 @@
 // Package auth implements the email+password authentication usecase for the
-// four RBAC roles (super_admin, admin, security, pic). It depends only on
+// four RBAC roles (super_admin, admin, security, vendor). It depends only on
 // domain ports plus two narrow local seams - Issuer and RoleDirectory - so
 // the production wiring stays in cmd without the usecase importing
 // infrastructure or SQL row types.
@@ -8,6 +8,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"thc-vms/backend/internal/domain"
 )
@@ -34,14 +35,15 @@ type RoleDirectory interface {
 
 // Profile mirrors the openapi User projection: the enriched account view
 // returned beside the token and by GET /auth/me. Nullable columns stay
-// pointers so location_id renders as JSON null for super_admin and pic.
-// VendorName stays nil: no domain port resolves the vendor name, which is a
-// display-only gap the delivery layer tolerates.
+// pointers so location_id renders as JSON null for super_admin and vendor.
+// VendorName resolves best-effort through the vendors port (nil when the
+// caller wires no catalogue, e.g. hermetic tests).
 type Profile struct {
 	ID           domain.UUID
 	Name         string
 	Email        string
 	Phone        string
+	NIK          string
 	Role         domain.RoleName
 	LocationID   *domain.UUID
 	LocationName *string
@@ -57,12 +59,14 @@ type LoginResult struct {
 }
 
 // Deps bundles the service collaborators in one named struct so the
-// constructor keeps a single parameter. Every field is required; a nil Clock
-// falls back to the wall clock.
+// constructor keeps a single parameter. Every field is required except
+// Vendors (nil catalogue means vendor names stay nil) and Clock (nil falls
+// back to the wall clock).
 type Deps struct {
 	Users     domain.UserRepository
 	Roles     RoleDirectory
 	Locations domain.MasterDataRepository
+	Vendors   domain.VendorRepository
 	Issuer    Issuer
 	Clock     domain.Clock
 }
@@ -72,6 +76,7 @@ type Service struct {
 	users     domain.UserRepository
 	roles     RoleDirectory
 	locations domain.MasterDataRepository
+	vendors   domain.VendorRepository
 	issuer    Issuer
 	clock     domain.Clock
 }
@@ -86,6 +91,7 @@ func NewService(d Deps) *Service {
 		users:     d.Users,
 		roles:     d.Roles,
 		locations: d.Locations,
+		vendors:   d.Vendors,
 		issuer:    d.Issuer,
 		clock:     d.Clock,
 	}
@@ -107,6 +113,7 @@ func (s *Service) profile(ctx context.Context, user domain.User) (Profile, error
 		Name:   user.Name,
 		Email:  user.Email,
 		Phone:  user.Phone,
+		NIK:    user.NIK,
 		Role:   role,
 		Status: user.Status,
 		Type:   user.Type,
@@ -119,6 +126,20 @@ func (s *Service) profile(ctx context.Context, user domain.User) (Profile, error
 		}
 		name := loc.Name
 		out.LocationName = &name
+	}
+	// Company display name is best-effort: a vendor-less row, an unwired
+	// catalogue (hermetic tests) or a deleted vendor leaves VendorName nil
+	// rather than failing the login/profile read. The manually typed company
+	// (migration 000005) wins when present — the write paths never store it
+	// alongside a vendor_id, so a present override implies no catalogue link —
+	// otherwise the catalogue name resolves as before.
+	if user.VendorNameOverride != nil && strings.TrimSpace(*user.VendorNameOverride) != "" {
+		name := strings.TrimSpace(*user.VendorNameOverride)
+		out.VendorName = &name
+	} else if user.VendorID != nil && s.vendors != nil {
+		if name, err := s.vendors.FindVendorName(ctx, *user.VendorID); err == nil {
+			out.VendorName = &name
+		}
 	}
 	return out, nil
 }

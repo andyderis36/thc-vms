@@ -26,7 +26,6 @@ import (
 
 	"github.com/golang-migrate/migrate/v4/source"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"thc-vms/backend/migrations"
@@ -125,17 +124,19 @@ func ensureVersionTable(ctx context.Context, conn *pgxpool.Conn) error {
 	return nil
 }
 
-// currentVersion reads the applied version; no row means a fresh database.
+// currentVersion reads the highest applied version; an empty table means a
+// fresh database. The aggregate returns exactly one row, so there is no
+// no-rows case. dirty is true when ANY version row is dirty: a crash between
+// marking and finishing refuses the next boot instead of silently skipping a
+// half-applied migration. (A plain LIMIT 1 read is wrong once more than one
+// migration exists: it can return an older row and re-apply a newer version.)
 func currentVersion(ctx context.Context, conn *pgxpool.Conn) (uint, bool, error) {
 	stmtCtx, cancel := context.WithTimeout(ctx, stmtTimeout)
 	defer cancel()
 	var version uint
 	var dirty bool
-	row := conn.QueryRow(stmtCtx, `SELECT version, dirty FROM `+versionsTabl+` LIMIT 1`)
+	row := conn.QueryRow(stmtCtx, `SELECT COALESCE(MAX(version), 0), COALESCE(BOOL_OR(dirty), false) FROM `+versionsTabl)
 	if err := row.Scan(&version, &dirty); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, false, nil
-		}
 		return 0, false, fmt.Errorf("migrate: read version: %w", err)
 	}
 	return version, dirty, nil

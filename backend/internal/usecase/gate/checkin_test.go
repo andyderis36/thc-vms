@@ -21,7 +21,7 @@ func checkInService(visits *fakeVisitRepo, checks *fakeCheckInOutRepo) *gate.Ser
 	})
 }
 
-func TestCheckIn_PICIsForbidden(t *testing.T) {
+func TestCheckIn_VendorIsForbidden(t *testing.T) {
 	t.Parallel()
 	// Given: an approved in-window visit and a PIC actor.
 	start, end := openWindow()
@@ -29,7 +29,7 @@ func TestCheckIn_PICIsForbidden(t *testing.T) {
 	visits := newFakeVisitRepo(visit)
 	checks := newFakeCheckInOutRepo()
 	svc := checkInService(visits, checks)
-	actor := gate.Actor{ID: "pic-1", Role: domain.RolePIC}
+	actor := gate.Actor{ID: "pic-1", Role: domain.RoleVendor}
 	// When: the external PIC tries to check in.
 	_, err := svc.CheckIn(t.Context(), actor, string(visit.ID), gate.CheckInInput{})
 	// Then: refused as a branch violation with zero writes.

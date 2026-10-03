@@ -20,7 +20,7 @@ docs/stitch-ui/
 
 ## 2. Urutan Pembuatan UI di Google Stitch
 
-1. **Langkah 1**: Baca `01-screen-inventory.md` & `02-design-system.md` untuk memahami token visual (Merah THC `#DE1B1B`, Dark Topbar `#0F172A`, Background `#F8FAFC`).
+1. **Langkah 1**: Baca `01-screen-inventory.md` & `02-design-system.md` untuk memahami token visual (Ungu-Biru THC `#422AD5`, Dark Topbar `#18181B`, Background `#FFFFFF`).
 2. **Langkah 2**: Buka `06-prompt-templates.md` Bagian 1, salin prompt **Base Layout Shell** (`SHELL-01` s/d `SHELL-04`) ke Google Stitch untuk mengunci konsistensi bingkai navbar & sidebar tiap peran.
 3. **Langkah 3**: Salin prompt **5 Layar Inti MVP** (`SCR-01` s/d `SCR-05`) satu per satu ke Google Stitch.
 

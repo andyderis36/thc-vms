@@ -8,7 +8,7 @@ import (
 )
 
 // Approve moves a requested visit to approved. Only a branch admin (for its
-// own branch) or super_admin may trigger this edge; security and pic are
+// own branch) or super_admin may trigger this edge; security and vendor are
 // refused with 403.
 func (s *Service) Approve(ctx context.Context, actor Actor, visitID domain.UUID, note string) error {
 	visit, err := s.visits.FindByID(ctx, visitID)
@@ -49,19 +49,19 @@ func (s *Service) Reject(ctx context.Context, actor Actor, visitID domain.UUID, 
 	return s.transition(ctx, visit, actor, domain.VisitStatusRejected, trimmed)
 }
 
-// Cancel moves a visit to cancelled. The owning PIC, the branch admin and
-// super_admin may trigger this edge; security and a PIC that does not own the
+// Cancel moves a visit to cancelled. The owning vendor, the branch admin and
+// super_admin may trigger this edge; security and a vendor that does not own the
 // visit are refused.
 func (s *Service) Cancel(ctx context.Context, actor Actor, visitID domain.UUID, note string) error {
 	visit, err := s.visits.FindByID(ctx, visitID)
 	if err != nil {
 		return err
 	}
-	if err := actor.requireRole(domain.RolePIC, domain.RoleAdmin, domain.RoleSuperAdmin); err != nil {
+	if err := actor.requireRole(domain.RoleVendor, domain.RoleAdmin, domain.RoleSuperAdmin); err != nil {
 		return err
 	}
 	switch actor.Role {
-	case domain.RolePIC:
+	case domain.RoleVendor:
 		if visit.PICUserID != actor.ID {
 			return domain.NotFoundEntity("Kunjungan")
 		}

@@ -1,7 +1,7 @@
 package repository
 
 // Scope suite: branch isolation is total — a location filter can only reach
-// the hard location_id equality, a PIC filter only its own rows, and the
+// the hard location_id equality, a vendor filter only its own rows, and the
 // unscoped query runs only when both filters are nil.
 
 import (
@@ -26,14 +26,14 @@ func TestList_LocationScopeNeverLeaksOtherBranches(t *testing.T) {
 
 	locA := seedLocation(t, pool, "Cabang A Isolasi", "cabang")
 	locB := seedLocation(t, pool, "Cabang B Isolasi", "pop")
-	picA := seedUser(t, pool, seedUserParams{Name: "PIC A", Email: "a@vendor.test", Role: "pic", Type: "external"})
-	picB := seedUser(t, pool, seedUserParams{Name: "PIC B", Email: "b@vendor.test", Role: "pic", Type: "external"})
+	vendorA := seedUser(t, pool, seedUserParams{Name: "Vendor A", Email: "a@vendor.test", Role: "vendor", Type: "external"})
+	vendorB := seedUser(t, pool, seedUserParams{Name: "Vendor B", Email: "b@vendor.test", Role: "vendor", Type: "external"})
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	end := start.Add(4 * time.Hour)
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000201", PIC: picA, Location: locA, Start: start, End: end, Status: domain.VisitStatusRequested})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000202", PIC: picA, Location: locA, Start: start, End: end, Status: domain.VisitStatusApproved})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000203", PIC: picB, Location: locB, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000201", PIC: vendorA, Location: locA, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000202", PIC: vendorA, Location: locA, Start: start, End: end, Status: domain.VisitStatusApproved})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000203", PIC: vendorB, Location: locB, Start: start, End: end, Status: domain.VisitStatusRequested})
 
 	visits, total, err := repos.List(ctx, domain.VisitFilter{LocationID: &locA, Page: 1, Limit: 10})
 	if err != nil {
@@ -52,34 +52,34 @@ func TestList_LocationScopeNeverLeaksOtherBranches(t *testing.T) {
 	}
 }
 
-// TestList_PICScopeNeverLeaksOtherVendors proves a vendor sees only its own
+// TestList_VendorScopeNeverLeaksOtherVendors proves a vendor sees only its own
 // requests even when other vendors hold visits on the same branch.
-func TestList_PICScopeNeverLeaksOtherVendors(t *testing.T) {
+func TestList_VendorScopeNeverLeaksOtherVendors(t *testing.T) {
 	pool := testPool(t)
 	resetTables(t, pool)
 	ctx := testContext(t)
 	repos := NewVisitRepository(pool)
 
 	loc := seedLocation(t, pool, "Cabang Vendor", "cabang")
-	pic1 := seedUser(t, pool, seedUserParams{Name: "PIC Satu", Email: "satu@vendor.test", Role: "pic", Type: "external"})
-	pic2 := seedUser(t, pool, seedUserParams{Name: "PIC Dua", Email: "dua@vendor.test", Role: "pic", Type: "external"})
+	vendor1 := seedUser(t, pool, seedUserParams{Name: "Vendor Satu", Email: "satu@vendor.test", Role: "vendor", Type: "external"})
+	vendor2 := seedUser(t, pool, seedUserParams{Name: "Vendor Dua", Email: "dua@vendor.test", Role: "vendor", Type: "external"})
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	end := start.Add(4 * time.Hour)
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000211", PIC: pic1, Location: loc, Start: start, End: end, Status: domain.VisitStatusRequested})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000212", PIC: pic1, Location: loc, Start: start, End: end, Status: domain.VisitStatusApproved})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000213", PIC: pic2, Location: loc, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000211", PIC: vendor1, Location: loc, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000212", PIC: vendor1, Location: loc, Start: start, End: end, Status: domain.VisitStatusApproved})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000213", PIC: vendor2, Location: loc, Start: start, End: end, Status: domain.VisitStatusRequested})
 
-	visits, total, err := repos.List(ctx, domain.VisitFilter{PICUserID: &pic1, Page: 1, Limit: 10})
+	visits, total, err := repos.List(ctx, domain.VisitFilter{PICUserID: &vendor1, Page: 1, Limit: 10})
 	if err != nil {
-		t.Fatalf("List PIC scope: %v", err)
+		t.Fatalf("List vendor scope: %v", err)
 	}
 	if total != 2 || len(visits) != 2 {
 		t.Fatalf("total=%d items=%d, want 2 and 2", total, len(visits))
 	}
 	for _, v := range visits {
-		if v.PICUserID != pic1 {
-			t.Fatalf("leaked visit %s of vendor %s into vendor %s (RED: cross-vendor leak)", v.VisitID, v.PICUserID, pic1)
+		if v.PICUserID != vendor1 {
+			t.Fatalf("leaked visit %s of vendor %s into vendor %s (RED: cross-vendor leak)", v.VisitID, v.PICUserID, vendor1)
 		}
 	}
 }
@@ -94,13 +94,13 @@ func TestList_NilScopeReturnsAllForSuperAdmin(t *testing.T) {
 
 	locA := seedLocation(t, pool, "Cabang All A", "cabang")
 	locB := seedLocation(t, pool, "Cabang All B", "minipop")
-	pic := seedUser(t, pool, seedUserParams{Name: "PIC All", Email: "all@vendor.test", Role: "pic", Type: "external"})
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor All", Email: "all@vendor.test", Role: "vendor", Type: "external"})
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	end := start.Add(4 * time.Hour)
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000221", PIC: pic, Location: locA, Start: start, End: end, Status: domain.VisitStatusRequested})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000222", PIC: pic, Location: locB, Start: start, End: end, Status: domain.VisitStatusApproved})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000223", PIC: pic, Location: locB, Start: start, End: end, Status: domain.VisitStatusRejected})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000221", PIC: vendor, Location: locA, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000222", PIC: vendor, Location: locB, Start: start, End: end, Status: domain.VisitStatusApproved})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000223", PIC: vendor, Location: locB, Start: start, End: end, Status: domain.VisitStatusRejected})
 
 	visits, total, err := repos.List(ctx, domain.VisitFilter{Page: 1, Limit: 10})
 	if err != nil {
@@ -120,11 +120,11 @@ func TestFindByVisitCode_ResolvesManualScanCode(t *testing.T) {
 	repos := NewVisitRepository(pool)
 
 	loc := seedLocation(t, pool, "Cabang Pindai", "cabang")
-	pic := seedUser(t, pool, seedUserParams{Name: "PIC Pindai", Email: "pindai@vendor.test", Role: "pic", Type: "external"})
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Pindai", Email: "pindai@vendor.test", Role: "vendor", Type: "external"})
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	id := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000231", PIC: pic, Location: loc,
+		Code: "VST-0000000231", PIC: vendor, Location: loc,
 		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusApproved,
 	})
 

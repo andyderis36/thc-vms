@@ -2,6 +2,7 @@ package visit
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"time"
 
@@ -18,6 +19,13 @@ func textOrEmpty(s *string) string {
 	return *s
 }
 
+// Manual-input length caps (migration 000005): a rune count on the trimmed
+// value, so multi-byte company names are measured as the user sees them.
+const (
+	maxManualVendorNameLen = 120
+	maxPurposeNoteLen      = 200
+)
+
 type VisitorInput struct {
 	Name     string
 	IDNumber string
@@ -25,6 +33,19 @@ type VisitorInput struct {
 	// IDCardPhotoURL is the MinIO/S3 URL of the technician's KTP/SIM photo,
 	// uploaded beforehand through POST /uploads with the id_card category.
 	IDCardPhotoURL *string
+	// PhotoURL is the MinIO/S3 URL of the technician's selfie, uploaded
+	// beforehand through POST /uploads with the same id_card category (no new
+	// storage category: YAGNI). Optional, per the openapi schema.
+	PhotoURL *string
+	// VendorID is the technician's own company. Optional: internal staff
+	// travel without one. When set it must name an active (not blacklisted)
+	// vendor from the catalogue.
+	VendorID *domain.UUID
+	// VendorName is the manually typed company (migration 000005), honoured
+	// ONLY when VendorID is absent: a sent VendorID wins and this text is
+	// discarded, never stored alongside it. It never enters the vendor
+	// catalogue, so the dropdown keeps showing registered vendors only.
+	VendorName *string
 }
 
 // CreateVisitInput is the data needed to file a new visit request.
@@ -36,6 +57,10 @@ type CreateVisitInput struct {
 	EndDate       time.Time
 	IsNDAAccepted bool
 	Notes         string
+	// PurposeNote is the free-typed "tujuan lain" (migration 000005). Either
+	// a non-empty PurposeIDs or a non-empty PurposeNote is required; both may
+	// travel together. It never enters the purpose catalogue.
+	PurposeNote string
 	// AssignmentLetterURL is the MinIO/S3 URL of the vendor's Surat Tugas /
 	// SPK, uploaded beforehand through POST /uploads with the
 	// assignment_letter category. Optional, per the openapi schema.
@@ -48,8 +73,11 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 	if strings.TrimSpace(string(in.LocationID)) == "" {
 		return domain.VisitRequest{}, domain.ValidationFailure("Lokasi kunjungan wajib diisi.")
 	}
-	if len(in.PurposeIDs) < 1 {
-		return domain.VisitRequest{}, domain.ValidationFailure("Minimal satu tujuan kunjungan wajib dipilih.")
+	if len(in.PurposeIDs) < 1 && strings.TrimSpace(in.PurposeNote) == "" {
+		return domain.VisitRequest{}, domain.ValidationFailure("Minimal satu tujuan kunjungan wajib dipilih atau ditulis.")
+	}
+	if len([]rune(strings.TrimSpace(in.PurposeNote))) > maxPurposeNoteLen {
+		return domain.VisitRequest{}, domain.ValidationFailure("Tujuan lain kunjungan maksimal 200 karakter.")
 	}
 	if len(in.Visitors) < 1 {
 		return domain.VisitRequest{}, domain.ValidationFailure("Minimal satu pengunjung wajib didaftarkan.")
@@ -68,15 +96,48 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 			return domain.VisitRequest{}, err
 		}
 	}
+	if err := ValidatePhotoURL(textOrEmpty(in.AssignmentLetterURL)); err != nil {
+		return domain.VisitRequest{}, err
+	}
 
-	// Scope: a PIC may request any destination; an admin only its own branch.
+	// Scope: a vendor may request any destination; an admin only its own branch.
 	// Security staff file no requests: their post is the gate, not the form.
-	if err := actor.requireRole(domain.RolePIC, domain.RoleAdmin, domain.RoleSuperAdmin); err != nil {
+	if err := actor.requireRole(domain.RoleVendor, domain.RoleAdmin, domain.RoleSuperAdmin); err != nil {
 		return domain.VisitRequest{}, err
 	}
 	if actor.Role == domain.RoleAdmin {
 		if err := actor.requireBranch(in.LocationID); err != nil {
 			return domain.VisitRequest{}, err
+		}
+	}
+
+	// Vendor: absent means internal staff. A named vendor must be an active
+	// (non-blacklisted) catalogue row; ListVendors only returns active rows,
+	// so membership is the existence+active check in one call. Each
+	// technician carries its own company, so the check runs per visitor.
+	// Free-choice vendor intent: any active catalogue vendor is accepted for
+	// any actor (vendor, admin, super_admin alike); vendor-locking of the vendor to
+	// the requesting account is deliberately not enforced.
+	vendorNames := map[domain.UUID]string{}
+	if s.vendors != nil {
+		vendors, err := s.vendors.ListVendors(ctx)
+		if err != nil {
+			return domain.VisitRequest{}, err
+		}
+		for _, v := range vendors {
+			vendorNames[v.ID] = v.Name
+		}
+		for _, visitor := range in.Visitors {
+			if visitor.VendorID == nil {
+				continue
+			}
+			id := domain.UUID(strings.TrimSpace(string(*visitor.VendorID)))
+			if id == "" {
+				continue
+			}
+			if _, known := vendorNames[id]; !known {
+				return domain.VisitRequest{}, domain.ValidationFailure("Vendor tidak ditemukan atau tidak aktif.")
+			}
 		}
 	}
 
@@ -95,6 +156,9 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 	if notes := strings.TrimSpace(in.Notes); notes != "" {
 		visit.Notes = &notes
 	}
+	if note := strings.TrimSpace(in.PurposeNote); note != "" {
+		visit.PurposeNote = &note
+	}
 	visitors := make([]domain.Visitor, 0, len(in.Visitors))
 	for _, v := range in.Visitors {
 		visitor := domain.Visitor{
@@ -105,9 +169,33 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 		if photo := strings.TrimSpace(textOrEmpty(v.IDCardPhotoURL)); photo != "" {
 			visitor.IDCardPhotoURL = &photo
 		}
+		if selfie := strings.TrimSpace(textOrEmpty(v.PhotoURL)); selfie != "" {
+			visitor.PhotoURL = &selfie
+		}
+		// Catalogue wins: a valid VendorID resolves the display name and the
+		// manual text is discarded (never stored alongside it, so the read
+		// helper's override-otherwise-catalogue stays unambiguous). The
+		// manual name is stored only when no catalogue link travels along.
+		if v.VendorID != nil {
+			if id := domain.UUID(strings.TrimSpace(string(*v.VendorID))); id != "" {
+				visitor.VendorID = id
+				visitor.VendorName = vendorNames[id]
+			}
+		} else if name := strings.TrimSpace(textOrEmpty(v.VendorName)); name != "" {
+			visitor.VendorNameOverride = &name
+			visitor.VendorName = name
+		}
 		visitors = append(visitors, visitor)
 	}
-	return s.visits.Create(ctx, visit, visitors, in.PurposeIDs)
+	created, err := s.visits.Create(ctx, visit, visitors, in.PurposeIDs)
+	if err != nil {
+		return domain.VisitRequest{}, err
+	}
+	// The repository returns the visit row without its roster, so the
+	// just-validated roster (with resolved vendor names) travels back on the
+	// created visit for the response echo.
+	created.Visitors = visitors
+	return created, nil
 }
 
 // validateWindow enforces that both schedule bounds are present and that the
@@ -136,7 +224,61 @@ func validateVisitor(v VisitorInput, n int) error {
 	if strings.TrimSpace(v.Phone) == "" {
 		return domain.ValidationFailure("Nomor telepon pengunjung ke-" + itoa(n) + " wajib diisi.")
 	}
+	if err := validatePhotoURL(textOrEmpty(v.IDCardPhotoURL)); err != nil {
+		return err
+	}
+	if err := validatePhotoURL(textOrEmpty(v.PhotoURL)); err != nil {
+		return err
+	}
+	if len([]rune(strings.TrimSpace(textOrEmpty(v.VendorName)))) > maxManualVendorNameLen {
+		return domain.ValidationFailure("Nama perusahaan vendor pengunjung ke-" + itoa(n) + " maksimal 120 karakter.")
+	}
 	return nil
+}
+
+// ValidatePhotoURL is the central allowlist for every uploaded-file URL that
+// travels through a visit payload (visitor id_card_photo_url, visitor
+// photo_url selfie, assignment_letter_url) and the gate check-in photo_url.
+// Empty (absent) is allowed; a non-empty value must be an https URL, or an
+// http URL only for the dev MinIO hosts (localhost/127.0.0.1), at most 2048
+// characters, and never a javascript:/data:/blob:/vbscript: payload. It lives
+// in package visit so the gate usecase reuses the same gate.
+func ValidatePhotoURL(raw string) error { return validatePhotoURL(raw) }
+
+func validatePhotoURL(raw string) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	if len(trimmed) > 2048 {
+		return domain.ValidationFailure("Tautan berkas tidak valid: terlalu panjang.")
+	}
+	lower := strings.ToLower(trimmed)
+	for _, bad := range []string{"javascript:", "data:", "blob:", "vbscript:"} {
+		if strings.HasPrefix(lower, bad) {
+			return domain.ValidationFailure("Tautan berkas tidak valid.")
+		}
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return domain.ValidationFailure("Tautan berkas tidak valid.")
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		if u.Hostname() == "" {
+			return domain.ValidationFailure("Tautan berkas tidak valid.")
+		}
+		return nil
+	case "http":
+		switch strings.ToLower(u.Hostname()) {
+		case "localhost", "127.0.0.1":
+			return nil
+		default:
+			return domain.ValidationFailure("Tautan berkas tidak valid: http hanya diizinkan untuk localhost.")
+		}
+	default:
+		return domain.ValidationFailure("Tautan berkas tidak valid.")
+	}
 }
 
 func sameCalendarDay(a time.Time, b time.Time) bool {

@@ -18,17 +18,29 @@ import {
   cancelVisit,
   checkInVisit,
   checkOutVisit,
+  createLocation,
+  createManagedUser,
   createSecurityUser,
   createVisit,
+  deleteLocation,
+  deleteManagedUser,
+  deleteSecurityUser,
+  deleteVisit,
   getMe,
   getVisit,
   getVisitQr,
   listLocations,
+  listManagedUsers,
   listPurposes,
   listSecurityUsers,
+  listVendors,
   listVisits,
   rejectVisit,
   rescheduleVisit,
+  updateLocation,
+  updateManagedUser,
+  updateManagedUserStatus,
+  updateSecurityUser,
   updateSecurityUserStatus,
   uploadFile,
 } from '@/lib/api/client'
@@ -38,10 +50,16 @@ import type {
   ApproveRequest,
   CancelRequest,
   CheckInRequest,
+  CreateLocationRequest,
+  CreateManagedUserRequest,
   CreateSecurityUserRequest,
   CreateVisitRequest,
+  ManagedUserListParams,
   RejectRequest,
   RescheduleRequest,
+  UpdateLocationRequest,
+  UpdateManagedUserRequest,
+  UpdateSecurityUserRequest,
   UpdateUserStatusRequest,
   UploadCategory,
   VisitListParams,
@@ -59,12 +77,24 @@ const MASTER_STALE_TIME = 5 * 60 * 1000
 const VISIT_STALE_TIME = 30 * 1000
 
 /**
+ * Pembaruan otomatis layar detail kunjungan (SCR-04 sisi vendor):
+ * QR & "Riwayat Status" wajib menyegarkan diri tanpa reload manual —
+ * misalnya saat admin menyetujui atau satpam check-in/out dari klien lain.
+ * Polling 12 detik (di dalam rentang 10–15 detik) + refetch saat jendela
+ * kembali fokus; `refetchIntervalInBackground: false` menjaga agar tab yang
+ * tersembunyi tidak membanjiri API.
+ */
+const VISIT_DETAIL_REFETCH_INTERVAL = 12_000
+
+/**
  * Prefix kunci yang tetap diturunkan dari `queryKeys`, bukan string yang
  * ditulis ulang. `invalidateQueries` memakai partial match, jadi prefix daftar
  * kunjungan sekaligus mengenai seluruh varian `params`/filter.
  */
 const VISIT_LIST_PREFIX = queryKeys.visits.list({}).slice(0, 2)
 const SECURITY_USERS_PREFIX = queryKeys.securityUsers().slice(0, 1)
+const MANAGED_USERS_PREFIX = queryKeys.managedUsers().slice(0, 1)
+const LOCATIONS_PREFIX = queryKeys.locations().slice(0, 1)
 
 /** 401/403/404 bersifat definitif — mengulanginya hanya menambah beban API. */
 function shouldRetry(failureCount: number, error: unknown): boolean {
@@ -72,10 +102,11 @@ function shouldRetry(failureCount: number, error: unknown): boolean {
   return !isDefinitive && failureCount < 1
 }
 
-/** Status kunjungan berubah → segarkan seluruh daftar + detail kunjungan itu. */
+/** Status kunjungan berubah → segarkan seluruh daftar + detail + QR kunjungan itu. */
 function invalidateVisitStatus(queryClient: QueryClient, visitId: string): void {
   void queryClient.invalidateQueries({ queryKey: VISIT_LIST_PREFIX })
   void queryClient.invalidateQueries({ queryKey: queryKeys.visits.detail(visitId) })
+  void queryClient.invalidateQueries({ queryKey: queryKeys.visits.qr(visitId) })
 }
 
 /**
@@ -103,17 +134,26 @@ export const meQueryOptions = queryOptions({
 })
 
 /** Master data bersifat global (bukan per cabang) — aman dipakai bersama semua pengguna. */
-export const locationsQueryOptions = queryOptions({
-  queryKey: queryKeys.locations(),
-  queryFn: () => listLocations(),
-  staleTime: MASTER_STALE_TIME,
-  retry: shouldRetry,
-})
+export const locationsQueryOptions = (activeOnly?: boolean) =>
+  queryOptions({
+    queryKey: queryKeys.locations(activeOnly),
+    queryFn: () => listLocations(activeOnly),
+    staleTime: MASTER_STALE_TIME,
+    retry: shouldRetry,
+  })
 
 /** Sama seperti lokasi: tujuan kunjungan jarang berubah, jadi layak 5 menit. */
 export const purposesQueryOptions = queryOptions({
   queryKey: queryKeys.purposes(),
   queryFn: () => listPurposes(),
+  staleTime: MASTER_STALE_TIME,
+  retry: shouldRetry,
+})
+
+/** Katalog vendor mitra: master data global seperti lokasi/purposes. */
+export const vendorsQueryOptions = queryOptions({
+  queryKey: queryKeys.vendors(),
+  queryFn: () => listVendors(),
   staleTime: MASTER_STALE_TIME,
   retry: shouldRetry,
 })
@@ -134,6 +174,10 @@ export function visitDetailQueryOptions(id: string | null) {
     enabled: id !== null,
     staleTime: VISIT_STALE_TIME,
     retry: shouldRetry,
+    // Pembaruan mandiri SCR-04 vendor (lihat konstanta di atas).
+    refetchInterval: VISIT_DETAIL_REFETCH_INTERVAL,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -149,6 +193,10 @@ export function visitQrQueryOptions(id: string | null) {
     enabled: id !== null,
     staleTime: VISIT_STALE_TIME,
     retry: shouldRetry,
+    // QR wajib ikut polling agar kartu QR selalu sinkron (lihat konstanta di atas).
+    refetchInterval: VISIT_DETAIL_REFETCH_INTERVAL,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -156,6 +204,16 @@ export function securityUsersQueryOptions(locationId?: string) {
   return queryOptions({
     queryKey: queryKeys.securityUsers(locationId),
     queryFn: () => listSecurityUsers({ location_id: locationId }),
+    staleTime: VISIT_STALE_TIME,
+    retry: shouldRetry,
+  })
+}
+
+/** Daftar user lintas cabang untuk super_admin (filter role/search/location). */
+export function managedUsersQueryOptions(params: ManagedUserListParams) {
+  return queryOptions({
+    queryKey: queryKeys.managedUsers(params),
+    queryFn: () => listManagedUsers(params),
     staleTime: VISIT_STALE_TIME,
     retry: shouldRetry,
   })
@@ -169,12 +227,16 @@ export function useMeQuery() {
   return useQuery(meQueryOptions)
 }
 
-export function useLocationsQuery() {
-  return useQuery(locationsQueryOptions)
+export function useLocationsQuery(activeOnly?: boolean) {
+  return useQuery(locationsQueryOptions(activeOnly));
 }
 
 export function usePurposesQuery() {
   return useQuery(purposesQueryOptions)
+}
+
+export function useVendorsQuery(enabled = true) {
+  return useQuery({ ...vendorsQueryOptions, enabled })
 }
 
 export function useVisitsQuery(params: VisitListParams, enabled = true) {
@@ -185,13 +247,17 @@ export function useVisitQuery(id: string | null) {
   return useQuery(visitDetailQueryOptions(id))
 }
 
-/** `enabled` berasal dari pemanggil — teruskan `visit.status === 'approved'` agar 404 tidak dipancing. */
+/** `enabled` berasal dari pemanggil — teruskan true untuk status `approved` (check-in) atau `visiting` (check-out, QR yang sama). */
 export function useVisitQrQuery(id: string | null, enabled = true) {
   return useQuery({ ...visitQrQueryOptions(id), enabled: id !== null && enabled })
 }
 
 export function useSecurityUsersQuery(locationId?: string, enabled = true) {
   return useQuery({ ...securityUsersQueryOptions(locationId), enabled })
+}
+
+export function useManagedUsersQuery(params: ManagedUserListParams, enabled = true) {
+  return useQuery({ ...managedUsersQueryOptions(params), enabled })
 }
 
 // ---------------------------------------------------------------------------
@@ -242,8 +308,9 @@ export function useCreateVisitMutation() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ body }: { body: CreateVisitRequest }) => createVisit(body),
-    onSuccess: () => {
+    onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: VISIT_LIST_PREFIX })
+      queryClient.setQueryData(queryKeys.visits.detail(data.id), data)
     },
   })
 }
@@ -285,6 +352,118 @@ export function useUpdateSecurityUserStatusMutation() {
       updateSecurityUserStatus(userId, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: SECURITY_USERS_PREFIX })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me() })
+    },
+  })
+}
+
+/** Hapus satpam cabang → segarkan daftar security-users (prefix ada). */
+export function useDeleteSecurityUserMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ userId }: { userId: string }) => deleteSecurityUser(userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: SECURITY_USERS_PREFIX })
+    },
+  })
+}
+
+/** Ubah satpam cabang → segarkan daftar security-users (prefix ada). */
+export function useUpdateSecurityUserMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ userId, body }: { userId: string; body: UpdateSecurityUserRequest }) =>
+      updateSecurityUser(userId, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: SECURITY_USERS_PREFIX })
+    },
+  })
+}
+
+export function useCreateLocationMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ body }: { body: CreateLocationRequest }) => createLocation(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: LOCATIONS_PREFIX })
+    },
+  })
+}
+
+export function useUpdateLocationMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ locationId, body }: { locationId: string; body: UpdateLocationRequest }) =>
+      updateLocation(locationId, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: LOCATIONS_PREFIX })
+    },
+  })
+}
+
+export function useCreateManagedUserMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ body }: { body: CreateManagedUserRequest }) => createManagedUser(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: MANAGED_USERS_PREFIX })
+    },
+  })
+}
+
+export function useUpdateManagedUserStatusMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ userId, body }: { userId: string; body: UpdateUserStatusRequest }) =>
+      updateManagedUserStatus(userId, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: MANAGED_USERS_PREFIX })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me() })
+    },
+  })
+}
+
+/** Ubah user terkelola → segarkan daftar managed-users (prefix ada). */
+export function useUpdateManagedUserMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ userId, body }: { userId: string; body: UpdateManagedUserRequest }) =>
+      updateManagedUser(userId, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: MANAGED_USERS_PREFIX })
+    },
+  })
+}
+
+/** Hapus kunjungan → segarkan daftar + detail kunjungan itu (prefix ada). */
+export function useDeleteVisitMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ visitId }: { visitId: string }) => deleteVisit(visitId),
+    onSuccess: (_data, variables) => {
+      invalidateVisitStatus(queryClient, variables.visitId)
+    },
+  })
+}
+
+/** Hapus user terkelola → segarkan daftar managed-users (prefix ada). */
+export function useDeleteManagedUserMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ userId }: { userId: string }) => deleteManagedUser(userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: MANAGED_USERS_PREFIX })
+    },
+  })
+}
+
+/** Hapus fasilitas → segarkan daftar locations (prefix ada). */
+export function useDeleteLocationMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ locationId }: { locationId: string }) => deleteLocation(locationId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: LOCATIONS_PREFIX })
     },
   })
 }

@@ -24,7 +24,7 @@ tags:
   - name: Health
     description: Health & readiness probe untuk monitoring uptime & database pool
   - name: Auth
-    description: Otentikasi praktis berbasis peran (Admin, Security, PIC)
+    description: Otentikasi praktis berbasis peran (Admin, Security, Vendor)
   - name: Visits
     description: Manajemen inti siklus hidup kunjungan
   - name: SecurityGate
@@ -187,13 +187,72 @@ paths:
         '404':
           description: Akun security tidak ditemukan
 
+  /users/security/{id}:
+    patch:
+      tags: [UserManagement]
+      summary: Ubah data akun security cabang — parsial + reset password (Superadmin semua cabang; Admin terkunci ke cabangnya)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSecurityUserRequest'
+      responses:
+        '200':
+          description: Data akun security berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityUserResponse'
+        '400':
+          description: Format data tidak valid
+        '403':
+          description: Akses ditolak (vendor/security dilarang; Admin lintas cabang dilarang)
+        '404':
+          description: Akun security tidak ditemukan (termasuk non-security)
+        '409':
+          description: Email sudah dipakai akun lain
+    delete:
+      tags: [UserManagement]
+      summary: Hapus permanen akun security cabang (Superadmin semua cabang; Admin terkunci ke cabangnya)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Akun security dihapus permanen (tanpa body)
+        '403':
+          description: Akses ditolak (vendor/security dilarang; Admin lintas cabang dilarang)
+        '404':
+          description: Akun security tidak ditemukan (termasuk non-security)
+        '409':
+          description: Petugas masih memiliki kunjungan terkait
+
   # ============================================================
   # MASTER DATA (READ-ONLY FOR MVP)
   # ============================================================
   /locations:
     get:
       tags: [MasterData]
-      summary: Daftar fasilitas lokasi (Cabang, POP, miniPOP) THC aktif
+      summary: Daftar fasilitas lokasi (Cabang, POP, miniPOP) THC
+      parameters:
+        - name: active_only
+          in: query
+          description: true (default) hanya fasilitas aktif; false menyertakan nonaktif (halaman admin)
+          schema:
+            type: boolean
+            default: true
       responses:
         '200':
           description: Daftar fasilitas lokasi berhasil diambil
@@ -201,6 +260,217 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LocationListResponse'
+
+    post:
+      tags: [MasterData]
+      summary: Tambah fasilitas lokasi baru (Superadmin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLocationRequest'
+      responses:
+        '201':
+          description: Fasilitas lokasi berhasil ditambahkan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationResponse'
+        '400':
+          description: Format data tidak valid
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+
+  /locations/{id}:
+    patch:
+      tags: [MasterData]
+      summary: Ubah parsial fasilitas lokasi / toggle aktif-nonaktif (Superadmin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLocationRequest'
+      responses:
+        '200':
+          description: Fasilitas lokasi berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationResponse'
+        '400':
+          description: Format data tidak valid
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+        '404':
+          description: Fasilitas lokasi tidak ditemukan
+
+    delete:
+      tags: [MasterData]
+      summary: Hapus permanen fasilitas lokasi (Superadmin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Fasilitas lokasi dihapus permanen (tanpa body)
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+        '404':
+          description: Fasilitas lokasi tidak ditemukan
+        '409':
+          description: Fasilitas masih digunakan oleh kunjungan atau pengguna
+
+  /users:
+    get:
+      tags: [UserManagement]
+      summary: Daftar pengguna lintas cabang dengan filter peran/pencarian/cabang (Superadmin)
+      parameters:
+        - name: role
+          in: query
+          description: Filter peran (admin, vendor, security)
+          schema:
+            type: string
+        - name: search
+          in: query
+          description: Pencarian nama atau email
+          schema:
+            type: string
+        - name: location_id
+          in: query
+          description: Filter cabang penugasan
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Daftar pengguna berhasil diambil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+
+    post:
+      tags: [UserManagement]
+      summary: Daftarkan akun admin cabang atau vendor baru (Superadmin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateManagedUserRequest'
+      responses:
+        '201':
+          description: Akun pengguna berhasil didaftarkan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Format data tidak valid
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+        '409':
+          description: Email sudah terdaftar
+
+  /users/{id}:
+    patch:
+      tags: [UserManagement]
+      summary: Ubah data akun pengguna — parsial, tanpa role/status (Superadmin; password = reset hash)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateManagedUserRequest'
+      responses:
+        '200':
+          description: Data akun pengguna berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Format data tidak valid atau pasangan peran/lokasi dilanggar
+        '401':
+          description: Bukti password saat ini salah (khusus reset password akun sendiri)
+        '403':
+          description: Akses ditolak (hanya Superadmin; reset password super_admin lain dilarang)
+        '404':
+          description: Akun pengguna tidak ditemukan
+        '409':
+          description: Email sudah dipakai akun lain
+    delete:
+      tags: [UserManagement]
+      summary: 'Hapus permanen akun pengguna (Superadmin; larangan: akun sendiri & super_admin)'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Akun pengguna dihapus permanen (tanpa body)
+        '403':
+          description: Akses ditolak (hanya Superadmin; akun sendiri & super_admin dilarang)
+        '404':
+          description: Akun pengguna tidak ditemukan
+        '409':
+          description: Pengguna masih memiliki kunjungan terkait
+
+  /users/{id}/status:
+    patch:
+      tags: [UserManagement]
+      summary: 'Ubah status aktif/nonaktif akun pengguna (Superadmin; larangan: akun sendiri & super_admin)'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserStatusRequest'
+      responses:
+        '200':
+          description: Status akun pengguna berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Format data tidak valid
+        '403':
+          description: Akses ditolak (hanya Superadmin; akun sendiri & super_admin dilarang)
+        '404':
+          description: Akun pengguna tidak ditemukan
 
   /purposes:
     get:
@@ -213,6 +483,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PurposeListResponse'
+
+  /vendors:
+    get:
+      tags: [MasterData]
+      summary: Daftar vendor mitra (katalog dropdown relasi vendor)
+      responses:
+        '200':
+          description: Daftar vendor mitra berhasil diambil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorListResponse'
 
   # ============================================================
   # OBJECT STORAGE & FILE UPLOAD (MINIO / S3)
@@ -237,6 +519,9 @@ paths:
                   type: string
                   enum: [assignment_letter, id_card, checkin_photo]
                   description: Kategori berkas untuk isolasi folder bucket MinIO
+                owner_id:
+                  type: string
+                  description: ID pemilik berkas (visit id / visitor id). Opsional — kosong berarti staging pre-create di folder pending/.
       responses:
         '201':
           description: Berkas berhasil diunggah ke MinIO/S3
@@ -268,7 +553,7 @@ paths:
             format: uuid
         - name: search
           in: query
-          description: Pencarian nama PIC atau Visit ID
+          description: Pencarian nama vendor atau Visit ID
           schema:
             type: string
         - name: page
@@ -291,7 +576,7 @@ paths:
 
     post:
       tags: [Visits]
-      summary: Buat permohonan kunjungan baru (PIC / Admin)
+      summary: Buat permohonan kunjungan baru (Vendor / Admin)
       requestBody:
         required: true
         content:
@@ -323,6 +608,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VisitDetailResponse'
+        '404':
+          description: Kunjungan tidak ditemukan
+        '403':
+          description: Di luar cakupan cabang (isolasi multi-branch AGENTS §6.1) — tanpa membocorkan data
+
+    delete:
+      tags: [Visits]
+      summary: Hapus permanen kunjungan (Superadmin; status apa pun)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Kunjungan dihapus permanen (tanpa body)
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
         '404':
           description: Kunjungan tidak ditemukan
 
@@ -376,7 +680,7 @@ paths:
   /visits/{id}/reschedule:
     post:
       tags: [Visits]
-      summary: Penjadwalan ulang kunjungan (PIC / Admin)
+      summary: Penjadwalan ulang kunjungan (Vendor / Admin)
       parameters:
         - name: id
           in: path
@@ -459,7 +763,7 @@ paths:
   /visits/{id}/checkin:
     post:
       tags: [SecurityGate]
-      summary: Eksekusi check-in tamu oleh Security atau Admin Cabang (Live Cam, Upload QR Galeri, atau Manual)
+      summary: Eksekusi check-in tamu oleh Security, Admin Cabang, atau Superadmin (bypass lintas cabang saat darurat; Live Cam, Upload QR Galeri, atau Manual)
       parameters:
         - name: id
           in: path
@@ -480,7 +784,7 @@ paths:
                   type: string
       responses:
         '200':
-          description: Check-in berhasil (Status -> visiting)
+          description: Check-in berhasil (Status -> visiting; dicatat atas id pelaksana, superadmin lintas cabang saat darurat)
         '400':
           description: Di luar rentang toleransi waktu jadwal (±2 jam) atau QR tidak valid
         '403':
@@ -489,7 +793,7 @@ paths:
   /visits/{id}/checkout:
     post:
       tags: [SecurityGate]
-      summary: Eksekusi check-out tamu saat selesai kunjungan (oleh Security atau Admin Cabang)
+      summary: Eksekusi check-out tamu saat selesai kunjungan (oleh Security, Admin Cabang, atau Superadmin bypass lintas cabang saat darurat)
       parameters:
         - name: id
           in: path
@@ -498,7 +802,7 @@ paths:
             type: string
       responses:
         '200':
-          description: Check-out berhasil (Status -> completed)
+          description: Check-out berhasil (Status -> completed; dicatat atas id pelaksana, superadmin lintas cabang saat darurat)
         '403':
           description: Petugas tidak berwenang mengelola cabang kunjungan ini
 
@@ -638,14 +942,18 @@ components:
           type: string
         phone:
           type: string
+        nik:
+          type: [string, "null"]
+          pattern: ^\d{16}$
+          description: NIK KTP tepat 16 digit angka; wajib untuk admin & vendor, null untuk security & super_admin (BE menolak NIK untuk keduanya)
         role:
           type: string
-          enum: [super_admin, admin, security, pic]
+          enum: [super_admin, admin, security, vendor]
           example: admin
         location_id:
           type: [string, "null"]
           format: uuid
-          description: ID cabang/POP penugasan (khusus admin & security, null untuk super_admin & pic)
+          description: ID cabang/POP penugasan (khusus admin & security, null untuk super_admin & vendor)
         location_name:
           type: [string, "null"]
           description: Nama fasilitas cabang/POP penugasan
@@ -658,6 +966,7 @@ components:
           enum: [internal, external]
         vendor_name:
           type: [string, "null"]
+          description: Nama perusahaan vendor akun ini (override ketikan manual bila ada, kalau tidak nama katalog vendor; TIDAK terdaftar di katalog bila diketik manual dan TIDAK pernah tampil di dropdown vendor)
 
     UserResponse:
       type: object
@@ -716,6 +1025,22 @@ components:
           type: string
           enum: [active, inactive]
 
+    UpdateSecurityUserRequest:
+      type: object
+      description: Parsial — member absen berarti biarkan kolom; password non-kosong me-reset hash baru
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: [string, "null"]
+        password:
+          type: string
+          format: password
+          description: Kosong/absen = biarkan; terisi = reset hash baru
+
     Location:
       type: object
       properties:
@@ -736,6 +1061,9 @@ components:
         timezone:
           type: string
           enum: [WIB, WITA, WIT]
+        is_active:
+          type: boolean
+          description: false berarti dinonaktifkan superadmin (disembunyikan dari katalog form)
 
     LocationListResponse:
       type: object
@@ -746,6 +1074,133 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Location'
+
+    LocationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Location'
+
+    CreateLocationRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          example: Kantor Cabang Malang
+        type:
+          type: string
+          enum: [pusat, cabang, pop, minipop]
+          example: cabang
+        address:
+          type: string
+        city:
+          type: string
+        timezone:
+          type: string
+          enum: [WIB, WITA, WIT]
+
+    UpdateLocationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [pusat, cabang, pop, minipop]
+        address:
+          type: string
+        city:
+          type: string
+        timezone:
+          type: string
+          enum: [WIB, WITA, WIT]
+        is_active:
+          type: boolean
+          description: Toggle aktif/nonaktif fasilitas
+
+    CreateManagedUserRequest:
+      type: object
+      required: [name, email, password, role]
+      properties:
+        name:
+          type: string
+          example: Bayu Santoso
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        phone:
+          type: string
+        nik:
+          type: string
+          pattern: ^\d{16}$
+          description: Wajib tepat 16 digit angka iff role admin/vendor (400 bila absen atau format salah)
+        role:
+          type: string
+          enum: [admin, vendor]
+          description: Peran akun baru (admin wajib location_id; vendor menyembunyikan location_id)
+        location_id:
+          type: string
+          format: uuid
+          description: Wajib iff role admin; diabaikan iff role vendor
+        vendor_id:
+          type: string
+          description: Opsional — relasi vendor untuk akun vendor
+        vendor_name:
+          type: string
+          maxLength: 120
+          description: Opsional — nama perusahaan vendor akun vendor yang diketik manual (maks 120 karakter setelah trim); mengikuti semantik phone (absen = biarkan); bila vendor_id dikirim maka vendor_id menang (katalog); TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor
+
+    UpdateManagedUserRequest:
+      type: object
+      description: Parsial — member absen berarti biarkan kolom; role/type/status tak punya member
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: [string, "null"]
+          description: String kosong dibersihkan menjadi null
+        nik:
+          type: [string, "null"]
+          pattern: ^\d{16}$
+          description: Tepat 16 digit angka; wajib & tak boleh dikosongkan untuk target admin/vendor; ditolak (400) bila target security/super_admin; absen = biarkan
+        password:
+          type: string
+          format: password
+          description: Kosong/absen = biarkan; terisi = reset hash baru (superadmin)
+        current_password:
+          type: string
+          format: password
+          description: Wajib bila me-reset password akun sendiri (bukti anti-pengambilalihan); salah = 401
+        location_id:
+          type: [string, "null"]
+          format: uuid
+          description: Absen/null = biarkan; mengikuti aturan peran target (admin wajib cabang, vendor tanpa cabang)
+        vendor_id:
+          type: [string, "null"]
+          description: Absen/null = biarkan; hanya untuk role vendor
+        vendor_name:
+          type: [string, "null"]
+          maxLength: 120
+          description: Absen = biarkan; string kosong = bersihkan jadi null; terisi = set override (maks 120 karakter setelah trim); hanya untuk role vendor; bila vendor_id dikirim maka vendor_id menang (katalog); TIDAK terdaftar di katalog vendor
+
+    UserListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
 
     Purpose:
       type: object
@@ -767,6 +1222,27 @@ components:
           items:
             $ref: '#/components/schemas/Purpose'
 
+    Vendor:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: PT Lintas Fiber
+
+    VendorListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Vendor'
+
     VisitorItem:
       type: object
       required: [name, id_number, phone]
@@ -781,11 +1257,23 @@ components:
         id_card_photo_url:
           type: [string, "null"]
           format: uri
-          description: URL foto KTP/SIM di MinIO/S3
+          description: URL bertanda tangan (presigned) berumur pendek untuk foto KTP/SIM di bucket privat MinIO/S3, bukan URL stabil — muat ulang detail kunjungan untuk tautan baru; null bila tidak ada berkas milik bucket
+        photo_url:
+          type: [string, "null"]
+          format: uri
+          description: URL bertanda tangan (presigned) berumur pendek untuk foto selfie pengunjung di bucket privat MinIO/S3 (diunggah via /uploads kategori id_card), bukan URL stabil — muat ulang detail kunjungan untuk tautan baru; null bila tidak ada berkas milik bucket
+        vendor_id:
+          type: [string, "null"]
+          format: uuid
+          description: ID perusahaan vendor teknisi (opsional, harus merujuk vendor aktif)
+        vendor_name:
+          type: [string, "null"]
+          maxLength: 120
+          description: Nama perusahaan vendor teknisi yang diketik manual (maks 120 karakter setelah trim); DIHORMATI hanya bila vendor_id absen — bila vendor_id dikirim maka vendor_id menang dan teks ini dibuang; TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor
 
     CreateVisitRequest:
       type: object
-      required: [location_id, purpose_ids, start_date, end_date, visitors, is_nda_accepted]
+      required: [location_id, start_date, end_date, visitors, is_nda_accepted]
       properties:
         location_id:
           type: string
@@ -796,6 +1284,11 @@ components:
             type: string
             format: uuid
           minItems: 1
+          description: Daftar ID tujuan dari katalog; opsional bila purpose_note terisi — minimal salah satu dari purpose_ids non-kosong ATAU purpose_note non-kosong wajib diisi (400 bila keduanya kosong)
+        purpose_note:
+          type: string
+          maxLength: 200
+          description: Tujuan kunjungan tambahan yang diketik bebas / "tujuan lain" (maks 200 karakter setelah trim); TIDAK terdaftar di katalog purpose dan TIDAK pernah tampil di dropdown tujuan
         start_date:
           type: string
           format: date-time
@@ -842,6 +1335,7 @@ components:
           $ref: '#/components/schemas/User'
         vendor_name:
           type: string
+          description: Nama vendor tampilan kunjungan (override ketikan manual bila ada, kalau tidak nama katalog)
         start_date:
           type: string
           format: date-time
@@ -851,9 +1345,13 @@ components:
         assignment_letter_url:
           type: [string, "null"]
           format: uri
-          description: URL berkas surat tugas / SPK vendor di MinIO/S3
+          description: URL bertanda tangan (presigned) berumur pendek untuk berkas surat tugas / SPK vendor di bucket privat MinIO/S3, bukan URL stabil — muat ulang detail kunjungan untuk tautan baru; null bila tidak ada berkas milik bucket
         notes:
           type: string
+        purpose_note:
+          type: [string, "null"]
+          maxLength: 200
+          description: Tujuan kunjungan tambahan yang diketik bebas / "tujuan lain" (maks 200 karakter); null bila tidak ada; TIDAK terdaftar di katalog purpose
         visitors:
           type: array
           items:
@@ -861,6 +1359,18 @@ components:
         created_at:
           type: string
           format: date-time
+        check_in_at:
+          type: [string, "null"]
+          format: date-time
+          description: Waktu check-in aktual di gerbang (tabel check_in.checked_in_at); null bila belum check-in
+        check_out_at:
+          type: [string, "null"]
+          format: date-time
+          description: Waktu check-out aktual di gerbang (tabel check_out.checked_out_at); null bila belum check-out
+        checked_in_by:
+          type: [string, "null"]
+          format: uuid
+          description: ID petugas (security/admin) pelaksana check-in (tabel check_in.checked_in_by); null bila belum check-in
 
     VisitDetailResponse:
       type: object

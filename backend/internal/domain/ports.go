@@ -52,6 +52,15 @@ type IStorageService interface {
 	Upload(ctx context.Context, in UploadRequest) (UploadResult, error)
 	// PresignedURL mints a time-boxed direct link to one stored object.
 	PresignedURL(ctx context.Context, objectKey string, expiry time.Duration) (string, error)
+	// ObjectKeyFromStoredURL reverses a stored absolute file URL back to its
+	// bucket object key. It accepts ONLY URLs under the adapter's own public
+	// base (bucket privat: FE tidak boleh memakai URL mentah dari DB, backend
+	// menukar tiap URL menjadi presigned saat serialisasi). A foreign, empty
+	// or traversal-carrying URL is refused with ErrValidation so callers blank
+	// it instead of leaking a third-party address. Parsing lives on the
+	// adapter (SRP): only the storage owner knows the base URL and the key
+	// layout; usecases never split URLs themselves.
+	ObjectKeyFromStoredURL(rawURL string) (string, error)
 }
 
 // UserRepository is the port the PostgreSQL adapter implements for accounts.
@@ -73,7 +82,7 @@ type UserRepository interface {
 
 // VisitFilter scopes a visit listing to the caller's branch and role, which
 // is how the backend enforces multi-branch isolation: admins and security
-// pass their own location_id, super_admin passes nil, and PIC passes its own
+// pass their own location_id, super_admin passes nil, and vendor passes its own
 // user id. Page starts at 1; Limit caps the page size.
 type VisitFilter struct {
 	LocationID *UUID
@@ -109,6 +118,12 @@ type VisitRepository interface {
 	// Reschedule writes the new window, flips the status to rescheduled and
 	// appends the history row atomically; reason is stored as the history note.
 	Reschedule(ctx context.Context, id UUID, start, end time.Time, changedBy UUID, reason string) error
+	// DeleteVisit removes one visit row in any status (DELETE /visits/:id,
+	// super_admin only). The child tables (visitor, visit_purpose,
+	// status_history, check_in, check_out) all carry ON DELETE CASCADE, so
+	// the single-row delete cleans the roster, purposes, history and gate
+	// records atomically. A missing id is ErrNotFound.
+	DeleteVisit(ctx context.Context, id UUID) error
 }
 
 // VisitAutoRuleRepository is the read side of the background worker: each method
@@ -134,6 +149,20 @@ type MasterDataRepository interface {
 	ListLocations(ctx context.Context, onlyActive bool) ([]Location, error)
 	FindLocationByID(ctx context.Context, id UUID) (Location, error)
 	ListPurposes(ctx context.Context, onlyActive bool) ([]Purpose, error)
+}
+
+// VendorRepository is the narrow port behind GET /vendors: the active company
+// catalogue the vendor/admin forms consume as the company dropdown. It is
+// deliberately separate from MasterDataRepository (which the older handler
+// fakes implement): the production masterRepository satisfies both, while the
+// handler resolves it with a type assertion so narrow fakes keep compiling
+// unchanged and fail closed with 500 instead of panicking.
+type VendorRepository interface {
+	ListVendors(ctx context.Context) ([]Vendor, error)
+	// FindVendorName resolves one company name for display (auth profile).
+	// A missing id is ErrNotFound; callers that tolerate absence (login/me)
+	// treat it as an unnamed vendor rather than failing the request.
+	FindVendorName(ctx context.Context, id UUID) (string, error)
 }
 
 // CheckInOutRepository is the port persisting gate records. The schema keeps

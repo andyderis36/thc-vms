@@ -149,11 +149,11 @@ func TestJWT_ValidTokenStoresIdentity(t *testing.T) {
 	}
 }
 
-func TestRBAC_PICCannotReachAdminRoutes(t *testing.T) {
+func TestRBAC_VendorCannotReachAdminRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/users/security",
-		withTestIdentity(deliveryhttp.Identity{UserID: "pic-1", Role: domain.RolePIC}),
+		withTestIdentity(deliveryhttp.Identity{UserID: "pic-1", Role: domain.RoleVendor}),
 		middleware.RequireRoles(domain.RoleSuperAdmin, domain.RoleAdmin),
 		okHandler,
 	)
@@ -162,7 +162,7 @@ func TestRBAC_PICCannotReachAdminRoutes(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("pic on admin route status = %d, want %d", rec.Code, http.StatusForbidden)
+		t.Fatalf("vendor on admin route status = %d, want %d", rec.Code, http.StatusForbidden)
 	}
 	assertForbiddenBranchMessage(t, rec.Body.String())
 }

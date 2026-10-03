@@ -72,7 +72,7 @@ interface RequireRoleProps {
 /**
  * Wajib login + wajib peran. Peran di luar `allow` diarahkan ke home route
  * perannya (`getLoginRedirect` — satu sumber kebenaran) dan render `null`.
- * Contoh: PIC yang membuka `/gate` dipulangkan ke `/dashboard`.
+ * Contoh: Vendor/Mitra yang membuka `/gate` dipulangkan ke `/dashboard`.
  */
 export function RequireRole({ allow, children }: RequireRoleProps): React.JSX.Element | null {
   const { user, status } = useSession();
@@ -110,7 +110,7 @@ export function RequireRole({ allow, children }: RequireRoleProps): React.JSX.El
 
 /**
  * Hook kenyamanan untuk menyembunyikan kontrol per-peran (mis. sembunyikan
- * Approve/Reject dari PIC). Kembalikan peran bila sesi terautentikasi dan
+ * Approve/Reject dari Vendor/Mitra). Kembalikan peran bila sesi terautentikasi dan
  * peran termasuk `allow`, selain itu `null`. Tidak menavigasi.
  */
 export function useRequireRole(allow: readonly Role[]): Role | null {

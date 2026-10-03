@@ -216,8 +216,8 @@ VALUES ($1, $2)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`
 
 	upsertUserSQL = `
-INSERT INTO users (name, email, password_hash, role_id, location_id, type, status, vendor_id, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+INSERT INTO users (name, email, password_hash, role_id, location_id, type, status, vendor_id, nik, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 ON CONFLICT (email) DO UPDATE SET
     name = EXCLUDED.name,
     password_hash = EXCLUDED.password_hash,
@@ -225,6 +225,7 @@ ON CONFLICT (email) DO UPDATE SET
     location_id = EXCLUDED.location_id,
     type = EXCLUDED.type,
     vendor_id = EXCLUDED.vendor_id,
+    nik = EXCLUDED.nik,
     updated_at = now()`
 )
 
@@ -299,8 +300,16 @@ func applyUsers(ctx context.Context, db Session, users []seeddata.SeedUser, role
 		}
 		// locationID and vendorID travel as *uuid.UUID so an unreferenced one
 		// reaches pgx as SQL NULL, which is exactly what
-		// enforce_user_location_invariant() demands of super_admin and pic.
-		if _, err := db.Exec(ctx, upsertUserSQL, u.Name, u.Email, hash, roleID, locationID, u.Type, u.Status, vendorID); err != nil {
+		// enforce_user_location_invariant() demands of super_admin and vendor.
+		// The NIK travels as *string for the same reason: an absent NIK
+		// (security, super_admin) reaches pgx as SQL NULL rather than an
+		// empty string chk_users_nik would reject.
+		var nik *string
+		if u.NIK != "" {
+			value := u.NIK
+			nik = &value
+		}
+		if _, err := db.Exec(ctx, upsertUserSQL, u.Name, u.Email, hash, roleID, locationID, u.Type, u.Status, vendorID, nik); err != nil {
 			return fmt.Errorf("user %s: %w", u.Email, err)
 		}
 	}

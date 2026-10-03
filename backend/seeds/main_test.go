@@ -121,7 +121,7 @@ func TestDryRunMakesNoDatabaseCalls(t *testing.T) {
 	if err := s.run(context.Background()); err != nil {
 		t.Fatalf("--dry-run returned %v, want nil (exit 0)", err)
 	}
-	want := map[string]int{"roles": 4, "locations": 5, "purposes": 6, "vendors": 2, "users": 7, "visits": 0}
+	want := map[string]int{"roles": 4, "locations": 5, "purposes": 6, "vendors": 2, "users": 26, "visits": 0}
 	got := planCounts(t, out.String())
 	for entity, n := range want {
 		if got[entity] != n {

@@ -26,11 +26,11 @@ func (s *Service) Reschedule(ctx context.Context, actor Actor, visitID domain.UU
 	if err != nil {
 		return err
 	}
-	if err := actor.requireRole(domain.RolePIC, domain.RoleAdmin, domain.RoleSuperAdmin); err != nil {
+	if err := actor.requireRole(domain.RoleVendor, domain.RoleAdmin, domain.RoleSuperAdmin); err != nil {
 		return err
 	}
 	switch actor.Role {
-	case domain.RolePIC:
+	case domain.RoleVendor:
 		if visit.PICUserID != actor.ID {
 			return domain.NotFoundEntity("Kunjungan")
 		}

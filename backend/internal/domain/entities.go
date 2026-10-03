@@ -45,7 +45,7 @@ func ParseUUID(raw string) (UUID, error) {
 }
 
 // RoleName is the RBAC role. super_admin carries a NULL location_id and sees
-// every branch; admin and security are locked to one location_id; pic is an
+// every branch; admin and security are locked to one location_id; vendor is an
 // external account that owns only its own visits.
 type RoleName string
 
@@ -53,7 +53,7 @@ const (
 	RoleSuperAdmin RoleName = "super_admin"
 	RoleAdmin      RoleName = "admin"
 	RoleSecurity   RoleName = "security"
-	RolePIC        RoleName = "pic"
+	RoleVendor     RoleName = "vendor"
 )
 
 // Role mirrors the ROLE table.
@@ -81,26 +81,37 @@ const (
 	UserStatusBlacklisted UserStatus = "blacklisted"
 )
 
-// User mirrors the USER table. LocationID is nil for super_admin and pic,
+// User mirrors the USER table. LocationID is nil for super_admin and vendor,
 // and mandatory for admin and security; VendorID is set for external vendor
-// staff only.
+// staff only. NIK is the national identity number: "" means SQL NULL
+// (mirroring Phone), populated only for admin and vendor accounts.
+// VendorNameOverride is the manually typed vendor company (migration 000005):
+// it is a *string rather than the ""-means-NULL convention of Phone/NIK so
+// the stored NULL maps one-to-one onto nil without a sentinel, and so the
+// PATCH tri-state (nil keep, "" clear, text set) travels through
+// ManagedUserPatch without a second flag. A sent VendorID always wins: the
+// write paths discard the manual text instead of storing both, hence an
+// override present implies no catalogue link and the read helper
+// (resolveVendorDisplayName) can prefer override-otherwise-catalogue.
 type User struct {
-	ID           UUID
-	Name         string
-	Email        string
-	PasswordHash string
-	Phone        string
-	RoleID       UUID
-	LocationID   *UUID
-	Type         UserType
-	Status       UserStatus
-	VendorID     *UUID
-	LastLogin    *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                 UUID
+	Name               string
+	Email              string
+	PasswordHash       string
+	Phone              string
+	NIK                string
+	RoleID             UUID
+	LocationID         *UUID
+	Type               UserType
+	Status             UserStatus
+	VendorID           *UUID
+	VendorNameOverride *string
+	LastLogin          *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
-// Vendor mirrors the VENDOR table: the partner company employing PIC users
+// Vendor mirrors the VENDOR table: the partner company employing vendor users
 // and owning visit requests.
 type Vendor struct {
 	ID            UUID

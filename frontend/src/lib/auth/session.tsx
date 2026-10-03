@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { getMe, login, logout } from '@/lib/api/client';
 import { ApiError } from '@/lib/api/fetcher';
 import { clearToken, getToken } from '@/lib/auth/storage';
@@ -99,6 +100,10 @@ function toDisplayMessage(err: unknown): string {
 export function SessionProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [user, setUser] = useState<User | null>(null);
   const [status, setStatus] = useState<SessionStatus>('loading');
+  // Cache React Query milik root Providers (di atas provider ini): WAJIB
+  // dibersihkan tiap ganti akun, kalau tidak daftar kunjungan akun lama
+  // menyala sesaat di dashboard akun baru sampai refetch selesai.
+  const queryClient = useQueryClient();
 
   const refresh = useCallback(async (): Promise<void> => {
     const token = getToken();
@@ -116,12 +121,14 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
       // Token sempat ada tapi getMe gagal (basi/401/jaringan): tandai sesi
       // berakhir SEBELUM clearToken agar guard bisa redirect `?expired=1`.
       // Navigasi + toast tetap tugas guard + layar login, bukan provider ini.
+      // Cache ikut dibuang: akun berikutnya wajib mulai dari data kosong.
       markSessionExpired();
+      queryClient.clear();
       clearToken();
       setUser(null);
       setStatus('unauthenticated');
     }
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,6 +166,9 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
   const signIn = useCallback(async (email: string, password: string): Promise<User> => {
     try {
       const result = await login({ email, password });
+      // Buang sisa cache akun sebelumnya SEBELUM sesi baru dipasang, supaya
+      // layar pertama akun baru tidak pernah melukis data akun lama.
+      queryClient.clear();
       setUser(result.user);
       setStatus('authenticated');
       return result.user;
@@ -166,7 +176,7 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
       // Jangan lempar ApiError mentah ke UI; bungkus jadi Error biasa.
       throw new Error(toDisplayMessage(err));
     }
-  }, []);
+  }, [queryClient]);
 
   const signOut = useCallback(async (): Promise<void> => {
     try {
@@ -174,12 +184,16 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
     } finally {
       // `logout()` sudah menghapus token via fetcher; panggil lagi via
       // storage agar satu kunci kebenaran tetap ditegakkan di lapisan auth.
+      // Batalkan fetch yang masih jalan lalu buang cache: tanpa ini, login
+      // berikutnya membaca daftar basi akun lama sampai refetch selesai.
       // `finally` menjamin sesi lokal berakhir walau jaringan gagal.
+      await queryClient.cancelQueries();
+      queryClient.clear();
       clearToken();
       setUser(null);
       setStatus('unauthenticated');
     }
-  }, []);
+  }, [queryClient]);
 
   const value = useMemo<SessionValue>(
     () => ({ user, status, signIn, signOut, refresh }),

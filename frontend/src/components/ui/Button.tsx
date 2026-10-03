@@ -65,7 +65,16 @@ export function Button({
           <Spinner size="sm" />
         </span>
       )}
-      <span className={loading ? 'invisible' : undefined}>{children}</span>
+      {/* Ikon + label selalu sebaris & terpusat vertikal (§4.1):
+          tanpa `inline-flex` anak span ini jatuh ke alur inline biasa
+          sehingga ikon block-level lucide tidak sejajar baseline teks. */}
+      <span
+        className={
+          loading ? 'invisible inline-flex items-center gap-2' : 'inline-flex items-center gap-2'
+        }
+      >
+        {children}
+      </span>
     </button>
   )
 }

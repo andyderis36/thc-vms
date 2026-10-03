@@ -12,6 +12,11 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: true,
+  // Demo via Cloudflare quick tunnel: izinkan origin *.trycloudflare.com
+  // mengakses endpoint dev (HMR/RSC). Tanpa ini dev server memblokir
+  // request cross-origin ("Blocked cross-origin request") dan halaman
+  // via tunnel gagal hidrasi (putih polos). Dev-only, tidak ke build.
+  allowedDevOrigins: ['*.trycloudflare.com'],
 }
 
 export default nextConfig

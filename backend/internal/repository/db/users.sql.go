@@ -13,6 +13,146 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countStaffReferences = `-- name: CountStaffReferences :one
+SELECT
+    (SELECT count(*) FROM check_in WHERE checked_in_by = $1) +
+    (SELECT count(*) FROM check_out WHERE checked_out_by = $1) +
+    (SELECT count(*) FROM status_history WHERE changed_by = $1)
+`
+
+type CountStaffReferencesParams struct {
+	CheckedInBy uuid.UUID `json:"checked_in_by"`
+}
+
+// DELETE /users/:id pre-check 2: gate and audit rows written BY the account
+// as staff (check_in.checked_in_by, check_out.checked_out_by,
+// status_history.changed_by, all without cascade). A non-zero total blocks
+// the delete with 409.
+func (q *Queries) CountStaffReferences(ctx context.Context, arg CountStaffReferencesParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countStaffReferences, arg.CheckedInBy)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countVisitsByPIC = `-- name: CountVisitsByPIC :one
+
+SELECT count(*)
+FROM visit_request
+WHERE pic_user_id = $1
+`
+
+type CountVisitsByPICParams struct {
+	PicUserID uuid.UUID `json:"pic_user_id"`
+}
+
+// =============================================================================
+// SUPER_ADMIN HARD DELETE (DELETE /users/:id, super_admin only). The Go layer
+// runs the Count* pre-checks below FIRST and refuses with 409 while a visit,
+// gate record or history row still references the account; the DELETE itself
+// is the second line of defence (a raced reference surfaces as 23503 -> 409
+// via MapError). There is no status transition here: the row is removed.
+// =============================================================================
+// DELETE /users/:id pre-check 1: visits owned by the account as PIC
+// (visit_request.pic_user_id, no cascade, so a remaining row blocks the delete).
+func (q *Queries) CountVisitsByPIC(ctx context.Context, arg CountVisitsByPICParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countVisitsByPIC, arg.PicUserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteUser = `-- name: DeleteUser :one
+DELETE FROM users
+WHERE id = $1
+RETURNING id
+`
+
+type DeleteUserParams struct {
+	ID uuid.UUID `json:"id"`
+}
+
+// DELETE /users/:id (super_admin only). A missing id surfaces pgx.ErrNoRows
+// (-> 404 via MapError); a raced reference surfaces 23503 (-> 409).
+func (q *Queries) DeleteUser(ctx context.Context, arg DeleteUserParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteUser, arg.ID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getManagedUserByID = `-- name: GetManagedUserByID :one
+SELECT
+    u.id,
+    u.name,
+    u.email,
+    u.phone,
+    u.nik,
+    u.role_id,
+    r.name AS role,
+    u.location_id,
+    l.name AS location_name,
+    u.status,
+    u.type,
+    v.name AS vendor_name,
+    u.vendor_id,
+    u.vendor_name_override,
+    u.created_at
+FROM users u
+JOIN role r ON r.id = u.role_id
+LEFT JOIN location l ON l.id = u.location_id
+LEFT JOIN vendor v ON v.id = u.vendor_id
+WHERE u.id = $1
+`
+
+type GetManagedUserByIDParams struct {
+	ID uuid.UUID `json:"id"`
+}
+
+type GetManagedUserByIDRow struct {
+	ID                 uuid.UUID   `json:"id"`
+	Name               string      `json:"name"`
+	Email              string      `json:"email"`
+	Phone              pgtype.Text `json:"phone"`
+	Nik                pgtype.Text `json:"nik"`
+	RoleID             uuid.UUID   `json:"role_id"`
+	Role               string      `json:"role"`
+	LocationID         pgtype.UUID `json:"location_id"`
+	LocationName       pgtype.Text `json:"location_name"`
+	Status             string      `json:"status"`
+	Type               string      `json:"type"`
+	VendorName         pgtype.Text `json:"vendor_name"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	CreatedAt          time.Time   `json:"created_at"`
+}
+
+// Detail read for PATCH /users/{id}/status (super_admin only). Same
+// projection as GetUserByID plus the resolved role NAME, which the status
+// guard needs to refuse touches on other super_admin accounts.
+func (q *Queries) GetManagedUserByID(ctx context.Context, arg GetManagedUserByIDParams) (GetManagedUserByIDRow, error) {
+	row := q.db.QueryRow(ctx, getManagedUserByID, arg.ID)
+	var i GetManagedUserByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.Phone,
+		&i.Nik,
+		&i.RoleID,
+		&i.Role,
+		&i.LocationID,
+		&i.LocationName,
+		&i.Status,
+		&i.Type,
+		&i.VendorName,
+		&i.VendorID,
+		&i.VendorNameOverride,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getUserByEmailForLogin = `-- name: GetUserByEmailForLogin :one
 
 SELECT
@@ -21,6 +161,7 @@ SELECT
     u.email,
     u.password_hash,
     u.phone,
+    u.nik,
     u.role_id,
     r.name AS role,
     u.location_id,
@@ -28,7 +169,8 @@ SELECT
     u.status,
     u.type,
     v.name AS vendor_name,
-    u.vendor_id
+    u.vendor_id,
+    u.vendor_name_override
 FROM users u
 JOIN role r ON r.id = u.role_id
 LEFT JOIN location l ON l.id = u.location_id
@@ -41,19 +183,21 @@ type GetUserByEmailForLoginParams struct {
 }
 
 type GetUserByEmailForLoginRow struct {
-	ID           uuid.UUID   `json:"id"`
-	Name         string      `json:"name"`
-	Email        string      `json:"email"`
-	PasswordHash string      `json:"password_hash"`
-	Phone        pgtype.Text `json:"phone"`
-	RoleID       uuid.UUID   `json:"role_id"`
-	Role         string      `json:"role"`
-	LocationID   pgtype.UUID `json:"location_id"`
-	LocationName pgtype.Text `json:"location_name"`
-	Status       string      `json:"status"`
-	Type         string      `json:"type"`
-	VendorName   pgtype.Text `json:"vendor_name"`
-	VendorID     pgtype.UUID `json:"vendor_id"`
+	ID                 uuid.UUID   `json:"id"`
+	Name               string      `json:"name"`
+	Email              string      `json:"email"`
+	PasswordHash       string      `json:"password_hash"`
+	Phone              pgtype.Text `json:"phone"`
+	Nik                pgtype.Text `json:"nik"`
+	RoleID             uuid.UUID   `json:"role_id"`
+	Role               string      `json:"role"`
+	LocationID         pgtype.UUID `json:"location_id"`
+	LocationName       pgtype.Text `json:"location_name"`
+	Status             string      `json:"status"`
+	Type               string      `json:"type"`
+	VendorName         pgtype.Text `json:"vendor_name"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
 }
 
 // =============================================================================
@@ -70,7 +214,7 @@ type GetUserByEmailForLoginRow struct {
 // Login lookup (POST /auth/login). Returns the projection the openapi `User`
 // schema needs (openapi L629-660) plus password_hash, which never leaves the
 // auth usecase. The CASE normalises a missing join to a Go nil rather than an
-// empty string so `"location_id": null` is emitted for super_admin/pic.
+// empty string so `"location_id": null` is emitted for super_admin/vendor.
 func (q *Queries) GetUserByEmailForLogin(ctx context.Context, arg GetUserByEmailForLoginParams) (GetUserByEmailForLoginRow, error) {
 	row := q.db.QueryRow(ctx, getUserByEmailForLogin, arg.Email)
 	var i GetUserByEmailForLoginRow
@@ -80,6 +224,7 @@ func (q *Queries) GetUserByEmailForLogin(ctx context.Context, arg GetUserByEmail
 		&i.Email,
 		&i.PasswordHash,
 		&i.Phone,
+		&i.Nik,
 		&i.RoleID,
 		&i.Role,
 		&i.LocationID,
@@ -88,6 +233,7 @@ func (q *Queries) GetUserByEmailForLogin(ctx context.Context, arg GetUserByEmail
 		&i.Type,
 		&i.VendorName,
 		&i.VendorID,
+		&i.VendorNameOverride,
 	)
 	return i, err
 }
@@ -98,6 +244,7 @@ SELECT
     u.name,
     u.email,
     u.phone,
+    u.nik,
     u.role_id,
     r.name AS role,
     u.location_id,
@@ -106,6 +253,7 @@ SELECT
     u.type,
     v.name AS vendor_name,
     u.vendor_id,
+    u.vendor_name_override,
     u.created_at
 FROM users u
 JOIN role r ON r.id = u.role_id
@@ -119,19 +267,21 @@ type GetUserByIDParams struct {
 }
 
 type GetUserByIDRow struct {
-	ID           uuid.UUID   `json:"id"`
-	Name         string      `json:"name"`
-	Email        string      `json:"email"`
-	Phone        pgtype.Text `json:"phone"`
-	RoleID       uuid.UUID   `json:"role_id"`
-	Role         string      `json:"role"`
-	LocationID   pgtype.UUID `json:"location_id"`
-	LocationName pgtype.Text `json:"location_name"`
-	Status       string      `json:"status"`
-	Type         string      `json:"type"`
-	VendorName   pgtype.Text `json:"vendor_name"`
-	VendorID     pgtype.UUID `json:"vendor_id"`
-	CreatedAt    time.Time   `json:"created_at"`
+	ID                 uuid.UUID   `json:"id"`
+	Name               string      `json:"name"`
+	Email              string      `json:"email"`
+	Phone              pgtype.Text `json:"phone"`
+	Nik                pgtype.Text `json:"nik"`
+	RoleID             uuid.UUID   `json:"role_id"`
+	Role               string      `json:"role"`
+	LocationID         pgtype.UUID `json:"location_id"`
+	LocationName       pgtype.Text `json:"location_name"`
+	Status             string      `json:"status"`
+	Type               string      `json:"type"`
+	VendorName         pgtype.Text `json:"vendor_name"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	CreatedAt          time.Time   `json:"created_at"`
 }
 
 // Profile read for GET /auth/me and for every owner-scoped response.
@@ -143,6 +293,7 @@ func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (GetUs
 		&i.Name,
 		&i.Email,
 		&i.Phone,
+		&i.Nik,
 		&i.RoleID,
 		&i.Role,
 		&i.LocationID,
@@ -151,7 +302,83 @@ func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (GetUs
 		&i.Type,
 		&i.VendorName,
 		&i.VendorID,
+		&i.VendorNameOverride,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const insertManagedUser = `-- name: InsertManagedUser :one
+INSERT INTO users (name, email, password_hash, phone, nik, role_id, location_id, type, status, vendor_id, vendor_name_override)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, name, email, phone, nik, role_id, location_id, type, status, vendor_id, vendor_name_override, created_at, updated_at
+`
+
+type InsertManagedUserParams struct {
+	Name               string      `json:"name"`
+	Email              string      `json:"email"`
+	PasswordHash       string      `json:"password_hash"`
+	Phone              pgtype.Text `json:"phone"`
+	Nik                pgtype.Text `json:"nik"`
+	RoleID             uuid.UUID   `json:"role_id"`
+	LocationID         pgtype.UUID `json:"location_id"`
+	Type               string      `json:"type"`
+	Status             string      `json:"status"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+}
+
+type InsertManagedUserRow struct {
+	ID                 uuid.UUID   `json:"id"`
+	Name               string      `json:"name"`
+	Email              string      `json:"email"`
+	Phone              pgtype.Text `json:"phone"`
+	Nik                pgtype.Text `json:"nik"`
+	RoleID             uuid.UUID   `json:"role_id"`
+	LocationID         pgtype.UUID `json:"location_id"`
+	Type               string      `json:"type"`
+	Status             string      `json:"status"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	CreatedAt          time.Time   `json:"created_at"`
+	UpdatedAt          time.Time   `json:"updated_at"`
+}
+
+// POST /users (super_admin only). Unlike InsertSecurityUser this insert takes
+// type, status and vendor_id as parameters: admin rows are type 'internal'
+// with a branch location, vendor rows are type 'external' with no location and
+// an optional vendor. The enforce_user_location_invariant trigger rejects any
+// pairing the Go validation missed (check_violation -> 400 via MapError) and
+// users_email_key rejects a duplicate email (23505 -> 409 via MapError).
+func (q *Queries) InsertManagedUser(ctx context.Context, arg InsertManagedUserParams) (InsertManagedUserRow, error) {
+	row := q.db.QueryRow(ctx, insertManagedUser,
+		arg.Name,
+		arg.Email,
+		arg.PasswordHash,
+		arg.Phone,
+		arg.Nik,
+		arg.RoleID,
+		arg.LocationID,
+		arg.Type,
+		arg.Status,
+		arg.VendorID,
+		arg.VendorNameOverride,
+	)
+	var i InsertManagedUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.Phone,
+		&i.Nik,
+		&i.RoleID,
+		&i.LocationID,
+		&i.Type,
+		&i.Status,
+		&i.VendorID,
+		&i.VendorNameOverride,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -159,7 +386,7 @@ func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (GetUs
 const insertSecurityUser = `-- name: InsertSecurityUser :one
 INSERT INTO users (name, email, password_hash, phone, role_id, location_id, type, status)
 VALUES ($1, $2, $3, $4, $5, $6, 'internal', 'active')
-RETURNING id, name, email, phone, role_id, location_id, type, status, created_at, updated_at
+RETURNING id, name, email, phone, nik, role_id, location_id, type, status, created_at, updated_at
 `
 
 type InsertSecurityUserParams struct {
@@ -176,6 +403,7 @@ type InsertSecurityUserRow struct {
 	Name       string      `json:"name"`
 	Email      string      `json:"email"`
 	Phone      pgtype.Text `json:"phone"`
+	Nik        pgtype.Text `json:"nik"`
 	RoleID     uuid.UUID   `json:"role_id"`
 	LocationID pgtype.UUID `json:"location_id"`
 	Type       string      `json:"type"`
@@ -203,6 +431,7 @@ func (q *Queries) InsertSecurityUser(ctx context.Context, arg InsertSecurityUser
 		&i.Name,
 		&i.Email,
 		&i.Phone,
+		&i.Nik,
 		&i.RoleID,
 		&i.LocationID,
 		&i.Type,
@@ -213,12 +442,110 @@ func (q *Queries) InsertSecurityUser(ctx context.Context, arg InsertSecurityUser
 	return i, err
 }
 
+const listManagedUsers = `-- name: ListManagedUsers :many
+
+SELECT
+    u.id,
+    u.name,
+    u.email,
+    u.phone,
+    u.nik,
+    r.name AS role,
+    u.location_id,
+    l.name AS location_name,
+    u.status,
+    u.type,
+    v.name AS vendor_name,
+    u.vendor_id,
+    u.vendor_name_override,
+    u.created_at
+FROM users u
+JOIN role r ON r.id = u.role_id
+LEFT JOIN location l ON l.id = u.location_id
+LEFT JOIN vendor v ON v.id = u.vendor_id
+WHERE ($1::text IS NULL OR r.name = $1::text)
+  AND ($2::text IS NULL
+       OR u.name ILIKE '%' || $2::text || '%'
+       OR u.email ILIKE '%' || $2::text || '%')
+  AND ($3::uuid IS NULL OR u.location_id = $3::uuid)
+ORDER BY u.created_at DESC, u.id DESC
+`
+
+type ListManagedUsersParams struct {
+	Role       pgtype.Text `json:"role"`
+	Search     pgtype.Text `json:"search"`
+	LocationID pgtype.UUID `json:"location_id"`
+}
+
+type ListManagedUsersRow struct {
+	ID                 uuid.UUID   `json:"id"`
+	Name               string      `json:"name"`
+	Email              string      `json:"email"`
+	Phone              pgtype.Text `json:"phone"`
+	Nik                pgtype.Text `json:"nik"`
+	Role               string      `json:"role"`
+	LocationID         pgtype.UUID `json:"location_id"`
+	LocationName       pgtype.Text `json:"location_name"`
+	Status             string      `json:"status"`
+	Type               string      `json:"type"`
+	VendorName         pgtype.Text `json:"vendor_name"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	CreatedAt          time.Time   `json:"created_at"`
+}
+
+// =============================================================================
+// SUPER_ADMIN MANAGED ACCOUNTS (PRD §4: kelola admin/vendor + security semua
+// cabang). Same bound-parameter scoping invariant as above: role, search and
+// location_id are NULLable bound values, never interpolated SQL text.
+// =============================================================================
+// GET /users (super_admin only). role narrows to one of admin|vendor|security
+// (validated in Go before this runs); search matches nama atau email
+// case-insensitively; location_id narrows to one branch. All three filters
+// are optional, so an empty filter lists every account with no pagination,
+// consistent with ListSecurityUsers. ORDER BY keeps the listing stable.
+func (q *Queries) ListManagedUsers(ctx context.Context, arg ListManagedUsersParams) ([]ListManagedUsersRow, error) {
+	rows, err := q.db.Query(ctx, listManagedUsers, arg.Role, arg.Search, arg.LocationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListManagedUsersRow{}
+	for rows.Next() {
+		var i ListManagedUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Email,
+			&i.Phone,
+			&i.Nik,
+			&i.Role,
+			&i.LocationID,
+			&i.LocationName,
+			&i.Status,
+			&i.Type,
+			&i.VendorName,
+			&i.VendorID,
+			&i.VendorNameOverride,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSecurityUsers = `-- name: ListSecurityUsers :many
 SELECT
     u.id,
     u.name,
     u.email,
     u.phone,
+    u.nik,
     r.name AS role,
     u.location_id,
     l.name AS location_name,
@@ -245,6 +572,7 @@ type ListSecurityUsersRow struct {
 	Name         string      `json:"name"`
 	Email        string      `json:"email"`
 	Phone        pgtype.Text `json:"phone"`
+	Nik          pgtype.Text `json:"nik"`
 	Role         string      `json:"role"`
 	LocationID   pgtype.UUID `json:"location_id"`
 	LocationName pgtype.Text `json:"location_name"`
@@ -273,6 +601,7 @@ func (q *Queries) ListSecurityUsers(ctx context.Context, arg ListSecurityUsersPa
 			&i.Name,
 			&i.Email,
 			&i.Phone,
+			&i.Nik,
 			&i.Role,
 			&i.LocationID,
 			&i.LocationName,
@@ -290,6 +619,102 @@ func (q *Queries) ListSecurityUsers(ctx context.Context, arg ListSecurityUsersPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateManagedUser = `-- name: UpdateManagedUser :one
+
+UPDATE users
+SET name          = COALESCE($1, name),
+    email         = COALESCE($2, email),
+    phone         = COALESCE($3, phone),
+    nik           = COALESCE($4, nik),
+    location_id   = COALESCE($5::uuid, location_id),
+    vendor_id     = COALESCE($6::uuid, vendor_id),
+    -- Manual-company tri-state (migration 000005): has_vendor_name_override
+    -- is always sent (never NULL). false keeps the stored override (COALESCE
+    -- path unreachable); true writes the nullable vendor_name_override value,
+    -- so NULL clears it to SQL NULL and a text sets it. COALESCE cannot
+    -- express clear-vs-keep on one nullable param, hence the explicit flag.
+    vendor_name_override = CASE
+        WHEN $7::boolean
+        THEN $8
+        ELSE vendor_name_override
+    END,
+    password_hash = COALESCE($9, password_hash),
+    updated_at    = now()
+WHERE id = $10
+RETURNING id, name, email, phone, nik, role_id, location_id, type, status, vendor_id, vendor_name_override, created_at, updated_at
+`
+
+type UpdateManagedUserParams struct {
+	Name                  pgtype.Text `json:"name"`
+	Email                 pgtype.Text `json:"email"`
+	Phone                 pgtype.Text `json:"phone"`
+	Nik                   pgtype.Text `json:"nik"`
+	LocationID            pgtype.UUID `json:"location_id"`
+	VendorID              pgtype.UUID `json:"vendor_id"`
+	HasVendorNameOverride bool        `json:"has_vendor_name_override"`
+	VendorNameOverride    pgtype.Text `json:"vendor_name_override"`
+	PasswordHash          pgtype.Text `json:"password_hash"`
+	ID                    uuid.UUID   `json:"id"`
+}
+
+type UpdateManagedUserRow struct {
+	ID                 uuid.UUID   `json:"id"`
+	Name               string      `json:"name"`
+	Email              string      `json:"email"`
+	Phone              pgtype.Text `json:"phone"`
+	Nik                pgtype.Text `json:"nik"`
+	RoleID             uuid.UUID   `json:"role_id"`
+	LocationID         pgtype.UUID `json:"location_id"`
+	Type               string      `json:"type"`
+	Status             string      `json:"status"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	CreatedAt          time.Time   `json:"created_at"`
+	UpdatedAt          time.Time   `json:"updated_at"`
+}
+
+// =============================================================================
+// SUPER_ADMIN ACCOUNT EDIT (PATCH /users/:id, super_admin only). Partial
+// update via COALESCE like UpdateLocation in master.sql: a NULL member keeps
+// the stored column, so the body may carry any subset of name, email, phone,
+// location_id, vendor_id and password (a non-empty password resets the
+// bcrypt hash; guarded by the superadmin self/other-superadmin rules).
+// Role, type and status are NEVER writable here (role is immutable, status
+// via .../status); the location invariant trigger still guards every pairing
+// (check_violation -> 400) and users_email_key guards email (23505 -> 409).
+// =============================================================================
+func (q *Queries) UpdateManagedUser(ctx context.Context, arg UpdateManagedUserParams) (UpdateManagedUserRow, error) {
+	row := q.db.QueryRow(ctx, updateManagedUser,
+		arg.Name,
+		arg.Email,
+		arg.Phone,
+		arg.Nik,
+		arg.LocationID,
+		arg.VendorID,
+		arg.HasVendorNameOverride,
+		arg.VendorNameOverride,
+		arg.PasswordHash,
+		arg.ID,
+	)
+	var i UpdateManagedUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.Phone,
+		&i.Nik,
+		&i.RoleID,
+		&i.LocationID,
+		&i.Type,
+		&i.Status,
+		&i.VendorID,
+		&i.VendorNameOverride,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec
@@ -315,7 +740,7 @@ UPDATE users
 SET status     = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, phone, role_id, location_id, type, status, created_at, updated_at
+RETURNING id, name, email, phone, nik, role_id, location_id, type, status, created_at, updated_at
 `
 
 type UpdateUserStatusParams struct {
@@ -328,6 +753,7 @@ type UpdateUserStatusRow struct {
 	Name       string      `json:"name"`
 	Email      string      `json:"email"`
 	Phone      pgtype.Text `json:"phone"`
+	Nik        pgtype.Text `json:"nik"`
 	RoleID     uuid.UUID   `json:"role_id"`
 	LocationID pgtype.UUID `json:"location_id"`
 	Type       string      `json:"type"`
@@ -347,6 +773,7 @@ func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusPara
 		&i.Name,
 		&i.Email,
 		&i.Phone,
+		&i.Nik,
 		&i.RoleID,
 		&i.LocationID,
 		&i.Type,

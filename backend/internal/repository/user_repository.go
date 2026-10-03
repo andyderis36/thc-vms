@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -21,8 +22,20 @@ type userRepository struct {
 // Compile-time proof that the adapter satisfies its port.
 var _ domain.UserRepository = (*userRepository)(nil)
 
+// Compile-time proof that the same adapter satisfies the super_admin managed
+// account port (the status flip is the shared UpdateStatus method).
+var _ domain.ManagedUserRepository = (*userRepository)(nil)
+
 // NewUserRepository builds the PostgreSQL-backed domain.UserRepository.
 func NewUserRepository(pool *pgxpool.Pool) domain.UserRepository {
+	return &userRepository{pool: pool}
+}
+
+// NewManagedUserRepository exposes the same PostgreSQL adapter through the
+// super_admin managed-account port. It is a separate constructor (rather
+// than a widened NewUserRepository return) so the security-account callers
+// keep their narrow type and no existing signature changes.
+func NewManagedUserRepository(pool *pgxpool.Pool) domain.ManagedUserRepository {
 	return &userRepository{pool: pool}
 }
 
@@ -143,6 +156,216 @@ func (r *userRepository) ListSecurity(ctx context.Context, locationID *domain.UU
 	return out, nil
 }
 
+// ListManagedUsers serves GET /users: every account matching the optional
+// role, search and branch filters, with no pagination (consistent with
+// ListSecurity). A blank search is sent as SQL NULL so the predicate is a
+// no-op; every filter value travels as a bound parameter, never as
+// interpolated SQL text.
+func (r *userRepository) ListManagedUsers(ctx context.Context, filter domain.UserFilter) ([]domain.ManagedUser, error) {
+	var role pgtype.Text
+	if filter.Role != nil {
+		role = pgtype.Text{String: string(*filter.Role), Valid: true}
+	}
+	var search pgtype.Text
+	if trimmed := strings.TrimSpace(filter.Search); trimmed != "" {
+		search = pgtype.Text{String: trimmed, Valid: true}
+	}
+	scope, err := pgNullUUIDPtr(filter.LocationID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.queries().ListManagedUsers(ctx, db.ListManagedUsersParams{
+		Role:       role,
+		Search:     search,
+		LocationID: scope,
+	})
+	if err != nil {
+		return nil, MapError(err)
+	}
+	out := make([]domain.ManagedUser, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, managedListRowToUser(row))
+	}
+	return out, nil
+}
+
+// CreateManagedUser persists one admin or vendor account for POST /users. The
+// caller sets RoleID, Type, Status, LocationID and VendorID after the
+// usecase validation; the enforce_user_location_invariant trigger rejects
+// any pairing the validation missed (check_violation -> ErrValidation via
+// MapError) and users_email_key rejects a duplicate email (23505 ->
+// ErrConflict via MapError, the same mapping POST /users/security relies
+// on, rendered as 409 by the handler).
+func (r *userRepository) CreateManagedUser(ctx context.Context, user domain.User) (domain.User, error) {
+	roleID, err := fromDomainUUID(user.RoleID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	locationID, err := pgNullUUIDPtr(user.LocationID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	vendorID, err := pgNullUUIDPtr(user.VendorID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	row, err := r.queries().InsertManagedUser(ctx, db.InsertManagedUserParams{
+		Name:               user.Name,
+		Email:              user.Email,
+		PasswordHash:       user.PasswordHash,
+		Phone:              pgText(phonePtr(user.Phone)),
+		Nik:                pgText(nikPtr(user.NIK)),
+		RoleID:             roleID,
+		LocationID:         locationID,
+		Type:               string(user.Type),
+		Status:             string(user.Status),
+		VendorID:           vendorID,
+		VendorNameOverride: pgText(user.VendorNameOverride),
+	})
+	if err != nil {
+		return domain.User{}, MapError(err)
+	}
+	return domain.User{
+		ID:                 mustDomainUUID(row.ID),
+		Name:               row.Name,
+		Email:              row.Email,
+		PasswordHash:       user.PasswordHash,
+		Phone:              textValue(row.Phone),
+		NIK:                textValue(row.Nik),
+		RoleID:             mustDomainUUID(row.RoleID),
+		LocationID:         domainUUIDPtr(row.LocationID),
+		Type:               domain.UserType(row.Type),
+		Status:             domain.UserStatus(row.Status),
+		VendorID:           domainUUIDPtr(row.VendorID),
+		VendorNameOverride: textPtr(row.VendorNameOverride),
+		CreatedAt:          row.CreatedAt,
+		UpdatedAt:          row.UpdatedAt,
+	}, nil
+}
+
+// UpdateManagedUser applies a partial super_admin edit for PATCH /users/:id.
+// Nil patch members keep the stored columns via COALESCE (patchMemberText /
+// pgNullUUIDPtr render nil as SQL NULL); a duplicate email surfaces
+// ErrConflict and a missing id ErrNotFound through MapError, the same
+// mappings POST /users relies on.
+func (r *userRepository) UpdateManagedUser(ctx context.Context, id domain.UUID, patch domain.ManagedUserPatch) (domain.User, error) {
+	parsed, err := fromDomainUUID(id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	locationID, err := pgNullUUIDPtr(patch.LocationID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	vendorID, err := pgNullUUIDPtr(patch.VendorID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	// Manual-company tri-state (migration 000005): nil keeps the stored
+	// override (flag false), a blank value clears it to SQL NULL (flag true +
+	// NULL value), a filled value sets it (flag true + text). A blank never
+	// reaches patchMemberText, whose NULL-means-keep would make clearing
+	// impossible through COALESCE.
+	var (
+		hasVendorOverride bool
+		vendorOverride    pgtype.Text
+	)
+	if patch.VendorName != nil {
+		hasVendorOverride = true
+		if trimmed := strings.TrimSpace(*patch.VendorName); trimmed != "" {
+			vendorOverride = pgtype.Text{String: trimmed, Valid: true}
+		}
+	}
+	row, err := r.queries().UpdateManagedUser(ctx, db.UpdateManagedUserParams{
+		Name:                  patchMemberText(patch.Name),
+		Email:                 patchMemberText(patch.Email),
+		Phone:                 patchMemberText(patch.Phone),
+		Nik:                   patchMemberText(patch.NIK),
+		LocationID:            locationID,
+		VendorID:              vendorID,
+		HasVendorNameOverride: hasVendorOverride,
+		VendorNameOverride:    vendorOverride,
+		PasswordHash:          patchMemberText(patch.PasswordHash),
+		ID:                    parsed,
+	})
+	if err != nil {
+		return domain.User{}, MapError(err)
+	}
+	return domain.User{
+		ID:                 mustDomainUUID(row.ID),
+		Name:               row.Name,
+		Email:              row.Email,
+		Phone:              textValue(row.Phone),
+		NIK:                textValue(row.Nik),
+		RoleID:             mustDomainUUID(row.RoleID),
+		LocationID:         domainUUIDPtr(row.LocationID),
+		Type:               domain.UserType(row.Type),
+		Status:             domain.UserStatus(row.Status),
+		VendorID:           domainUUIDPtr(row.VendorID),
+		VendorNameOverride: textPtr(row.VendorNameOverride),
+		CreatedAt:          row.CreatedAt,
+		UpdatedAt:          row.UpdatedAt,
+	}, nil
+}
+
+// FindManagedByID resolves one account with its joined role, location and
+// vendor names for the super_admin console. A missing row becomes
+// domain.ErrNotFound so the handler renders 404.
+func (r *userRepository) FindManagedByID(ctx context.Context, id domain.UUID) (domain.ManagedUser, error) {
+	parsed, err := fromDomainUUID(id)
+	if err != nil {
+		return domain.ManagedUser{}, err
+	}
+	row, err := r.queries().GetManagedUserByID(ctx, db.GetManagedUserByIDParams{ID: parsed})
+	if err != nil {
+		return domain.ManagedUser{}, MapError(err)
+	}
+	return domain.ManagedUser{
+		User: domain.User{
+			ID:                 mustDomainUUID(row.ID),
+			Name:               row.Name,
+			Email:              row.Email,
+			Phone:              textValue(row.Phone),
+			NIK:                textValue(row.Nik),
+			RoleID:             mustDomainUUID(row.RoleID),
+			LocationID:         domainUUIDPtr(row.LocationID),
+			Type:               domain.UserType(row.Type),
+			Status:             domain.UserStatus(row.Status),
+			VendorID:           domainUUIDPtr(row.VendorID),
+			VendorNameOverride: textPtr(row.VendorNameOverride),
+			CreatedAt:          row.CreatedAt,
+		},
+		Role:         domain.RoleName(row.Role),
+		LocationName: textPtr(row.LocationName),
+		VendorName:   resolveVendorDisplayPtr(row.VendorNameOverride, row.VendorName),
+	}, nil
+}
+
+// managedListRowToUser projects one listing row onto the console shape. The
+// listing SELECT carries no role_id or password hash (neither is needed for
+// the projection), so those members stay empty here; the detail read above
+// carries them.
+func managedListRowToUser(row db.ListManagedUsersRow) domain.ManagedUser {
+	return domain.ManagedUser{
+		User: domain.User{
+			ID:                 mustDomainUUID(row.ID),
+			Name:               row.Name,
+			Email:              row.Email,
+			Phone:              textValue(row.Phone),
+			NIK:                textValue(row.Nik),
+			LocationID:         domainUUIDPtr(row.LocationID),
+			Type:               domain.UserType(row.Type),
+			Status:             domain.UserStatus(row.Status),
+			VendorID:           domainUUIDPtr(row.VendorID),
+			VendorNameOverride: textPtr(row.VendorNameOverride),
+			CreatedAt:          row.CreatedAt,
+		},
+		Role:         domain.RoleName(row.Role),
+		LocationName: textPtr(row.LocationName),
+		VendorName:   resolveVendorDisplayPtr(row.VendorNameOverride, row.VendorName),
+	}
+}
+
 // loginRowToUser projects the auth lookup onto the domain account.
 //
 // KNOWN GAP (generated shape vs port): GetUserByEmailForLogin returns the
@@ -156,16 +379,18 @@ func (r *userRepository) ListSecurity(ctx context.Context, locationID *domain.UU
 // here made every login fail with 401 at token-minting time.
 func loginRowToUser(row db.GetUserByEmailForLoginRow) domain.User {
 	return domain.User{
-		ID:           mustDomainUUID(row.ID),
-		Name:         row.Name,
-		Email:        row.Email,
-		PasswordHash: row.PasswordHash,
-		Phone:        textValue(row.Phone),
-		RoleID:       mustDomainUUID(row.RoleID),
-		LocationID:   domainUUIDPtr(row.LocationID),
-		Type:         domain.UserType(row.Type),
-		Status:       domain.UserStatus(row.Status),
-		VendorID:     domainUUIDPtr(row.VendorID),
+		ID:                 mustDomainUUID(row.ID),
+		Name:               row.Name,
+		Email:              row.Email,
+		PasswordHash:       row.PasswordHash,
+		Phone:              textValue(row.Phone),
+		NIK:                textValue(row.Nik),
+		RoleID:             mustDomainUUID(row.RoleID),
+		LocationID:         domainUUIDPtr(row.LocationID),
+		Type:               domain.UserType(row.Type),
+		Status:             domain.UserStatus(row.Status),
+		VendorID:           domainUUIDPtr(row.VendorID),
+		VendorNameOverride: textPtr(row.VendorNameOverride),
 	}
 }
 
@@ -173,16 +398,18 @@ func loginRowToUser(row db.GetUserByEmailForLoginRow) domain.User {
 // Same role_id gap as loginRowToUser; created_at IS present on this row.
 func profileRowToUser(row db.GetUserByIDRow) domain.User {
 	return domain.User{
-		ID:         mustDomainUUID(row.ID),
-		Name:       row.Name,
-		Email:      row.Email,
-		Phone:      textValue(row.Phone),
-		RoleID:     mustDomainUUID(row.RoleID),
-		LocationID: domainUUIDPtr(row.LocationID),
-		Type:       domain.UserType(row.Type),
-		Status:     domain.UserStatus(row.Status),
-		VendorID:   domainUUIDPtr(row.VendorID),
-		CreatedAt:  row.CreatedAt,
+		ID:                 mustDomainUUID(row.ID),
+		Name:               row.Name,
+		Email:              row.Email,
+		Phone:              textValue(row.Phone),
+		NIK:                textValue(row.Nik),
+		RoleID:             mustDomainUUID(row.RoleID),
+		LocationID:         domainUUIDPtr(row.LocationID),
+		Type:               domain.UserType(row.Type),
+		Status:             domain.UserStatus(row.Status),
+		VendorID:           domainUUIDPtr(row.VendorID),
+		VendorNameOverride: textPtr(row.VendorNameOverride),
+		CreatedAt:          row.CreatedAt,
 	}
 }
 
@@ -193,6 +420,7 @@ func securityRowToUser(row db.ListSecurityUsersRow) domain.User {
 		Name:       row.Name,
 		Email:      row.Email,
 		Phone:      textValue(row.Phone),
+		NIK:        textValue(row.Nik),
 		LocationID: domainUUIDPtr(row.LocationID),
 		Type:       domain.UserType(row.Type),
 		Status:     domain.UserStatus(row.Status),
@@ -208,6 +436,15 @@ func phonePtr(phone string) *string {
 		return nil
 	}
 	return &phone
+}
+
+// nikPtr maps the domain NIK the same way: empty means SQL NULL, never an
+// empty-string nik row (which chk_users_nik would reject).
+func nikPtr(nik string) *string {
+	if nik == "" {
+		return nil
+	}
+	return &nik
 }
 
 // textValue renders a nullable text column as a plain string, NULL as "".

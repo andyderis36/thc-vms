@@ -222,7 +222,7 @@ function Be-Start {
         Write-Err2 "backend did not become healthy in time; last log lines:"
         if (Test-Path (Get-ErrFile "be")) { Get-Content (Get-ErrFile "be") -Tail 20 | ForEach-Object { Write-Info $_ } }
     }
-    Write-Warn2 "login is rate limited to 5 attempts/min/IP; set `$env:AUTH_RATE_LIMIT=500 for load or QA runs"
+    Write-Warn2 "login rate limit ikut backend/.env AUTH_RATE_LIMIT (default 5/menit/IP; -1 = dimatikan untuk dev/QA)"
 }
 
 function Be-Stop {
@@ -629,6 +629,274 @@ function Port-Proxy {
     Write-Info "this script will not add or delete them. Free the port by using a different one."
 }
 
+# ============================================================== SHARE
+# Demo remote untuk PM: dua Cloudflare quick tunnel (FE di 3210, BE di 8080)
+# sehingga aplikasi lokal bisa dibuka dari mana saja lewat satu link.
+#
+# Quick-tunnel hostname ACAK di setiap run, jadi perintah ini menulis ulang
+# dua env lokal agar menunjuk satu sama lain, me-restart kedua server supaya
+# nilainya kepakai, lalu mencetak satu URL untuk dibagikan. Nilai env asal
+# di-snapshot ke .runtime/share.json; `vms share stop` membunuh HANYA tunnel
+# yang dibuat skrip ini, mengembalikan env byte-per-byte, dan me-restart
+# server ke mode local-only.
+#
+# Kedua server WAJIB vms-tracked (dinyalakan via `vms start` / `vms be|fe
+# start`) karena hanya proses tracked yang boleh di-restart. Proses manual
+# tidak pernah dibunuh - perintah menolak dengan instruksi yang jelas.
+$ShareStateFile = Join-Path $Runtime "share.json"
+
+function Get-Cloudflared {
+    $cmd = Get-Command cloudflared -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $fallback = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
+    if (Test-Path -LiteralPath $fallback) { return $fallback }
+    return $null
+}
+
+function Get-DotEnvValue([string]$File, [string]$Key) {
+    $line = Select-String -Pattern ('^\s*' + $Key + '\s*=') -LiteralPath $File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $line) { return $null }
+    return (($line.Line -split '=', 2)[1].Trim().Trim('"'))
+}
+
+# Write-Utf8NoBomFile menulis teks sebagai UTF-8 TANPA BOM di SEMUA versi
+# PowerShell: `-Encoding utf8NoBOM` hanya ada di PS 7+, padahal skrip ini
+# harus jalan juga di powershell.exe 5.1 bawaan Windows.
+function Write-Utf8NoBomFile([string]$File, [string[]]$Lines) {
+    [System.IO.File]::WriteAllLines($File, $Lines, (New-Object System.Text.UTF8Encoding $false))
+}
+
+function Set-DotEnvValue([string]$File, [string]$Key, [string]$Value) {
+    $lines = @(Get-Content -LiteralPath $File -ErrorAction SilentlyContinue)
+    $done = $false
+    $out = foreach ($l in $lines) {
+        if ($l -match ('^\s*' + $Key + '\s*=')) { "$Key=`"$Value`""; $done = $true } else { $l }
+    }
+    if (-not $done) { $out = @($out) + "$Key=`"$Value`"" }
+    Write-Utf8NoBomFile $File $out
+}
+
+function Remove-DotEnvKey([string]$File, [string]$Key) {
+    $lines = @(Get-Content -LiteralPath $File -ErrorAction SilentlyContinue)
+    $out = foreach ($l in $lines) { if ($l -notmatch ('^\s*' + $Key + '\s*=')) { $l } }
+    Write-Utf8NoBomFile $File $out
+}
+
+# Clear-StaleTunnelMetrics membebaskan port metrics cloudflared sebelum tunnel
+# baru dibuka. cloudflared MATI bila port metrics-nya sudah dipegang proses
+# lain — dan sesi yang crash (kill paksa, terminal ditutup) meninggalkan
+# cloudflared yatim yang memegang 20241/20242 selamanya, sehingga SEMUA run
+# berikutnya gagal dengan "tunnel mati di tengah jalan". Hanya membunuh bila
+# penghuninya benar-benar bernama cloudflared (terbukti milik alur ini).
+function Clear-StaleTunnelMetrics([string]$MetricsPort) {
+    $port = [int]$MetricsPort
+    $c = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $c) { return }
+    try { $owner = Get-Process -Id $c.OwningProcess -ErrorAction Stop } catch { return }
+    if ($owner.ProcessName -eq 'cloudflared') {
+        Stop-Process -Id $owner.Id -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 1500
+        Write-Warn2 "cloudflared yatim (PID $($owner.Id)) di port metrics $port dibersihkan."
+    } else {
+        Write-Warn2 "port metrics $port dipegang $($owner.ProcessName) (PID $($owner.Id)); bukan cloudflared, dibiarkan."
+    }
+}
+
+# Start-QuickTunnel meluncurkan satu `cloudflared tunnel --url` detached dan
+# menunggu hostname https://*.trycloudflare.com muncul di lognya (maks 45
+# detik). Metrik diberi port eksplisit berbeda per tunnel agar dua instance
+# tidak berebut. Kembalian @{Pid, Url}, atau $null bila gagal.
+function Start-QuickTunnel([string]$Name, [int]$Port, [string]$MetricsPort) {
+    $exe = Get-Cloudflared
+    $log = Join-Path $Runtime "$Name.tunnel.log"
+    $errLog = Join-Path $Runtime "$Name.tunnel.err.log"
+    Remove-Item -LiteralPath $log, $errLog -Force -ErrorAction SilentlyContinue
+    New-Runtime
+    Clear-StaleTunnelMetrics $MetricsPort
+    $p = Start-Process -FilePath $exe -ArgumentList @("tunnel", "--url", "http://localhost:$Port", "--metrics", "127.0.0.1:$MetricsPort") -RedirectStandardOutput $log -RedirectStandardError $errLog -PassThru -WindowStyle Hidden
+    $url = $null
+    $deadline = (Get-Date).AddSeconds(45)
+    while ((Get-Date) -lt $deadline -and -not $url) {
+        Start-Sleep -Milliseconds 800
+        foreach ($f in @($log, $errLog)) {
+            if (Test-Path -LiteralPath $f) {
+                $m = Select-String -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' -LiteralPath $f -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($m) { $url = $m.Matches[0].Value; break }
+            }
+        }
+        if ($p.HasExited) { break }
+        # cloudflared gagal fatal (mis. metrics port direbut yatim): URL
+        # takkan pernah terbit, jangan habiskan 45 detik menunggu.
+        if ((Test-Path -LiteralPath $errLog) -and (Select-String -Pattern 'Error opening metrics server listener' -LiteralPath $errLog -ErrorAction SilentlyContinue)) { break }
+    }
+    if (-not $url) {
+        try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch { }
+        Write-Err2 "$Name tunnel tidak menerbitkan URL dalam 45 detik; lihat $log"
+        return $null
+    }
+    "$($p.Id)" | Set-Content -LiteralPath (Get-PidFile "$Name-tunnel")
+    return @{ Pid = $p.Id; Url = $url }
+}
+
+function Stop-QuickTunnel([string]$Name) {
+    $id = Get-TrackedPid "$Name-tunnel"
+    if ($id) {
+        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Get-PidFile "$Name-tunnel") -Force -ErrorAction SilentlyContinue
+        Write-Ok "$Name tunnel berhenti"
+    }
+}
+
+# Restore-ShareEnvs mengembalikan dua env ke snapshot (atau menghapus key
+# yang tadinya tidak ada), dipakai share stop dan rollback. Self-heal: bila
+# snapshot berisi URL tunnel run lama yang mati tak wajar, pakai default
+# lokal yang terdokumentasi, bukan URL mati itu.
+function Restore-ShareEnvs($State) {
+    $feEnv = Join-Path $Frontend ".env.local"
+    $beEnv = Join-Path $Backend ".env"
+    $apiBase = $State.origApiBase
+    if ([string]::IsNullOrEmpty($apiBase)) {
+        $apiBase = 'http://localhost:8080/api/v1'
+        Write-Warn2 "snapshot API base kosong; memakai default lokal."
+    } elseif ($apiBase -match 'trycloudflare\.com') {
+        $apiBase = 'http://localhost:8080/api/v1'
+        Write-Warn2 "snapshot API base berisi URL tunnel lama; memakai default lokal."
+    }
+    Set-DotEnvValue $feEnv "NEXT_PUBLIC_API_BASE_URL" $apiBase
+    $cors = $State.origCors
+    if ([string]::IsNullOrEmpty($cors)) {
+        Remove-DotEnvKey $beEnv "CORS_ALLOWED_ORIGINS"
+    } elseif ($cors -match 'trycloudflare\.com') {
+        Remove-DotEnvKey $beEnv "CORS_ALLOWED_ORIGINS"
+        Write-Warn2 "snapshot CORS berisi URL tunnel lama; key dihapus."
+    } else {
+        Set-DotEnvValue $beEnv "CORS_ALLOWED_ORIGINS" $cors
+    }
+    Write-Ok "env lokal dikembalikan seperti semula"
+}
+
+function Share-IsActive() {
+    if (-not (Test-Path -LiteralPath $ShareStateFile)) { return $null }
+    try {
+        $st = Get-Content -LiteralPath $ShareStateFile -Raw | ConvertFrom-Json
+    } catch { return $null }
+    $feAlive = $false
+    $beAlive = $false
+    try { $feAlive = [bool](Get-Process -Id $st.fePid -ErrorAction Stop) } catch { }
+    try { $beAlive = [bool](Get-Process -Id $st.bePid -ErrorAction Stop) } catch { }
+    if ($feAlive -and $beAlive) { return $st }
+    return $null
+}
+
+function Share-Start([string]$FePortWanted) {
+    $exe = Get-Cloudflared
+    if (-not $exe) {
+        Write-Err2 "cloudflared tidak ditemukan. Install: winget install cloudflare.cloudflared"
+        return
+    }
+    foreach ($c in @("be", "fe")) {
+        if (-not (Get-TrackedPid $c)) {
+            Write-Err2 "$c tidak vms-tracked (jalan manual?). Hentikan manual, jalankan 'vms $c start', lalu ulangi 'vms share start'."
+            return
+        }
+    }
+    $fePort = Get-FePort $FePortWanted
+    if (-not (Test-PortBusy $fePort)) {
+        Write-Err2 "port $fePort tidak ada yang listen. Jalankan dulu 'vms fe start $fePort' (atau 'vms start')."
+        return
+    }
+    $active = Share-IsActive
+    if ($active) {
+        Write-Ok ("sudah sharing: " + $active.feUrl)
+        Write-Info ("backend: " + $active.beUrl)
+        return
+    }
+    # Sesi lama mati tak wajar (terminal ditutup): pid-file bisa menunjuk
+    # proses mati (dibersihkan Get-TrackedPid) atau yatim yang masih hidup.
+    # Bunuh yang hidup agar tidak bocor, lalu mulai segar.
+    Stop-QuickTunnel "fe"
+    Stop-QuickTunnel "be"
+    New-Runtime
+    Write-Step "share: membuka tunnel FE (port $fePort)"
+    $fe = Start-QuickTunnel "fe" $fePort "20241"
+    if (-not $fe) { return }
+    Write-Ok ("tunnel FE: " + $fe.Url)
+    Write-Step "share: membuka tunnel BE (port 8080)"
+    $be = Start-QuickTunnel "be" 8080 "20242"
+    if (-not $be) { Stop-QuickTunnel "fe"; return }
+    Write-Ok ("tunnel BE: " + $be.Url)
+
+    $feEnv = Join-Path $Frontend ".env.local"
+    $beEnv = Join-Path $Backend ".env"
+    $state = [pscustomobject]@{
+        fePid = $fe.Pid; bePid = $be.Pid; feUrl = $fe.Url; beUrl = $be.Url
+        fePort = $fePort
+        origApiBase = Get-DotEnvValue $feEnv "NEXT_PUBLIC_API_BASE_URL"
+        origCors = Get-DotEnvValue $beEnv "CORS_ALLOWED_ORIGINS"
+    }
+    $stateJson = $state | ConvertTo-Json
+    Write-Utf8NoBomFile $ShareStateFile @($stateJson)
+
+    Write-Step "share: mengarahkan env ke tunnel"
+    Set-DotEnvValue $feEnv "NEXT_PUBLIC_API_BASE_URL" ($be.Url + "/api/v1")
+    Set-DotEnvValue $beEnv "CORS_ALLOWED_ORIGINS" $fe.Url
+    Write-Ok "env diperbarui (aslinya tersimpan)"
+
+    Write-Step "share: restart backend (pakai CORS + env baru)"
+    Be-Stop; Be-Start
+    Write-Step "share: restart frontend (pakai API base baru)"
+    Fe-Stop; Fe-Start $fePort
+    # Verifikasi akhir: restart butuh menit; tunnel bisa mati di tengah.
+    # Bila tidak lengkap, rollback penuh (tunnel mati + env pulih + lokal)
+    # agar tak tertinggal setengah jalan seperti tunnel yatim + env rusak.
+    Start-Sleep -Seconds 3
+    $feAlive = $false
+    $beAlive = $false
+    try { $feAlive = [bool](Get-Process -Id $fe.Pid -ErrorAction Stop) } catch { }
+    try { $beAlive = [bool](Get-Process -Id $be.Pid -ErrorAction Stop) } catch { }
+    if (-not ($feAlive -and $beAlive)) {
+        Write-Err2 ("tunnel mati di tengah jalan (FE alive={0} BE alive={1}); rollback ke lokal." -f $feAlive, $beAlive)
+        Write-Info "log FE: .runtime/fe.tunnel.log (.err); log BE: .runtime/be.tunnel.log (.err)"
+        Share-Stop $state
+        return
+    }
+    Write-Host ""
+    Write-Host ("### bagikan ke PM: " + $fe.Url + " ###") -ForegroundColor Green
+    Write-Info "login demo semua peran, password: Password123!"
+    Write-Info "berhenti berbagi: vms share stop (env + server kembali lokal)"
+    Write-Host ""
+}
+
+function Share-Stop([object]$GivenState) {
+    # Terima state runtuh dari rollback; bila dipanggil polos, baca file
+    # (bahkan parsial) agar sesi setengah-mati tetap bisa dibersihkan.
+    $st = $GivenState
+    if (-not $st -and (Test-Path -LiteralPath $ShareStateFile)) {
+        try { $st = Get-Content -LiteralPath $ShareStateFile -Raw | ConvertFrom-Json } catch { $st = $null }
+    }
+    if (-not $st) {
+        Write-Warn2 "tidak sedang sharing"
+        return
+    }
+    Stop-QuickTunnel "fe"
+    Stop-QuickTunnel "be"
+    Restore-ShareEnvs $st
+    Remove-Item -LiteralPath $ShareStateFile -Force -ErrorAction SilentlyContinue
+    Write-Step "share: restart server kembali ke local-only"
+    Be-Stop; Be-Start
+    if ($st.fePort) { Fe-Stop; Fe-Start $st.fePort } else { Fe-Stop; Fe-Start }
+    Write-Ok "selesai berbagi"
+}
+
+function Share-Status {
+    $st = Share-IsActive
+    if (-not $st) { Write-Warn2 "tidak sedang sharing"; return }
+    Write-Step "share: aktif"
+    Write-Ok ("FE  : " + $st.feUrl)
+    Write-Ok ("BE  : " + $st.beUrl)
+    Write-Info "bagikan URL FE ke PM"
+}
+
 # ============================================================== ALL
 function All-Start {
     Write-Host ""
@@ -680,12 +948,15 @@ elseif (-not $PSBoundParameters.ContainsKey('Action') -and
     $target = "vms"
 }
 
+# Dot-sourcing (mis. oleh vms-tunnel.ps1) hanya memuat definisi fungsi di atas;
+# blok dispatch di bawah hanya jalan bila skrip dieksekusi langsung.
+if ($MyInvocation.InvocationName -ne '.') {
 switch ($target) {
     "help" {
         Write-Host ""
         Write-Host "vms <target> <action>" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "  targets : be | fe | docker | port | vms (alias: all)" -ForegroundColor Gray
+        Write-Host "  targets : be | fe | docker | port | share | vms (alias: all)" -ForegroundColor Gray
         Write-Host "  actions : start | stop | restart | status | logs" -ForegroundColor Gray
         Write-Host "  extras  : be foreground | be build | docker reset" -ForegroundColor Gray
         Write-Host "            port list | port kill | port proxy (read-only)" -ForegroundColor Gray
@@ -704,6 +975,8 @@ switch ($target) {
         Write-Host "    vms port kill        # free 8080 + 3210 (asks first, never kills system procs)" -ForegroundColor DarkGray
         Write-Host "    vms port kill -Force # free them with no prompt" -ForegroundColor DarkGray
         Write-Host "    vms fe start 4000    # run the frontend on another port" -ForegroundColor DarkGray
+        Write-Host "    vms share start    # tunnel FE+BE, auto env+restart, print 1 link buat PM" -ForegroundColor DarkGray
+        Write-Host "    vms share stop     # kill tunnel, kembalikan env+server lokal" -ForegroundColor DarkGray
         Write-Host "    vms port proxy       # show netsh portproxy rules (read-only, never edited)" -ForegroundColor DarkGray
         Write-Host ""
     }
@@ -730,5 +1003,11 @@ switch ($target) {
         "start" { All-Start } "stop" { All-Stop } "restart" { All-Stop; All-Start }
         "status" { All-Status } "logs" { Docker-Logs; Be-Logs; Fe-Logs }
         default { Write-Err2 "unknown action '$Action' for vms (start|stop|restart|status|logs)" } } }
-    default { Write-Err2 "unknown target '$Target' (be | fe | docker | vms | help)"; Write-Info "run 'vms' with no arguments for the command list" }
-}
+    "share" { switch ($action) {
+        "start" { Share-Start ($Rest | Select-Object -First 1) }
+        "stop" { Share-Stop } "restart" { Share-Stop; Share-Start ($Rest | Select-Object -First 1) }
+        "status" { Share-Status }
+        default { Write-Err2 "unknown action '$Action' for share (start|stop|restart|status)" } } }
+    default { Write-Err2 "unknown target '$Target' (be | fe | docker | share | vms | help)"; Write-Info "run 'vms' with no arguments for the command list" }
+} # tutup switch ($target)
+} # tutup guard dot-sourcing

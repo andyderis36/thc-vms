@@ -56,7 +56,7 @@ func NewService(deps Dependencies) *Service {
 	}
 }
 
-// authorizeGateRole admits the two gate roles plus the bypass role. PIC is an
+// authorizeGateRole admits the two gate roles plus the bypass role. Vendor is an
 // external account that must never execute a gate operation.
 func authorizeGateRole(role domain.RoleName) error {
 	switch role {

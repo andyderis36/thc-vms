@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,23 @@ func envInt(key string, def int) int {
 		return def
 	}
 	return value
+}
+
+// envList reads a comma-separated list knob (for example CORS origins).
+// Absent or blank means "no values" (nil); entries are trimmed and empties
+// dropped, so "a,, b" behaves like "a,b".
+func envList(key string) []string {
+	raw := os.Getenv(key)
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // envDuration reads a Go duration tuning knob (for example "1m" or "30s") with

@@ -31,7 +31,7 @@ const (
 	// CtxUserRole carries the RBAC role as string or domain.RoleName.
 	CtxUserRole = "user_role"
 	// CtxLocationID carries the caller's branch as string or domain.UUID.
-	// Absent (nil) for super_admin and pic.
+	// Absent (nil) for super_admin and vendor.
 	CtxLocationID = "location_id"
 )
 
@@ -39,7 +39,7 @@ const (
 const identityStructKey = "thc.identity"
 
 // Identity is the authenticated caller behind one request: its user id, its
-// RBAC role and, for branch-bound roles, its location. super_admin and pic
+// RBAC role and, for branch-bound roles, its location. super_admin and vendor
 // carry a nil LocationID; admin and security must carry their branch.
 // Handlers map this into their own usecase actor types (visit.Actor and
 // gate.Actor are intentionally separate); this struct is never unified with

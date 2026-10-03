@@ -40,7 +40,12 @@ func MapError(err error) error {
 		case "23514":
 			return fmt.Errorf("repository: check constraint rejected value: %w", domain.ErrValidation)
 		case "23503":
-			return fmt.Errorf("repository: foreign key rejected reference: %w", domain.ErrValidation)
+			// A surviving reference blocks the write: the row is still
+			// needed elsewhere, which is a state clash (409), not a
+			// malformed field. This is the second line of defence behind
+			// the Go pre-check counts on the DELETE paths; the trigger
+			// invariant keeps raising 23514 (-> 400) for bad pairings.
+			return fmt.Errorf("repository: foreign key rejected reference: %w", domain.ErrConflict)
 		}
 	}
 	return fmt.Errorf("repository: %w: %v", domain.ErrDatabase, err)

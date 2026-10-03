@@ -127,10 +127,10 @@ const createVisit = `-- name: CreateVisit :one
 INSERT INTO visit_request (
     visit_id, pic_user_id, vendor_id, location_id,
     start_date, end_date, is_multi_day, status,
-    assignment_letter_url, is_nda_accepted, notes
+    assignment_letter_url, is_nda_accepted, notes, purpose_note
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10)
-RETURNING id, visit_id, pic_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10, $11)
+RETURNING id, visit_id, pic_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note
 `
 
 type CreateVisitParams struct {
@@ -144,6 +144,7 @@ type CreateVisitParams struct {
 	AssignmentLetterUrl pgtype.Text `json:"assignment_letter_url"`
 	IsNdaAccepted       bool        `json:"is_nda_accepted"`
 	Notes               pgtype.Text `json:"notes"`
+	PurposeNote         pgtype.Text `json:"purpose_note"`
 }
 
 // =============================================================================
@@ -168,7 +169,7 @@ type CreateVisitParams struct {
 //	  admin       : ListVisitsForLocation     (location_id REQUIRED)
 //	  security    : ListVisitsForLocation     (location_id REQUIRED,
 //	                                           + date_from/date_to = TODAY, PRD L97)
-//	  pic         : ListVisitsForPIC          (pic_user_id REQUIRED)
+//	  vendor       : ListVisitsForPIC          (pic_user_id REQUIRED)
 //	Each list query has a Count* twin with the identical predicate so the
 //	{items,total,page,limit} envelope (openapi L896-913) cannot drift from the
 //	page it is counting.
@@ -190,6 +191,7 @@ func (q *Queries) CreateVisit(ctx context.Context, arg CreateVisitParams) (Visit
 		arg.AssignmentLetterUrl,
 		arg.IsNdaAccepted,
 		arg.Notes,
+		arg.PurposeNote,
 	)
 	var i VisitRequest
 	err := row.Scan(
@@ -207,13 +209,37 @@ func (q *Queries) CreateVisit(ctx context.Context, arg CreateVisitParams) (Visit
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PurposeNote,
 	)
 	return i, err
 }
 
+const deleteVisit = `-- name: DeleteVisit :one
+DELETE FROM visit_request
+WHERE id = $1
+RETURNING id
+`
+
+type DeleteVisitParams struct {
+	ID uuid.UUID `json:"id"`
+}
+
+// DELETE /visits/:id (super_admin only, any status). The child tables
+// (visitor, visit_purpose, status_history, check_in, check_out) all carry
+// ON DELETE CASCADE, so removing the single visit row cleans its roster,
+// purposes, history and gate records atomically. A missing id surfaces
+// pgx.ErrNoRows (-> 404 via MapError). There is deliberately no status
+// guard: a super_admin may purge a visit in any lifecycle state.
+func (q *Queries) DeleteVisit(ctx context.Context, arg DeleteVisitParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteVisit, arg.ID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getVisitByID = `-- name: GetVisitByID :one
 SELECT
-    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at,
+    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
     l.name AS location_name, l.type AS location_type,
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
@@ -245,6 +271,7 @@ type GetVisitByIDRow struct {
 	Notes               pgtype.Text `json:"notes"`
 	CreatedAt           time.Time   `json:"created_at"`
 	UpdatedAt           time.Time   `json:"updated_at"`
+	PurposeNote         pgtype.Text `json:"purpose_note"`
 	LocationName        string      `json:"location_name"`
 	LocationType        string      `json:"location_type"`
 	LocationAddress     pgtype.Text `json:"location_address"`
@@ -277,6 +304,7 @@ func (q *Queries) GetVisitByID(ctx context.Context, arg GetVisitByIDParams) (Get
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PurposeNote,
 		&i.LocationName,
 		&i.LocationType,
 		&i.LocationAddress,
@@ -292,7 +320,7 @@ func (q *Queries) GetVisitByID(ctx context.Context, arg GetVisitByIDParams) (Get
 
 const getVisitByIDForUpdate = `-- name: GetVisitByIDForUpdate :one
 SELECT
-    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at,
+    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
     l.name AS location_name, l.type AS location_type,
     v.name AS vendor_name,
     pu.name AS pic_name
@@ -323,6 +351,7 @@ type GetVisitByIDForUpdateRow struct {
 	Notes               pgtype.Text `json:"notes"`
 	CreatedAt           time.Time   `json:"created_at"`
 	UpdatedAt           time.Time   `json:"updated_at"`
+	PurposeNote         pgtype.Text `json:"purpose_note"`
 	LocationName        string      `json:"location_name"`
 	LocationType        string      `json:"location_type"`
 	VendorName          pgtype.Text `json:"vendor_name"`
@@ -350,6 +379,7 @@ func (q *Queries) GetVisitByIDForUpdate(ctx context.Context, arg GetVisitByIDFor
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PurposeNote,
 		&i.LocationName,
 		&i.LocationType,
 		&i.VendorName,
@@ -360,7 +390,7 @@ func (q *Queries) GetVisitByIDForUpdate(ctx context.Context, arg GetVisitByIDFor
 
 const getVisitByVisitCode = `-- name: GetVisitByVisitCode :one
 SELECT
-    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at,
+    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
     l.name AS location_name, l.type AS location_type,
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
@@ -392,6 +422,7 @@ type GetVisitByVisitCodeRow struct {
 	Notes               pgtype.Text `json:"notes"`
 	CreatedAt           time.Time   `json:"created_at"`
 	UpdatedAt           time.Time   `json:"updated_at"`
+	PurposeNote         pgtype.Text `json:"purpose_note"`
 	LocationName        string      `json:"location_name"`
 	LocationType        string      `json:"location_type"`
 	LocationAddress     pgtype.Text `json:"location_address"`
@@ -424,6 +455,7 @@ func (q *Queries) GetVisitByVisitCode(ctx context.Context, arg GetVisitByVisitCo
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PurposeNote,
 		&i.LocationName,
 		&i.LocationType,
 		&i.LocationAddress,
@@ -439,7 +471,7 @@ func (q *Queries) GetVisitByVisitCode(ctx context.Context, arg GetVisitByVisitCo
 
 const getVisitByVisitCodeForUpdate = `-- name: GetVisitByVisitCodeForUpdate :one
 SELECT
-    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at,
+    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
     l.name AS location_name, l.type AS location_type,
     v.name AS vendor_name,
     pu.name AS pic_name
@@ -470,6 +502,7 @@ type GetVisitByVisitCodeForUpdateRow struct {
 	Notes               pgtype.Text `json:"notes"`
 	CreatedAt           time.Time   `json:"created_at"`
 	UpdatedAt           time.Time   `json:"updated_at"`
+	PurposeNote         pgtype.Text `json:"purpose_note"`
 	LocationName        string      `json:"location_name"`
 	LocationType        string      `json:"location_type"`
 	VendorName          pgtype.Text `json:"vendor_name"`
@@ -495,6 +528,7 @@ func (q *Queries) GetVisitByVisitCodeForUpdate(ctx context.Context, arg GetVisit
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PurposeNote,
 		&i.LocationName,
 		&i.LocationType,
 		&i.VendorName,
@@ -557,23 +591,29 @@ func (q *Queries) InsertVisitPurpose(ctx context.Context, arg InsertVisitPurpose
 }
 
 const insertVisitor = `-- name: InsertVisitor :one
-INSERT INTO visitor (visit_request_id, name, id_number, phone, id_card_photo_url, photo_url)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, created_at
+INSERT INTO visitor (visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, vendor_id, vendor_name_override)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, created_at, vendor_id, vendor_name_override
 `
 
 type InsertVisitorParams struct {
-	VisitRequestID uuid.UUID   `json:"visit_request_id"`
-	Name           string      `json:"name"`
-	IDNumber       string      `json:"id_number"`
-	Phone          string      `json:"phone"`
-	IDCardPhotoUrl pgtype.Text `json:"id_card_photo_url"`
-	PhotoUrl       pgtype.Text `json:"photo_url"`
+	VisitRequestID     uuid.UUID   `json:"visit_request_id"`
+	Name               string      `json:"name"`
+	IDNumber           string      `json:"id_number"`
+	Phone              string      `json:"phone"`
+	IDCardPhotoUrl     pgtype.Text `json:"id_card_photo_url"`
+	PhotoUrl           pgtype.Text `json:"photo_url"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
 }
 
 // POST /visits visitors[] (openapi L816-822), up to 10 rows per visit (QA
-// VISIT-05). Cascades to nothing on insert; the visit FK is ON DELETE CASCADE so
-// deleting a visit removes its roster.
+// VISIT-05). vendor_id is the technician's own company (openapi VisitorItem);
+// NULL for internal staff. vendor_name_override is the manually typed company
+// (migration 000005), stored ONLY when vendor_id is absent: a sent vendor_id
+// wins and the Go caller passes NULL for the override. Cascades to nothing on
+// insert; the visit FK is ON DELETE CASCADE so deleting a visit removes its
+// roster.
 func (q *Queries) InsertVisitor(ctx context.Context, arg InsertVisitorParams) (Visitor, error) {
 	row := q.db.QueryRow(ctx, insertVisitor,
 		arg.VisitRequestID,
@@ -582,6 +622,8 @@ func (q *Queries) InsertVisitor(ctx context.Context, arg InsertVisitorParams) (V
 		arg.Phone,
 		arg.IDCardPhotoUrl,
 		arg.PhotoUrl,
+		arg.VendorID,
+		arg.VendorNameOverride,
 	)
 	var i Visitor
 	err := row.Scan(
@@ -593,6 +635,8 @@ func (q *Queries) InsertVisitor(ctx context.Context, arg InsertVisitorParams) (V
 		&i.IDCardPhotoUrl,
 		&i.PhotoUrl,
 		&i.CreatedAt,
+		&i.VendorID,
+		&i.VendorNameOverride,
 	)
 	return i, err
 }
@@ -693,26 +737,44 @@ func (q *Queries) ListVisitPurposes(ctx context.Context, arg ListVisitPurposesPa
 }
 
 const listVisitors = `-- name: ListVisitors :many
-SELECT id, visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, created_at FROM visitor
-WHERE visit_request_id = ANY($1::uuid[])
-ORDER BY created_at ASC, id ASC
+SELECT v.id, v.visit_request_id, v.name, v.id_number, v.phone, v.id_card_photo_url, v.photo_url, v.created_at, v.vendor_id, v.vendor_name_override,
+    vn.name AS vendor_name
+FROM visitor v
+LEFT JOIN vendor vn ON vn.id = v.vendor_id
+WHERE v.visit_request_id = ANY($1::uuid[])
+ORDER BY v.created_at ASC, v.id ASC
 `
 
 type ListVisitorsParams struct {
 	VisitRequestIds []uuid.UUID `json:"visit_request_ids"`
 }
 
+type ListVisitorsRow struct {
+	ID                 uuid.UUID   `json:"id"`
+	VisitRequestID     uuid.UUID   `json:"visit_request_id"`
+	Name               string      `json:"name"`
+	IDNumber           string      `json:"id_number"`
+	Phone              string      `json:"phone"`
+	IDCardPhotoUrl     pgtype.Text `json:"id_card_photo_url"`
+	PhotoUrl           pgtype.Text `json:"photo_url"`
+	CreatedAt          time.Time   `json:"created_at"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	VendorName         pgtype.Text `json:"vendor_name"`
+}
+
 // Roster for SCR-04 / SCR-05. Batched per page with a single IN (...) by the
-// repository to avoid an N+1 over the visit list.
-func (q *Queries) ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]Visitor, error) {
+// repository to avoid an N+1 over the visit list. The vendor name rides along
+// for the openapi VisitorItem vendor_name member.
+func (q *Queries) ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]ListVisitorsRow, error) {
 	rows, err := q.db.Query(ctx, listVisitors, arg.VisitRequestIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Visitor{}
+	items := []ListVisitorsRow{}
 	for rows.Next() {
-		var i Visitor
+		var i ListVisitorsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.VisitRequestID,
@@ -722,6 +784,9 @@ func (q *Queries) ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]V
 			&i.IDCardPhotoUrl,
 			&i.PhotoUrl,
 			&i.CreatedAt,
+			&i.VendorID,
+			&i.VendorNameOverride,
+			&i.VendorName,
 		); err != nil {
 			return nil, err
 		}
@@ -735,7 +800,7 @@ func (q *Queries) ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]V
 
 const listVisitsForLocation = `-- name: ListVisitsForLocation :many
 SELECT
-    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at,
+    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
     pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
@@ -781,6 +846,7 @@ type ListVisitsForLocationRow struct {
 	Notes               pgtype.Text `json:"notes"`
 	CreatedAt           time.Time   `json:"created_at"`
 	UpdatedAt           time.Time   `json:"updated_at"`
+	PurposeNote         pgtype.Text `json:"purpose_note"`
 	LocationName        string      `json:"location_name"`
 	LocationType        string      `json:"location_type"`
 	LocationTimezone    string      `json:"location_timezone"`
@@ -828,6 +894,7 @@ func (q *Queries) ListVisitsForLocation(ctx context.Context, arg ListVisitsForLo
 			&i.Notes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PurposeNote,
 			&i.LocationName,
 			&i.LocationType,
 			&i.LocationTimezone,
@@ -848,7 +915,7 @@ func (q *Queries) ListVisitsForLocation(ctx context.Context, arg ListVisitsForLo
 
 const listVisitsForPIC = `-- name: ListVisitsForPIC :many
 SELECT
-    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at,
+    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
     pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
@@ -894,6 +961,7 @@ type ListVisitsForPICRow struct {
 	Notes               pgtype.Text `json:"notes"`
 	CreatedAt           time.Time   `json:"created_at"`
 	UpdatedAt           time.Time   `json:"updated_at"`
+	PurposeNote         pgtype.Text `json:"purpose_note"`
 	LocationName        string      `json:"location_name"`
 	LocationType        string      `json:"location_type"`
 	LocationTimezone    string      `json:"location_timezone"`
@@ -904,7 +972,7 @@ type ListVisitsForPICRow struct {
 }
 
 // PIC / external-staff scope (PRD L112, AGENTS.md rule 6.1): strictly
-// WHERE pic_user_id = auth_user.id. A PIC can never widen this to see another
+// WHERE pic_user_id = auth_user.id. A vendor can never widen this to see another
 // vendor's visits, whatever they send in the query string. Uses idx_visit_pic
 // (PRD L209).
 func (q *Queries) ListVisitsForPIC(ctx context.Context, arg ListVisitsForPICParams) ([]ListVisitsForPICRow, error) {
@@ -939,6 +1007,7 @@ func (q *Queries) ListVisitsForPIC(ctx context.Context, arg ListVisitsForPICPara
 			&i.Notes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PurposeNote,
 			&i.LocationName,
 			&i.LocationType,
 			&i.LocationTimezone,
@@ -959,7 +1028,7 @@ func (q *Queries) ListVisitsForPIC(ctx context.Context, arg ListVisitsForPICPara
 
 const listVisitsForSuperAdmin = `-- name: ListVisitsForSuperAdmin :many
 SELECT
-    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at,
+    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
     pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
@@ -1005,6 +1074,7 @@ type ListVisitsForSuperAdminRow struct {
 	Notes               pgtype.Text `json:"notes"`
 	CreatedAt           time.Time   `json:"created_at"`
 	UpdatedAt           time.Time   `json:"updated_at"`
+	PurposeNote         pgtype.Text `json:"purpose_note"`
 	LocationName        string      `json:"location_name"`
 	LocationType        string      `json:"location_type"`
 	LocationTimezone    string      `json:"location_timezone"`
@@ -1052,6 +1122,7 @@ func (q *Queries) ListVisitsForSuperAdmin(ctx context.Context, arg ListVisitsFor
 			&i.Notes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PurposeNote,
 			&i.LocationName,
 			&i.LocationType,
 			&i.LocationTimezone,
@@ -1077,7 +1148,7 @@ SET start_date = $2,
     status     = $4,
     updated_at = now()
 WHERE id = $1
-RETURNING id, visit_id, pic_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at
+RETURNING id, visit_id, pic_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note
 `
 
 type UpdateVisitScheduleParams struct {
@@ -1113,6 +1184,7 @@ func (q *Queries) UpdateVisitSchedule(ctx context.Context, arg UpdateVisitSchedu
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PurposeNote,
 	)
 	return i, err
 }
@@ -1122,7 +1194,7 @@ UPDATE visit_request
 SET status     = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, visit_id, pic_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at
+RETURNING id, visit_id, pic_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note
 `
 
 type UpdateVisitStatusParams struct {
@@ -1154,6 +1226,7 @@ func (q *Queries) UpdateVisitStatus(ctx context.Context, arg UpdateVisitStatusPa
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PurposeNote,
 	)
 	return i, err
 }

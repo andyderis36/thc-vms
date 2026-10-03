@@ -1,36 +1,50 @@
 'use client'
 
 import { use, useState, type ReactNode } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   CalendarClock,
+  CheckCircle2,
   ExternalLink,
   FileText,
   History,
   MapPin,
   SearchX,
   ShieldAlert,
+  Trash2,
   Users,
   XCircle,
 } from 'lucide-react'
 import { Badge, StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardBody } from '@/components/ui/Card'
+import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Spinner } from '@/components/ui/Spinner'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
 import { PicMobileShell } from '@/components/layouts/PicMobileShell'
 import { SecurityKioskShell } from '@/components/layouts/SecurityKioskShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
+import { ApproveModal } from '@/features/visits/components/ApproveModal'
+import { RejectModal } from '@/features/visits/components/RejectModal'
 import { CancelModal } from '@/features/visits/detail/CancelModal'
 import { QrCard } from '@/features/visits/detail/QrCard'
 import { RescheduleModal } from '@/features/visits/detail/RescheduleModal'
 import { Timeline, formatTanggalWaktu } from '@/features/visits/detail/Timeline'
+import { VisitorPhoto } from '@/features/visits/detail/VisitorPhoto'
 import { ApiError } from '@/lib/api/fetcher'
-import { useVisitQuery } from '@/lib/api/hooks'
+import { useDeleteVisitMutation, useVisitQuery } from '@/lib/api/hooks'
 import type { Role, VisitDetail, VisitStatus } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import { toast } from 'sonner'
+import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
+
+/** Pesan konfirmasi hapus kunjungan — menyebut visit_id agar tidak salah sasaran. */
+export function deleteVisitConfirmMessage(visitId: string): string {
+  return `Hapus permanen kunjungan "${visitId}"? Tindakan ini tidak dapat dibatalkan.`
+}
 
 interface VisitDetailPageProps {
   /**
@@ -82,7 +96,7 @@ function ErrorBlock({ error, onRetry }: ErrorBlockProps) {
     return (
       <Card>
         <EmptyState
-          icon={<SearchX className="size-10" />}
+          icon={<SearchX aria-hidden="true" className="size-10" />}
           title="Kunjungan tidak ditemukan"
           description="Kunjungan yang Anda cari tidak ada atau tidak berada dalam lingkup akses Anda."
         />
@@ -94,7 +108,7 @@ function ErrorBlock({ error, onRetry }: ErrorBlockProps) {
     return (
       <Card>
         <EmptyState
-          icon={<ShieldAlert className="size-10" />}
+          icon={<ShieldAlert aria-hidden="true" className="size-10" />}
           title="Akses ditolak"
           description="Anda tidak memiliki akses untuk melihat detail kunjungan ini. Hubungi admin cabang terkait."
         />
@@ -123,16 +137,27 @@ function ErrorBlock({ error, onRetry }: ErrorBlockProps) {
 interface RoleShellProps {
   role: Role
   visitId: string
+  /**
+   * Status kunjungan bila sudah termuat. SHELL-04 (Vendor/Mitra) memakainya untuk
+   * memetakan rute detail ini ke tab Vendor/Mitra yang benar (approved/visiting ->
+   * `/qr`, selainnya -> `/dashboard`) sehingga SCR-04 selalu punya
+   * `aria-current`. Shell lain mengabaikannya.
+   */
+  visitStatus?: VisitStatus
   children: ReactNode
 }
 
 /** Pilih base layout (SHELL-01..04) sesuai peran — tanpa memihak peran tertentu. */
-function RoleShell({ role, visitId, children }: RoleShellProps) {
+function RoleShell({ role, visitId, visitStatus, children }: RoleShellProps) {
   const activeHref = `/visits/${visitId}`
 
   switch (role) {
-    case 'pic':
-      return <PicMobileShell activeHref={activeHref}>{children}</PicMobileShell>
+    case 'vendor':
+      return (
+        <PicMobileShell activeHref={activeHref} visitStatus={visitStatus}>
+          {children}
+        </PicMobileShell>
+      )
     case 'admin':
       return <AdminBranchShell activeHref={activeHref}>{children}</AdminBranchShell>
     case 'security':
@@ -158,7 +183,7 @@ function VisitDetailScreen({ visitId }: VisitDetailScreenProps) {
   const visit = visitQuery.data
 
   return (
-    <RoleShell role={role} visitId={visitId}>
+    <RoleShell role={role} visitId={visitId} visitStatus={visit?.status}>
       {visitQuery.isPending ? (
         <LoadingBlock />
       ) : visitQuery.isError ? (
@@ -195,14 +220,31 @@ interface VisitDetailViewProps {
 function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
+  const [approveOpen, setApproveOpen] = useState(false)
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const router = useRouter()
+  const deleteMutation = useDeleteVisitMutation()
+  const showDelete = can(role, 'deleteRecords')
 
   const isTerminal = TERMINAL_STATUSES.has(visit.status)
-  // Kontrol aksi mengikuti matriks kapabilitas — PIC tidak pernah melihat
+  // Kontrol aksi mengikuti matriks kapabilitas — Vendor/Mitra tidak pernah melihat
   // kontrol approval, dan satpam tidak bisa mengubah jadwal/membatalkan.
   const canReschedule = !isTerminal && can(role, 'rescheduleVisit')
   const canCancel = !isTerminal && can(role, 'cancelVisit')
-  const showActions = canReschedule || canCancel
-  const isApproved = visit.status === 'approved'
+  // Persetujuan di SCR-04 (inventaris §3: modal approve/reject ada di SCR-02
+  // & SCR-04): hanya status requested + peran berhak. Gaya tombol disamakan
+  // dengan VisitTable (success/danger, min-h-touch, aria-label).
+  // Vendor/Mitra & security tidak memiliki `approveVisit`/`rejectVisit` sehingga kedua
+  // tombol itu tidak pernah dirender untuk mereka (PRD §4 — RBAC murni).
+  const canApprove = visit.status === 'requested' && can(role, 'approveVisit')
+  const canReject = visit.status === 'requested' && can(role, 'rejectVisit')
+  const showActions = canReschedule || canCancel || canApprove || canReject
+  // QR tampil selama `approved` (untuk check-in) DAN `visiting` (untuk
+  // check-out): payload QR == visit_id stabil per kunjungan, dan scanner
+  // gerbang mengarahkan otomatis approved->check-in, visiting->check-out.
+  // Status lain (requested/cancelled/completed/...) menyembunyikan QR.
+  const showQr = visit.status === 'approved' || visit.status === 'visiting'
 
   const purposeChips =
     visit.purposes.length > 0 ? (
@@ -231,7 +273,7 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
             <QrCard
               visitId={visitId}
               visitCode={visit.visit_id}
-              approved={isApproved}
+              qrVisible={showQr}
             />
           </div>
         </div>
@@ -246,19 +288,49 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                 </div>
                 {showActions && (
                   <div className="flex flex-wrap items-center gap-2">
+                    {canApprove && (
+                      <Button
+                        size="sm"
+                        variant="success"
+                        className="min-h-touch px-3"
+                        aria-label={`Setujui kunjungan ${visit.visit_id}`}
+                        onClick={() => setApproveOpen(true)}
+                      >
+                        <CheckCircle2 aria-hidden="true" className="size-4 shrink-0" />
+                        Setujui
+                      </Button>
+                    )}
+                    {canReject && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        className="min-h-touch px-3"
+                        aria-label={`Tolak kunjungan ${visit.visit_id}`}
+                        onClick={() => setRejectOpen(true)}
+                      >
+                        <XCircle aria-hidden="true" className="size-4 shrink-0" />
+                        Tolak
+                      </Button>
+                    )}
                     {canReschedule && (
                       <Button
                         variant="secondary"
                         size="sm"
+                        className="min-h-touch"
                         onClick={() => setRescheduleOpen(true)}
                       >
-                        <CalendarClock aria-hidden="true" className="size-4" />
+                        <CalendarClock aria-hidden="true" className="size-4 shrink-0" />
                         Ubah Jadwal
                       </Button>
                     )}
                     {canCancel && (
-                      <Button variant="danger" size="sm" onClick={() => setCancelOpen(true)}>
-                        <XCircle aria-hidden="true" className="size-4" />
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        className="min-h-touch"
+                        onClick={() => setCancelOpen(true)}
+                      >
+                        <XCircle aria-hidden="true" className="size-4 shrink-0" />
                         Batalkan Kunjungan
                       </Button>
                     )}
@@ -279,7 +351,7 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
               </h2>
               <dl className="mt-3 divide-y divide-border-light">
                 <InfoRow
-                  label="PIC"
+                  label="Vendor/Mitra"
                   value={
                     <>
                       {visit.pic_user.name}
@@ -289,12 +361,13 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                     </>
                   }
                 />
-                <InfoRow
-                  label="Vendor"
-                  value={visit.vendor_name !== '' ? visit.vendor_name : '—'}
-                />
                 <InfoRow label="Lokasi" value={visit.location.name} />
                 <InfoRow label="Keperluan" value={purposeChips} />
+                {/* "Tujuan lain" (purpose_note) hanya bila terisi. */}
+                {visit.purpose_note != null &&
+                visit.purpose_note.trim() !== '' ? (
+                  <InfoRow label="Tujuan lain" value={visit.purpose_note} />
+                ) : null}
                 <InfoRow
                   label="Rentang Waktu"
                   value={`${formatTanggalWaktu(visit.start_date)} – ${formatTanggalWaktu(visit.end_date)}`}
@@ -318,15 +391,20 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                 <FileText aria-hidden="true" className="size-4 shrink-0 text-ink-secondary" />
                 Dokumen Surat Tugas
               </h2>
-              {visit.assignment_letter_url !== null ? (
+              {/*
+                Cek truthy (bukan `!== null`): string kosong sama saja tidak
+                ada dokumen — jika tetap dirender, href="" membuka tab kosong.
+              */}
+              {visit.assignment_letter_url ? (
                 <div className="mt-4 flex flex-col items-start gap-2">
                   <a
                     href={visit.assignment_letter_url}
                     target="_blank"
                     rel="noopener noreferrer"
+                    aria-label={`Lihat dokumen surat tugas ${visit.visit_id}`}
                     className="inline-flex min-h-touch items-center justify-center gap-2 rounded-control border border-brand px-4 text-label font-semibold uppercase tracking-wide text-brand transition duration-150 hover:bg-brand-soft"
                   >
-                    <ExternalLink aria-hidden="true" className="size-4" />
+                    <ExternalLink aria-hidden="true" className="size-4 shrink-0" />
                     Lihat Dokumen
                   </a>
                   <p className="text-label text-ink-muted">
@@ -350,21 +428,58 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
               </h2>
               {visit.visitors.length > 0 ? (
                 <ul className="mt-3 divide-y divide-border-light">
-                  {visit.visitors.map((visitor, index) => (
-                    <li
-                      key={`${index}-${visitor.id_number}`}
-                      className="flex items-center justify-between gap-3 py-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-ink">
-                          {visitor.name}
-                        </p>
-                        <p className="text-label text-ink-secondary">
-                          {`No. Identitas: ${visitor.id_number}`}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
+                  {visit.visitors.map((visitor, index) => {
+                    const selfieUrl = visitor.photo_url ?? null
+                    const ktpUrl = visitor.id_card_photo_url ?? null
+                    return (
+                      <li
+                        key={`${index}-${visitor.id_number}`}
+                        className="flex items-start gap-3 py-3"
+                      >
+                        <VisitorPhoto
+                          src={selfieUrl}
+                          visitorName={visitor.name}
+                          variant="selfie"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-ink">
+                            {visitor.name}
+                          </p>
+                          <p className="text-label text-ink-secondary">
+                            {`No. Identitas: ${visitor.id_number}`}
+                          </p>
+                          <p className="text-label text-ink-secondary">
+                            {visitor.phone !== '' ? visitor.phone : '—'}
+                          </p>
+                          <p className="text-label text-ink-secondary">
+                            {`Perusahaan: ${(visitor.vendor_name ?? '').trim() !== '' ? visitor.vendor_name : '—'}`}
+                          </p>
+                          <div className="mt-1.5 flex flex-wrap gap-2">
+                            {ktpUrl !== null && ktpUrl !== '' ? (
+                              <a
+                                href={ktpUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`Lihat Foto KTP ${visitor.name}`}
+                                className="inline-flex min-h-touch items-center rounded-badge border border-border-mid px-2.5 text-badge font-semibold text-brand"
+                              >
+                                Lihat Foto KTP
+                              </a>
+                            ) : (
+                              <span className="text-badge text-ink-muted">
+                                Foto KTP tidak tersedia
+                              </span>
+                            )}
+                            {selfieUrl === null || selfieUrl === '' ? (
+                              <span className="text-badge text-ink-muted">
+                                Selfie tidak tersedia
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               ) : (
                 <p className="mt-3 rounded-control bg-neutral-bg px-4 py-3 text-sm text-neutral-text">
@@ -387,10 +502,35 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                   createdAt={visit.created_at}
                   startDate={visit.start_date}
                   endDate={visit.end_date}
+                  checkInAt={visit.check_in_at ?? null}
+                  checkOutAt={visit.check_out_at ?? null}
                 />
               </div>
             </CardBody>
           </Card>
+
+          {showDelete ? (
+            <Card>
+              <CardBody>
+                <h2 className="flex items-center gap-2 text-base font-semibold text-danger-text">
+                  <Trash2 aria-hidden="true" className="size-4 shrink-0" />
+                  Zona Berbahaya
+                </h2>
+                <p className="mt-2 text-sm text-ink-secondary">
+                  Hapus permanen kunjungan ini beserta seluruh datanya. Berlaku untuk status apa pun dan tidak dapat dibatalkan.
+                </p>
+                <Button
+                  variant="danger"
+                  className="mt-4 min-h-touch"
+                  aria-label={`Hapus permanen kunjungan ${visit.visit_id}`}
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <Trash2 aria-hidden="true" className="size-4 shrink-0" />
+                  Hapus Permanen
+                </Button>
+              </CardBody>
+            </Card>
+          ) : null}
         </div>
       </div>
 
@@ -404,6 +544,36 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
         />
       )}
       {cancelOpen && <CancelModal visitId={visitId} open onClose={() => setCancelOpen(false)} />}
+      {approveOpen && (
+        <ApproveModal visit={visit} open onClose={() => setApproveOpen(false)} />
+      )}
+      {rejectOpen && (
+        <RejectModal visit={visit} open onClose={() => setRejectOpen(false)} />
+      )}
+      {deleteOpen && (
+        <ConfirmModal
+          open
+          title={`Hapus ${visit.visit_id}`}
+          message={deleteVisitConfirmMessage(visit.visit_id)}
+          loading={deleteMutation.isPending}
+          onClose={() => setDeleteOpen(false)}
+          onConfirm={() => {
+            deleteMutation.mutate(
+              { visitId },
+              {
+                onSuccess: () => {
+                  toast.success(`Kunjungan ${visit.visit_id} dihapus permanen`)
+                  setDeleteOpen(false)
+                  router.replace('/dashboard')
+                },
+                onError: (error) => {
+                  toast.error(apiErrorMessage(error))
+                },
+              },
+            )
+          }}
+        />
+      )}
     </>
   )
 }

@@ -111,7 +111,7 @@ func TestCheckOut_ForbiddenActorAndBranch(t *testing.T) {
 		name  string
 		actor gate.Actor
 	}{
-		{"pic is forbidden", gate.Actor{ID: "pic-1", Role: domain.RolePIC}},
+		{"vendor is forbidden", gate.Actor{ID: "pic-1", Role: domain.RoleVendor}},
 		{"security on another branch is forbidden", gate.Actor{ID: "sec-1", Role: domain.RoleSecurity, LocationID: uuidPtr("loc-A")}},
 		{"admin on another branch is forbidden", gate.Actor{ID: "adm-1", Role: domain.RoleAdmin, LocationID: uuidPtr("loc-A")}},
 	}

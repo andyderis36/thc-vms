@@ -75,6 +75,10 @@ type User struct {
 	LastLogin    pgtype.Timestamptz `json:"last_login"`
 	CreatedAt    time.Time          `json:"created_at"`
 	UpdatedAt    time.Time          `json:"updated_at"`
+	// Nomor Induk Kependudukan (16 digit numerik) pemilik akun; wajib untuk role admin/vendor, NULL untuk security/super_admin
+	Nik pgtype.Text `json:"nik"`
+	// Nama perusahaan vendor akun PIC yang diketik manual; TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor (hanya dipakai sebagai vendor_name tampilan bila vendor_id absen)
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
 }
 
 type Vendor struct {
@@ -107,6 +111,8 @@ type VisitRequest struct {
 	Notes               pgtype.Text `json:"notes"`
 	CreatedAt           time.Time   `json:"created_at"`
 	UpdatedAt           time.Time   `json:"updated_at"`
+	// Tujuan kunjungan tambahan yang diketik bebas (tujuan lain); TIDAK terdaftar di katalog purpose dan TIDAK pernah tampil di dropdown tujuan
+	PurposeNote pgtype.Text `json:"purpose_note"`
 }
 
 type Visitor struct {
@@ -118,4 +124,8 @@ type Visitor struct {
 	IDCardPhotoUrl pgtype.Text `json:"id_card_photo_url"`
 	PhotoUrl       pgtype.Text `json:"photo_url"`
 	CreatedAt      time.Time   `json:"created_at"`
+	// Perusahaan vendor teknisi (opsional); NULL untuk staf internal THC
+	VendorID pgtype.UUID `json:"vendor_id"`
+	// Nama perusahaan vendor yang diketik manual per teknisi; TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor (hanya dipakai sebagai vendor_name tampilan bila vendor_id absen)
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
 }

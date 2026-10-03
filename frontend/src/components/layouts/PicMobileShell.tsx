@@ -4,6 +4,9 @@ import Link from 'next/link'
 import { House, LogOut, Plus, QrCode, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useSession } from '@/lib/auth/session'
+import { getRoleLabel } from '@/lib/auth/capabilities'
+import type { VisitStatus } from '@/lib/api/types'
+import { SkipToContentLink } from './SkipToContentLink'
 
 interface PicNavDestination {
   id: string
@@ -16,9 +19,10 @@ interface PicNavDestination {
 }
 
 /**
- * Tiga tujuan SHELL-04. Rute mengikuti peta rute aplikasi
- * (`/dashboard`, `/visits/new` — lihat `lib/auth/guards.tsx`); `/qr` adalah
- * layar tiket QR aktif milik PIC (SCR-04). Layar pemilik rute boleh
+ * Tiga tujuan SHELL-04. `/qr` adalah resolver tiket QR aktif milik Vendor/Mitra
+ * (SCR-04): memilih kunjungan visiting/approved lalu mengganti ke
+ * `/visits/[id]` (kartu QR above-the-fold); tanpa tiket menampilkan
+ * empty state + ajakan mengajukan. Layar pemilik rute boleh
  * menyesuaikan konstanta ini bila peta rute berubah.
  */
 const PIC_NAV: PicNavDestination[] = [
@@ -48,23 +52,57 @@ const PIC_NAV: PicNavDestination[] = [
 /** Item tengah bottom bar = tombol bundar raised merah (+ Ajukan). */
 const CENTRE_NAV_ID = 'new-visit'
 
+/** Status yang menampilkan kartu QR di SCR-04 (sama dengan `showQr` di halaman detail). */
+const QR_VISIBLE_STATUSES: ReadonlySet<VisitStatus> = new Set<VisitStatus>([
+  'approved',
+  'visiting',
+])
+
+/**
+ * Rute detail SCR-04 (`/visits/[id]`) tidak punya pasangan di `PIC_NAV`,
+ * jadi `aria-current` pernah kosong. Petakan: status yang menampilkan kartu
+ * QR (approved/visiting) -> `/qr` (Tiket QR); selainnya -> `/dashboard`
+ * (Kunjungan Saya). Rute lain diteruskan apa adanya.
+ */
+function resolveActiveHref(activeHref: string, visitStatus: VisitStatus | undefined): string {
+  const isDetailRoute = activeHref.startsWith('/visits/') && activeHref !== '/visits/new'
+  if (!isDetailRoute) return activeHref
+  return visitStatus !== undefined && QR_VISIBLE_STATUSES.has(visitStatus)
+    ? '/qr'
+    : '/dashboard'
+}
+
 export interface PicMobileShellProps {
   children: ReactNode
-  /** Bandingkan dengan `href` tujuan untuk menandai `aria-current="page"`. */
+  /**
+   * Bandingkan dengan `href` tujuan untuk menandai `aria-current="page"`.
+   * Default `'/dashboard'` agar selalu ada satu tujuan aktif walau layar
+   * pemilik datanya belum meneruskan rute.
+   */
   activeHref?: string
+  /**
+   * Status kunjungan saat rute detail SCR-04 (`/visits/[id]`) terbuka —
+   * dipakai `resolveActiveHref` agar kartu QR menyalakan tab yang benar.
+   */
+  visitStatus?: VisitStatus
 }
 
 /**
- * SHELL-04 — PIC Mobile Shell.
+ * SHELL-04 — Vendor Mobile Shell (`PicMobileShell`).
  *
- * Hanya untuk peran `pic` (customer / teknisi vendor). Tanpa sidebar:
+ * Hanya untuk peran `vendor` (Vendor/Mitra — customer / teknisi vendor). Tanpa sidebar:
  * ponsel/tablet (< 1024px) memakai bottom navigation tetap berisi 3 tujuan
  * (Kunjungan Saya, tombol bundar raised + Ajukan, Tiket QR); desktop
  * (>= 1024px) menggantinya dengan top navigation horizontal di dalam header.
  */
-export function PicMobileShell({ children, activeHref }: PicMobileShellProps) {
+export function PicMobileShell({
+  children,
+  activeHref = '/dashboard',
+  visitStatus,
+}: PicMobileShellProps) {
   const { user, signOut } = useSession()
-  const vendorLabel = user?.vendor_name ?? 'PIC'
+  const vendorLabel = user?.vendor_name ?? getRoleLabel('vendor')
+  const currentHref = resolveActiveHref(activeHref, visitStatus)
 
   const handleSignOut = (): void => {
     void signOut()
@@ -72,8 +110,13 @@ export function PicMobileShell({ children, activeHref }: PicMobileShellProps) {
 
   return (
     <div className="flex min-h-dvh flex-col bg-page">
-      {/* Header sticky: logo + nama produk, nav desktop, vendor + logout. */}
-      <header className="sticky top-0 z-30 h-14 border-b border-border-light bg-surface lg:h-topbar">
+      {/* Pintas keyboard pertama: lompat langsung ke konten utama. */}
+      <SkipToContentLink />
+
+      {/* Header sticky: logo + nama produk, nav desktop, vendor + logout.
+          overflow-hidden: potongan terakhir bila ada child nowrap (logo
+          group) yang keberatan mengecil di 375px. */}
+      <header className="sticky top-0 z-30 h-14 overflow-hidden border-b border-border-light bg-surface lg:h-topbar">
         <div className="flex h-full items-center justify-between gap-3 px-4">
           <div className="flex shrink-0 items-center gap-2">
             <span
@@ -87,7 +130,7 @@ export function PicMobileShell({ children, activeHref }: PicMobileShellProps) {
 
           <nav aria-label="Navigasi utama" className="hidden items-center gap-1 lg:flex">
             {PIC_NAV.map((item) => {
-              const active = activeHref === item.href
+              const active = currentHref === item.href
               return (
                 <Link
                   key={item.id}
@@ -98,15 +141,18 @@ export function PicMobileShell({ children, activeHref }: PicMobileShellProps) {
                     active ? 'text-brand' : 'text-ink-secondary hover:bg-neutral-bg hover:text-ink',
                   ].join(' ')}
                 >
-                  <item.Icon aria-hidden="true" className="size-4" />
+                  <item.Icon aria-hidden="true" className="size-4 shrink-0" />
                   {item.label}
                 </Link>
               )
             })}
           </nav>
 
-          <div className="flex min-w-0 shrink-0 items-center gap-1">
-            <span className="min-w-0 truncate text-label font-semibold text-ink-secondary lg:max-w-40">
+          {/* Tanpa `shrink-0`: modifier itu menetralkan `min-w-0` sehingga
+              label vendor tak pernah bisa menyusut dan header meluber di
+              375px. `max-w-*` memberi batas atas; `truncate` memotongnya. */}
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="min-w-0 max-w-28 truncate text-label font-semibold text-ink-secondary sm:max-w-72 lg:max-w-40">
               {vendorLabel}
             </span>
             <button
@@ -116,14 +162,16 @@ export function PicMobileShell({ children, activeHref }: PicMobileShellProps) {
               title="Keluar dari akun"
               className="inline-flex size-11 shrink-0 items-center justify-center rounded-control text-ink-secondary transition-colors hover:bg-neutral-bg hover:text-brand"
             >
-              <LogOut aria-hidden="true" className="size-4" />
+              <LogOut aria-hidden="true" className="size-4 shrink-0" />
             </button>
           </div>
         </div>
       </header>
 
-      {/* Konten: p-4; pb-24 memberi ruang bottom nav 64px + tonjolan tombol bundar. */}
-      <main className="flex-1 overflow-x-hidden p-4 pb-24 lg:pb-8">
+      {/* Konten: p-4; pb-24 memberi ruang bottom nav 64px + tonjolan tombol bundar.
+          overflow-x-clip mengunci scroll horizontal tanpa mematikan elemen sticky
+          (action bar SCR-03). min-w-0 = min-inline-size:0; id+tabIndex = skip-to-content. */}
+      <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-x-clip p-4 pb-24 lg:pb-8">
         {children}
       </main>
 
@@ -134,7 +182,7 @@ export function PicMobileShell({ children, activeHref }: PicMobileShellProps) {
       >
         <div className="flex h-full items-stretch">
           {PIC_NAV.map((item) => {
-            const active = activeHref === item.href
+            const active = currentHref === item.href
 
             if (item.id === CENTRE_NAV_ID) {
               return (
@@ -146,7 +194,7 @@ export function PicMobileShell({ children, activeHref }: PicMobileShellProps) {
                   className="relative flex flex-1 items-start justify-center"
                 >
                   <span className="flex size-14 -translate-y-6 flex-col items-center justify-center gap-0.5 rounded-full bg-brand text-brand-contrast shadow-dropdown ring-4 ring-surface">
-                    <item.Icon aria-hidden="true" className="size-5" />
+                    <item.Icon aria-hidden="true" className="size-5 shrink-0" />
                     <span className="text-badge font-bold leading-none">{item.mobileLabel}</span>
                   </span>
                 </Link>
@@ -163,7 +211,7 @@ export function PicMobileShell({ children, activeHref }: PicMobileShellProps) {
                   active ? 'text-brand' : 'text-ink-secondary',
                 ].join(' ')}
               >
-                <item.Icon aria-hidden="true" className="size-5" />
+                <item.Icon aria-hidden="true" className="size-5 shrink-0" />
                 {item.mobileLabel}
               </Link>
             )

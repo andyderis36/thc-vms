@@ -27,7 +27,7 @@ func TestPlanCounts(t *testing.T) {
 		{"locations", len(p.Locations), 5},
 		{"purposes", len(p.Purposes), 6},
 		{"vendors", len(p.Vendors), 2},
-		{"users", len(p.Users), 7},
+		{"users", len(p.Users), 26},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s: got %d rows, want %d", c.what, c.got, c.want)
@@ -76,7 +76,7 @@ func TestDerivedIDsAreStableAndDistinct(t *testing.T) {
 	for _, v := range p.Vendors {
 		note(DeriveID(EntityVendor, v.Name), "vendor "+v.Name)
 	}
-	if got, want := DeriveID(EntityLocation, "HQ-SBY-01"), DeriveID(EntityLocation, "HQ-SBY-01"); got != want {
+	if got, want := DeriveID(EntityLocation, "HQ-PTK-01"), DeriveID(EntityLocation, "HQ-PTK-01"); got != want {
 		t.Errorf("DeriveID is not deterministic: %s then %s", got, want)
 	}
 }
@@ -101,7 +101,7 @@ func TestLocationsUseTheSchemaVocabulary(t *testing.T) {
 // Each row is one case from the plpgsql trigger, including a role it does not
 // know, so an unexpected name must not be inserted.
 func TestRoleLocationInvariantMatrix(t *testing.T) {
-	loc := ResolveLocationID("HQ-SBY-01")
+	loc := ResolveLocationID("HQ-PTK-01")
 	violations := []struct {
 		name     string
 		role     string
@@ -111,8 +111,8 @@ func TestRoleLocationInvariantMatrix(t *testing.T) {
 		{"super_admin with a location", RoleSuperAdmin, loc, UserTypeInternal},
 		{"admin without a location", RoleAdmin, nil, UserTypeInternal},
 		{"security without a location", RoleSecurity, nil, UserTypeInternal},
-		{"pic with a location", RolePIC, loc, UserTypeExternal},
-		{"pic typed internal", RolePIC, nil, UserTypeInternal},
+		{"vendor with a location", RoleVendor, loc, UserTypeExternal},
+		{"vendor typed internal", RoleVendor, nil, UserTypeInternal},
 		{"unknown role", "superuser", loc, UserTypeInternal},
 	}
 	for _, v := range violations {
@@ -131,7 +131,7 @@ func TestRoleLocationInvariantMatrix(t *testing.T) {
 		{"super_admin is global", RoleSuperAdmin, nil, UserTypeInternal},
 		{"admin is bound to a facility", RoleAdmin, loc, UserTypeInternal},
 		{"security is bound to a facility", RoleSecurity, loc, UserTypeInternal},
-		{"pic is global and external", RolePIC, nil, UserTypeExternal},
+		{"vendor is global and external", RoleVendor, nil, UserTypeExternal},
 	}
 	for _, a := range accepted {
 		if err := CheckInvariant(a.role, a.location, a.userType); err != nil {

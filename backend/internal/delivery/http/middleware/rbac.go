@@ -11,7 +11,7 @@ import (
 // RequireRoles is MW3's role gate: only callers carrying one of the allowed
 // roles pass. Anonymous callers get the 401 envelope; the wrong role gets
 // 403 with the sentinel's exact message, read from domain.ErrForbiddenBranch
-// and never retyped. pic is refused on every administrative route by simply
+// and never retyped. vendor is refused on every administrative route by simply
 // never listing it among the allowed roles.
 func RequireRoles(allowed ...domain.RoleName) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -50,7 +50,7 @@ func CheckBranch(id deliveryhttp.Identity, target domain.UUID) error {
 
 // EffectiveScope resolves the location filter a listing endpoint must apply:
 // super_admin may pass nil (every branch) or narrow to ?location_id=, while
-// admin and security are locked to their own branch and pic is refused.
+// admin and security are locked to their own branch and vendor is refused.
 // An unparseable filter can never widen the scope, so it fails closed.
 func EffectiveScope(id deliveryhttp.Identity, queryLocation string) (*domain.UUID, error) {
 	if id.Role == domain.RoleSuperAdmin {

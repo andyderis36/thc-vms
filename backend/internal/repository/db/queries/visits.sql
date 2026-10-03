@@ -18,7 +18,7 @@
 --     admin       : ListVisitsForLocation     (location_id REQUIRED)
 --     security    : ListVisitsForLocation     (location_id REQUIRED,
 --                                              + date_from/date_to = TODAY, PRD L97)
---     pic         : ListVisitsForPIC          (pic_user_id REQUIRED)
+--     vendor       : ListVisitsForPIC          (pic_user_id REQUIRED)
 --   Each list query has a Count* twin with the identical predicate so the
 --   {items,total,page,limit} envelope (openapi L896-913) cannot drift from the
 --   page it is counting.
@@ -32,9 +32,9 @@
 INSERT INTO visit_request (
     visit_id, pic_user_id, vendor_id, location_id,
     start_date, end_date, is_multi_day, status,
-    assignment_letter_url, is_nda_accepted, notes
+    assignment_letter_url, is_nda_accepted, notes, purpose_note
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10, $11)
 RETURNING *;
 
 -- Detail read for GET /visits/{id} (openapi L309-327) and for every
@@ -188,7 +188,7 @@ WHERE vr.location_id = sqlc.arg('location_id')::uuid
 
 -- name: ListVisitsForPIC :many
 -- PIC / external-staff scope (PRD L112, AGENTS.md rule 6.1): strictly
--- WHERE pic_user_id = auth_user.id. A PIC can never widen this to see another
+-- WHERE pic_user_id = auth_user.id. A vendor can never widen this to see another
 -- vendor's visits, whatever they send in the query string. Uses idx_visit_pic
 -- (PRD L209).
 SELECT
@@ -268,18 +268,26 @@ ORDER BY sh.changed_at ASC, sh.id ASC;
 
 -- name: InsertVisitor :one
 -- POST /visits visitors[] (openapi L816-822), up to 10 rows per visit (QA
--- VISIT-05). Cascades to nothing on insert; the visit FK is ON DELETE CASCADE so
--- deleting a visit removes its roster.
-INSERT INTO visitor (visit_request_id, name, id_number, phone, id_card_photo_url, photo_url)
-VALUES ($1, $2, $3, $4, $5, $6)
+-- VISIT-05). vendor_id is the technician's own company (openapi VisitorItem);
+-- NULL for internal staff. vendor_name_override is the manually typed company
+-- (migration 000005), stored ONLY when vendor_id is absent: a sent vendor_id
+-- wins and the Go caller passes NULL for the override. Cascades to nothing on
+-- insert; the visit FK is ON DELETE CASCADE so deleting a visit removes its
+-- roster.
+INSERT INTO visitor (visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, vendor_id, vendor_name_override)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: ListVisitors :many
 -- Roster for SCR-04 / SCR-05. Batched per page with a single IN (...) by the
--- repository to avoid an N+1 over the visit list.
-SELECT * FROM visitor
-WHERE visit_request_id = ANY(sqlc.arg('visit_request_ids')::uuid[])
-ORDER BY created_at ASC, id ASC;
+-- repository to avoid an N+1 over the visit list. The vendor name rides along
+-- for the openapi VisitorItem vendor_name member.
+SELECT v.*,
+    vn.name AS vendor_name
+FROM visitor v
+LEFT JOIN vendor vn ON vn.id = v.vendor_id
+WHERE v.visit_request_id = ANY(sqlc.arg('visit_request_ids')::uuid[])
+ORDER BY v.created_at ASC, v.id ASC;
 
 -- name: InsertVisitPurpose :exec
 -- visit_purpose is a pure join table (ERD L107-110) whose composite primary key
@@ -293,3 +301,14 @@ FROM visit_purpose vp
 JOIN purpose p ON p.id = vp.purpose_id
 WHERE vp.visit_request_id = ANY(sqlc.arg('visit_request_ids')::uuid[])
 ORDER BY p.name ASC;
+
+-- name: DeleteVisit :one
+-- DELETE /visits/:id (super_admin only, any status). The child tables
+-- (visitor, visit_purpose, status_history, check_in, check_out) all carry
+-- ON DELETE CASCADE, so removing the single visit row cleans its roster,
+-- purposes, history and gate records atomically. A missing id surfaces
+-- pgx.ErrNoRows (-> 404 via MapError). There is deliberately no status
+-- guard: a super_admin may purge a visit in any lifecycle state.
+DELETE FROM visit_request
+WHERE id = $1
+RETURNING id;

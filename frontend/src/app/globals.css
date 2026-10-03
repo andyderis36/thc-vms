@@ -23,25 +23,31 @@
   --text-label: 0.8125rem; /* 13px — form labels, small button text */
   --text-badge: 0.6875rem; /* 11px — status badge (uppercase, bold) */
 
-  /* --- Brand (Merah THC) --------------------------------------------------- */
-  --color-brand: #de1b1b;
-  --color-brand-dark: #b91616; /* hover / active */
-  --color-brand-soft: #fee2e2; /* sidebar active bg, soft fills */
-  --color-brand-contrast: #ffffff; /* text on brand */
+  /* --- Brand (Ungu-Biru Trans Hybrid Communication) ------------------------ */
+  --color-brand: #422ad5;
+  --color-brand-dark: #3824b5; /* hover / active — teks #e0e7ff tetap ~8:1 (WCAG AA) */
+  --color-brand-soft: #e0e7ff; /* tint keluarga primary-content: sidebar active bg, soft fills */
+  --color-brand-contrast: #e0e7ff; /* primary-content: teks di atas brand */
+
+  /* --- Secondary & Accent (identitas THC) ---------------------------------- */
+  --color-secondary: #f43098; /* magenta sekunder */
+  --color-secondary-contrast: #ffffff; /* teks di atas secondary */
+  --color-accent: #00d1bb; /* teal aksen */
+  --color-accent-contrast: #09090b; /* teks di atas accent (netral gelap) */
 
   /* --- Neutrals ----------------------------------------------------------- */
-  --color-page: #f5f7fa; /* background halaman */
+  --color-page: #ffffff; /* background halaman (base) */
   --color-surface: #ffffff; /* background kartu & panel */
-  --color-border-light: #e5e7eb;
-  --color-border-mid: #d1d5db;
-  --color-ink: #1a1a1a; /* teks utama */
-  --color-ink-secondary: #6b7280; /* teks sekunder */
-  --color-ink-muted: #9ca3af; /* placeholder / caption */
+  --color-border-light: #eeeeee;
+  --color-border-mid: #eeeeee;
+  --color-ink: #18181b; /* teks utama */
+  --color-ink-secondary: #52525b; /* teks sekunder — 7.7:1 di putih (WCAG AA) */
+  --color-ink-muted: #71717a; /* placeholder / caption — 4.8:1 di putih (WCAG AA) */
 
-  /* --- Shell surfaces ----------------------------------------------------- */
-  --color-sidebar-dark: #0f172a; /* SHELL-01 superadmin sidebar */
-  --color-sidebar-dark-active: #1e293b; /* item aktif di sidebar gelap */
-  --color-kiosk-topbar: #1e293b; /* SHELL-03 topbar kios industrial */
+  /* --- Shell surfaces (diturunkan dari neutral #09090b; base < active) ----- */
+  --color-sidebar-dark: #09090b; /* SHELL-01 superadmin sidebar */
+  --color-sidebar-dark-active: #27272a; /* item aktif — lebih terang dari base */
+  --color-kiosk-topbar: #18181b; /* SHELL-03 topbar kios industrial */
 
   /* --- Semantic pairs (teks / background) --------------------------------- */
   --color-success-text: #166534;
@@ -55,14 +61,14 @@
   --color-neutral-text: #6b7280;
   --color-neutral-bg: #f3f4f6;
 
-  /* --- Action buttons (SCR-05 gerbang) ------------------------------------- */
+  /* --- Action buttons (SCR-05 gerbang) — PENGECUALIAN FUNGSIONAL ---------- */
   --color-checkin: #16a34a; /* tombol "CHECK-IN MASUK" */
   --color-checkout: #dc2626; /* tombol "CHECK-OUT KELUAR" / Reject */
 
   /* --- Border radius ------------------------------------------------------ */
   --radius-badge: 0.375rem; /* 6px  */
-  --radius-control: 0.5rem; /* 8px  button & input */
-  --radius-card: 0.75rem; /* 12px card */
+  --radius-control: 0.25rem; /* 4px  button & input */
+  --radius-card: 0.5rem; /* 8px card */
   --radius-modal: 1rem; /* 16px modal */
 
   /* --- Elevation ---------------------------------------------------------- */
@@ -106,12 +112,39 @@
   * {
     -webkit-tap-highlight-color: transparent;
   }
+
+  /*
+   * Reduced motion (WCAG 2.3.3 / design contract §5): seluruh transisi &
+   * animasi dimatikan untuk pengguna `prefers-reduced-motion: reduce`.
+   * Klarifikasi teknis: yang benar-benar GPU-composited hanya `opacity`
+   * dan `transform`. `color`/`background-color` adalah tahap PAINT (browser
+   * menggambar ulang piksel, bukan sekadar meng-komposit layer) — tetap murah
+   * karena tidak mengubah layout. Yang pasti tidak ada: animasi properti
+   * layout (width/height/margin/dst) di seluruh aplikasi ini.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 /* =============================================================================
  * Reusable component classes
  * NOTE: variant-aware custom utilities must use `@utility`, NOT `@layer utilities`.
  * ========================================================================== */
+
+/* Pemecah token panjang tanpa spasi (ID kunjungan, nama vendor) di sel sempit.
+ * Dipakai 3 tempat: VisitCards (keperluan), users (Cabang/Vendor), facilities. */
+@utility wrap-anywhere {
+  overflow-wrap: anywhere;
+}
+
 @layer components {
   /* Card surface used across SCR-02 / SCR-03 / SCR-04 */
   .card {

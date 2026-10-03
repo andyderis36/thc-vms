@@ -8,7 +8,8 @@ import { toast } from 'sonner'
 import { z } from 'zod'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { getLoginRedirect } from '@/lib/auth/capabilities'
+import { Select } from '@/components/ui/Select'
+import { getLoginRedirect, getRoleLabel } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 
 /**
@@ -36,7 +37,12 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>
 
-/** Kata sandi semua akun demo sama — sumbernya seed (`mocks/seed.ts`). */
+/**
+ * Kata sandi semua akun demo sama — SAMA dengan `DemoPassword` milik BE
+ * (`backend/seeds/seeddata/password.go`, diverifikasi 2026-09-26).
+ * JANGAN ubah nilainya: bila suatu saat berbeda dengan BE, LAPORKAN
+ * alih-alih menyamakan sepihak.
+ */
 const DEMO_PASSWORD = 'Password123!'
 
 interface DemoAccount {
@@ -44,17 +50,66 @@ interface DemoAccount {
   email: string
 }
 
-const DEMO_ACCOUNTS: readonly DemoAccount[] = [
-  { label: 'Superadmin', email: 'superadmin@thc.net.id' },
-  { label: 'Admin Cabang', email: 'admin.sby@thc.net.id' },
-  { label: 'Security', email: 'satpam.sby@thc.net.id' },
-  { label: 'PIC Vendor', email: 'vendor.splicing@mitra-fo.com' },
+interface DemoGroup {
+  role: string
+  accounts: readonly DemoAccount[]
+}
+
+/**
+ * 26 akun demo skema baru — email HARUS sama persis dengan `mocks/seed.ts`
+ * (1 superadmin + 5 admin + 10 security + 10 Vendor/Mitra; NIK/vendor di seed).
+ */
+const DEMO_GROUPS: readonly DemoGroup[] = [
+  {
+    role: getRoleLabel('super_admin'),
+    accounts: [{ label: 'Hendra Wijaya', email: 'superadmin@thc.net.id' }],
+  },
+  {
+    role: getRoleLabel('admin'),
+    accounts: [
+      { label: 'Agus Setiawan (Admin 1)', email: 'admin1@thc.com' },
+      { label: 'Rina Kartika (Admin 2)', email: 'admin2@thc.com' },
+      { label: 'Dedi Kurniawan (Admin 3)', email: 'admin3@thc.com' },
+      { label: 'Siti Rahayu (Admin 4)', email: 'admin4@thc.com' },
+      { label: 'Bambang Sutrisno (Admin 5)', email: 'admin5@thc.com' },
+    ],
+  },
+  {
+    role: getRoleLabel('security'),
+    accounts: [
+      { label: 'Joko Susilo (Pengawas 1A)', email: 'satpam1a@thc.com' },
+      { label: 'Sutrisno Hadi (Pengawas 1B)', email: 'satpam1b@thc.com' },
+      { label: 'Rahmat Hidayat (Pengawas 2A)', email: 'satpam2a@thc.com' },
+      { label: 'Wahyu Saputra (Pengawas 2B)', email: 'satpam2b@thc.com' },
+      { label: 'Slamet Riyadi (Pengawas 3A)', email: 'satpam3a@thc.com' },
+      { label: 'Andi Wijaya (Pengawas 3B)', email: 'satpam3b@thc.com' },
+      { label: 'Herman Yusuf (Pengawas 4A)', email: 'satpam4a@thc.com' },
+      { label: 'Tono Prasetyo (Pengawas 4B)', email: 'satpam4b@thc.com' },
+      { label: 'Mulyadi Santoso (Pengawas 5A)', email: 'satpam5a@thc.com' },
+      { label: 'Dadang Firmansyah (Pengawas 5B)', email: 'satpam5b@thc.com' },
+    ],
+  },
+  {
+    role: getRoleLabel('vendor'),
+    accounts: [
+      { label: 'Dimas Prasetyo (Vendor 1A)', email: 'pic1a@thc.com' },
+      { label: 'Eko Gunawan (Vendor 1B)', email: 'pic1b@thc.com' },
+      { label: 'Fajar Nugroho (Vendor 2A)', email: 'pic2a@thc.com' },
+      { label: 'Yoga Pratama (Vendor 2B)', email: 'pic2b@thc.com' },
+      { label: 'Rudi Hartono (Vendor 3A)', email: 'pic3a@thc.com' },
+      { label: 'Asep Saepudin (Vendor 3B)', email: 'pic3b@thc.com' },
+      { label: 'Budi Santoso (Vendor 4A)', email: 'pic4a@thc.com' },
+      { label: 'Irfan Maulana (Vendor 4B)', email: 'pic4b@thc.com' },
+      { label: 'Hendra Saputra (Vendor 5A)', email: 'pic5a@thc.com' },
+      { label: 'Teguh Laksmana (Vendor 5B)', email: 'pic5b@thc.com' },
+    ],
+  },
 ]
 
 function LoginScreen() {
   const router = useRouter()
   const { user, status, signIn } = useSession()
-  const [selectedDemo, setSelectedDemo] = useState<string | null>(null)
+  const [pickedDemo, setPickedDemo] = useState<{ group: string; email: string } | null>(null)
   const expiredHandled = useRef(false)
 
   const {
@@ -98,11 +153,11 @@ function LoginScreen() {
   }, [status, router])
 
   /** Isi kolom dari akun demo. Hanya `setValue` — tidak pernah auto-submit. */
-  const applyDemo = (account: DemoAccount): void => {
+  const applyDemo = (group: string, email: string): void => {
     clearErrors()
-    setValue('email', account.email, { shouldValidate: true })
+    setValue('email', email, { shouldValidate: true })
     setValue('password', DEMO_PASSWORD, { shouldValidate: true })
-    setSelectedDemo(account.label)
+    setPickedDemo({ group, email })
   }
 
   const onSubmit = async (values: LoginFormValues): Promise<void> => {
@@ -198,21 +253,23 @@ function LoginScreen() {
               <p className="text-label font-semibold text-ink-secondary">
                 Akun demo (uji coba)
               </p>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {DEMO_ACCOUNTS.map((account) => (
-                  <button
-                    key={account.label}
-                    type="button"
-                    aria-pressed={selectedDemo === account.label}
-                    onClick={() => applyDemo(account)}
-                    className={`flex min-h-touch cursor-pointer items-center justify-center rounded-control border px-3 py-2 text-xs font-semibold transition duration-150 ${
-                      selectedDemo === account.label
-                        ? 'border-brand bg-brand text-brand-contrast'
-                        : 'border-border-mid bg-surface text-ink-secondary hover:bg-neutral-bg'
-                    }`}
-                  >
-                    {account.label}
-                  </button>
+              <div className="mt-2 flex flex-col gap-2">
+                {DEMO_GROUPS.map((group) => (
+                  <Select
+                    key={group.role}
+                    label={group.role}
+                    placeholder="Pilih akun…"
+                    options={group.accounts.map((account) => ({
+                      value: account.email,
+                      label: `${account.label} — ${account.email}`,
+                    }))}
+                    value={pickedDemo !== null && pickedDemo.group === group.role ? pickedDemo.email : ''}
+                    onChange={(event) => {
+                      if (event.target.value !== '') {
+                        applyDemo(group.role, event.target.value)
+                      }
+                    }}
+                  />
                 ))}
               </div>
             </div>

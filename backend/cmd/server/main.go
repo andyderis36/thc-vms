@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"thc-vms/backend/internal/config"
 	deliveryhttp "thc-vms/backend/internal/delivery/http"
 	"thc-vms/backend/internal/delivery/http/handlers"
@@ -99,9 +101,13 @@ func run(ctx context.Context) error {
 	dir := directory.New(pool, master)
 	jwtSvc := infraJWT.NewService(cfg).WithDirectory(dir)
 	authSvc := auth.NewService(auth.Deps{
-		Users: users, Roles: dir.Roles(), Locations: master, Issuer: jwtSvc, Clock: clock,
+		Users: users, Roles: dir.Roles(), Locations: master, Vendors: repository.NewVendorRepository(pool), Issuer: jwtSvc, Clock: clock,
 	})
-	visitSvc := visit.NewService(visits, master, clock)
+	// File links on visit reads are short-lived presigned URLs of our own
+	// private bucket (never the raw stored address); the TTL comes from
+	// S3_PRESIGN_TTL_MINUTES and is guaranteed positive by config.
+	visitSvc := visit.NewService(visits, master, clock, checkins, repository.NewVendorRepository(pool)).
+		WithFileLinks(store, cfg.Storage.PresignTTL())
 	gateSvc := gate.NewService(gate.Dependencies{
 		Visits: visits, CheckIns: checkins, Clock: clock, Logger: logger,
 	})
@@ -115,11 +121,29 @@ func run(ctx context.Context) error {
 	}
 	slog.Info("security role resolved")
 
+	// The super_admin back-office (PRD §4) creates admin/vendor accounts, so
+	// their role rows are resolved once at startup like the security role.
+	adminRoleID, err := dir.RoleIDByName(ctx, domain.RoleAdmin)
+	if err != nil {
+		return fmt.Errorf("resolve admin role id: %w", err)
+	}
+	vendorRoleID, err := dir.RoleIDByName(ctx, domain.RoleVendor)
+	if err != nil {
+		return fmt.Errorf("resolve vendor role id: %w", err)
+	}
+	slog.Info("admin and vendor roles resolved")
+
 	authHandler := handlers.NewAuthHandler(authSvc)
 	visitHandler := handlers.NewVisitHandler(visitSvc)
 	gateHandler := handlers.NewGateHandler(gateSvc)
 	masterHandler := handlers.NewMasterHandler(master)
 	userHandler := handlers.NewUserHandler(users, master, securityRoleID)
+	superAdminHandler := handlers.NewSuperAdminHandler(
+		repository.NewManagedUserRepository(pool),
+		repository.NewLocationAdminRepository(pool),
+		visits,
+		adminRoleID, vendorRoleID,
+	)
 	uploadHandler := handlers.NewUploadHandler(store, cfg.Upload.MaxSizeBytes)
 	healthHandler := deliveryhttp.NewHealthHandler(pool)
 
@@ -127,20 +151,45 @@ func run(ctx context.Context) error {
 	// PRD mandates the component but sets no threshold. It is therefore
 	// env-driven with the documented local default, so a QA run or a stricter
 	// production posture can change it without a rebuild.
-	limiter := middleware.NewRateLimiter(
-		envInt("AUTH_RATE_LIMIT", middleware.DefaultAuthRateLimit),
-		envDuration("AUTH_RATE_WINDOW", middleware.DefaultAuthRateWindow),
-	)
+	//
+	// Sentinel "-1" disables the limiter entirely (local dev/QA open mode):
+	// nil makes the router fall back to passthrough, so no per-IP tracking
+	// happens at all. It is read raw via os.Getenv because envInt only
+	// accepts positive integers and would fall back to 5 on -1.
+	// Production keeps the default 5 attempts per minute.
+	var loginLimiter gin.HandlerFunc
+	if os.Getenv("AUTH_RATE_LIMIT") != "-1" {		loginLimiter = middleware.NewRateLimiter(
+			envInt("AUTH_RATE_LIMIT", middleware.DefaultAuthRateLimit),
+			envDuration("AUTH_RATE_WINDOW", middleware.DefaultAuthRateWindow),
+		).Middleware()
+	} else {
+		slog.Warn("auth rate limiter disabled (AUTH_RATE_LIMIT=-1): local dev open mode")
+	}
+	// Mode Gin mengikuti env: production (atau APP_DEBUG=false) berjalan
+	// dengan gin.ReleaseMode agar tidak membocorkan stack trace debug.
+	// Dev default (APP_ENV=local, APP_DEBUG=true) tetap gin.DebugMode.
+	if cfg.App.Environment == "production" || !cfg.App.Debug {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	engine := deliveryhttp.New(deliveryhttp.Deps{
 		Auth: deliveryhttp.AuthRoutes{
 			Login: authHandler.Login, Me: authHandler.Me, Logout: authHandler.Logout,
 		},
 		Users: deliveryhttp.UserRoutes{
 			List: userHandler.ListSecurity, Create: userHandler.CreateSecurity,
-			UpdateStatus: userHandler.UpdateSecurityStatus,
+			UpdateStatus: userHandler.UpdateSecurityStatus, Delete: userHandler.DeleteSecurity,
+			Update: userHandler.UpdateSecurity,
+		},
+		SuperAdmin: deliveryhttp.SuperAdminRoutes{
+			CreateLocation: superAdminHandler.CreateLocation, UpdateLocation: superAdminHandler.UpdateLocation,
+			DeleteLocation: superAdminHandler.DeleteLocation,
+			ListUsers:      superAdminHandler.ListUsers, CreateUser: superAdminHandler.CreateUser,
+			UpdateUserStatus: superAdminHandler.UpdateUserStatus, DeleteUser: superAdminHandler.DeleteUser,
+			DeleteVisit: superAdminHandler.DeleteVisit,
 		},
 		Master: deliveryhttp.MasterRoutes{
 			Locations: masterHandler.ListLocations, Purposes: masterHandler.ListPurposes,
+			Vendors: masterHandler.ListVendors,
 		},
 		Visits: deliveryhttp.VisitRoutes{
 			List: visitHandler.List, Create: visitHandler.Create, Get: visitHandler.Get,
@@ -153,12 +202,17 @@ func run(ctx context.Context) error {
 		Upload: deliveryhttp.UploadRoutes{Upload: uploadHandler.Upload},
 		Health: deliveryhttp.HealthProbes{Health: healthHandler.Health, Ready: healthHandler.Ready},
 		Chain: deliveryhttp.Chain{
-			Recovery:     middleware.Recovery(),
-			CORS:         middleware.CORS(),
-			LoginLimiter: limiter.Middleware(),
+			Recovery: middleware.Recovery(),
+			// Asal tunnel Cloudflare (mis. https://xxx.trycloudflare.com) didaftarkan
+			// lewat CORS_ALLOWED_ORIGINS (koma-dipisah di backend/.env); kosong =
+			// default lokal middleware (localhost:3210).
+			CORS:         middleware.CORS(envList("CORS_ALLOWED_ORIGINS")...),
+			LoginLimiter: loginLimiter,
 			Authenticate: middleware.JWT(jwtSvc, authSvc),
 			AdminOnly: middleware.RequireRoles(
 				domain.RoleSuperAdmin, domain.RoleAdmin),
+			SuperAdminOnly: middleware.RequireRoles(
+				domain.RoleSuperAdmin),
 			ApproveOnly: middleware.RequireRoles(
 				domain.RoleSuperAdmin, domain.RoleAdmin),
 			GateOnly: middleware.RequireRoles(

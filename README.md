@@ -27,7 +27,7 @@ Sistem ini dirancang khusus untuk mengelola izin masuk teknisi internal, vendor 
 3. **`security` (Petugas Jaga Pos / Shelter)**:
    - Terisolasi penuh pada `location_id` pos jaganya.
    - Operasional harian verifikasi tamu check-in & check-out via *Triple-Mode QR Scanner*.
-4. **`pic` (Customer / Teknisi Vendor Mitra Eksternal)**:
+4. **`vendor` (Vendor/Mitra — Customer / Teknisi Vendor Mitra Eksternal)**:
    - Mengajukan permohonan izin kunjungan fasilitas THC.
    - Mengunggah Surat Tugas (SPK) resmi dan data teknisi pengiring.
    - Memegang kartu pas masuk digital (QR Code) siap scan di pos jaga.
@@ -69,10 +69,14 @@ Sistem ini dirancang khusus untuk mengelola izin masuk teknisi internal, vendor 
 | Kode Layar | Nama Layar | Pengguna Utama | Fokus Fungsionalitas |
 |---|---|---|---|
 | **SCR-01** | Layar Masuk (*Login Screen*) | Semua Role | Autentikasi email & password + pemisahan layout RBAC |
-| **SCR-02** | Dashboard Operasional & Antrean Izin | Admin Cabang & Superadmin | Filter perizinan (`pending`, `approved`, `sedang di lokasi`) & modal satpam |
-| **SCR-03** | Formulir Pengajuan Kunjungan | PIC Vendor & Admin | Input form bertahap, multi-teknisi, & upload Surat Tugas SPK (PDF/Img <= 5MB) |
-| **SCR-04** | Status Kunjungan & Pas Masuk QR | PIC Vendor | Kartu QR *above-the-fold* untuk disodorkan ke scanner satpam pos |
+| **SCR-02** | Dashboard Operasional & Antrean Izin | Admin Cabang & Superadmin | Filter perizinan (`requested`, `approved`, `visiting`) & modal satpam |
+| **SCR-03** | Formulir Pengajuan Kunjungan | Vendor & Admin | Input form bertahap, multi-teknisi, & upload Surat Tugas SPK (PDF/Img <= 5MB) |
+| **SCR-04** | Status Kunjungan & Pas Masuk QR | Vendor | Kartu QR *above-the-fold* untuk disodorkan ke scanner satpam pos |
 | **SCR-05** | Layar Gerbang Masuk & Scanner QR | Security & Admin | *Triple-Mode Scanner*: Kamera live, upload foto galeri/chat WA, dan input tiket manual |
+
+> **Halaman back-office (di luar 5 layar inti, memakai ulang permukaan SCR-02):**
+> `/approvals` (antrean approval, admin+superadmin), `/security` (kelola satpam, admin+superadmin),
+> `/facilities` + `/users` (superadmin), `/qr` (resolver tiket QR vendor → SCR-04).
 
 ### Arsitektur Base Layout Shell
 - `SHELL-01`: **Superadmin Shell** (Dark Sidebar 260px + Dropdown Switcher Cabang Nasional).

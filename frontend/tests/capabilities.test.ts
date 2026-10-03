@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { can, getLoginRedirect } from '@/lib/auth/capabilities'
+import { can, getLoginRedirect, getRoleLabel } from '@/lib/auth/capabilities'
 import type { Capability, Role } from '@/lib/auth/capabilities'
 
-const ROLES: readonly Role[] = ['super_admin', 'admin', 'security', 'pic']
+const ROLES: readonly Role[] = ['super_admin', 'admin', 'security', 'vendor']
 
 const CAPABILITIES: readonly Capability[] = [
   'viewAllBranches',
@@ -34,7 +34,7 @@ const EXPECTED: Record<Role, readonly Capability[]> = {
     'manageSecurity',
   ],
   security: ['checkIn', 'checkOut'],
-  pic: ['submitVisit', 'rescheduleVisit', 'cancelVisit'],
+  vendor: ['submitVisit', 'rescheduleVisit', 'cancelVisit'],
 }
 
 /** Expected landing page after login, per role. */
@@ -42,7 +42,7 @@ const EXPECTED_REDIRECT: Record<Role, string> = {
   super_admin: '/dashboard',
   admin: '/dashboard',
   security: '/gate',
-  pic: '/dashboard',
+  vendor: '/dashboard',
 }
 
 /** Every (role, capability) cell, expanded for `it.each`. */
@@ -84,8 +84,8 @@ describe('role capability totals', () => {
     expect(allowed).toEqual(['checkIn', 'checkOut'])
   })
 
-  it('pic is allowed only submitVisit, rescheduleVisit and cancelVisit', () => {
-    const allowed = CAPABILITIES.filter((c) => can('pic', c))
+  it('vendor is allowed only submitVisit, rescheduleVisit and cancelVisit (mantan pic)', () => {
+    const allowed = CAPABILITIES.filter((c) => can('vendor', c))
     expect(allowed).toEqual(['submitVisit', 'rescheduleVisit', 'cancelVisit'])
   })
 })
@@ -99,6 +99,46 @@ describe('getLoginRedirect', () => {
     expect(getLoginRedirect('security')).toBe('/gate')
     expect(getLoginRedirect('super_admin')).toBe('/dashboard')
     expect(getLoginRedirect('admin')).toBe('/dashboard')
-    expect(getLoginRedirect('pic')).toBe('/dashboard')
+    expect(getLoginRedirect('vendor')).toBe('/dashboard')
+  })
+})
+
+describe('getRoleLabel', () => {
+  it("pins getRoleLabel('vendor') to the approved label 'Vendor/Mitra'", () => {
+    expect(getRoleLabel('vendor')).toBe('Vendor/Mitra')
+  })
+
+  it('keeps the other role labels byte-identical', () => {
+    expect(getRoleLabel('super_admin')).toBe('Superadmin')
+    expect(getRoleLabel('admin')).toBe('Koordinator Wilayah')
+    expect(getRoleLabel('security')).toBe('Pengawas')
+  })
+
+  it('no longer maps any label under the retired `pic` role key', () => {
+    // @ts-expect-error 'pic' is no longer a member of Role after the rename.
+    const retired = getRoleLabel('pic')
+    expect(retired).toBeUndefined()
+  })
+})
+
+describe('vendor capabilities (renamed from pic)', () => {
+  const OLD_PIC_SET: readonly Capability[] = [
+    'submitVisit',
+    'rescheduleVisit',
+    'cancelVisit',
+  ]
+
+  it('vendor capability set equals the old pic set exactly', () => {
+    const allowed = CAPABILITIES.filter((c) => can('vendor', c))
+    expect(allowed).toEqual([...OLD_PIC_SET])
+  })
+
+  it('vendor never gains approval or management capabilities', () => {
+    expect(can('vendor', 'approveVisit')).toBe(false)
+    expect(can('vendor', 'rejectVisit')).toBe(false)
+    expect(can('vendor', 'manageSecurity')).toBe(false)
+    expect(can('vendor', 'deleteSecurity')).toBe(false)
+    expect(can('vendor', 'deleteRecords')).toBe(false)
+    expect(can('vendor', 'viewAllBranches')).toBe(false)
   })
 })

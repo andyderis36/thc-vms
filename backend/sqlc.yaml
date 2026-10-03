@@ -17,9 +17,17 @@ version: "2"
 
 sql:
   - engine: "postgresql"
-    # Only the UP migration is the schema. The .down.sql file is teardown DDL and
-    # must never be parsed as schema (it would drop everything sqlc needs).
-    schema: "migrations/000001_init_schema.up.sql"
+    # Only the UP migrations are the schema. The .down.sql files are teardown
+    # DDL and must never be parsed as schema (they would drop everything sqlc
+    # needs). Migrations apply in filename order, so 000002 sees the 000001
+    # tables it alters.
+    schema:
+      - "migrations/000001_init_schema.up.sql"
+      - "migrations/000002_add_user_nik.up.sql"
+      - "migrations/000003_visitor_vendor_id.up.sql"
+      - "migrations/000004_visitor_vendor_index.up.sql"
+      - "migrations/000005_manual_company_and_purpose.up.sql"
+      - "migrations/000006_rename_pic_to_vendor.up.sql"
     queries: "internal/repository/db/queries"
 
     gen:

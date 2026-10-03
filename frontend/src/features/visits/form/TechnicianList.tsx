@@ -14,17 +14,28 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { UploadBox } from './UploadBox'
+import { useVendorsQuery } from '@/lib/api/hooks'
+import { VENDOR_NAME_MAX_LENGTH } from '@/lib/visits/vendor-input'
 import {
   MAX_TECHNICIANS,
   type TechnicianFormValues,
   type VisitFormValues,
 } from './visit-schema'
 
+/** id <datalist> bersama — hanya berisi nama vendor TERDAFTAR dari katalog. */
+const VENDOR_DATALIST_ID = 'visit-vendor-datalist'
+
+/** Helper teks untuk isian vendor bebas-teks (bahasa Indonesia). */
+const VENDOR_HINT =
+  'Pilih dari daftar atau ketik manual. Nama yang diketik manual tidak masuk daftar vendor.'
+
 export interface TechnicianListProps {
   control: Control<VisitFormValues>
   register: UseFormRegister<VisitFormValues>
   setValue: UseFormSetValue<VisitFormValues>
   errors: FieldErrors<VisitFormValues>
+  /** Teks vendor milik pengguna yang sedang masuk — isian awal tiap baris baru. */
+  defaultVendorName?: string
 }
 
 interface TechnicianRowProps {
@@ -35,10 +46,20 @@ interface TechnicianRowProps {
   errors: FieldErrors<VisitFormValues>
   canRemove: boolean
   onRemove: () => void
+  vendorsPending: boolean
+  vendorsError: boolean
 }
 
-function emptyTechnician(): TechnicianFormValues {
-  return { name: '', id_number: '', phone: '', id_card_photo: null }
+function emptyTechnician(defaultVendorName?: string): TechnicianFormValues {
+  return {
+    name: '',
+    id_number: '',
+    phone: '',
+    id_card_photo: null,
+    // Sentinel kosong = belum diunggah; refine skema menolak saat submit.
+    selfie: { url: '', name: '' },
+    vendor_name: defaultVendorName ?? '',
+  }
 }
 
 function TechnicianRow({
@@ -49,10 +70,16 @@ function TechnicianRow({
   errors,
   canRemove,
   onRemove,
+  vendorsPending,
+  vendorsError,
 }: TechnicianRowProps) {
   const photo = useWatch({
     control,
     name: `technicians.${index}.id_card_photo`,
+  })
+  const selfie = useWatch({
+    control,
+    name: `technicians.${index}.selfie`,
   })
   const rowError = errors.technicians?.[index]
   const removeLabel = `Hapus teknisi ${index + 1}`
@@ -74,10 +101,12 @@ function TechnicianRow({
           aria-label={removeLabel}
           title={canRemove ? removeLabel : 'Minimal satu teknisi harus tetap terdaftar'}
         >
-          <Trash aria-hidden="true" className="size-4" />
+          <Trash aria-hidden="true" className="size-4 shrink-0" />
         </Button>
       </div>
 
+      {/* 1 kolom di ponsel (kartu ringkas), 2 kolom >= sm:
+          Nama | No. KTP/SIM, lalu No. HP | Foto KTP */}
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <Input
           label="Nama Lengkap"
@@ -109,9 +138,6 @@ function TechnicianRow({
           error={rowError?.phone?.message}
           {...register(`technicians.${index}.phone`)}
         />
-      </div>
-
-      <div className="mt-4">
         <UploadBox
           compact
           label="Foto KTP (opsional)"
@@ -123,6 +149,48 @@ function TechnicianRow({
               shouldDirty: true,
             })
           }
+        />
+        <UploadBox
+          compact
+          label="Foto Selfie Teknisi"
+          hint="Wajah teknisi terlihat jelas — maksimal 5 MB (JPG/PNG)."
+          idleButtonLabel="Unggah Foto Selfie"
+          changeButtonLabel="Ganti Foto Selfie"
+          category="id_card"
+          value={selfie.url === '' ? null : selfie}
+          error={rowError?.selfie?.message}
+          onChange={(next) =>
+            setValue(
+              `technicians.${index}.selfie`,
+              // Hapus berkas = kembali ke sentinel kosong (wajib isi ulang).
+              next ?? { url: '', name: '' },
+              {
+                shouldDirty: true,
+              },
+            )
+          }
+        />
+        {/* Input bebas-teks + <datalist>: saran HANYA dari katalog vendor
+            terdaftar; teks ketikan manual tidak pernah menjadi opsi. */}
+        <Input
+          label="Perusahaan Vendor"
+          fieldSize="gate"
+          list={VENDOR_DATALIST_ID}
+          autoComplete="off"
+          maxLength={VENDOR_NAME_MAX_LENGTH}
+          placeholder={
+            vendorsPending
+              ? 'Memuat vendor…'
+              : 'Pilih dari daftar atau ketik nama vendor'
+          }
+          hint={VENDOR_HINT}
+          error={
+            rowError?.vendor_name?.message ??
+            (vendorsError
+              ? 'Gagal memuat daftar vendor. Silakan muat ulang halaman.'
+              : undefined)
+          }
+          {...register(`technicians.${index}.vendor_name`)}
         />
       </div>
     </div>
@@ -139,11 +207,14 @@ export function TechnicianList({
   register,
   setValue,
   errors,
+  defaultVendorName,
 }: TechnicianListProps) {
   const { fields, append, remove } = useFieldArray({
     control,
     name: 'technicians',
   })
+  const vendorsQuery = useVendorsQuery()
+  const vendors = vendorsQuery.data ?? []
   const atLimit = fields.length >= MAX_TECHNICIANS
   const listError = errors.technicians?.message
 
@@ -170,6 +241,14 @@ export function TechnicianList({
           </p>
         ) : null}
 
+        {/* Katalog saran vendor — HANYA nama terdaftar (master data
+            Superadmin); teks ketikan manual tidak pernah ditambahkan. */}
+        <datalist id={VENDOR_DATALIST_ID}>
+          {vendors.map((vendor) => (
+            <option key={vendor.id} value={vendor.name} />
+          ))}
+        </datalist>
+
         <div className="flex flex-col gap-4">
           {fields.map((field, index) => (
             <TechnicianRow
@@ -181,6 +260,8 @@ export function TechnicianList({
               errors={errors}
               canRemove={fields.length > 1}
               onRemove={() => remove(index)}
+              vendorsPending={vendorsQuery.isPending}
+              vendorsError={vendorsQuery.isError}
             />
           ))}
         </div>
@@ -192,9 +273,9 @@ export function TechnicianList({
             fullWidth
             className="min-h-touch"
             disabled={atLimit}
-            onClick={() => append(emptyTechnician())}
+            onClick={() => append(emptyTechnician(defaultVendorName))}
           >
-            <Plus aria-hidden="true" className="size-4" />
+            <Plus aria-hidden="true" className="size-4 shrink-0" />
             Tambah Anggota Teknisi
           </Button>
           {atLimit ? (

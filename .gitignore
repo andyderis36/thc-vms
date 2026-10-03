@@ -14,3 +14,13 @@ frontend/.env.local
 # QA run outputs (logs, screenshots) — local only, never commit.
 *.log
 qa-evidence/
+frontend/screenshots/
+docs/stitch-ui/*.png
+
+# Local QA upload fixtures (KTP/selfie/SPK samples) — never commit.
+dummy-assets/
+
+# Stray Node artifacts at repo root (the apps live in frontend/).
+node_modules/
+.vite/
+thc-vms-acc.pdf

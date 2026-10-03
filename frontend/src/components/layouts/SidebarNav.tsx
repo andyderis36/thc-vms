@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { ReactNode } from 'react'
 
 export interface SidebarNavItem {
@@ -6,6 +7,14 @@ export interface SidebarNavItem {
   icon?: ReactNode
   /** Tampil sebagai pill; nilai 0 (atau kurang) disembunyikan. */
   badge?: number
+  /**
+   * Rute alias/subordinat yang IKUT menyalakan item ini (pemetaan aktif).
+   * Dipakai shell untuk rute yang sengaja tidak punya item mandiri pada
+   * menu SSOT — mis. `/gate` & `/visits/*` di bawah Superadmin (§6.1) —
+   * tanpa menambah/mengubah item utama. Kocokan: persis atau prefix
+   * (`<alias>/…`). Opsional; pemanggil lama tanpa field ini tetap aman.
+   */
+  match?: string[]
 }
 
 export type SidebarNavVariant = 'dark' | 'light'
@@ -35,9 +44,25 @@ const STATE_CLASSES: Record<SidebarNavVariant, { active: string; inactive: strin
 }
 
 /**
- * Navigasi daftar vertikal untuk sidebar shell. Sengaja memakai `<a>` biasa
- * (bukan `next/link` + `usePathname`): aktif/tidak ditentukan `activeHref`
- * dari pemilik layar, sehingga komponen ini bebas dependensi router.
+ * Item dianggap aktif bila `activeHref` cocok persis dengan `href`-nya,
+ * merupakan rute turunan (`<href>/…`), atau jatuh pada salah satu alias
+ * `match` (persis/prefix). Murni perbandingan string terhadap `activeHref`
+ * yang diteruskan pemilik layar — komponen tetap tidak membaca `usePathname`,
+ * sehingga bebas dependensi router & mudah diuji.
+ */
+function isNavItemActive(item: SidebarNavItem, activeHref: string): boolean {
+  const bases = item.match !== undefined ? [item.href, ...item.match] : [item.href]
+  return bases.some(
+    (base) => activeHref === base || activeHref.startsWith(`${base}/`),
+  )
+}
+
+/**
+ * Navigasi daftar vertikal untuk sidebar shell. Memakai `next/link` agar
+ * klik menu menjadi navigasi SPA (client routing + prefetch default Link)
+ * alih-alih reload penuh halaman; penanda aktif/tidak tetap ditentukan
+ * `activeHref` dari pemilik layar (bukan `usePathname`), sehingga komponen
+ * ini tetap bodoh & teruji.
  */
 export function SidebarNav({ items, activeHref, variant }: SidebarNavProps) {
   const state = STATE_CLASSES[variant]
@@ -46,17 +71,19 @@ export function SidebarNav({ items, activeHref, variant }: SidebarNavProps) {
     <nav aria-label="Navigasi utama">
       <ul className="flex flex-col gap-1">
         {items.map((item) => {
-          const isActive = item.href === activeHref
+          const isActive = isNavItemActive(item, activeHref)
           const count = item.badge
           const showBadge = typeof count === 'number' && count > 0
 
           return (
             <li key={item.href}>
-              <a
+              <Link
                 href={item.href}
                 aria-current={isActive ? 'page' : undefined}
                 className={[
-                  'flex w-full items-center gap-3 border-l-[3px] px-4 py-2.5 text-sm font-medium transition-colors',
+                  // `py-3` (12px×2 + baris teks 20px = 44px): target sentuh
+                  // minimum §5.2.1 — sebelumnya `py-2.5` hanya 40px.
+                  'flex w-full items-center gap-3 border-l-[3px] px-4 py-3 text-sm font-medium transition-colors',
                   isActive ? state.active : state.inactive,
                 ]
                   .filter(Boolean)
@@ -73,7 +100,7 @@ export function SidebarNav({ items, activeHref, variant }: SidebarNavProps) {
                     {count}
                   </span>
                 )}
-              </a>
+              </Link>
             </li>
           )
         })}
@@ -92,25 +119,35 @@ export interface BottomNavProps {
 /**
  * Navigasi bawah mobile — pasangan dari `SidebarNav` untuk shell tanpa
  * akses sidebar di layar kecil. Item aktif ditandai warna brand +
- * `aria-current="page"`, label memakai skala `text-badge`.
+ * `aria-current="page"`, label memakai skala `text-badge`. Link memakai
+ * `next/link` (navigasi SPA + prefetch default) dan jumlah kolom grid
+ * mengikuti `items.length` secara dinamis sehingga tidak hardcode
+ * `grid-cols-4` (§6.1/§6.2 kini 4 tab; kolom tetap benar bila berubah).
  */
 export function BottomNav({ items, activeHref, className }: BottomNavProps) {
   const classes = [
-    'fixed inset-x-0 bottom-0 z-30 grid h-bottomnav grid-cols-4 border-t border-border-light bg-surface',
+    'fixed inset-x-0 bottom-0 z-30 grid h-bottomnav border-t border-border-light bg-surface',
     className ?? '',
   ]
     .filter(Boolean)
     .join(' ')
 
+  // Minimal 1 kolom agar `repeat(0, …)` (CSS tidak valid) tak pernah terjadi.
+  const columns = Math.max(items.length, 1)
+
   return (
-    <nav aria-label="Navigasi bawah" className={classes}>
+    <nav
+      aria-label="Navigasi bawah"
+      className={classes}
+      style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+    >
       {items.map((item) => {
-        const isActive = item.href === activeHref
+        const isActive = isNavItemActive(item, activeHref)
         const count = item.badge
         const showBadge = typeof count === 'number' && count > 0
 
         return (
-          <a
+          <Link
             key={item.href}
             href={item.href}
             aria-current={isActive ? 'page' : undefined}
@@ -122,7 +159,7 @@ export function BottomNav({ items, activeHref, className }: BottomNavProps) {
               .join(' ')}
           >
             {item.icon !== undefined && (
-              <span className="flex size-5 items-center justify-center" aria-hidden="true">
+              <span className="flex size-5 shrink-0 items-center justify-center" aria-hidden="true">
                 {item.icon}
               </span>
             )}
@@ -132,7 +169,7 @@ export function BottomNav({ items, activeHref, className }: BottomNavProps) {
                 {count}
               </span>
             )}
-          </a>
+          </Link>
         )
       })}
     </nav>

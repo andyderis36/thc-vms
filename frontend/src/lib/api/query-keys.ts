@@ -5,7 +5,7 @@
  * kunci query secara manual di tempat lain.
  */
 
-import type { VisitListParams } from '@/lib/api/types';
+import type { ManagedUserListParams, VisitListParams } from '@/lib/api/types';
 
 export const queryKeys = {
   visits: {
@@ -13,8 +13,11 @@ export const queryKeys = {
     detail: (id: string) => ['visits', 'detail', id] as const,
     qr: (id: string) => ['visits', 'qr', id] as const,
   },
-  locations: () => ['locations'] as const,
+  locations: (activeOnly?: boolean) => ['locations', activeOnly ?? null] as const,
   purposes: () => ['purposes'] as const,
+  vendors: () => ['vendors'] as const,
   securityUsers: (locationId?: string) => ['security-users', locationId ?? null] as const,
+  managedUsers: (params?: ManagedUserListParams) =>
+    ['managed-users', params ?? null] as const,
   me: () => ['me'] as const,
 } as const;

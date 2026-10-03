@@ -33,20 +33,32 @@ func NewAuthHandler(svc AuthService) *AuthHandler {
 }
 
 // accountDTO mirrors the openapi User schema field for field: id, name,
-// email, phone, role, location_id, location_name, status, type, vendor_name.
-// Nullable members stay pointers so they render as JSON null (super_admin
-// and pic carry no branch); the password hash is never a member.
+// email, phone, role, location_id, location_name, status, type, vendor_name,
+// plus the nik member (migration 000002). Nullable members stay pointers so
+// they render as JSON null (super_admin and vendor carry no branch; accounts
+// without a national identity number carry a null nik); the password hash is
+// never a member.
 type accountDTO struct {
 	ID           string       `json:"id"`
 	Name         string       `json:"name"`
 	Email        string       `json:"email"`
 	Phone        string       `json:"phone"`
+	NIK          *string      `json:"nik"`
 	Role         string       `json:"role"`
 	LocationID   *domain.UUID `json:"location_id"`
 	LocationName *string      `json:"location_name"`
 	Status       string       `json:"status"`
 	Type         string       `json:"type"`
 	VendorName   *string      `json:"vendor_name"`
+}
+
+// nikPtr maps a stored NIK onto the wire shape: "" renders as JSON null,
+// a populated value renders as its digit string.
+func nikPtr(nik string) *string {
+	if nik == "" {
+		return nil
+	}
+	return &nik
 }
 
 // profileToAccount projects the usecase profile (which carries no JSON tags)
@@ -57,6 +69,7 @@ func profileToAccount(p auth.Profile) accountDTO {
 		Name:         p.Name,
 		Email:        p.Email,
 		Phone:        p.Phone,
+		NIK:          nikPtr(p.NIK),
 		Role:         string(p.Role),
 		LocationID:   p.LocationID,
 		LocationName: p.LocationName,

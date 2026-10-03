@@ -153,7 +153,7 @@ func loginDeps(users *fakeUsers) Deps {
 			"role-superadmin": domain.RoleSuperAdmin,
 			"role-admin":      domain.RoleAdmin,
 			"role-security":   domain.RoleSecurity,
-			"role-pic":        domain.RolePIC,
+			"role-vendor":     domain.RoleVendor,
 		}},
 		Locations: fakeLocations{locations: map[domain.UUID]domain.Location{
 			"loc-bandung": {ID: loc, Name: "THC Cabang Bandung"},
@@ -214,7 +214,7 @@ func realIssuer() *thcjwt.Service {
 			"role-superadmin": domain.RoleSuperAdmin,
 			"role-admin":      domain.RoleAdmin,
 			"role-security":   domain.RoleSecurity,
-			"role-pic":        domain.RolePIC,
+			"role-vendor":     domain.RoleVendor,
 		},
 		locations: map[domain.UUID]string{"loc-bandung": "THC Cabang Bandung"},
 	}
@@ -292,7 +292,7 @@ func TestLogin_IssuesTokenWithExactlyTheFourMandatedClaims(t *testing.T) {
 	}
 }
 
-func TestLogin_LocationIDIsJSONNullForSuperAdminAndPIC(t *testing.T) {
+func TestLogin_LocationIDIsJSONNullForSuperAdminAndVendor(t *testing.T) {
 	makeSvc := func(user domain.User) *Service {
 		users := &fakeUsers{
 			byEmail: map[string]domain.User{user.Email: user},
@@ -329,27 +329,27 @@ func TestLogin_LocationIDIsJSONNullForSuperAdminAndPIC(t *testing.T) {
 		t.Fatalf("super_admin: raw payload lacks literal null: %s", raw)
 	}
 
-	pic := domain.User{
+	vendor := domain.User{
 		ID:           "user-pic-1",
 		Email:        "pic@vendor.example",
 		PasswordHash: hashPassword(t, "Password123!"),
-		RoleID:       "role-pic",
+		RoleID:       "role-vendor",
 		LocationID:   nil,
 		Type:         domain.UserTypeExternal,
 		Status:       domain.UserStatusActive,
 	}
-	svc = makeSvc(pic)
+	svc = makeSvc(vendor)
 	got, err = svc.Login(context.Background(), "pic@vendor.example", "Password123!")
 	if err != nil {
-		t.Fatalf("pic Login: %v", err)
+		t.Fatalf("vendor Login: %v", err)
 	}
 	payload, raw = decodeLoginPayload(t, got.Token)
 	value, present = payload["location_id"]
 	if !present || value != nil {
-		t.Fatalf("pic: location_id = %v (present=%v), want JSON null", value, present)
+		t.Fatalf("vendor: location_id = %v (present=%v), want JSON null", value, present)
 	}
 	if !strings.Contains(raw, `"location_id":null`) {
-		t.Fatalf("pic: raw payload lacks literal null: %s", raw)
+		t.Fatalf("vendor: raw payload lacks literal null: %s", raw)
 	}
 
 	admin := activeAdmin(hashPassword(t, "Password123!"))

@@ -12,6 +12,64 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUsersByLocation = `-- name: CountUsersByLocation :one
+SELECT count(*)
+FROM users
+WHERE location_id = $1
+`
+
+type CountUsersByLocationParams struct {
+	LocationID pgtype.UUID `json:"location_id"`
+}
+
+// DELETE /locations/:id pre-check 1: accounts stationed at the facility
+// (users.location_id, no cascade, so a remaining row blocks the delete).
+func (q *Queries) CountUsersByLocation(ctx context.Context, arg CountUsersByLocationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsersByLocation, arg.LocationID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countVisitsByLocation = `-- name: CountVisitsByLocation :one
+SELECT count(*)
+FROM visit_request
+WHERE location_id = $1
+`
+
+type CountVisitsByLocationParams struct {
+	LocationID uuid.UUID `json:"location_id"`
+}
+
+// DELETE /locations/:id pre-check 2: visits hosted at the facility
+// (visit_request.location_id, no cascade, so a remaining row blocks it).
+func (q *Queries) CountVisitsByLocation(ctx context.Context, arg CountVisitsByLocationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countVisitsByLocation, arg.LocationID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteLocation = `-- name: DeleteLocation :one
+DELETE FROM location
+WHERE id = $1
+RETURNING id
+`
+
+type DeleteLocationParams struct {
+	ID uuid.UUID `json:"id"`
+}
+
+// DELETE /locations/:id (super_admin only). A missing id surfaces
+// pgx.ErrNoRows (-> 404 via MapError); a raced reference surfaces 23503
+// (-> 409).
+func (q *Queries) DeleteLocation(ctx context.Context, arg DeleteLocationParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteLocation, arg.ID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getActivePurposesByIDs = `-- name: GetActivePurposesByIDs :many
 SELECT id, name
 FROM purpose
@@ -53,7 +111,7 @@ func (q *Queries) GetActivePurposesByIDs(ctx context.Context, arg GetActivePurpo
 }
 
 const getLocationByID = `-- name: GetLocationByID :one
-SELECT id, name, type, address, city, timezone
+SELECT id, name, type, address, city, timezone, is_active
 FROM location
 WHERE id = $1
 `
@@ -62,18 +120,9 @@ type GetLocationByIDParams struct {
 	ID uuid.UUID `json:"id"`
 }
 
-type GetLocationByIDRow struct {
-	ID       uuid.UUID   `json:"id"`
-	Name     string      `json:"name"`
-	Type     string      `json:"type"`
-	Address  pgtype.Text `json:"address"`
-	City     pgtype.Text `json:"city"`
-	Timezone string      `json:"timezone"`
-}
-
-func (q *Queries) GetLocationByID(ctx context.Context, arg GetLocationByIDParams) (GetLocationByIDRow, error) {
+func (q *Queries) GetLocationByID(ctx context.Context, arg GetLocationByIDParams) (Location, error) {
 	row := q.db.QueryRow(ctx, getLocationByID, arg.ID)
-	var i GetLocationByIDRow
+	var i Location
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -81,6 +130,73 @@ func (q *Queries) GetLocationByID(ctx context.Context, arg GetLocationByIDParams
 		&i.Address,
 		&i.City,
 		&i.Timezone,
+		&i.IsActive,
+	)
+	return i, err
+}
+
+const getVendorName = `-- name: GetVendorName :one
+SELECT name
+FROM vendor
+WHERE id = $1
+`
+
+type GetVendorNameParams struct {
+	ID uuid.UUID `json:"id"`
+}
+
+// Resolves one company name for the auth profile (GET /auth/me + login
+// response vendor_name). A missing id surfaces pgx.ErrNoRows (-> 404 via
+// MapError); callers that tolerate absence check for it explicitly.
+func (q *Queries) GetVendorName(ctx context.Context, arg GetVendorNameParams) (string, error) {
+	row := q.db.QueryRow(ctx, getVendorName, arg.ID)
+	var name string
+	err := row.Scan(&name)
+	return name, err
+}
+
+const insertLocation = `-- name: InsertLocation :one
+
+INSERT INTO location (name, type, address, city, timezone, is_active)
+VALUES ($1, $2, $3, $4, $5, true)
+RETURNING id, name, type, address, city, timezone, is_active
+`
+
+type InsertLocationParams struct {
+	Name     string      `json:"name"`
+	Type     string      `json:"type"`
+	Address  pgtype.Text `json:"address"`
+	City     pgtype.Text `json:"city"`
+	Timezone string      `json:"timezone"`
+}
+
+// =============================================================================
+// SUPER_ADMIN FACILITY WRITES (PRD §4: kelola lokasi). New facilities start
+// active; the soft removal stays deactivation via is_active, while the hard
+// removal is DELETE /locations/:id (super_admin only, with the Count*
+// pre-checks below refusing with 409 while users or visits still reference
+// the row; the DELETE itself is the second line of defence, 23503 -> 409).
+// =============================================================================
+// POST /locations (super_admin only). timezone defaults to 'WIB' in Go before
+// this runs; the chk_location_type / chk_location_timezone CHECKs are the
+// second line of defence (23514 -> 400 via MapError).
+func (q *Queries) InsertLocation(ctx context.Context, arg InsertLocationParams) (Location, error) {
+	row := q.db.QueryRow(ctx, insertLocation,
+		arg.Name,
+		arg.Type,
+		arg.Address,
+		arg.City,
+		arg.Timezone,
+	)
+	var i Location
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.Address,
+		&i.City,
+		&i.Timezone,
+		&i.IsActive,
 	)
 	return i, err
 }
@@ -103,16 +219,24 @@ type ListActiveLocationsRow struct {
 }
 
 // =============================================================================
-// master.sql - Read-only master data for the pickers on SCR-03.
+// master.sql - Master data for the pickers on SCR-03 plus the super_admin
+// facility writes (PRD §4: kelola lokasi).
 //
-//	Both endpoints are read-only in the MVP (PRD L83: "MVP menggunakan database
-//	seeding"), so there is deliberately no INSERT/UPDATE here. Rows are written
-//	by the seeds program and, for locations, toggled by super_admin later.
+//	The SCR-03 pickers stay read-only (PRD L83: "MVP menggunakan database
+//	seeding"): rows are written by the seeds program and read through the
+//	List/Get queries below. The super_admin CRUD is append-only in the write
+//	direction: INSERT (POST /locations) and partial UPDATE
+//	(PATCH /locations/:id). There is deliberately no DELETE: location rows
+//	are referenced by visits.location_id and users.location_id (restrict
+//	FKs), and the MVP has no restore flow, so deactivation via is_active is
+//	the only removal (YAGNI).
 //	The active filter matches the openapi summaries "fasilitas ... THC aktif"
 //	(openapi L196) and only active purposes are offered to a PIC.
 //
 // =============================================================================
 // GET /locations (openapi L193-203) -> the Location schema (openapi L719-738).
+// The ?active_only=true (default) path: only facilities still operating are
+// offered, which is what the SCR-03 visit form consumes.
 func (q *Queries) ListActiveLocations(ctx context.Context) ([]ListActiveLocationsRow, error) {
 	rows, err := q.db.Query(ctx, listActiveLocations)
 	if err != nil {
@@ -171,4 +295,126 @@ func (q *Queries) ListActivePurposes(ctx context.Context) ([]ListActivePurposesR
 		return nil, err
 	}
 	return items, nil
+}
+
+const listActiveVendors = `-- name: ListActiveVendors :many
+SELECT id, name
+FROM vendor
+WHERE is_blacklisted = false
+ORDER BY name ASC
+`
+
+type ListActiveVendorsRow struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+// GET /vendors -> the [{id, name}] company dropdown the PIC/admin forms
+// consume. Only non-blacklisted companies are offered, mirroring the
+// active-only purpose catalogue above.
+func (q *Queries) ListActiveVendors(ctx context.Context) ([]ListActiveVendorsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveVendors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveVendorsRow{}
+	for rows.Next() {
+		var i ListActiveVendorsRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllLocations = `-- name: ListAllLocations :many
+SELECT id, name, type, address, city, timezone, is_active
+FROM location
+ORDER BY name ASC
+`
+
+// GET /locations?active_only=false (super_admin console only): every
+// facility row including deactivated ones, so a switched-off branch stays
+// visible and can be reactivated via PATCH /locations/:id. Same column
+// shape plus the is_active flag the console renders.
+func (q *Queries) ListAllLocations(ctx context.Context) ([]Location, error) {
+	rows, err := q.db.Query(ctx, listAllLocations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Location{}
+	for rows.Next() {
+		var i Location
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Type,
+			&i.Address,
+			&i.City,
+			&i.Timezone,
+			&i.IsActive,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateLocation = `-- name: UpdateLocation :one
+UPDATE location
+SET name      = COALESCE($2, name),
+    type      = COALESCE($3, type),
+    address   = COALESCE($4, address),
+    city      = COALESCE($5, city),
+    timezone  = COALESCE($6, timezone),
+    is_active = COALESCE($7::boolean, is_active)
+WHERE id = $1
+RETURNING id, name, type, address, city, timezone, is_active
+`
+
+type UpdateLocationParams struct {
+	ID       uuid.UUID   `json:"id"`
+	Name     pgtype.Text `json:"name"`
+	Type     pgtype.Text `json:"type"`
+	Address  pgtype.Text `json:"address"`
+	City     pgtype.Text `json:"city"`
+	Timezone pgtype.Text `json:"timezone"`
+	IsActive pgtype.Bool `json:"is_active"`
+}
+
+// PATCH /locations/:id (super_admin only). Every column is a NULLable bound
+// value: a NULL keeps the stored column via COALESCE, so the body may carry
+// any subset of fields. is_active flips here are the deactivation path that
+// replaces DELETE.
+func (q *Queries) UpdateLocation(ctx context.Context, arg UpdateLocationParams) (Location, error) {
+	row := q.db.QueryRow(ctx, updateLocation,
+		arg.ID,
+		arg.Name,
+		arg.Type,
+		arg.Address,
+		arg.City,
+		arg.Timezone,
+		arg.IsActive,
+	)
+	var i Location
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.Address,
+		&i.City,
+		&i.Timezone,
+		&i.IsActive,
+	)
+	return i, err
 }

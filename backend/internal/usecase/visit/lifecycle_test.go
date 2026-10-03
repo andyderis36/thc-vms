@@ -43,8 +43,8 @@ func TestApprove_SuperAdminAnyBranchSucceeds(t *testing.T) {
 	}
 }
 
-func TestApprove_PICAndSecurityAreForbidden(t *testing.T) {
-	for _, role := range []domain.RoleName{domain.RolePIC, domain.RoleSecurity} {
+func TestApprove_VendorAndSecurityAreForbidden(t *testing.T) {
+	for _, role := range []domain.RoleName{domain.RoleVendor, domain.RoleSecurity} {
 		repo := newFakeVisitRepo(t)
 		seedRequestedVisit(repo)
 		svc := newTestService(repo, nil, testNow())
@@ -98,14 +98,14 @@ func TestReject_RequiresReason(t *testing.T) {
 	}
 }
 
-func TestCancel_AllowsOwningPICAndBranchAdmin(t *testing.T) {
+func TestCancel_AllowsOwningVendorAndBranchAdmin(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	seedRequestedVisit(repo)
 	svc := newTestService(repo, nil, testNow())
 
-	owner := testActor(domain.RolePIC, "pic-1", "")
-	if err := svc.Cancel(context.Background(), owner, domain.UUID("visit-1"), "batal oleh pic"); err != nil {
-		t.Fatalf("owning PIC cancel returned error: %v", err)
+	owner := testActor(domain.RoleVendor, "pic-1", "")
+	if err := svc.Cancel(context.Background(), owner, domain.UUID("visit-1"), "batal oleh vendor"); err != nil {
+		t.Fatalf("owning vendor cancel returned error: %v", err)
 	}
 
 	visit := seedRequestedVisit(repo)
@@ -186,8 +186,8 @@ func TestTransitionGuards_AlwaysRunBeforeTheRepository(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"pic approves", func() error {
-			return svc.Approve(context.Background(), testActor(domain.RolePIC, "pic-1", ""), domain.UUID("visit-1"), "x")
+		{"vendor approves", func() error {
+			return svc.Approve(context.Background(), testActor(domain.RoleVendor, "pic-1", ""), domain.UUID("visit-1"), "x")
 		}},
 		{"security approves", func() error {
 			return svc.Approve(context.Background(), testActor(domain.RoleSecurity, "sec-1", "loc-A"), domain.UUID("visit-1"), "x")

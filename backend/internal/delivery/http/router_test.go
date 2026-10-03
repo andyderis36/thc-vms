@@ -149,6 +149,10 @@ func (fakeStorage) PresignedURL(_ context.Context, _ string, _ time.Duration) (s
 	return "", domain.ErrNotFound
 }
 
+func (fakeStorage) ObjectKeyFromStoredURL(_ string) (string, error) {
+	return "", domain.ErrValidation
+}
+
 // testEngine builds the full MVP route table on fakes: no database, no
 // MinIO, no tokens. The chain is the real middleware over denying
 // collaborators, so refusals prove the production path.
@@ -167,7 +171,12 @@ func testEngine() *gin.Engine {
 		},
 		Users: deliveryhttp.UserRoutes{
 			List: users.ListSecurity, Create: users.CreateSecurity, UpdateStatus: users.UpdateSecurityStatus,
+			Delete: users.DeleteSecurity,
 		},
+		// Back-office superadmin kosong disengaja: withFallback mengubah tiap
+		// member nil menjadi passthrough sehingga rute terdaftar (tidak 404);
+		// perilaku handler-nya ditutup test handlers/superadmin_*_test.go.
+		SuperAdmin: deliveryhttp.SuperAdminRoutes{},
 		Master: deliveryhttp.MasterRoutes{
 			Locations: master.ListLocations, Purposes: master.ListPurposes,
 		},
@@ -192,6 +201,7 @@ func testEngine() *gin.Engine {
 				domain.RoleSuperAdmin, domain.RoleAdmin),
 			GateOnly: middleware.RequireRoles(
 				domain.RoleSecurity, domain.RoleAdmin, domain.RoleSuperAdmin),
+			SuperAdminOnly: middleware.RequireRoles(domain.RoleSuperAdmin),
 		},
 	})
 }
@@ -203,10 +213,10 @@ func serve(engine *gin.Engine, method, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 20 MVP
+// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 32 wired
 // operations resolves to a registered route: a registered route may answer
-// 401/403/400 without a token, but never 404. The two Phase-2 feedback and
-// incident endpoints must 404.
+// 401/403/400/500 without credentials, but never 404. The two Phase-2
+// feedback and incident endpoints must 404.
 func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 	engine := testEngine()
 	wired := []struct{ method, path string }{
@@ -218,7 +228,17 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/users/security"},
 		{http.MethodPost, "/api/v1/users/security"},
 		{http.MethodPatch, "/api/v1/users/security/some-id/status"},
+		{http.MethodPatch, "/api/v1/users/security/some-id"},
+		{http.MethodDelete, "/api/v1/users/security/some-id"},
 		{http.MethodGet, "/api/v1/locations"},
+		{http.MethodPost, "/api/v1/locations"},
+		{http.MethodPatch, "/api/v1/locations/some-id"},
+		{http.MethodDelete, "/api/v1/locations/some-id"},
+		{http.MethodGet, "/api/v1/users"},
+		{http.MethodPost, "/api/v1/users"},
+		{http.MethodPatch, "/api/v1/users/some-id/status"},
+		{http.MethodPatch, "/api/v1/users/some-id"},
+		{http.MethodDelete, "/api/v1/users/some-id"},
 		{http.MethodGet, "/api/v1/purposes"},
 		{http.MethodGet, "/api/v1/visits"},
 		{http.MethodPost, "/api/v1/visits"},
@@ -230,10 +250,11 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/visits/some-id/qr"},
 		{http.MethodPost, "/api/v1/visits/some-id/checkin"},
 		{http.MethodPost, "/api/v1/visits/some-id/checkout"},
+		{http.MethodDelete, "/api/v1/visits/some-id"},
 		{http.MethodPost, "/api/v1/uploads"},
 	}
-	if len(wired) != 21 {
-		t.Fatalf("contract drift: wired routes = %d, want 21", len(wired))
+	if len(wired) != 32 {
+		t.Fatalf("contract drift: wired routes = %d, want 32", len(wired))
 	}
 	for _, route := range wired {
 		rec := serve(engine, route.method, route.path)

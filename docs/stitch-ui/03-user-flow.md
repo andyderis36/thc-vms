@@ -36,12 +36,12 @@ SCR-05: Layar Security Gate / Site Check-in
   └──► Tab 'Sedang di Lokasi' ──► Klik 'Check-out' ──► Status Berubah 'completed'
 ```
 
-### 1.3 Alur PIC / Teknisi Vendor (Mobile Smartphone di Jalan)
+### 1.3 Alur Vendor/Mitra - Teknisi (Mobile Smartphone di Jalan)
 ```text
-SCR-01: Login Terpadu (Pilih Role: PIC / Teknisi)
+SCR-01: Login Terpadu (Pilih Role: Vendor/Mitra)
   │
   ▼
-SCR-02: Dashboard Kunjungan (Tampilan Terfilter: Hanya Kunjungan Milik PIC)
+SCR-02: Dashboard Kunjungan (Tampilan Terfilter: Hanya Kunjungan Milik Vendor/Mitra)
   │
   ├──► Klik 'Buat Kunjungan Baru' ──► SCR-03: Form Pengajuan Kunjungan
   │                                       │
@@ -58,7 +58,7 @@ SCR-02: Dashboard Kunjungan (Tampilan Terfilter: Hanya Kunjungan Milik PIC)
 ## 2. Alur End-to-End Operasional Lapangan (Happy Path)
 
 ```text
-[PIC / Teknisi Vendor]         [THC Admin / NOC]              [Petugas Jaga Cabang/POP]
+[Vendor/Mitra / Teknisi]         [THC Admin / NOC]              [Petugas Jaga Cabang/POP]
         │                              │                                  │
         ├── 1. Submit SCR-03 ─────────►│                                  │
         │   (Form Pengajuan POP)       │                                  │

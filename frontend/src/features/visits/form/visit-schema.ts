@@ -1,17 +1,22 @@
 /**
  * Skema validasi SCR-03 — Formulir Pengajuan Kunjungan (zod).
  *
- * Kontrak mengikuti `docs/4. openapi.yaml` (CreateVisitRequest): tanpa field
- * tambahan. Seluruh pesan galat berbahasa Indonesia. Aturan urutan waktu
- * (selesai setelah mulai) ditegakkan di `superRefine` di akhir rantai.
+ * Kontrak mengikuti `docs/4. openapi.yaml` (CreateVisitRequest) termasuk
+ * field `purpose_note` (tujuan lain, ≤200 karakter). Seluruh pesan galat
+ * berbahasa Indonesia. Aturan urutan waktu (selesai setelah mulai) dan
+ * "minimal satu tujuan" ditegakkan di `superRefine` di akhir rantai.
  */
 
 import { z } from 'zod'
 
-/** Batas anggota tim per kunjungan — openapi `visitors.maxItems` = 10. */
-export const MAX_TECHNICIANS = 10
+import { MAX_TECHNICIANS } from '@/lib/visits/vendor-input'
 
-/** Satu baris teknisi: nama, identitas, dan HP wajib; foto KTP opsional. */
+// Batas anggota tim dimiliki `lib/visits/vendor-input.ts` (modul `lib/` tidak
+// boleh mengimpor `features/`); di-re-export di sini agar importir lama
+// (`TechnicianList.tsx`, dll.) tetap berfungsi tanpa perubahan.
+export { MAX_TECHNICIANS }
+
+/** Satu baris teknisi: nama, identitas, HP, dan selfie wajib; foto KTP opsional. */
 export const technicianSchema = z.object({
   name: z.string().trim().min(1, 'Nama lengkap teknisi wajib diisi.'),
   id_number: z.string().trim().min(1, 'Nomor KTP/SIM teknisi wajib diisi.'),
@@ -22,6 +27,30 @@ export const technicianSchema = z.object({
       name: z.string().min(1),
     })
     .nullish(),
+  selfie: z
+    .object(
+      {
+        url: z.string().min(1, 'Foto selfie teknisi wajib diunggah.'),
+        name: z.string().min(1, 'Foto selfie teknisi wajib diunggah.'),
+      },
+      {
+        required_error: 'Foto selfie teknisi wajib diunggah.',
+        invalid_type_error: 'Foto selfie teknisi wajib diunggah.',
+      },
+    )
+    // Baris baru memakai sentinel kosong; tolak agar galat tampil di level
+    // `selfie` (terbaca `rowError?.selfie?.message`) bukan di sub-path.
+    .refine(
+      (value) => value.url !== '' && value.name !== '',
+      'Foto selfie teknisi wajib diunggah.',
+    ),
+  // Teks bebas: boleh nama dari katalog vendor (dicocokkan case-insensitive
+  // saat submit via `resolveVendorInput`) ATAU nama manual ≤120 karakter.
+  vendor_name: z
+    .string()
+    .trim()
+    .max(120, 'Nama vendor maksimal 120 karakter.')
+    .optional(),
 })
 
 /** Lampiran surat tugas / SPK: URL hasil unggahan + nama berkas untuk tampilan. */
@@ -33,9 +62,15 @@ export const assignmentLetterSchema = z.object({
 export const visitFormSchema = z
   .object({
     location_id: z.string().min(1, 'Fasilitas tujuan wajib dipilih.'),
-    purpose_ids: z
-      .array(z.string())
-      .min(1, 'Pilih minimal satu tujuan kunjungan.'),
+    // Chip tujuan boleh kosong ASALKAN `purpose_note` terisi — divalidasi
+    // bersama di `superRefine` di akhir rantai.
+    purpose_ids: z.array(z.string()),
+    // "Tujuan lain": teks bebas bila tujuan tidak ada di daftar chip.
+    purpose_note: z
+      .string()
+      .trim()
+      .max(200, 'Tujuan lain maksimal 200 karakter.')
+      .optional(),
     start_date: z.string().min(1, 'Waktu mulai wajib diisi.'),
     end_date: z.string().min(1, 'Waktu selesai wajib diisi.'),
     is_multi_day: z.boolean(),
@@ -56,6 +91,16 @@ export const visitFormSchema = z
       ),
   })
   .superRefine((value, ctx) => {
+    // Minimal satu tujuan: chip TERPILIH atau "Tujuan lain" terisi.
+    if (value.purpose_ids.length === 0 && (value.purpose_note ?? '') === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['purpose_ids'],
+        message:
+          'Pilih minimal satu tujuan kunjungan atau isi kolom Tujuan lain.',
+      })
+    }
+
     const start = new Date(value.start_date)
     const end = new Date(value.end_date)
 

@@ -2,12 +2,15 @@
 
 import { useId, type InputHTMLAttributes } from 'react'
 
-/** `default` 40px (desktop) · `gate` 44px (tablet/ponsel petugas). */
+/**
+ * `default` 40px · `gate` 40px (mobile/desktop) → 48px (tablet 768–1023px).
+ * Tinggi mengikuti design-system §4.2: 40px Desktop/Mobile, 48px Tablet.
+ */
 export type FieldSize = 'default' | 'gate'
 
-const FIELD_HEIGHT: Record<FieldSize, string> = {
+export const FIELD_HEIGHT: Record<FieldSize, string> = {
   default: 'h-10',
-  gate: 'h-touch',
+  gate: 'h-10 md:h-12 lg:h-10',
 }
 
 export const FIELD_BASE_CLASS =
@@ -59,7 +62,7 @@ export function Input({
       />
 
       {error ? (
-        <p id={errorId} className="text-xs text-danger-text">
+        <p id={errorId} role="alert" className="text-xs text-danger-text">
           {error}
         </p>
       ) : hint ? (

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"thc-vms/backend/internal/domain"
@@ -17,10 +18,10 @@ const maxListLimit = 100
 
 // List returns one page plus the total for the caller's scope. The dispatch is
 // total and branch-safe by construction: a location scope can only reach the
-// hard `location_id = $1` query, a PIC scope only the `pic_user_id = $1`
+// hard `location_id = $1` query, a vendor scope only the `pic_user_id = $1`
 // query, and the unscoped super_admin query runs ONLY when both are nil, so
 // there is no code path where a branch caller silently receives every branch.
-// When both scopes are set the branch scope wins and the PIC scope is ignored;
+// When both scopes are set the branch scope wins and the vendor scope is ignored;
 // the generated queries offer no combined predicate, and branch isolation is
 // the invariant that must never be widened.
 func (r *visitRepository) List(
@@ -59,7 +60,11 @@ func (r *visitRepository) List(
 		if err != nil {
 			return nil, 0, MapError(err)
 		}
-		return locationRowsToDomain(rows), total, nil
+		visits := locationRowsToDomain(rows)
+		if err := r.attachPageVisitors(ctx, visits); err != nil {
+			return nil, 0, err
+		}
+		return visits, total, nil
 	}
 
 	if filter.PICUserID != nil {
@@ -89,7 +94,11 @@ func (r *visitRepository) List(
 		if err != nil {
 			return nil, 0, MapError(err)
 		}
-		return picRowsToDomain(rows), total, nil
+		visits := vendorRowsToDomain(rows)
+		if err := r.attachPageVisitors(ctx, visits); err != nil {
+			return nil, 0, err
+		}
+		return visits, total, nil
 	}
 
 	rows, err := q.ListVisitsForSuperAdmin(ctx, db.ListVisitsForSuperAdminParams{
@@ -114,7 +123,57 @@ func (r *visitRepository) List(
 	if err != nil {
 		return nil, 0, MapError(err)
 	}
-	return superAdminRowsToDomain(rows), total, nil
+	visits := superAdminRowsToDomain(rows)
+	if err := r.attachPageVisitors(ctx, visits); err != nil {
+		return nil, 0, err
+	}
+	return visits, total, nil
+}
+
+// attachPageVisitors loads every roster AND every purpose catalogue of one
+// page with two single IN (...) queries (the sqlc.yaml batch design) and
+// attaches each to its visit. An empty page issues no query; every returned
+// visit carries non-nil slices so the wire renders [] instead of null.
+func (r *visitRepository) attachPageVisitors(ctx context.Context, visits []domain.VisitRequest) error {
+	ids := make([]uuid.UUID, 0, len(visits))
+	for _, visit := range visits {
+		parsed, err := fromDomainUUID(visit.ID)
+		if err != nil {
+			return err
+		}
+		ids = append(ids, parsed)
+	}
+	for i := range visits {
+		visits[i].Visitors = []domain.Visitor{}
+		visits[i].Purposes = []domain.Purpose{}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	q := db.New(r.pool)
+	rows, err := q.ListVisitors(ctx, db.ListVisitorsParams{VisitRequestIds: ids})
+	if err != nil {
+		return MapError(err)
+	}
+	grouped := groupVisitorsByVisit(rows)
+	purposeRows, err := q.ListVisitPurposes(ctx, db.ListVisitPurposesParams{VisitRequestIds: ids})
+	if err != nil {
+		return MapError(err)
+	}
+	groupedPurposes := groupPurposesByVisit(purposeRows)
+	for i := range visits {
+		parsed, err := fromDomainUUID(visits[i].ID)
+		if err != nil {
+			return err
+		}
+		if roster, ok := grouped[parsed]; ok {
+			visits[i].Visitors = roster
+		}
+		if purposes, ok := groupedPurposes[parsed]; ok {
+			visits[i].Purposes = purposes
+		}
+	}
+	return nil
 }
 
 // normalizePage clamps 1-based pagination to sane bounds.

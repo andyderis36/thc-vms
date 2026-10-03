@@ -10,17 +10,24 @@ import type {
   ApproveRequest,
   CancelRequest,
   CheckInRequest,
+  CreateLocationRequest,
+  CreateManagedUserRequest,
   CreateSecurityUserRequest,
   CreateVisitRequest,
   Location,
   LoginRequest,
   LoginResult,
+  ManagedUserListParams,
   Purpose,
   QrPayload,
   RejectRequest,
   RescheduleRequest,
+  UpdateLocationRequest,
+  UpdateManagedUserRequest,
+  UpdateSecurityUserRequest,
   UpdateUserStatusRequest,
   User,
+  Vendor,
   VisitDetail,
   VisitListParams,
   VisitListResult,
@@ -58,12 +65,23 @@ export async function logout(): Promise<void> {
 // Master Data
 // ---------------------------------------------------------------------------
 
-export function listLocations(): Promise<Location[]> {
-  return apiFetch<Location[]>('/locations');
+export function listLocations(activeOnly?: boolean): Promise<Location[]> {
+  // Default/true → katalog aktif (kompatibel mundur untuk form pengajuan);
+  // false eksplisit → semua baris untuk halaman admin (agar nonaktif bisa diaktifkan lagi).
+  const search = activeOnly === false ? '?active_only=false' : '';
+  return apiFetch<Location[]>(`/locations${search}`);
 }
 
 export function listPurposes(): Promise<Purpose[]> {
   return apiFetch<Purpose[]>('/purposes');
+}
+
+/**
+ * `GET /vendors` → `[{id, name}]` — katalog vendor mitra untuk dropdown
+ * relasi Vendor/Mitra (kontrak BE; master data seperti locations/purposes).
+ */
+export function listVendors(): Promise<Vendor[]> {
+  return apiFetch<Vendor[]>('/vendors');
 }
 
 // ---------------------------------------------------------------------------
@@ -151,4 +169,85 @@ export function updateSecurityUserStatus(
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+}
+
+/** `DELETE /users/security/{id}` — 204 kosong; 403 lintas cabang; 409 bila direferensikan. */
+export function deleteSecurityUser(id: string): Promise<void> {
+  return apiFetch<void>(`/users/security/${id}`, { method: 'DELETE' });
+}
+
+/** `PATCH /users/security/:id` — admin cabang terkunci + superadmin; parsial + reset password. */
+export function updateSecurityUser(id: string, body: UpdateSecurityUserRequest): Promise<User> {
+  return apiFetch<User>(`/users/security/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Superadmin: Fasilitas & Cabang + Manajemen User & Vendor (kontrak §2)
+// ---------------------------------------------------------------------------
+
+/** `GET /locations` sudah ada di atas; di bawah ini sisi tulis + manajemen user. */
+
+export function createLocation(body: CreateLocationRequest): Promise<Location> {
+  return apiFetch<Location>('/locations', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function updateLocation(id: string, body: UpdateLocationRequest): Promise<Location> {
+  return apiFetch<Location>(`/locations/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export function listManagedUsers(params: ManagedUserListParams = {}): Promise<User[]> {
+  const query = new URLSearchParams();
+  if (params.role !== undefined && params.role !== '') query.set('role', params.role);
+  if (params.search !== undefined && params.search !== '') query.set('search', params.search);
+  if (params.location_id !== undefined && params.location_id !== '')
+    query.set('location_id', params.location_id);
+  const search = query.toString();
+  return apiFetch<User[]>(search === '' ? '/users' : `/users?${search}`);
+}
+
+export function createManagedUser(body: CreateManagedUserRequest): Promise<User> {
+  return apiFetch<User>('/users', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function updateManagedUserStatus(
+  id: string,
+  body: UpdateUserStatusRequest,
+): Promise<User> {
+  return apiFetch<User>(`/users/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `PATCH /users/:id` — super_admin saja; parsial, tanpa role/status (password = reset hash). */
+export function updateManagedUser(id: string, body: UpdateManagedUserRequest): Promise<User> {
+  return apiFetch<User>(`/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Hapus permanen (super_admin saja — kontrak DELETE §2)
+// ---------------------------------------------------------------------------
+
+/** `DELETE /visits/{id}` — 204 kosong. */
+export function deleteVisit(id: string): Promise<void> {
+  return apiFetch<void>(`/visits/${id}`, { method: 'DELETE' });
+}
+
+/** `DELETE /users/{id}` — 204 kosong; 403 diri sendiri/super_admin; 409 bila direferensikan. */
+export function deleteManagedUser(id: string): Promise<void> {
+  return apiFetch<void>(`/users/${id}`, { method: 'DELETE' });
+}
+
+/** `DELETE /locations/{id}` — 204 kosong; 409 bila masih direferensikan. */
+export function deleteLocation(id: string): Promise<void> {
+  return apiFetch<void>(`/locations/${id}`, { method: 'DELETE' });
 }

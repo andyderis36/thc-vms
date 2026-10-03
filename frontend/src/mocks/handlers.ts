@@ -13,10 +13,12 @@ import {
   isWithinCheckinWindow,
 } from '@/lib/visits/tolerance';
 import type {
+  Location,
   LoginResult,
   QrPayload,
   UploadFileResult,
   User,
+  Vendor,
   VisitDetail,
   VisitListResult,
 } from '@/lib/api/types';
@@ -153,7 +155,7 @@ function scopeVisits(
       (visit) => visit.location.id === user.location_id,
     );
   }
-  // PIC hanya melihat kunjungan miliknya sendiri.
+  // Vendor/Mitra hanya melihat kunjungan miliknya sendiri.
   return db.visits.filter((visit) => visit.pic_user.id === user.id);
 }
 
@@ -212,6 +214,59 @@ function generateVisitCode(): string {
 const INVALID_TRANSITION_MESSAGE =
   'Kunjungan tidak dapat diproses pada status saat ini.';
 
+const LOCATION_TYPES = new Set(['pusat', 'cabang', 'pop', 'minipop']);
+const LOCATION_TIMEZONES = new Set(['WIB', 'WITA', 'WIT']);
+const MANAGED_ROLES = new Set(['admin', 'vendor']);
+
+/**
+ * Cermin kontrak BE `users.nik TEXT NULL UNIQUE` (16 digit):
+ * wajib + format + unik untuk admin/vendor.
+ */
+const NIK_PATTERN = /^\d{16}$/;
+
+function invalidNikFormat(): Response {
+  return fail(
+    'BAD_REQUEST',
+    'NIK harus terdiri dari tepat 16 digit angka.',
+    400,
+  );
+}
+
+function takenNik(): Response {
+  return fail('CONFLICT', 'NIK sudah terdaftar.', 409);
+}
+
+/** NIK pada body create managed user (admin/vendor: wajib). Kembalikan error atau NIK bersih. */
+function parseRequiredNik(body: Record<string, unknown>): { nik: string } | { error: Response } {
+  const raw = body['nik'];
+  const nik = typeof raw === 'string' ? raw.trim() : '';
+  if (nik === '') {
+    return {
+      error: fail(
+        'BAD_REQUEST',
+        'NIK wajib diisi untuk peran admin dan Vendor/Mitra.',
+        400,
+      ),
+    };
+  }
+  if (!NIK_PATTERN.test(nik)) {
+    return { error: invalidNikFormat() };
+  }
+  if (db.users.some((user) => user.nik === nik)) {
+    return { error: takenNik() };
+  }
+  return { nik };
+}
+
+/** NIK ditolak BE untuk security/super_admin — cermin 400 di endpoint security. */
+function rejectSecurityNik(body: Record<string, unknown>): Response | null {
+  const raw = body['nik'];
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    return fail('BAD_REQUEST', 'NIK tidak berlaku untuk akun security.', 400);
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -255,6 +310,12 @@ export const handlers: RequestHandler[] = [
   http.get(`${API_BASE}/purposes`, async () => {
     await delay(150);
     return ok(db.purposes);
+  }),
+
+  http.get(`${API_BASE}/vendors`, async () => {
+    await delay(150);
+    const vendors: Vendor[] = db.vendors;
+    return ok(vendors);
   }),
 
   // -- Visits: list ---------------------------------------------------------
@@ -308,16 +369,33 @@ export const handlers: RequestHandler[] = [
     const endDate = stringField(body, 'end_date') ?? '';
     const visitors = body['visitors'];
     const purposeIds = body['purpose_ids'];
+    // "Tujuan lain" (kontrak baru): teks manual ≤200; `purpose_ids` boleh
+    // kosong selama field ini terisi (cermin BE).
+    const purposeNoteRaw = stringField(body, 'purpose_note');
+    const purposeNote =
+      purposeNoteRaw === undefined || purposeNoteRaw.trim() === ''
+        ? null
+        : purposeNoteRaw.trim();
     const isNdaAccepted = body['is_nda_accepted'];
 
     const location = db.locations.find((loc) => loc.id === locationId);
     if (location === undefined) {
       return fail('BAD_REQUEST', 'Lokasi wajib dipilih.', 400);
     }
-    if (!Array.isArray(purposeIds) || purposeIds.length === 0) {
-      return fail('BAD_REQUEST', 'Tujuan kunjungan wajib dipilih.', 400);
+    if (purposeNote !== null && purposeNote.length > 200) {
+      return fail('BAD_REQUEST', 'Tujuan lain maksimal 200 karakter.', 400);
     }
-    const unknownPurpose = purposeIds.some(
+    const purposeIdList: unknown[] = Array.isArray(purposeIds)
+      ? purposeIds
+      : [];
+    if (purposeIdList.length === 0 && purposeNote === null) {
+      return fail(
+        'BAD_REQUEST',
+        'Pilih minimal satu tujuan kunjungan atau isi tujuan lain.',
+        400,
+      );
+    }
+    const unknownPurpose = purposeIdList.some(
       (id) =>
         typeof id !== 'string' ||
         db.purposes.every((purpose) => purpose.id !== id),
@@ -354,7 +432,7 @@ export const handlers: RequestHandler[] = [
       );
     }
 
-    const matchedPurposes = purposeIds.flatMap((id) => {
+    const matchedPurposes = purposeIdList.flatMap((id) => {
       if (typeof id !== 'string') {
         return [];
       }
@@ -373,6 +451,7 @@ export const handlers: RequestHandler[] = [
       end_date: new Date(endMs).toISOString(),
       assignment_letter_url: stringField(body, 'assignment_letter_url') ?? null,
       notes: stringField(body, 'notes') ?? null,
+      purpose_note: purposeNote,
       visitors: visitors.flatMap((item) => {
         if (!isRecord(item)) {
           return [];
@@ -388,7 +467,35 @@ export const handlers: RequestHandler[] = [
           typeof item['id_card_photo_url'] === 'string'
             ? item['id_card_photo_url']
             : null;
-        return [{ name, id_number: idNumber, phone, id_card_photo_url: photo }];
+        const selfie =
+          typeof item['photo_url'] === 'string' ? item['photo_url'] : null;
+        const rawVendorId =
+          typeof item['vendor_id'] === 'string' ? item['vendor_id'] : '';
+        const vendor =
+          rawVendorId !== ''
+            ? db.vendors.find((entry) => entry.id === rawVendorId)
+            : undefined;
+        // vendor_id menang; selain itu teks manual `vendor_name` (≤120).
+        const manualVendor =
+          typeof item['vendor_name'] === 'string'
+            ? item['vendor_name'].trim()
+            : '';
+        return [
+          {
+            name,
+            id_number: idNumber,
+            phone,
+            id_card_photo_url: photo,
+            photo_url: selfie,
+            vendor_id: rawVendorId !== '' ? rawVendorId : null,
+            vendor_name:
+              vendor !== undefined
+                ? vendor.name
+                : manualVendor !== '' && manualVendor.length <= 120
+                  ? manualVendor
+                  : null,
+          },
+        ];
       }),
       created_at: new Date().toISOString(),
     };
@@ -507,7 +614,7 @@ export const handlers: RequestHandler[] = [
       if (visit === undefined) {
         return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
       }
-      if (auth.role === 'pic' && visit.pic_user.id !== auth.id) {
+      if (auth.role === 'vendor' && visit.pic_user.id !== auth.id) {
         return fail(
           'FORBIDDEN',
           'Anda hanya dapat menjadwalkan ulang kunjungan milik Anda.',
@@ -570,7 +677,7 @@ export const handlers: RequestHandler[] = [
     if (visit === undefined) {
       return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
     }
-    if (auth.role === 'pic' && visit.pic_user.id !== auth.id) {
+    if (auth.role === 'vendor' && visit.pic_user.id !== auth.id) {
       return fail(
         'FORBIDDEN',
         'Anda hanya dapat membatalkan kunjungan milik Anda.',
@@ -627,7 +734,7 @@ export const handlers: RequestHandler[] = [
     if (visit === undefined) {
       return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
     }
-    if (auth.role === 'pic') {
+    if (auth.role === 'vendor') {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk melakukan check-in.',
@@ -672,7 +779,7 @@ export const handlers: RequestHandler[] = [
     if (visit === undefined) {
       return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
     }
-    if (auth.role === 'pic') {
+    if (auth.role === 'vendor') {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk melakukan check-out.',
@@ -738,7 +845,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role === 'security' || auth.role === 'pic') {
+    if (auth.role === 'security' || auth.role === 'vendor') {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk melihat data petugas.',
@@ -764,7 +871,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role === 'security' || auth.role === 'pic') {
+    if (auth.role === 'security' || auth.role === 'vendor') {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk menambah petugas.',
@@ -772,6 +879,10 @@ export const handlers: RequestHandler[] = [
       );
     }
     const body = await readJsonBody(request);
+    const nikRejected = rejectSecurityNik(body);
+    if (nikRejected !== null) {
+      return nikRejected;
+    }
     const name = stringField(body, 'name')?.trim() ?? '';
     const email = stringField(body, 'email')?.trim() ?? '';
     const password = stringField(body, 'password') ?? '';
@@ -811,6 +922,7 @@ export const handlers: RequestHandler[] = [
       name,
       email,
       phone,
+      nik: null,
       role: 'security',
       location_id: location.id,
       location_name: location.name,
@@ -829,7 +941,7 @@ export const handlers: RequestHandler[] = [
       if (auth === null) {
         return unauthorized();
       }
-      if (auth.role === 'security' || auth.role === 'pic') {
+      if (auth.role === 'security' || auth.role === 'vendor') {
         return fail(
           'FORBIDDEN',
           'Anda tidak memiliki izin untuk mengubah status petugas.',
@@ -865,4 +977,645 @@ export const handlers: RequestHandler[] = [
       return ok(target);
     },
   ),
+
+  // -- Security users: delete (super_admin semua cabang; admin terkunci cabangnya) --
+  http.delete(`${API_BASE}/users/security/:id`, ({ request, params }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role === 'security' || auth.role === 'vendor') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk menghapus petugas.',
+        403,
+      );
+    }
+    const id = params['id'];
+    if (typeof id !== 'string') {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const index = db.users.findIndex(
+      (user) => user.id === id && user.role === 'security',
+    );
+    if (index === -1) {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const target = db.users[index] as User;
+    if (
+      auth.role === 'admin' &&
+      (auth.location_id === null || target.location_id !== auth.location_id)
+    ) {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk menghapus petugas di luar cabang Anda.',
+        403,
+      );
+    }
+    const referenced =
+      db.visits.some((visit) => visit.pic_user.id === target.id) ||
+      db.visits.some((visit) => visit.checked_in_by === target.id);
+    if (referenced) {
+      return fail(
+        'CONFLICT',
+        'Petugas masih memiliki kunjungan terkait dan tidak dapat dihapus.',
+        409,
+      );
+    }
+    db.users.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // -- Superadmin: fasilitas & cabang (kontrak §2) --------------------------------
+  http.post(`${API_BASE}/locations`, async ({ request }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk mengelola fasilitas.',
+        403,
+      );
+    }
+    const body = await readJsonBody(request);
+    const name = stringField(body, 'name')?.trim() ?? '';
+    const type = stringField(body, 'type') ?? '';
+    if (name === '' || type === '') {
+      return fail('BAD_REQUEST', 'Nama dan tipe fasilitas wajib diisi.', 400);
+    }
+    if (!LOCATION_TYPES.has(type)) {
+      return fail(
+        'BAD_REQUEST',
+        'Tipe fasilitas harus pusat, cabang, pop, atau minipop.',
+        400,
+      );
+    }
+    const timezone = stringField(body, 'timezone') ?? 'WIB';
+    if (!LOCATION_TIMEZONES.has(timezone)) {
+      return fail(
+        'BAD_REQUEST',
+        'Zona waktu harus WIB, WITA, atau WIT.',
+        400,
+      );
+    }
+    const created: Location = {
+      id: crypto.randomUUID(),
+      name,
+      type: type as Location['type'],
+      address: stringField(body, 'address') ?? '',
+      city: stringField(body, 'city') ?? '',
+      timezone: timezone as Location['timezone'],
+      is_active: true,
+    };
+    db.locations.push(created);
+    return ok(created, 201);
+  }),
+
+  http.patch(`${API_BASE}/locations/:id`, async ({ request, params }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk mengelola fasilitas.',
+        403,
+      );
+    }
+    const id = params['id'];
+    if (typeof id !== 'string') {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const target = db.locations.find((loc) => loc.id === id);
+    if (target === undefined) {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const body = await readJsonBody(request);
+    if ('name' in body) {
+      const name = stringField(body, 'name')?.trim() ?? '';
+      if (name === '') {
+        return fail('BAD_REQUEST', 'Nama fasilitas tidak boleh kosong.', 400);
+      }
+      target.name = name;
+    }
+    if ('type' in body) {
+      const type = stringField(body, 'type') ?? '';
+      if (!LOCATION_TYPES.has(type)) {
+        return fail(
+          'BAD_REQUEST',
+          'Tipe fasilitas harus pusat, cabang, pop, atau minipop.',
+          400,
+        );
+      }
+      target.type = type as Location['type'];
+    }
+    if ('address' in body) {
+      target.address = stringField(body, 'address') ?? '';
+    }
+    if ('city' in body) {
+      target.city = stringField(body, 'city') ?? '';
+    }
+    if ('timezone' in body) {
+      const timezone = stringField(body, 'timezone') ?? '';
+      if (!LOCATION_TIMEZONES.has(timezone)) {
+        return fail('BAD_REQUEST', 'Zona waktu harus WIB, WITA, atau WIT.', 400);
+      }
+      target.timezone = timezone as Location['timezone'];
+    }
+    if ('is_active' in body) {
+      const flag = body['is_active'];
+      if (typeof flag !== 'boolean') {
+        return fail('BAD_REQUEST', 'Status aktif harus true atau false.', 400);
+      }
+      target.is_active = flag;
+    }
+    return ok(target);
+  }),
+
+  // -- Superadmin: manajemen user & vendor (kontrak §2) ---------------------------
+  http.get(`${API_BASE}/users`, async ({ request }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk melihat data pengguna.',
+        403,
+      );
+    }
+    await delay(150);
+    const url = new URL(request.url);
+    const roleParam = url.searchParams.get('role');
+    const locationParam = url.searchParams.get('location_id');
+    const searchParam = url.searchParams.get('search')?.trim().toLowerCase();
+    let items = [...db.users];
+    if (roleParam !== null && roleParam !== '') {
+      items = items.filter((user) => user.role === roleParam);
+    }
+    if (locationParam !== null && locationParam !== '') {
+      items = items.filter((user) => user.location_id === locationParam);
+    }
+    if (searchParam !== null && searchParam !== undefined && searchParam !== '') {
+      items = items.filter(
+        (user) =>
+          user.name.toLowerCase().includes(searchParam) ||
+          user.email.toLowerCase().includes(searchParam),
+      );
+    }
+    return ok(items);
+  }),
+
+  http.post(`${API_BASE}/users`, async ({ request }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk menambah pengguna.',
+        403,
+      );
+    }
+    const body = await readJsonBody(request);
+    const name = stringField(body, 'name')?.trim() ?? '';
+    const email = stringField(body, 'email')?.trim() ?? '';
+    const password = stringField(body, 'password') ?? '';
+    const role = stringField(body, 'role') ?? '';
+    if (name === '' || email === '' || password === '') {
+      return fail(
+        'BAD_REQUEST',
+        'Nama, email, dan password wajib diisi.',
+        400,
+      );
+    }
+    if (!MANAGED_ROLES.has(role)) {
+      return fail(
+        'BAD_REQUEST',
+        'Peran harus admin atau vendor.',
+        400,
+      );
+    }
+    const emailTaken = db.users.some(
+      (user) => user.email.toLowerCase() === email.toLowerCase(),
+    );
+    if (emailTaken) {
+      return fail('CONFLICT', 'Email sudah terdaftar.', 409);
+    }
+    // NIK wajib + 16 digit + unik untuk admin/vendor (cermin BE).
+    const parsedNik = parseRequiredNik(body);
+    if ('error' in parsedNik) {
+      return parsedNik.error;
+    }
+    let locationId: string | null = null;
+    let locationName: string | null = null;
+    let vendorName: string | null = null;
+    if (role === 'admin') {
+      const requested = stringField(body, 'location_id') ?? '';
+      if (requested === '') {
+        return fail('BAD_REQUEST', 'Admin wajib memiliki cabang penugasan.', 400);
+      }
+      const location = db.locations.find((loc) => loc.id === requested);
+      if (location === undefined) {
+        return fail('BAD_REQUEST', 'Lokasi tidak valid.', 400);
+      }
+      locationId = location.id;
+      locationName = location.name;
+      const vendorId = stringField(body, 'vendor_id') ?? '';
+      const vendorNameManual = stringField(body, 'vendor_name') ?? '';
+      if (vendorId !== '' || vendorNameManual !== '') {
+        return fail('BAD_REQUEST', 'vendor_id hanya untuk role vendor.', 400);
+      }
+    } else {
+      // role vendor: vendor_id opsional — resolve ke nama vendor katalog;
+      // selain itu `vendor_name` manual dari isian bebas-teks (≤120).
+      const vendorId = stringField(body, 'vendor_id') ?? '';
+      const vendorNameManual = stringField(body, 'vendor_name') ?? '';
+      if (vendorId !== '') {
+        const vendor = db.vendors.find((item) => item.id === vendorId);
+        if (vendor === undefined) {
+          return fail('BAD_REQUEST', 'Vendor tidak valid.', 400);
+        }
+        vendorName = vendor.name;
+      } else if (vendorNameManual.trim() !== '' && vendorNameManual.trim().length <= 120) {
+        vendorName = vendorNameManual.trim();
+      }
+    }
+    const phone = stringField(body, 'phone') ?? '-';
+    const created: User = {
+      id: crypto.randomUUID(),
+      name,
+      email,
+      phone,
+      nik: parsedNik.nik,
+      role: role as User['role'],
+      location_id: locationId,
+      location_name: locationName,
+      status: 'active',
+      type: role === 'admin' ? 'internal' : 'external',
+      vendor_name: vendorName,
+    };
+    db.users.push(created);
+    return ok(created, 201);
+  }),
+
+  http.patch(`${API_BASE}/users/:id/status`, async ({ request, params }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk mengubah status pengguna.',
+        403,
+      );
+    }
+    const id = params['id'];
+    if (typeof id !== 'string') {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const target = db.users.find((user) => user.id === id);
+    if (target === undefined) {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    if (target.id === auth.id) {
+      return fail(
+        'FORBIDDEN',
+        'Tidak dapat mengubah status akun sendiri.',
+        403,
+      );
+    }
+    if (target.role === 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Tidak dapat mengubah status akun super_admin.',
+        403,
+      );
+    }
+    const body = await readJsonBody(request);
+    const status = stringField(body, 'status');
+    if (status !== 'active' && status !== 'inactive') {
+      return fail(
+        'BAD_REQUEST',
+        'Status harus "active" atau "inactive".',
+        400,
+      );
+    }
+    target.status = status;
+    return ok(target);
+  }),
+
+  // -- Superadmin: ubah user (parsial; tanpa role/status) ------------------------
+  // vendor_id di-resolve ke vendor_name katalog agar dropdown Vendor/Mitra terasa;
+  // NIK cermin BE (wajib/format/unik untuk admin/vendor, ditolak lainnya).
+  http.patch(`${API_BASE}/users/:id`, async ({ request, params }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk mengubah pengguna.',
+        403,
+      );
+    }
+    const id = params['id'];
+    if (typeof id !== 'string') {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const target = db.users.find((user) => user.id === id);
+    if (target === undefined) {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const body = await readJsonBody(request);
+    const name = stringField(body, 'name');
+    const email = stringField(body, 'email');
+    const phone = stringField(body, 'phone');
+    const locationId = stringField(body, 'location_id');
+    const vendorId = stringField(body, 'vendor_id');
+    // vendor_name: string = set manual ('' = bersihkan kolom); absen = biarkan.
+    const vendorNameField =
+      typeof body['vendor_name'] === 'string' ? body['vendor_name'] : undefined;
+    const nikProvided = 'nik' in body;
+    // Kata sandi hanya divalidasi (mock tak menyimpan hash — BE acuan).
+    const password = stringField(body, 'password');
+    if (
+      name === undefined &&
+      email === undefined &&
+      phone === undefined &&
+      locationId === undefined &&
+      vendorId === undefined &&
+      vendorNameField === undefined &&
+      password === undefined &&
+      !nikProvided
+    ) {
+      return fail('BAD_REQUEST', 'Tidak ada perubahan yang diberikan.', 400);
+    }
+    if (name !== undefined && name.trim() === '') {
+      return fail('BAD_REQUEST', 'Nama tidak boleh kosong.', 400);
+    }
+    if (email !== undefined && email.trim() === '') {
+      return fail('BAD_REQUEST', 'Email tidak boleh kosong.', 400);
+    }
+    if (password !== undefined && password === '') {
+      return fail('BAD_REQUEST', 'Password baru tidak boleh kosong.', 400);
+    }
+    if (
+      target.role === 'admin' &&
+      (vendorId !== undefined || vendorNameField !== undefined)
+    ) {
+      return fail('BAD_REQUEST', 'vendor_id hanya untuk role vendor.', 400);
+    }
+    if (target.role === 'vendor' && locationId !== undefined) {
+      return fail('BAD_REQUEST', 'Role vendor tidak memakai location_id.', 400);
+    }
+    // NIK cermin BE: ditolak untuk security/super_admin; untuk admin/vendor
+    // wajib 16 digit, tak boleh dikosongkan, dan unik.
+    let nextNik: string | undefined;
+    if (nikProvided) {
+      if (target.role !== 'admin' && target.role !== 'vendor') {
+        return fail(
+          'BAD_REQUEST',
+          'NIK hanya berlaku untuk peran admin dan Vendor/Mitra.',
+          400,
+        );
+      }
+      const raw = body['nik'];
+      const nik = typeof raw === 'string' ? raw.trim() : '';
+      if (nik === '') {
+        return fail('BAD_REQUEST', 'NIK tidak boleh dikosongkan.', 400);
+      }
+      if (!NIK_PATTERN.test(nik)) {
+        return invalidNikFormat();
+      }
+      if (db.users.some((user) => user.id !== id && user.nik === nik)) {
+        return takenNik();
+      }
+      nextNik = nik;
+    }
+    // Anti-pengambilalihan (cermin BE): super_admin lain tak tersentuh;
+    // reset diri sendiri wajib buktikan password saat ini (mock: DEMO_PASSWORD).
+    if (password !== undefined) {
+      if (target.role === 'super_admin' && target.id !== auth.id) {
+        return fail('FORBIDDEN', 'Tidak dapat me-reset password super_admin lain.', 403);
+      }
+      if (target.id === auth.id) {
+        const currentPassword = stringField(body, 'current_password');
+        if (currentPassword === undefined || currentPassword === '') {
+          return fail('BAD_REQUEST', 'Password saat ini wajib diisi untuk mengubah password sendiri.', 400);
+        }
+        if (currentPassword !== DEMO_PASSWORD) {
+          return fail('INVALID_CREDENTIALS', 'Password saat ini salah.', 401);
+        }
+      }
+    }
+    if (email !== undefined && db.users.some((user) => user.id !== id && user.email === email)) {
+      return fail('CONFLICT', 'Email sudah dipakai akun lain.', 409);
+    }
+    if (name !== undefined) target.name = name;
+    if (email !== undefined) target.email = email;
+    if (phone !== undefined) target.phone = phone;
+    if (locationId !== undefined) target.location_id = locationId;
+    if (nextNik !== undefined) target.nik = nextNik;
+    if (target.role === 'vendor') {
+      if (vendorId !== undefined) {
+        // vendor_id menang bila keduanya ada — resolve ke nama katalog.
+        const vendor = db.vendors.find((item) => item.id === vendorId);
+        if (vendor === undefined) {
+          return fail('BAD_REQUEST', 'Vendor tidak valid.', 400);
+        }
+        target.vendor_name = vendor.name;
+      } else if (vendorNameField !== undefined) {
+        const trimmed = vendorNameField.trim();
+        if (trimmed.length > 120) {
+          return fail('BAD_REQUEST', 'Nama vendor maksimal 120 karakter.', 400);
+        }
+        // String kosong = bersihkan override; selain itu teks manual.
+        target.vendor_name = trimmed === '' ? null : trimmed;
+      }
+    }
+    return ok(target);
+  }),
+
+  // -- Security users: ubah satpam (admin cabang terkunci; super_admin bebas) ----
+  http.patch(`${API_BASE}/users/security/:id`, async ({ request, params }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'super_admin' && auth.role !== 'admin') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk mengubah satpam.',
+        403,
+      );
+    }
+    const id = params['id'];
+    if (typeof id !== 'string') {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const target = db.users.find((user) => user.id === id);
+    if (target === undefined || target.role !== 'security') {
+      return fail('NOT_FOUND', 'Akun security tidak ditemukan.', 404);
+    }
+    if (auth.role !== 'super_admin' && target.location_id !== auth.location_id) {
+      return fail(
+        'FORBIDDEN_BRANCH',
+        'Tidak berhak mengubah akun security dari cabang lain.',
+        403,
+      );
+    }
+    const body = await readJsonBody(request);
+    const nikRejected = rejectSecurityNik(body);
+    if (nikRejected !== null) {
+      return nikRejected;
+    }
+    const name = stringField(body, 'name');
+    const email = stringField(body, 'email');
+    const phone = stringField(body, 'phone');
+    const password = stringField(body, 'password');
+    if (
+      name === undefined &&
+      email === undefined &&
+      phone === undefined &&
+      password === undefined
+    ) {
+      return fail('BAD_REQUEST', 'Tidak ada perubahan yang diberikan.', 400);
+    }
+    if (name !== undefined && name.trim() === '') {
+      return fail('BAD_REQUEST', 'Nama tidak boleh kosong.', 400);
+    }
+    if (email !== undefined && email.trim() === '') {
+      return fail('BAD_REQUEST', 'Email tidak boleh kosong.', 400);
+    }
+    if (password !== undefined && password === '') {
+      return fail('BAD_REQUEST', 'Password baru tidak boleh kosong.', 400);
+    }
+    if (
+      email !== undefined &&
+      db.users.some((user) => user.id !== id && user.email === email)
+    ) {
+      return fail('CONFLICT', 'Email sudah dipakai akun lain.', 409);
+    }
+    if (name !== undefined) target.name = name;
+    if (email !== undefined) target.email = email;
+    if (phone !== undefined) target.phone = phone;
+    return ok(target);
+  }),
+
+  // -- Visits: delete (super_admin saja) ---------------------------------------
+  http.delete(`${API_BASE}/visits/:id`, ({ request, params }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk menghapus kunjungan.',
+        403,
+      );
+    }
+    const id = params['id'];
+    if (typeof id !== 'string') {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const index = db.visits.findIndex(
+      (visit) => visit.id === id || visit.visit_id === id,
+    );
+    if (index === -1) {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    db.visits.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // -- Superadmin: hapus user (larangan: diri sendiri & super_admin; 409 bila direferensikan) --
+  http.delete(`${API_BASE}/users/:id`, ({ request, params }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk menghapus pengguna.',
+        403,
+      );
+    }
+    const id = params['id'];
+    if (typeof id !== 'string') {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const index = db.users.findIndex((user) => user.id === id);
+    if (index === -1) {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const target = db.users[index] as User;
+    if (target.id === auth.id) {
+      return fail(
+        'FORBIDDEN',
+        'Tidak dapat menghapus akun sendiri.',
+        403,
+      );
+    }
+    if (target.role === 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Tidak dapat menghapus akun super_admin.',
+        403,
+      );
+    }
+    const referenced = db.visits.some((visit) => visit.pic_user.id === target.id);
+    if (referenced) {
+      return fail(
+        'CONFLICT',
+        'Pengguna masih memiliki kunjungan terkait dan tidak dapat dihapus.',
+        409,
+      );
+    }
+    db.users.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // -- Superadmin: hapus fasilitas (409 bila masih direferensikan) --------------
+  http.delete(`${API_BASE}/locations/:id`, ({ request, params }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'super_admin') {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk menghapus fasilitas.',
+        403,
+      );
+    }
+    const id = params['id'];
+    if (typeof id !== 'string') {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const index = db.locations.findIndex((loc) => loc.id === id);
+    if (index === -1) {
+      return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+    }
+    const usedByVisit = db.visits.some((visit) => visit.location.id === id);
+    const usedByUser = db.users.some((user) => user.location_id === id);
+    if (usedByVisit || usedByUser) {
+      return fail(
+        'CONFLICT',
+        'Fasilitas masih digunakan oleh kunjungan atau pengguna dan tidak dapat dihapus.',
+        409,
+      );
+    }
+    db.locations.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
 ];

@@ -1,7 +1,8 @@
 'use client'
 
 import { useId, type SelectHTMLAttributes } from 'react'
-import { FIELD_BASE_CLASS, type FieldSize } from './Input'
+import { ChevronDown } from 'lucide-react'
+import { FIELD_BASE_CLASS, FIELD_HEIGHT, type FieldSize } from './Input'
 
 export interface SelectOption {
   value: string
@@ -38,7 +39,7 @@ export function Select({
   const errorId = `${selectId}-error`
   const hintId = `${selectId}-hint`
   const describedBy = error ? errorId : hint ? hintId : undefined
-  const height = fieldSize === 'gate' ? 'h-touch' : 'h-10'
+  const height = FIELD_HEIGHT[fieldSize]
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -69,16 +70,14 @@ export function Select({
             </option>
           ))}
         </select>
-        <span
+        <ChevronDown
           aria-hidden="true"
-          className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted"
-        >
-          &#9662;
-        </span>
+          className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted"
+        />
       </div>
 
       {error ? (
-        <p id={errorId} className="text-xs text-danger-text">
+        <p id={errorId} role="alert" className="text-xs text-danger-text">
           {error}
         </p>
       ) : hint ? (

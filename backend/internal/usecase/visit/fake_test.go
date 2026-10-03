@@ -131,6 +131,18 @@ func (f *fakeVisitRepo) Reschedule(_ context.Context, id domain.UUID, start time
 	return nil
 }
 
+// DeleteVisit removes one visit from the fake roster, mirroring the
+// PostgreSQL adapter's ErrNotFound on a missing id. The production cascade
+// over the child tables needs no fake equivalent: the fake stores no child
+// rows, so dropping the parent is already atomic.
+func (f *fakeVisitRepo) DeleteVisit(_ context.Context, id domain.UUID) error {
+	if _, ok := f.byID[id]; !ok {
+		return domain.NotFoundEntity("Kunjungan")
+	}
+	delete(f.byID, id)
+	return nil
+}
+
 // fakeMasterRepo is a hand-written fake for domain.MasterDataRepository.
 type fakeMasterRepo struct {
 	locations map[domain.UUID]domain.Location
@@ -156,7 +168,36 @@ func newTestService(repo *fakeVisitRepo, master *fakeMasterRepo, now time.Time) 
 	if master == nil {
 		master = &fakeMasterRepo{locations: make(map[domain.UUID]domain.Location)}
 	}
-	return NewService(repo, master, fixedClock{now: now})
+	return NewService(repo, master, fixedClock{now: now}, nil, nil)
+}
+
+// fakeVendorRepo is a hand-written fake for domain.VendorRepository: the
+// active company catalogue. ListVendors returns the active rows only, so a
+// vendor absent from the list is unknown or blacklisted.
+type fakeVendorRepo struct {
+	vendors []domain.Vendor
+}
+
+func (f *fakeVendorRepo) ListVendors(_ context.Context) ([]domain.Vendor, error) {
+	return f.vendors, nil
+}
+
+func (f *fakeVendorRepo) FindVendorName(_ context.Context, id domain.UUID) (string, error) {
+	for _, v := range f.vendors {
+		if v.ID == id {
+			return v.Name, nil
+		}
+	}
+	return "", domain.NotFoundEntity("Vendor")
+}
+
+// newTestServiceWithVendors wires the visit usecase to an active vendor
+// catalogue for the create-vendor tests.
+func newTestServiceWithVendors(repo *fakeVisitRepo, master *fakeMasterRepo, now time.Time, vendors []domain.Vendor) *Service {
+	if master == nil {
+		master = &fakeMasterRepo{locations: make(map[domain.UUID]domain.Location)}
+	}
+	return NewService(repo, master, fixedClock{now: now}, nil, &fakeVendorRepo{vendors: vendors})
 }
 
 func testActor(role domain.RoleName, id string, loc string) Actor {

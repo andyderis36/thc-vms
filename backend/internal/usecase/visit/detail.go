@@ -45,7 +45,7 @@ func overlapsVisitDay(now time.Time, visit domain.VisitRequest, loc *time.Locati
 }
 
 // GetVisit loads one visit by UUID or VST- business code and applies read
-// scope: branch isolation for admin/security, ownership for pic, and the
+// scope: branch isolation for admin/security, ownership for vendor, and the
 // TODAY-only restriction for security evaluated in the facility timezone with
 // the injected clock (never time.Now).
 func (s *Service) GetVisit(ctx context.Context, actor Actor, key string) (domain.VisitRequest, error) {
@@ -67,7 +67,7 @@ func (s *Service) GetVisit(ctx context.Context, actor Actor, key string) (domain
 		if err := actor.requireBranch(visit.LocationID); err != nil {
 			return domain.VisitRequest{}, err
 		}
-	case domain.RolePIC:
+	case domain.RoleVendor:
 		if visit.PICUserID != actor.ID {
 			return domain.VisitRequest{}, domain.NotFoundEntity("Kunjungan")
 		}
@@ -83,5 +83,34 @@ func (s *Service) GetVisit(ctx context.Context, actor Actor, key string) (domain
 			return domain.VisitRequest{}, domain.NotFoundEntity("Kunjungan")
 		}
 	}
-	return visit, nil
+	// File links are exchanged last: withFileLinks only runs on an
+	// already-authorized visit, so the scoped read above is the authz and no
+	// new scope check is introduced here.
+	return s.withFileLinks(ctx, s.withGateTimes(ctx, visit)), nil
+}
+
+// withGateTimes enriches one ALREADY-AUTHORIZED visit with its gate timestamps
+// for the GET /visits/{id} response (QA GATE-01/02/09). It runs only here, not
+// in ListVisits: a 100-row page would otherwise pay up to 200 extra point
+// lookups (N+1), while a single GET pays at most two indexed lookups on the
+// UNIQUE visit_request_id columns. A missing gate row (ErrNotFound) means "not
+// yet checked in/out" and leaves the pointers nil; any other storage error is
+// swallowed the same way so a gate-table outage never turns a readable visit
+// into a 500 — the visit row itself is the source of truth for the read scope,
+// the gate times are best-effort display data.
+func (s *Service) withGateTimes(ctx context.Context, visit domain.VisitRequest) domain.VisitRequest {
+	if s.checkIns == nil {
+		return visit
+	}
+	if checkIn, err := s.checkIns.FindCheckInByVisit(ctx, visit.ID); err == nil {
+		at := checkIn.CheckedInAt
+		by := checkIn.CheckedInBy
+		visit.CheckInAt = &at
+		visit.CheckedInBy = &by
+	}
+	if checkOut, err := s.checkIns.FindCheckOutByVisit(ctx, visit.ID); err == nil {
+		at := checkOut.CheckedOutAt
+		visit.CheckOutAt = &at
+	}
+	return visit
 }

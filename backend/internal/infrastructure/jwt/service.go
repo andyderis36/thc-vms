@@ -17,8 +17,13 @@ import (
 )
 
 // Claims is the full token payload. LocationID is a pointer with no omitempty
-// so a nil location (super_admin, pic) serialises as JSON null, never as "":
+// so a nil location (super_admin, vendor) serialises as JSON null, never as "":
 // branch scoping downstream compares against null.
+//
+// NOTE (role rename pic -> vendor): the role claim is the wire role VALUE
+// ("vendor"), so tokens minted before migration 000006 still carry "pic" and
+// are rejected by the middleware after the rename. This is accepted for local
+// dev: no token migration is performed; users simply log in again.
 type Claims struct {
 	jwt.RegisteredClaims
 	Role         domain.RoleName `json:"role"`

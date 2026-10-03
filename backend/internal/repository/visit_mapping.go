@@ -29,20 +29,27 @@ func visitRowToDomain(row db.VisitRequest) (domain.VisitRequest, error) {
 		AssignmentLetterURL: textPtr(row.AssignmentLetterUrl),
 		IsNDAAccepted:       row.IsNdaAccepted,
 		Notes:               textPtr(row.Notes),
+		PurposeNote:         textPtr(row.PurposeNote),
 		CreatedAt:           row.CreatedAt,
 		UpdatedAt:           row.UpdatedAt,
 	}, nil
 }
 
 // detailRowToDomain projects the GET /visits/{id} join onto the domain request.
-// The joined display names serve the openapi VisitDetail schema and are not
-// part of the domain entity, so they are deliberately dropped here.
+// The vendor display name rides along for the openapi VisitDetail vendor_name
+// member; location name/type ride along for the location member (kolom
+// Fasilitas FE); vendor name/email ride along for the pic_user member (kartu
+// Informasi Kunjungan FE). The vendor profile beyond name/email stays id-only
+// and belongs to user endpoints.
 func detailRowToDomain(row db.GetVisitByIDRow) (domain.VisitRequest, error) {
 	return visitFieldsToDomain(
 		row.ID, row.VisitID, row.PicUserID, row.VendorID, row.LocationID,
 		row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 		row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-		row.CreatedAt, row.UpdatedAt,
+		row.PurposeNote,
+		row.CreatedAt, row.UpdatedAt, row.VendorName,
+		row.LocationName, row.LocationType,
+		row.PicName, row.PicEmail,
 	)
 }
 
@@ -52,7 +59,10 @@ func visitCodeRowToDomain(row db.GetVisitByVisitCodeRow) (domain.VisitRequest, e
 		row.ID, row.VisitID, row.PicUserID, row.VendorID, row.LocationID,
 		row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 		row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-		row.CreatedAt, row.UpdatedAt,
+		row.PurposeNote,
+		row.CreatedAt, row.UpdatedAt, row.VendorName,
+		row.LocationName, row.LocationType,
+		row.PicName, row.PicEmail,
 	)
 }
 
@@ -71,8 +81,14 @@ func visitFieldsToDomain(
 	assignmentLetterURL pgtype.Text,
 	isNDAAccepted bool,
 	notes pgtype.Text,
+	purposeNote pgtype.Text,
 	createdAt time.Time,
 	updatedAt time.Time,
+	vendorName pgtype.Text,
+	locationName string,
+	locationType string,
+	picName string,
+	picEmail string,
 ) (domain.VisitRequest, error) {
 	parsed, err := domain.ParseVisitStatus(status)
 	if err != nil {
@@ -84,6 +100,10 @@ func visitFieldsToDomain(
 		PICUserID:           mustDomainUUID(picUserID),
 		VendorID:            nullUUIDToDomain(vendorID),
 		LocationID:          mustDomainUUID(locationID),
+		LocationName:        locationName,
+		LocationType:        domain.LocationType(locationType),
+		PICUserName:         picName,
+		PICUserEmail:        picEmail,
 		StartDate:           startDate,
 		EndDate:             endDate,
 		IsMultiDay:          isMultiDay,
@@ -91,9 +111,67 @@ func visitFieldsToDomain(
 		AssignmentLetterURL: textPtr(assignmentLetterURL),
 		IsNDAAccepted:       isNDAAccepted,
 		Notes:               textPtr(notes),
+		PurposeNote:         textPtr(purposeNote),
 		CreatedAt:           createdAt,
 		UpdatedAt:           updatedAt,
+		VendorName:          textValue(vendorName),
 	}, nil
+}
+
+// visitorModelToDomain projects one roster row onto the domain roster entry,
+// carrying the KTP/SIM photo, the optional selfie (openapi VisitorItem
+// id_card_photo_url + photo_url) and the technician's own company
+// (vendor_id + resolved vendor_name). The display name funnels through
+// resolveVendorDisplayName — the manual override wins only because the write
+// path never stores it alongside a vendor_id — so the raw manual text can
+// never leak past the resolved public member.
+func visitorModelToDomain(row db.ListVisitorsRow) domain.Visitor {
+	return domain.Visitor{
+		ID:                 mustDomainUUID(row.ID),
+		VisitRequestID:     mustDomainUUID(row.VisitRequestID),
+		Name:               row.Name,
+		IDNumber:           row.IDNumber,
+		Phone:              row.Phone,
+		IDCardPhotoURL:     textPtr(row.IDCardPhotoUrl),
+		PhotoURL:           textPtr(row.PhotoUrl),
+		VendorID:           nullUUIDToDomain(row.VendorID),
+		VendorName:         resolveVendorDisplayName(row.VendorNameOverride, row.VendorName),
+		VendorNameOverride: textPtr(row.VendorNameOverride),
+		CreatedAt:          row.CreatedAt,
+	}
+}
+
+// groupVisitorsByVisit indexes visitor rows by their owning visit id so the
+// list path attaches rosters with one batched query per page instead of N+1.
+func groupVisitorsByVisit(rows []db.ListVisitorsRow) map[uuid.UUID][]domain.Visitor {
+	grouped := make(map[uuid.UUID][]domain.Visitor, len(rows))
+	for _, row := range rows {
+		visitor := visitorModelToDomain(row)
+		grouped[row.VisitRequestID] = append(grouped[row.VisitRequestID], visitor)
+	}
+	return grouped
+}
+
+// purposeModelToDomain projects one visit_purpose join row onto the catalogue
+// purpose. The join carries the display name so the wire renders id + name.
+func purposeModelToDomain(row db.ListVisitPurposesRow) domain.Purpose {
+	return domain.Purpose{
+		ID:       mustDomainUUID(row.PurposeID),
+		Name:     row.PurposeName,
+		IsActive: row.PurposeIsActive,
+	}
+}
+
+// groupPurposesByVisit indexes purpose rows by their owning visit id so the
+// list path attaches catalogues with one batched query per page instead of
+// N+1, mirroring groupVisitorsByVisit.
+func groupPurposesByVisit(rows []db.ListVisitPurposesRow) map[uuid.UUID][]domain.Purpose {
+	grouped := make(map[uuid.UUID][]domain.Purpose, len(rows))
+	for _, row := range rows {
+		purpose := purposeModelToDomain(row)
+		grouped[row.VisitRequestID] = append(grouped[row.VisitRequestID], purpose)
+	}
+	return grouped
 }
 
 // nullUUIDToDomain renders a nullable uuid column as a domain identifier:
@@ -105,7 +183,9 @@ func nullUUIDToDomain(id pgtype.UUID) domain.UUID {
 	return toDomainUUID(id.Bytes)
 }
 
-// locationRowsToDomain projects the branch-scoped page.
+// locationRowsToDomain projects the branch-scoped page. Location name/type
+// ride along from the location join (kolom Fasilitas FE), same as detail.
+// Pic name/email ride along from the users join (kartu Informasi Kunjungan).
 func locationRowsToDomain(rows []db.ListVisitsForLocationRow) []domain.VisitRequest {
 	out := make([]domain.VisitRequest, 0, len(rows))
 	for _, row := range rows {
@@ -113,7 +193,10 @@ func locationRowsToDomain(rows []db.ListVisitsForLocationRow) []domain.VisitRequ
 			row.ID, row.VisitID, row.PicUserID, row.VendorID, row.LocationID,
 			row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 			row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-			row.CreatedAt, row.UpdatedAt,
+			row.PurposeNote,
+			row.CreatedAt, row.UpdatedAt, row.VendorName,
+			row.LocationName, row.LocationType,
+			row.PicName, row.PicEmail,
 		)
 		if err != nil {
 			continue
@@ -123,15 +206,20 @@ func locationRowsToDomain(rows []db.ListVisitsForLocationRow) []domain.VisitRequ
 	return out
 }
 
-// picRowsToDomain projects the vendor-scoped page.
-func picRowsToDomain(rows []db.ListVisitsForPICRow) []domain.VisitRequest {
+// vendorRowsToDomain projects the vendor-scoped page. Location name/type ride
+// along from the location join (kolom Fasilitas FE), same as detail.
+// Pic name/email ride along from the users join (kartu Informasi Kunjungan).
+func vendorRowsToDomain(rows []db.ListVisitsForPICRow) []domain.VisitRequest {
 	out := make([]domain.VisitRequest, 0, len(rows))
 	for _, row := range rows {
 		visit, err := visitFieldsToDomain(
 			row.ID, row.VisitID, row.PicUserID, row.VendorID, row.LocationID,
 			row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 			row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-			row.CreatedAt, row.UpdatedAt,
+			row.PurposeNote,
+			row.CreatedAt, row.UpdatedAt, row.VendorName,
+			row.LocationName, row.LocationType,
+			row.PicName, row.PicEmail,
 		)
 		if err != nil {
 			continue
@@ -141,7 +229,9 @@ func picRowsToDomain(rows []db.ListVisitsForPICRow) []domain.VisitRequest {
 	return out
 }
 
-// superAdminRowsToDomain projects the unscoped page.
+// superAdminRowsToDomain projects the unscoped page. Location name/type ride
+// along from the location join (kolom Fasilitas FE), same as detail.
+// Pic name/email ride along from the users join (kartu Informasi Kunjungan).
 func superAdminRowsToDomain(rows []db.ListVisitsForSuperAdminRow) []domain.VisitRequest {
 	out := make([]domain.VisitRequest, 0, len(rows))
 	for _, row := range rows {
@@ -149,7 +239,10 @@ func superAdminRowsToDomain(rows []db.ListVisitsForSuperAdminRow) []domain.Visit
 			row.ID, row.VisitID, row.PicUserID, row.VendorID, row.LocationID,
 			row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 			row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-			row.CreatedAt, row.UpdatedAt,
+			row.PurposeNote,
+			row.CreatedAt, row.UpdatedAt, row.VendorName,
+			row.LocationName, row.LocationType,
+			row.PicName, row.PicEmail,
 		)
 		if err != nil {
 			continue

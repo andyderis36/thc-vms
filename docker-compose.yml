@@ -19,7 +19,6 @@ services:
 
   minio:
     image: minio/minio:latest
-    pull_policy: never
     container_name: thc-vms-minio
     restart: always
     command: server /data --console-address ":9001"
@@ -31,6 +30,22 @@ services:
       - "9001:9001"
     volumes:
       - miniodata_local:/data
+
+  # One-shot: buatkan bucket privat S3_BUCKET_NAME (thc-vms-bucket) bila
+  # belum ada. Bucket TETAP privat (tanpa `mc anonymous`) karena backend
+  # melayani berkas lewat presigned URL ber-TTL (S3_PRESIGN_TTL_MINUTES).
+  minio-init:
+    image: minio/mc:latest
+    container_name: thc-vms-minio-init
+    restart: "no"
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set localminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb localminio/thc-vms-bucket --ignore-existing;
+      exit 0;
+      "
 
 volumes:
   pgdata_local:

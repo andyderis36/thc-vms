@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Textarea } from '@/components/ui/Textarea'
 import { useApproveVisitMutation } from '@/lib/api/hooks'
 import type { VisitDetail } from '@/lib/api/types'
+import { primaryVendorDisplay } from '@/lib/visits/vendor-display'
 import { formatVisitSchedule } from './VisitTable'
 
 /**
@@ -24,11 +25,16 @@ export function apiErrorMessage(error: unknown): string {
 
 export interface VisitSummaryProps {
   visit: VisitDetail
+  /** Sembunyikan perusahaan tingkat kunjungan (wajah gerbang memakai perusahaan per teknisi). */
+  hideVendor?: boolean
 }
 
-/** Ringkasan kunjungan di dalam modal — ID, PIC, fasilitas, keperluan, jadwal. */
-export function VisitSummary({ visit }: VisitSummaryProps) {
+/** Ringkasan kunjungan di dalam modal — ID, Vendor/Mitra, fasilitas, keperluan, jadwal. */
+export function VisitSummary({ visit, hideVendor = false }: VisitSummaryProps) {
   const purposes = visit.purposes.map((purpose) => purpose.name).join(', ')
+  const purposeNote = (visit.purpose_note ?? '').trim()
+  const vendorDisplay = primaryVendorDisplay(visit.visitors)
+  const showVendor = !hideVendor && vendorDisplay !== '—'
 
   return (
     <div className="mb-4 flex flex-col gap-2 rounded-control bg-neutral-bg p-3 text-sm">
@@ -38,10 +44,16 @@ export function VisitSummary({ visit }: VisitSummaryProps) {
       </div>
       <p className="text-ink-secondary">
         <span className="text-ink">{visit.pic_user.name}</span>
-        {visit.vendor_name !== '' ? ` · ${visit.vendor_name}` : ''}
+        {showVendor ? ` · ${vendorDisplay}` : ''}
       </p>
       <p className="text-ink-secondary">{visit.location.name}</p>
       <p className="text-ink-secondary">{purposes}</p>
+      {/* "Tujuan lain" (purpose_note) hanya bila terisi — label Indonesia. */}
+      {purposeNote !== '' ? (
+        <p className="text-ink-secondary">
+          <span className="text-ink">Tujuan lain:</span> {purposeNote}
+        </p>
+      ) : null}
       <p className="text-ink-secondary">{formatVisitSchedule(visit)}</p>
     </div>
   )

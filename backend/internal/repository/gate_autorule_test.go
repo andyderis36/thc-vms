@@ -22,12 +22,12 @@ func TestDoubleCheckIn_ReturnsConflict(t *testing.T) {
 	gates := NewCheckInOutRepository(pool)
 
 	loc := seedLocation(t, pool, "Cabang Gerbang", "cabang")
-	pic := seedUser(t, pool, seedUserParams{Name: "PIC Gerbang", Email: "gerbang@vendor.test", Role: "pic", Type: "external"})
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Gerbang", Email: "gerbang@vendor.test", Role: "vendor", Type: "external"})
 	guard := seedUser(t, pool, seedUserParams{Name: "Satpam Gerbang", Email: "satpam@thc.test", Role: "security", Location: loc, Type: "internal"})
 
 	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	visitID := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000301", PIC: pic, Location: loc,
+		Code: "VST-0000000301", PIC: vendor, Location: loc,
 		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusApproved,
 	})
 
@@ -57,12 +57,12 @@ func TestDoubleCheckOut_ReturnsConflict(t *testing.T) {
 	gates := NewCheckInOutRepository(pool)
 
 	loc := seedLocation(t, pool, "Cabang Keluar", "cabang")
-	pic := seedUser(t, pool, seedUserParams{Name: "PIC Keluar", Email: "keluar@vendor.test", Role: "pic", Type: "external"})
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Keluar", Email: "keluar@vendor.test", Role: "vendor", Type: "external"})
 	guard := seedUser(t, pool, seedUserParams{Name: "Satpam Keluar", Email: "satpam.keluar@thc.test", Role: "security", Location: loc, Type: "internal"})
 
 	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	visitID := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000302", PIC: pic, Location: loc,
+		Code: "VST-0000000302", PIC: vendor, Location: loc,
 		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusVisiting,
 	})
 
@@ -89,7 +89,7 @@ func TestAutoRules_SweepsMatchThePRDThresholds(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	loc := seedLocation(t, pool, "Cabang Sweeper", "cabang")
-	pic := seedUser(t, pool, seedUserParams{Name: "PIC Sweeper", Email: "sweep@vendor.test", Role: "pic", Type: "external"})
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Sweeper", Email: "sweep@vendor.test", Role: "vendor", Type: "external"})
 	guard := seedUser(t, pool, seedUserParams{Name: "Satpam Sweep", Email: "satpam.sweep@thc.test", Role: "security", Location: loc, Type: "internal"})
 
 	window := func(start time.Time) (time.Time, time.Time) { return start, start.Add(4 * time.Hour) }
@@ -97,25 +97,25 @@ func TestAutoRules_SweepsMatchThePRDThresholds(t *testing.T) {
 	// R1: stale requested (created 8d ago) vs fresh requested (created now).
 	staleStart, staleEnd := window(now.Add(-8 * 24 * time.Hour))
 	eightDaysAgo := now.Add(-8 * 24 * time.Hour)
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000311", PIC: pic, Location: loc, Start: staleStart, End: staleEnd, Status: domain.VisitStatusRequested, CreatedAt: &eightDaysAgo})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000311", PIC: vendor, Location: loc, Start: staleStart, End: staleEnd, Status: domain.VisitStatusRequested, CreatedAt: &eightDaysAgo})
 	freshStart, freshEnd := window(now.Add(24 * time.Hour))
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000312", PIC: pic, Location: loc, Start: freshStart, End: freshEnd, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000312", PIC: vendor, Location: loc, Start: freshStart, End: freshEnd, Status: domain.VisitStatusRequested})
 
 	// R2: no-show (ended 3h ago, never checked in) vs checked-in vs future.
 	oldStart, oldEnd := window(now.Add(-7 * time.Hour))
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000313", PIC: pic, Location: loc, Start: oldStart, End: oldEnd, Status: domain.VisitStatusApproved})
-	checkedID := seedVisit(t, pool, seedVisitParams{Code: "VST-0000000314", PIC: pic, Location: loc, Start: oldStart, End: oldEnd, Status: domain.VisitStatusApproved})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000313", PIC: vendor, Location: loc, Start: oldStart, End: oldEnd, Status: domain.VisitStatusApproved})
+	checkedID := seedVisit(t, pool, seedVisitParams{Code: "VST-0000000314", PIC: vendor, Location: loc, Start: oldStart, End: oldEnd, Status: domain.VisitStatusApproved})
 	if _, err := gates.RecordCheckIn(ctx, domain.CheckIn{VisitRequestID: checkedID, CheckedInBy: guard}); err != nil {
 		t.Fatalf("seed check-in for R2 exclusion: %v", err)
 	}
 	futureStart, futureEnd := window(now.Add(24 * time.Hour))
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000315", PIC: pic, Location: loc, Start: futureStart, End: futureEnd, Status: domain.VisitStatusApproved})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000315", PIC: vendor, Location: loc, Start: futureStart, End: futureEnd, Status: domain.VisitStatusApproved})
 
 	// R3: overstayed visiting (ended 25h ago) vs just-ended visiting.
 	overStart, overEnd := window(now.Add(-29 * time.Hour))
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000316", PIC: pic, Location: loc, Start: overStart, End: overEnd, Status: domain.VisitStatusVisiting})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000316", PIC: vendor, Location: loc, Start: overStart, End: overEnd, Status: domain.VisitStatusVisiting})
 	recentStart, recentEnd := window(now.Add(-5 * time.Hour))
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000317", PIC: pic, Location: loc, Start: recentStart, End: recentEnd, Status: domain.VisitStatusVisiting})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000317", PIC: vendor, Location: loc, Start: recentStart, End: recentEnd, Status: domain.VisitStatusVisiting})
 
 	assertCodes := func(what string, visits []domain.VisitRequest, want map[string]bool) {
 		t.Helper()

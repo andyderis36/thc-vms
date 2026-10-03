@@ -16,14 +16,15 @@ import (
 var openapiKeys = map[string]map[string]bool{
 	"VisitorItem": {
 		"name": true, "id_number": true, "phone": true, "id_card_photo_url": true,
+		"photo_url": true, "vendor_id": true, "vendor_name": true,
 	},
 	"Location": {
 		"id": true, "name": true, "type": true, "address": true,
-		"city": true, "timezone": true,
+		"city": true, "timezone": true, "is_active": true,
 	},
 	"Purpose": {"id": true, "name": true},
 	"User": {
-		"id": true, "name": true, "email": true, "phone": true, "role": true,
+		"id": true, "name": true, "email": true, "phone": true, "nik": true, "role": true,
 		"location_id": true, "location_name": true, "status": true,
 		"type": true, "vendor_name": true,
 	},
@@ -31,7 +32,8 @@ var openapiKeys = map[string]map[string]bool{
 		"id": true, "visit_id": true, "status": true, "location": true,
 		"purposes": true, "pic_user": true, "vendor_name": true,
 		"start_date": true, "end_date": true, "assignment_letter_url": true,
-		"notes": true, "visitors": true, "created_at": true,
+		"notes": true, "purpose_note": true, "visitors": true, "created_at": true,
+		"check_in_at": true, "check_out_at": true, "checked_in_by": true,
 	},
 	"VisitList": {"items": true, "total": true, "page": true, "limit": true},
 	"QR":        {"visit_id": true, "qr_code_payload": true},

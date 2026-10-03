@@ -31,7 +31,7 @@ type VisitService interface {
 var _ VisitService = (*visit.Service)(nil)
 
 // VisitHandler serves the eight visit-lifecycle operations. It only maps HTTP
-// onto the usecase: branch/PIC scoping, the state machine and the schedule
+// onto the usecase: branch/vendor scoping, the state machine and the schedule
 // rules all live in the usecase, never here.
 type VisitHandler struct {
 	visits VisitService
@@ -43,7 +43,7 @@ func NewVisitHandler(svc VisitService) *VisitHandler {
 }
 
 // List serves GET /visits. The actor travels through so the usecase applies
-// branch/PIC scoping; location_id and search are accepted query params but
+// branch/vendor scoping; location_id and search are accepted query params but
 // never widen that scope. Answers the {items, total, page, limit} envelope.
 func (h *VisitHandler) List(c *gin.Context) {
 	actor, err := visitActor(c)
@@ -67,7 +67,7 @@ func (h *VisitHandler) List(c *gin.Context) {
 	// location_id is the documented optional branch filter (openapi L264-267,
 	// PRD L109: superadmin may filter by branch). It is passed through as a
 	// NARROWING hint only: the usecase assigns the actor's own scope
-	// unconditionally for admin/security/pic, so supplying another branch id
+	// unconditionally for admin/security/vendor, so supplying another branch id
 	// here can never widen a caller's visibility. An unparsable value is a
 	// client error rather than a silently dropped filter.
 	if raw := strings.TrimSpace(c.Query("location_id")); raw != "" {
@@ -210,8 +210,14 @@ func checkCreateBody(body createVisitBody) string {
 	if strings.TrimSpace(body.LocationID) == "" {
 		return "Lokasi kunjungan wajib diisi."
 	}
-	if len(body.PurposeIDs) < 1 {
-		return "Minimal satu tujuan kunjungan wajib dipilih."
+	// Either a catalogue purpose or the free-typed "tujuan lain" satisfies
+	// the visit reason; the usecase repeats the rule for callers that bypass
+	// HTTP mapping.
+	if len(body.PurposeIDs) < 1 && strings.TrimSpace(body.PurposeNote) == "" {
+		return "Minimal satu tujuan kunjungan wajib dipilih atau ditulis."
+	}
+	if len([]rune(strings.TrimSpace(body.PurposeNote))) > 200 {
+		return "Tujuan lain kunjungan maksimal 200 karakter."
 	}
 	if len(body.Visitors) < 1 {
 		return "Minimal satu pengunjung wajib didaftarkan."
@@ -229,6 +235,18 @@ func checkCreateBody(body createVisitBody) string {
 		}
 		if strings.TrimSpace(visitor.Phone) == "" {
 			return "Nomor telepon pengunjung ke-" + strconv.Itoa(n) + " wajib diisi."
+		}
+		if visitor.VendorID != nil {
+			if id := strings.TrimSpace(*visitor.VendorID); id != "" {
+				if _, err := domain.ParseUUID(id); err != nil {
+					return "vendor_id pengunjung ke-" + strconv.Itoa(n) + " tidak valid."
+				}
+			}
+		}
+		if visitor.VendorName != nil {
+			if len([]rune(strings.TrimSpace(*visitor.VendorName))) > 120 {
+				return "Nama perusahaan vendor pengunjung ke-" + strconv.Itoa(n) + " maksimal 120 karakter."
+			}
 		}
 	}
 	if body.IsNDAAccepted == nil {

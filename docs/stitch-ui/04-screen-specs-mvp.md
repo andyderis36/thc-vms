@@ -6,7 +6,7 @@ Dokumen ini menjelaskan rancangan tata letak (*layout*), komponen, validasi, dan
 
 ## SCR-01: Login Terpadu
 
-- **Tujuan**: Autentikasi seluruh pengguna (Superadmin Pusat, Admin Cabang/POP, Petugas Jaga/Security, PIC Vendor/Teknisi).
+- **Tujuan**: Autentikasi seluruh pengguna (Superadmin Pusat, Admin Cabang/POP, Petugas Jaga/Security, Vendor/Mitra).
 - **Tata Letak**:
   - Desktop: Split 2 kolom. Kiri (60%) visual jaringan fiber optik & fasilitas POP THC. Kanan (40%) form login terpusat.
   - Mobile: 1 kolom kartu terpusat.
@@ -18,9 +18,9 @@ Dokumen ini menjelaskan rancangan tata letak (*layout*), komponen, validasi, dan
     - `Superadmin (Kantor Pusat)`
     - `Admin Cabang (Surabaya)`
     - `Security (Cabang Surabaya)`
-    - `PIC Teknisi (PT Fiber Maju)`
+    - `Vendor/Mitra (PT Fiber Maju)`
 - **Validasi**: Format email valid, password min. 6 karakter.
-- **Interaksi**: Submit berhasil mengarahkan ke SCR-02 (Superadmin/Admin/PIC) atau SCR-05 (Security).
+- **Interaksi**: Submit berhasil mengarahkan ke SCR-02 (Superadmin/Admin/Vendor/Mitra) atau SCR-05 (Security).
 
 ---
 
@@ -33,11 +33,11 @@ Dokumen ini menjelaskan rancangan tata letak (*layout*), komponen, validasi, dan
     - **Indikator Konteks Cabang**:
       - *Superadmin*: Badge `📍 Kantor Pusat THC` + dropdown filter `[Semua Cabang / POP ▼]` + tombol `[Kelola Satpam Cabang]`.
       - *Admin Cabang*: Badge terkunci `📍 Kantor Cabang Surabaya` (read-only, tanpa dropdown) + tombol `[+ Satpam Cabang]`.
-      - *PIC Vendor*: Label profil `👤 PT Fiber Maju (PIC Teknisi)`.
+      - *Vendor/Mitra*: Label profil `👤 PT Fiber Maju (Vendor/Mitra)`.
     - Tombol *Logout*.
   - **Baris Metrik (4 Kartu Ringkas)**: Total Kunjungan Cabang, Menunggu Approval, Sedang di Lokasi/POP (*visiting*), Selesai.
   - **Filter Bar**:
-    - Filter Fasilitas: Aktif untuk Superadmin; Terkunci/Disabled untuk Admin Cabang; Sembunyi untuk PIC.
+    - Filter Fasilitas: Aktif untuk Superadmin; Terkunci/Disabled untuk Admin Cabang; Sembunyi untuk Vendor/Mitra.
     - Dropdown Status Kunjungan, Search Box, dan Tombol Primer: *"+ Buat Kunjungan Baru"*.
   - **Tab Navigasi Antrean**:
     - Tab 1: `Semua Kunjungan`
@@ -45,10 +45,10 @@ Dokumen ini menjelaskan rancangan tata letak (*layout*), komponen, validasi, dan
     - Tab 3: `Sedang di Lokasi (Visiting)` *(Memantau teknisi yang sedang bekerja di fasilitas saat ini)*
     - Tab 4: `Selesai`
   - **Tabel Data Kunjungan (Desktop)**:
-    - Kolom: Visit ID, PIC/Teknisi & Vendor, Fasilitas Tujuan (Cabang/POP/miniPOP), Keperluan, Jadwal, Status Badge, Aksi Cepat.
+    - Kolom: Visit ID, Vendor/Mitra, Fasilitas Tujuan (Cabang/POP/miniPOP), Keperluan, Jadwal, Status Badge, Aksi Cepat.
     - Pada tab 'Menunggu Approval':
       - **Superadmin & Admin Cabang Terkait**: Menampilkan tombol aksi langsung **Approve** (hijau) & **Reject** (merah).
-      - **PIC**: Tombol Approve & Reject disembunyikan total (PIC hanya bisa Reschedule / Cancel).
+      - **Vendor/Mitra**: Tombol Approve & Reject disembunyikan total (Vendor/Mitra hanya bisa Reschedule / Cancel).
   - **Adaptasi Mobile (< 768px)**:
     - Tabel bertransformasi menjadi **Tumpukan Kartu Kunjungan (Card Stack)** vertikal mandiri (tanpa horizontal scroll).
     - Grid metrik menjadi 2x2.
@@ -67,7 +67,7 @@ Dokumen ini menjelaskan rancangan tata letak (*layout*), komponen, validasi, dan
 
 ## SCR-03: Form Pengajuan Kunjungan
 
-- **Tujuan**: PIC Teknisi atau THC Admin mengajukan permohonan akses pekerjaan ke Cabang / POP / miniPOP beserta lampiran surat tugas resmi.
+- **Tujuan**: Vendor/Mitra atau THC Admin mengajukan permohonan akses pekerjaan ke Cabang / POP / miniPOP beserta lampiran surat tugas resmi.
 - **Tata Letak**:
   - Header: Tombol kembali ke Dashboard & Judul Halaman: *"Pengajuan Akses Fasilitas Jaringan THC"*.
   - Panel Formulir Terstruktur:
@@ -102,7 +102,7 @@ Dokumen ini menjelaskan rancangan tata letak (*layout*), komponen, validasi, dan
 - **Tata Letak**:
   - Kartu Header: Nomor Visit ID (font 24px bold), Status Badge, dan Tombol Aksi (Reschedule / Cancel).
   - Kolom Kiri:
-    - Panel Informasi Lengkap: PIC, Vendor, Lokasi Cabang/POP, Keperluan, Rentang Waktu, Catatan Perangkat.
+    - Panel Informasi Lengkap: Vendor/Mitra, Vendor, Lokasi Cabang/POP, Keperluan, Rentang Waktu, Catatan Perangkat.
     - **Panel Dokumen Surat Tugas**: Menampilkan nama berkas terlampir dengan tombol *"Lihat Dokumen"* / *"Unduh PDF/Gambar"* (langsung dari MinIO/S3 presigned URL).
     - Tabel Tim Teknisi: Daftar nama dan nomor identitas yang diizinkan masuk.
     - Panel Riwayat Status (Vertical Timeline): Timestamp pengajuan, approval, check-in, check-out.

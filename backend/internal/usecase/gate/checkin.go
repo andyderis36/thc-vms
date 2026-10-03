@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"thc-vms/backend/internal/domain"
+	visituc "thc-vms/backend/internal/usecase/visit"
 )
 
 // CheckInInput carries the optional gate artefacts. The flow diagram has no
@@ -42,6 +43,13 @@ func (s *Service) CheckIn(ctx context.Context, actor Actor, visitIDOrCode string
 	}
 	if err := domain.CanTransition(visit.Status, domain.VisitStatusVisiting); err != nil {
 		return domain.CheckIn{}, err
+	}
+	// Gate photo is optional, but a supplied photo_url travels the same
+	// upload allowlist as the visit payload (https, or http for dev MinIO).
+	if in.PhotoURL != nil {
+		if err := visituc.ValidatePhotoURL(*in.PhotoURL); err != nil {
+			return domain.CheckIn{}, err
+		}
 	}
 	if err := s.visits.UpdateStatus(ctx, visit.ID, domain.VisitStatusVisiting, actor.ID, in.Notes); err != nil {
 		return domain.CheckIn{}, err

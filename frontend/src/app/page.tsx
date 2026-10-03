@@ -11,7 +11,7 @@ import { Spinner } from '@/components/ui/Spinner'
  *
  *   security          -> /gate      (SCR-05, kios pos jaga)
  *   super_admin/admin -> /dashboard (SCR-02)
- *   pic               -> /dashboard (SCR-02, portal vendor)
+ *   vendor             -> /dashboard (SCR-02, portal vendor)
  *   belum login       -> /login     (SCR-01)
  *
  * `getLoginRedirect` adalah satu-satunya sumber kebenaran pemetaan ini, sama

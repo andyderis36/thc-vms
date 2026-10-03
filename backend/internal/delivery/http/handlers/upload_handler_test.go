@@ -16,7 +16,7 @@ import (
 
 func newUploadEngine(storage *fakeStorage, maxBytes int64) *gin.Engine {
 	engine := gin.New()
-	engine.Use(withActor(domain.RolePIC, ""))
+	engine.Use(withActor(domain.RoleVendor, ""))
 	h := handlers.NewUploadHandler(storage, maxBytes)
 	engine.POST("/uploads", h.Upload)
 	return engine
@@ -123,5 +123,27 @@ func TestUpload_PassesCategoryOwnerHintToStorage(t *testing.T) {
 	}
 	if strings.Count(storage.lastReq.ObjectKey, "/") != 1 {
 		t.Fatalf("ObjectKey must be exactly category/ownerID: %q", storage.lastReq.ObjectKey)
+	}
+}
+
+func TestUpload_MissingOwnerIDStagesUnderPending(t *testing.T) {
+	storage := &fakeStorage{result: domain.UploadResult{
+		FileURL:  "http://localhost:9000/thc-vms-bucket/assignment_letters/pending/spk.pdf",
+		FileName: "spk.pdf",
+		FileSize: 5,
+		MimeType: "application/pdf",
+	}}
+	engine := newUploadEngine(storage, 5*1024*1024)
+
+	// Pre-create flow (/visits/new): belum ada visit id, hanya file + category.
+	body, ctype := multipartUpload(t, "spk.pdf", "application/pdf", []byte("hello"),
+		map[string]string{"category": "assignment_letter"})
+	rec := serve(engine, "POST", "/uploads", body, ctype)
+	mustStatus(t, rec, 201)
+	if storage.uploadCalls != 1 {
+		t.Fatalf("upload calls = %d, want 1", storage.uploadCalls)
+	}
+	if storage.lastReq.ObjectKey != "assignment_letter/pending" {
+		t.Fatalf("ObjectKey = %q, want hint %q", storage.lastReq.ObjectKey, "assignment_letter/pending")
 	}
 }

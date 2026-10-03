@@ -33,6 +33,10 @@ const (
 	defaultStorageDriver = "minio"
 	defaultMaxUploadMB   = 5
 	defaultAllowedMIMEs  = "application/pdf,image/jpeg,image/png"
+	// defaultPresignTTLMinutes bounds how long a presigned file URL stays
+	// fetchable. Short enough that a leaked <a>/<img> href dies quickly,
+	// long enough for a guard to open it from the visit detail page.
+	defaultPresignTTLMinutes = 15
 )
 
 // Config is the fully validated runtime configuration.
@@ -102,6 +106,22 @@ type Storage struct {
 	UseSSL          bool
 	Region          string
 	PublicBaseURL   string
+	// PresignTTLMinutes bounds the presigned file-URL lifetime minted for
+	// GET /visits reads. Always > 0: Load clamps a missing or non-positive
+	// value to defaultPresignTTLMinutes, and PresignTTL repeats the guard
+	// for zero-value Configs built outside Load (tests).
+	PresignTTLMinutes int
+}
+
+// PresignTTL converts the configured presign lifetime into a duration. A
+// non-positive value can never escape: it falls back to the default, so a
+// caller always forwards a positive expiry to IStorageService.PresignedURL
+// (whose adapter refuses expiry <= 0).
+func (s Storage) PresignTTL() time.Duration {
+	if s.PresignTTLMinutes <= 0 {
+		return time.Duration(defaultPresignTTLMinutes) * time.Minute
+	}
+	return time.Duration(s.PresignTTLMinutes) * time.Minute
 }
 
 // Upload carries the file policy enforced by the storage adapter.
@@ -176,6 +196,14 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	presignTTLMinutes, err := intEnv("S3_PRESIGN_TTL_MINUTES", defaultPresignTTLMinutes)
+	if err != nil {
+		return nil, err
+	}
+	if presignTTLMinutes <= 0 {
+		presignTTLMinutes = defaultPresignTTLMinutes
+	}
+
 	return &Config{
 		App: App{
 			Name:        stringEnv("APP_NAME", defaultAppName),
@@ -201,14 +229,15 @@ func Load() (*Config, error) {
 			ExpirationHours: jwtHours,
 		},
 		Storage: Storage{
-			Driver:          stringEnv("STORAGE_DRIVER", defaultStorageDriver),
-			Endpoint:        os.Getenv("S3_ENDPOINT"),
-			AccessKeyID:     os.Getenv("S3_ACCESS_KEY_ID"),
-			SecretAccessKey: os.Getenv("S3_SECRET_ACCESS_KEY"),
-			Bucket:          os.Getenv("S3_BUCKET_NAME"),
-			UseSSL:          useSSL,
-			Region:          os.Getenv("S3_REGION"),
-			PublicBaseURL:   os.Getenv("S3_PUBLIC_BASE_URL"),
+			Driver:            stringEnv("STORAGE_DRIVER", defaultStorageDriver),
+			Endpoint:          os.Getenv("S3_ENDPOINT"),
+			AccessKeyID:       os.Getenv("S3_ACCESS_KEY_ID"),
+			SecretAccessKey:   os.Getenv("S3_SECRET_ACCESS_KEY"),
+			Bucket:            os.Getenv("S3_BUCKET_NAME"),
+			UseSSL:            useSSL,
+			Region:            os.Getenv("S3_REGION"),
+			PublicBaseURL:     os.Getenv("S3_PUBLIC_BASE_URL"),
+			PresignTTLMinutes: presignTTLMinutes,
 		},
 		Upload: Upload{
 			MaxSizeMB:        maxSizeMB,

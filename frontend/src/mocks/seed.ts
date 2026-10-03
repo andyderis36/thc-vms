@@ -8,12 +8,16 @@
  * (tidak ada `code`, `check_in_at`, `created_by`, dsb.).
  */
 
-import type { Location, Purpose, User, VisitDetail } from '@/lib/api/types';
+import type { Location, Purpose, User, Vendor, VisitDetail } from '@/lib/api/types';
 
-/** Password seragam seluruh akun demo (docs/5. LOCAL_DEV.md §6.1). */
+/** Password seragam seluruh akun demo (docs/5. LOCAL_DEV.md §6.1; sama dengan `DemoPassword` BE di `backend/seeds/seeddata/password.go` — JANGAN ubah nilainya). */
 export const DEMO_PASSWORD = 'Password123!';
 
-/** ID lokasi (bentuk UUID sesuai skema OpenAPI; nama manusia ada di `name`). */
+/** ID lokasi (bentuk UUID sesuai skema OpenAPI; nama manusia ada di `name`).
+ * Nama konstanta LOC_* SENGAJA dipertahankan agar impor stabil (tanpa churn).
+ * Pemetaan operasional Kalimantan Barat: LOC_SBY = Kantor Pusat Pontianak,
+ * LOC_MLG = Cabang Sambas, LOC_SWJ = POP Mempawah, LOC_RKT = POP Singkawang,
+ * LOC_LWG = miniPOP Aruk. Hanya string tampilan yang berubah. */
 export const LOC_SBY = 'a11ce5b0-7f2d-4e5a-9c1d-0000000000a1';
 export const LOC_MLG = 'b22df6c1-8e3e-4f6b-8d2e-0000000000b2';
 export const LOC_SWJ = 'c33ea7d2-9f4f-4a7c-7e3f-0000000000c3';
@@ -28,6 +32,14 @@ export const PRP_PREVENTIVE = 'f4040404-4d5e-4f50-9152-000000000004';
 export const PRP_LOGISTICS = 'f5050505-5e6f-4051-a253-000000000005';
 export const PRP_AUDIT = 'f6060606-6f70-4162-b364-000000000006';
 
+/** ID vendor mitra (bentuk UUID sesuai skema OpenAPI; `GET /vendors`). */
+export const VND_LINTAS = 'e1000001-1a2b-4c3d-8e4f-000000000001';
+export const VND_DAYA = 'e2000002-2b3c-4d4e-9f50-000000000002';
+
+/** Nama vendor mitra — satu-satunya sumber nama untuk seed Vendor/Mitra. */
+export const VND_LINTAS_NAME = 'PT Lintas Fiber';
+export const VND_DAYA_NAME = 'PT Daya Power Mandiri';
+
 const HOUR_MS = 3_600_000;
 
 const isoHoursFromNow = (hours: number): string =>
@@ -37,49 +49,67 @@ export interface MockDb {
   users: User[];
   locations: Location[];
   purposes: Purpose[];
+  vendors: Vendor[];
   visits: VisitDetail[];
+}
+
+/**
+ * NIK demo 16 digit deterministik — SKEMA SAMA PERSIS dengan BE
+ * (`demoNIK` di backend/seeds/seeddata): 3578{branch:02d}{role:02d}{seq:08d}
+ * (admin = 01, vendor = 02). Nilai identik lintas BE/mock agar QA bisa
+ * membandingkan langsung.
+ */
+function demoNik(branch: number, role: 1 | 2, seq: number): string {
+  const branchPart = String(branch).padStart(2, '0');
+  const rolePart = role === 1 ? '01' : '02';
+  return `3578${branchPart}${rolePart}${String(seq).padStart(8, '0')}`;
+}
+
+/** ID user demo deterministik (`7d` = skema 26 akun; `7c` warisan 7 akun). */
+function demoUserId(serial: number): string {
+  return `c9b8a7d6-5e4f-4a3b-8c2d-2e0f9a8b7d${String(serial).padStart(2, '0')}`;
 }
 
 function buildSeed(): MockDb {
   const locations: Location[] = [
     {
       id: LOC_SBY,
-      name: 'Kantor Pusat THC (Surabaya)',
+      name: 'Kantor Pusat THC (Pontianak)',
       type: 'pusat',
-      address: 'Jl. Raya Darmo No. 45, Surabaya',
-      city: 'Surabaya',
+      address: 'Jl. Ahmad Yani No. 45, Pontianak',
+      city: 'Pontianak',
       timezone: 'WIB',
     },
     {
       id: LOC_MLG,
-      name: 'Kantor Cabang Malang',
+      name: 'Kantor Cabang Sambas',
       type: 'cabang',
-      address: 'Jl. Ijen No. 12, Malang',
-      city: 'Malang',
+      address: 'Jl. Sukaramai No. 12, Sambas',
+      city: 'Sambas',
       timezone: 'WIB',
     },
     {
       id: LOC_SWJ,
-      name: 'POP Sawojajar',
+      name: 'POP Mempawah',
       type: 'pop',
-      address: 'Ruko Sawojajar Blok A-4, Malang',
-      city: 'Malang',
+      address: 'Jl. Raden Kusno No. 8, Mempawah',
+      city: 'Mempawah',
       timezone: 'WIB',
     },
     {
       id: LOC_RKT,
-      name: 'POP Rungkut Industri',
+      name: 'POP Singkawang',
       type: 'pop',
-      address: 'Kawasan SIER Rungkut Kav. 9, Surabaya',
-      city: 'Surabaya',
+      address: 'Jl. Pahlawan No. 22, Singkawang',
+      city: 'Singkawang',
       timezone: 'WIB',
     },
     {
       id: LOC_LWG,
-      name: 'miniPOP Lawang',
+      name: 'miniPOP Aruk',
       type: 'minipop',
-      address: 'Shelter Tower THC Lawang, Malang',
-      city: 'Malang',
+      address: 'Pos Lintas Batas Aruk, Sambas',
+      city: 'Sambas',
       timezone: 'WIB',
     },
   ];
@@ -93,12 +123,41 @@ function buildSeed(): MockDb {
     { id: PRP_AUDIT, name: 'Survey Jalur / Audit Infrastruktur' },
   ];
 
+  const vendors: Vendor[] = [
+    { id: VND_LINTAS, name: VND_LINTAS_NAME },
+    { id: VND_DAYA, name: VND_DAYA_NAME },
+  ];
+
+  const vendorById = (id: string): string => {
+    const found = vendors.find((vendor) => vendor.id === id);
+    if (found === undefined) {
+      throw new Error(`Vendor seed tidak ditemukan: ${id}`);
+    }
+    return found.name;
+  };
+
+  const locationNameById = (id: string): string => {
+    const found = locations.find((loc) => loc.id === id);
+    if (found === undefined) {
+      throw new Error(`Lokasi seed tidak ditemukan: ${id}`);
+    }
+    return found.name;
+  };
+
+  /**
+   * 26 akun demo skema baru (cermin kontrak BE paralel):
+   * 1 superadmin + 5 admin (`admin1..5@thc.com`) + 10 security
+   * (`satpam{N}A/B@thc.com`, N=1..5) + 10 Vendor/Mitra (`pic{N}A/B@thc.com`).
+   * NIK 16 digit wajib untuk admin/vendor, `null` untuk security/superadmin
+   * (BE menolak NIK untuk keduanya). Password semua = DEMO_PASSWORD.
+   */
   const users: User[] = [
     {
-      id: 'c9b8a7d6-5e4f-4a3b-8c2d-1e0f9a8b7c01',
+      id: demoUserId(1),
       name: 'Hendra Wijaya',
       email: 'superadmin@thc.net.id',
       phone: '0811-3000-001',
+      nik: null,
       role: 'super_admin',
       location_id: null,
       location_name: null,
@@ -106,78 +165,90 @@ function buildSeed(): MockDb {
       type: 'internal',
       vendor_name: null,
     },
-    {
-      id: 'c9b8a7d6-5e4f-4a3b-8c2d-1e0f9a8b7c02',
-      name: 'Bayu Santoso',
-      email: 'admin.sby@thc.net.id',
-      phone: '0811-3000-002',
-      role: 'admin',
-      location_id: LOC_SBY,
-      location_name: 'Kantor Pusat THC (Surabaya)',
-      status: 'active',
-      type: 'internal',
-      vendor_name: null,
-    },
-    {
-      id: 'c9b8a7d6-5e4f-4a3b-8c2d-1e0f9a8b7c03',
-      name: 'Dian Permata',
-      email: 'admin.mlg@thc.net.id',
-      phone: '0811-3000-003',
-      role: 'admin',
-      location_id: LOC_MLG,
-      location_name: 'Kantor Cabang Malang',
-      status: 'active',
-      type: 'internal',
-      vendor_name: null,
-    },
-    {
-      id: 'c9b8a7d6-5e4f-4a3b-8c2d-1e0f9a8b7c04',
-      name: 'Joko Susilo',
-      email: 'satpam.sby@thc.net.id',
-      phone: '0811-3000-004',
-      role: 'security',
-      location_id: LOC_SBY,
-      location_name: 'Kantor Pusat THC (Surabaya)',
-      status: 'active',
-      type: 'internal',
-      vendor_name: null,
-    },
-    {
-      id: 'c9b8a7d6-5e4f-4a3b-8c2d-1e0f9a8b7c05',
-      name: 'Rahmat Hidayat',
-      email: 'satpam.sawojajar@thc.net.id',
-      phone: '0811-3000-005',
-      role: 'security',
-      location_id: LOC_SWJ,
-      location_name: 'POP Sawojajar',
-      status: 'active',
-      type: 'internal',
-      vendor_name: null,
-    },
-    {
-      id: 'c9b8a7d6-5e4f-4a3b-8c2d-1e0f9a8b7c06',
-      name: 'Dimas Prasetyo',
-      email: 'vendor.splicing@mitra-fo.com',
-      phone: '0812-4100-006',
-      role: 'pic',
-      location_id: null,
-      location_name: null,
-      status: 'active',
-      type: 'external',
-      vendor_name: 'PT Lintas Fiber',
-    },
-    {
-      id: 'c9b8a7d6-5e4f-4a3b-8c2d-1e0f9a8b7c07',
-      name: 'Eko Gunawan',
-      email: 'vendor.genset@dayapower.co.id',
-      phone: '0812-4200-007',
-      role: 'pic',
-      location_id: null,
-      location_name: null,
-      status: 'active',
-      type: 'external',
-      vendor_name: 'PT Daya Power Mandiri',
-    },
+    ...[
+      'Agus Setiawan (Admin Kantor Pusat Pontianak)',
+      'Rina Kartika (Admin Cabang Sambas)',
+      'Dedi Kurniawan (Admin POP Mempawah)',
+      'Siti Rahayu (Admin POP Singkawang)',
+      'Bambang Sutrisno (Admin miniPOP Aruk)',
+    ].map(
+      (name, index): User => {
+        const locationId = [LOC_SBY, LOC_MLG, LOC_SWJ, LOC_RKT, LOC_LWG][index] as string;
+        return {
+          id: demoUserId(2 + index),
+          name,
+          email: `admin${index + 1}@thc.com`,
+          phone: `0811-3000-0${String(10 + index)}`,
+          nik: demoNik(index + 1, 1, index + 1),
+          role: 'admin',
+          location_id: locationId,
+          location_name: locationNameById(locationId),
+          status: 'active',
+          type: 'internal',
+          vendor_name: null,
+        };
+      },
+    ),
+    ...[
+      'Joko Susilo (Satpam Kantor Pusat Pontianak)',
+      'Sutrisno Hadi (Satpam Kantor Pusat Pontianak)',
+      'Rahmat Hidayat (Satpam Cabang Sambas)',
+      'Wahyu Saputra (Satpam Cabang Sambas)',
+      'Slamet Riyadi (Satpam POP Mempawah)',
+      'Andi Wijaya (Satpam POP Mempawah)',
+      'Herman Yusuf (Satpam POP Singkawang)',
+      'Tono Prasetyo (Satpam POP Singkawang)',
+      'Mulyadi Santoso (Satpam miniPOP Aruk)',
+      'Dadang Firmansyah (Satpam miniPOP Aruk)',
+    ].map((name, index): User => {
+      // Pasangan A/B per cabang: N=1..5 → SBY/MLG/SWJ/RKT/LWG.
+      const branch = Math.floor(index / 2);
+      const variant = index % 2 === 0 ? 'a' : 'b';
+      const locationId = [LOC_SBY, LOC_MLG, LOC_SWJ, LOC_RKT, LOC_LWG][branch] as string;
+      return {
+        id: demoUserId(7 + index),
+        name,
+        email: `satpam${branch + 1}${variant}@thc.com`,
+        phone: `0811-3000-0${String(20 + index)}`,
+        nik: null,
+        role: 'security',
+        location_id: locationId,
+        location_name: locationNameById(locationId),
+        status: 'active',
+        type: 'internal',
+        vendor_name: null,
+      };
+    }),
+    ...[
+      'Dimas Prasetyo',
+      'Eko Gunawan',
+      'Fajar Nugroho',
+      'Yoga Pratama',
+      'Rudi Hartono',
+      'Asep Saepudin',
+      'Budi Santoso',
+      'Irfan Maulana',
+      'Hendra Saputra',
+      'Teguh Laksmana',
+    ].map((name, index): User => {
+      // Varian A → PT Lintas Fiber, B → PT Daya Power Mandiri (cermin BE).
+      const branch = Math.floor(index / 2);
+      const variant = index % 2 === 0 ? 'a' : 'b';
+      const vendorId = variant === 'a' ? VND_LINTAS : VND_DAYA;
+      return {
+        id: demoUserId(17 + index),
+        name,
+          email: `pic${branch + 1}${variant}@thc.com`,
+          phone: `0812-4100-0${String(30 + index)}`,
+          nik: demoNik(branch + 1, 2, index + 1),
+        role: 'vendor',
+        location_id: null,
+        location_name: null,
+        status: 'active',
+        type: 'external',
+        vendor_name: vendorById(vendorId),
+      };
+    }),
   ];
 
   const locationById = (id: string): Location => {
@@ -204,8 +275,8 @@ function buildSeed(): MockDb {
     return found;
   };
 
-  const picSplicing = userByEmail('vendor.splicing@mitra-fo.com');
-  const picGenset = userByEmail('vendor.genset@dayapower.co.id');
+  const picSplicing = userByEmail('pic1a@thc.com');
+  const picGenset = userByEmail('pic2a@thc.com');
 
   const visits: VisitDetail[] = [
     {
@@ -228,12 +299,16 @@ function buildSeed(): MockDb {
           id_number: '3573010101900001',
           phone: '0812-4100-006',
           id_card_photo_url: null,
+          vendor_id: VND_LINTAS,
+          vendor_name: VND_LINTAS_NAME,
         },
         {
           name: 'Andi Kurniawan',
           id_number: '3573010202920002',
           phone: '0812-4100-016',
           id_card_photo_url: null,
+          vendor_id: VND_DAYA,
+          vendor_name: VND_DAYA_NAME,
         },
       ],
       created_at: isoHoursFromNow(-20),
@@ -466,7 +541,7 @@ function buildSeed(): MockDb {
     },
   ];
 
-  return { users, locations, purposes, visits };
+  return { users, locations, purposes, vendors, visits };
 }
 
 /** Database mock yang bisa dimutasi handler; di-reset agar pengujian berulang. */
@@ -478,5 +553,6 @@ export function resetDb(): void {
   db.users = fresh.users;
   db.locations = fresh.locations;
   db.purposes = fresh.purposes;
+  db.vendors = fresh.vendors;
   db.visits = fresh.visits;
 }

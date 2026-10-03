@@ -1,6 +1,6 @@
 flowchart TD
     subgraph Client["Frontend Client (Next.js 16.3+ / React 19.3)"]
-        UI1["SCR-01: Login Terpadu (Superadmin, Admin, Security, PIC)"]
+        UI1["SCR-01: Login Terpadu (Superadmin, Admin, Security, Vendor)"]
         UI2["Role & Branch Route Guards (Context: role & location_id)"]
         UI3["TanStack Query (Client-Side Caching & Scoped Queries)"]
         UI1 --> UI2 --> UI3
@@ -15,7 +15,7 @@ flowchart TD
             R1["Superadmin: Bypass Location Filter (Global Control)"]
             R2["Admin: Scoped to location_id (Approval, Security Mgmt & Check-in)"]
             R3["Security: Scoped to location_id (Gate Ops & Check-in Only)"]
-            R4["PIC: Scoped to pic_user_id == user.id"]
+            R4["Vendor: Scoped to pic_user_id == user.id"]
         end
 
         subgraph Adapters["Modular Auth Adapter (KISS & Extensible)"]

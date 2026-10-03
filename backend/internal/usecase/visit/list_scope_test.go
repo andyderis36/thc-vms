@@ -37,7 +37,7 @@ func TestListVisits_SuperAdminCanNarrowByLocation(t *testing.T) {
 		t.Fatalf("VisitFilter.LocationID = %q, want the requested branch %q", *repo.lastFilter.LocationID, branch)
 	}
 	if repo.lastFilter.PICUserID != nil {
-		t.Fatal("a location filter must never introduce a PIC scope")
+		t.Fatal("a location filter must never introduce a vendor scope")
 	}
 }
 
@@ -78,13 +78,13 @@ func TestListVisits_AdminCannotWidenScopeWithAForeignLocation(t *testing.T) {
 	}
 }
 
-// A PIC stays pinned to its own visits even when it names a branch.
-func TestListVisits_PICCannotEscapeItsOwnVisits(t *testing.T) {
+// A vendor stays pinned to its own visits even when it names a branch.
+func TestListVisits_VendorCannotEscapeItsOwnVisits(t *testing.T) {
 	svc, repo := recording(t)
 	branch := domain.UUID("44444444-4444-4444-8444-444444444444")
 
 	if _, _, err := svc.ListVisits(context.Background(),
-		testActor(domain.RolePIC, "pic-1", ""),
+		testActor(domain.RoleVendor, "pic-1", ""),
 		ListVisitsInput{LocationID: &branch}); err != nil {
 		t.Fatalf("listing must succeed: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestListVisits_PICCannotEscapeItsOwnVisits(t *testing.T) {
 		t.Fatalf("VisitFilter.PICUserID = %v, want the actor's own id", repo.lastFilter.PICUserID)
 	}
 	if repo.lastFilter.LocationID != nil {
-		t.Fatalf("a PIC listing must carry no branch scope, got %q", *repo.lastFilter.LocationID)
+		t.Fatalf("a vendor listing must carry no branch scope, got %q", *repo.lastFilter.LocationID)
 	}
 }
 

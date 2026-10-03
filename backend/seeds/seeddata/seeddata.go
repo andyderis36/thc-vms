@@ -28,7 +28,7 @@ const (
 	RoleSuperAdmin = "super_admin"
 	RoleAdmin      = "admin"
 	RoleSecurity   = "security"
-	RolePIC        = "pic"
+	RoleVendor     = "vendor"
 
 	LocationPusat   = "pusat"
 	LocationCabang  = "cabang"
@@ -123,7 +123,9 @@ type SeedVendor struct {
 // SeedUser is one demo account. LocationCode and VendorName are references into
 // the location and vendor plans rather than stored ids, so the ids that reach
 // the database are derived in exactly one place (ResolveLocationID /
-// ResolveVendorID) and cannot drift away from the master rows.
+// ResolveVendorID) and cannot drift away from the master rows. NIK is the
+// national identity number: populated only for admin and vendor accounts
+// (migration 000002), empty for every other role.
 type SeedUser struct {
 	Name         string
 	Email        string
@@ -132,11 +134,51 @@ type SeedUser struct {
 	Type         string
 	Status       string
 	VendorName   string
+	NIK          string
+}
+
+// Role codes inside the deterministic demo NIK below.
+const (
+	// RoleCodeAdmin is the 2-digit role segment for admin demo NIKs.
+	RoleCodeAdmin = 1
+	// RoleCodeVendor is the 2-digit role segment for vendor demo NIKs.
+	RoleCodeVendor = 2
+)
+
+// demoNIK builds one deterministic, unique 16-digit demo identity number in
+// the agreed shape 3578{branch:02d}{role:02d}{seq:08d}: the 3578 prefix is
+// retained unchanged for demo stability (historically the East Java NIK area
+// head; the seeded facilities are now in Kalimantan Barat, but rotating the
+// prefix would invalidate every documented demo credential), branch numbers
+// the five seeded facilities in plan order
+// (1 = HQ-PTK-01 .. 5 = MPOP-ARK-01), role is RoleCodeAdmin/RoleCodeVendor,
+// and seq is the per-(branch,role) ordinal. Uniqueness across the plan falls
+// out of the construction: no two demo accounts share a (branch, role, seq)
+// triple.
+func demoNIK(branch, role, seq int) string {
+	return fmt.Sprintf("3578%02d%02d%08d", branch, role, seq)
+}
+
+// validSeedNIK mirrors chk_users_nik in
+// migrations/000002_add_user_nik.up.sql (and its twin
+// superadmin.ValidNIK): exactly 16 ASCII digits. It lives here rather than
+// imported so this package keeps its single external dependency (uuid) and
+// stays runnable before the module manifest exists.
+func validSeedNIK(nik string) bool {
+	if len(nik) != 16 {
+		return false
+	}
+	for i := 0; i < len(nik); i++ {
+		if nik[i] < '0' || nik[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // SeedPlan is the complete, ordered set of rows the seeder writes. It contains
 // no visit, visitor or attendance row: those are authored through the API by
-// PICs and branch admins, and pre-seeding them would fabricate an audit trail.
+// vendors and branch admins, and pre-seeding them would fabricate an audit trail.
 type SeedPlan struct {
 	Roles     []SeedRole
 	Locations []SeedLocation
@@ -146,7 +188,7 @@ type SeedPlan struct {
 }
 
 // ResolveLocationID returns the deterministic id of a location, or nil for the
-// empty key. nil is what the users INSERT sends for super_admin and pic, as
+// empty key. nil is what the users INSERT sends for super_admin and vendor, as
 // enforce_user_location_invariant() demands.
 func ResolveLocationID(code string) *uuid.UUID {
 	if code == "" {
@@ -172,18 +214,18 @@ func ResolveVendorID(name string) *uuid.UUID {
 // reject, and it is what a dry run exercises.
 func CheckInvariant(role string, locationID *uuid.UUID, userType string) error {
 	switch role {
-	case RoleSuperAdmin, RoleAdmin, RoleSecurity, RolePIC:
+	case RoleSuperAdmin, RoleAdmin, RoleSecurity, RoleVendor:
 	default:
 		return fmt.Errorf("role %q is not in chk_role_name; add its invariant to the trigger before seeding it", role)
 	}
-	if role == RoleSuperAdmin || role == RolePIC {
+	if role == RoleSuperAdmin || role == RoleVendor {
 		if locationID != nil {
 			return fmt.Errorf("role %s must have location_id = NULL, got %s", role, locationID)
 		}
 	} else if locationID == nil {
 		return fmt.Errorf("role %s must be assigned to a facility, got NULL", role)
 	}
-	if role == RolePIC && userType != UserTypeExternal {
+	if role == RoleVendor && userType != UserTypeExternal {
 		return fmt.Errorf("role %s must be typed %s, got %q", role, UserTypeExternal, userType)
 	}
 	return nil
@@ -200,17 +242,39 @@ func Validate(p SeedPlan) error {
 	}
 	for _, r := range p.Roles {
 		switch r.Name {
-		case RoleSuperAdmin, RoleAdmin, RoleSecurity, RolePIC:
+		case RoleSuperAdmin, RoleAdmin, RoleSecurity, RoleVendor:
 		default:
 			return fmt.Errorf("role %q is not in chk_role_name", r.Name)
 		}
 	}
+	seenNIK := map[string]string{}
 	for _, u := range p.Users {
 		if err := CheckInvariant(u.Role, ResolveLocationID(u.LocationCode), u.Type); err != nil {
 			return fmt.Errorf("user %s: %w", u.Email, err)
 		}
 		if u.VendorName != "" && u.Type != UserTypeExternal {
 			return errors.New("user " + u.Email + ": only external staff may carry a vendor")
+		}
+		// The per-role NIK rule (migration 000002): admin and vendor rows must
+		// carry a well-formed 16-digit number, every other role must carry
+		// none. The users_nik_key UNIQUE is pre-checked here so a duplicated
+		// demo number fails the dry run instead of the transaction.
+		switch u.Role {
+		case RoleAdmin, RoleVendor:
+			if u.NIK == "" {
+				return fmt.Errorf("user %s: role %s must carry a NIK", u.Email, u.Role)
+			}
+			if !validSeedNIK(u.NIK) {
+				return fmt.Errorf("user %s: NIK %q is not 16 numeric digits", u.Email, u.NIK)
+			}
+			if other, clash := seenNIK[u.NIK]; clash {
+				return fmt.Errorf("user %s: NIK %q is already used by %s", u.Email, u.NIK, other)
+			}
+			seenNIK[u.NIK] = u.Email
+		default:
+			if u.NIK != "" {
+				return fmt.Errorf("user %s: role %s must not carry a NIK", u.Email, u.Role)
+			}
 		}
 	}
 	return nil
@@ -236,7 +300,7 @@ func Plan() SeedPlan {
 			{Name: RoleSuperAdmin, Permissions: `{}`},
 			{Name: RoleAdmin, Permissions: `{}`},
 			{Name: RoleSecurity, Permissions: `{}`},
-			{Name: RolePIC, Permissions: `{}`},
+			{Name: RoleVendor, Permissions: `{}`},
 		},
 
 		// Facilities are verbatim from docs/5. LOCAL_DEV.md section 6.2, apart from
@@ -246,24 +310,24 @@ func Plan() SeedPlan {
 		// operator-facing SSOT strings.
 		Locations: []SeedLocation{
 			{
-				Code: "HQ-SBY-01", Name: "Kantor Pusat THC (Surabaya)", Type: LocationPusat,
-				Address: "Jl. Raya Darmo No. 45, Surabaya", City: "Surabaya", Timezone: TimezoneWIB,
+				Code: "HQ-PTK-01", Name: "Kantor Pusat THC (Pontianak)", Type: LocationPusat,
+				Address: "Jl. Ahmad Yani No. 45, Pontianak", City: "Pontianak", Timezone: TimezoneWIB,
 			},
 			{
-				Code: "BR-MLG-01", Name: "Kantor Cabang Malang", Type: LocationCabang,
-				Address: "Jl. Ijen No. 12, Malang", City: "Malang", Timezone: TimezoneWIB,
+				Code: "BR-SBS-01", Name: "Kantor Cabang Sambas", Type: LocationCabang,
+				Address: "Jl. Sukaramai No. 12, Sambas", City: "Sambas", Timezone: TimezoneWIB,
 			},
 			{
-				Code: "POP-MLG-SWJ", Name: "POP Sawojajar", Type: LocationPOP,
-				Address: "Ruko Sawojajar Blok A-4, Malang", City: "Malang", Timezone: TimezoneWIB,
+				Code: "POP-MPW-01", Name: "POP Mempawah", Type: LocationPOP,
+				Address: "Jl. Raden Kusno No. 8, Mempawah", City: "Mempawah", Timezone: TimezoneWIB,
 			},
 			{
-				Code: "POP-SBY-RKT", Name: "POP Rungkut Industri", Type: LocationPOP,
-				Address: "Kawasan SIER Rungkut Kav. 9, Surabaya", City: "Surabaya", Timezone: TimezoneWIB,
+				Code: "POP-SKW-01", Name: "POP Singkawang", Type: LocationPOP,
+				Address: "Jl. Pahlawan No. 22, Singkawang", City: "Singkawang", Timezone: TimezoneWIB,
 			},
 			{
-				Code: "MPOP-MLG-LWG", Name: "miniPOP Lawang", Type: LocationMiniPOP,
-				Address: "Shelter Tower THC Lawang, Malang", City: "Malang", Timezone: TimezoneWIB,
+				Code: "MPOP-ARK-01", Name: "miniPOP Aruk", Type: LocationMiniPOP,
+				Address: "Pos Lintas Batas Aruk, Sambas", City: "Sambas", Timezone: TimezoneWIB,
 			},
 		},
 
@@ -287,35 +351,130 @@ func Plan() SeedPlan {
 		// Accounts are verbatim from docs/5. LOCAL_DEV.md section 6.1. The email
 		// IS the login identity the QA matrix authenticates with, so these
 		// strings are a contract, not sample data: changing one silently breaks
-		// every documented test credential.
+		// every documented test credential. The demo NIKs are deterministic in
+		// the shape 3578{branch:02d}{role:02d}{seq:08d} (admin = 01, vendor =
+		// 02); branch numbers the five facilities above in order, and seq is
+		// the per-(branch,role) ordinal. The 3578 prefix predates the
+		// Kalimantan Barat move and is kept as-is for demo stability.
 		Users: []SeedUser{
 			{
 				Name: "Hendra Wijaya (Super Admin)", Email: "superadmin@thc.net.id", Role: RoleSuperAdmin,
 				LocationCode: "", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Bayu Santoso (Admin Cabang Surabaya)", Email: "admin.sby@thc.net.id", Role: RoleAdmin,
-				LocationCode: "HQ-SBY-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+				Name: "Agus Setiawan (Admin Kantor Pusat Pontianak)", Email: "admin1@thc.com", Role: RoleAdmin,
+				LocationCode: "HQ-PTK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+				NIK: demoNIK(1, RoleCodeAdmin, 1),
 			},
 			{
-				Name: "Dian Permata (Admin Cabang Malang)", Email: "admin.mlg@thc.net.id", Role: RoleAdmin,
-				LocationCode: "BR-MLG-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+				Name: "Rina Kartika (Admin Cabang Sambas)", Email: "admin2@thc.com", Role: RoleAdmin,
+				LocationCode: "BR-SBS-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+				NIK: demoNIK(2, RoleCodeAdmin, 2),
 			},
 			{
-				Name: "Joko Susilo (Satpam Pos Gerbang Sby)", Email: "satpam.sby@thc.net.id", Role: RoleSecurity,
-				LocationCode: "HQ-SBY-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+				Name: "Dedi Kurniawan (Admin POP Mempawah)", Email: "admin3@thc.com", Role: RoleAdmin,
+				LocationCode: "POP-MPW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+				NIK: demoNIK(3, RoleCodeAdmin, 3),
 			},
 			{
-				Name: "Rahmat Hidayat (Satpam Shelter Sawojajar)", Email: "satpam.sawojajar@thc.net.id", Role: RoleSecurity,
-				LocationCode: "POP-MLG-SWJ", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+				Name: "Siti Rahayu (Admin POP Singkawang)", Email: "admin4@thc.com", Role: RoleAdmin,
+				LocationCode: "POP-SKW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+				NIK: demoNIK(4, RoleCodeAdmin, 4),
 			},
 			{
-				Name: "Dimas Prasetyo (Teknisi PT Lintas Fiber)", Email: "vendor.splicing@mitra-fo.com", Role: RolePIC,
+				Name: "Bambang Sutrisno (Admin miniPOP Aruk)", Email: "admin5@thc.com", Role: RoleAdmin,
+				LocationCode: "MPOP-ARK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+				NIK: demoNIK(5, RoleCodeAdmin, 5),
+			},
+			{
+				Name: "Joko Susilo (Satpam Kantor Pusat Pontianak)", Email: "satpam1a@thc.com", Role: RoleSecurity,
+				LocationCode: "HQ-PTK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Sutrisno Hadi (Satpam Kantor Pusat Pontianak)", Email: "satpam1b@thc.com", Role: RoleSecurity,
+				LocationCode: "HQ-PTK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Rahmat Hidayat (Satpam Cabang Sambas)", Email: "satpam2a@thc.com", Role: RoleSecurity,
+				LocationCode: "BR-SBS-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Wahyu Saputra (Satpam Cabang Sambas)", Email: "satpam2b@thc.com", Role: RoleSecurity,
+				LocationCode: "BR-SBS-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Slamet Riyadi (Satpam POP Mempawah)", Email: "satpam3a@thc.com", Role: RoleSecurity,
+				LocationCode: "POP-MPW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Andi Wijaya (Satpam POP Mempawah)", Email: "satpam3b@thc.com", Role: RoleSecurity,
+				LocationCode: "POP-MPW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Herman Yusuf (Satpam POP Singkawang)", Email: "satpam4a@thc.com", Role: RoleSecurity,
+				LocationCode: "POP-SKW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Tono Prasetyo (Satpam POP Singkawang)", Email: "satpam4b@thc.com", Role: RoleSecurity,
+				LocationCode: "POP-SKW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Mulyadi Santoso (Satpam miniPOP Aruk)", Email: "satpam5a@thc.com", Role: RoleSecurity,
+				LocationCode: "MPOP-ARK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Dadang Firmansyah (Satpam miniPOP Aruk)", Email: "satpam5b@thc.com", Role: RoleSecurity,
+				LocationCode: "MPOP-ARK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Dimas Prasetyo (Teknisi PT Lintas Fiber)", Email: "pic1a@thc.com", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Lintas Fiber",
+				NIK: demoNIK(1, RoleCodeVendor, 1),
 			},
 			{
-				Name: "Eko Gunawan (PT Daya Power Mandiri)", Email: "vendor.genset@dayapower.co.id", Role: RolePIC,
+				Name: "Eko Gunawan (Teknisi PT Daya Power Mandiri)", Email: "pic1b@thc.com", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Daya Power Mandiri",
+				NIK: demoNIK(1, RoleCodeVendor, 2),
+			},
+			{
+				Name: "Fajar Nugroho (Teknisi PT Lintas Fiber)", Email: "pic2a@thc.com", Role: RoleVendor,
+				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Lintas Fiber",
+				NIK: demoNIK(2, RoleCodeVendor, 3),
+			},
+			{
+				Name: "Yoga Pratama (Teknisi PT Daya Power Mandiri)", Email: "pic2b@thc.com", Role: RoleVendor,
+				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Daya Power Mandiri",
+				NIK: demoNIK(2, RoleCodeVendor, 4),
+			},
+			{
+				Name: "Rudi Hartono (Teknisi PT Lintas Fiber)", Email: "pic3a@thc.com", Role: RoleVendor,
+				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Lintas Fiber",
+				NIK: demoNIK(3, RoleCodeVendor, 5),
+			},
+			{
+				Name: "Asep Saepudin (Teknisi PT Daya Power Mandiri)", Email: "pic3b@thc.com", Role: RoleVendor,
+				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Daya Power Mandiri",
+				NIK: demoNIK(3, RoleCodeVendor, 6),
+			},
+			{
+				Name: "Budi Santoso (Teknisi PT Lintas Fiber)", Email: "pic4a@thc.com", Role: RoleVendor,
+				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Lintas Fiber",
+				NIK: demoNIK(4, RoleCodeVendor, 7),
+			},
+			{
+				Name: "Irfan Maulana (Teknisi PT Daya Power Mandiri)", Email: "pic4b@thc.com", Role: RoleVendor,
+				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Daya Power Mandiri",
+				NIK: demoNIK(4, RoleCodeVendor, 8),
+			},
+			{
+				Name: "Hendra Saputra (Teknisi PT Lintas Fiber)", Email: "pic5a@thc.com", Role: RoleVendor,
+				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Lintas Fiber",
+				NIK: demoNIK(5, RoleCodeVendor, 9),
+			},
+			{
+				Name: "Teguh Laksmana (Teknisi PT Daya Power Mandiri)", Email: "pic5b@thc.com", Role: RoleVendor,
+				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Daya Power Mandiri",
+				NIK: demoNIK(5, RoleCodeVendor, 10),
 			},
 		},
 	}

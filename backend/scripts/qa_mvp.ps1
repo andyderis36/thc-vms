@@ -168,8 +168,8 @@ $adminSby = $tokens["admin.sby@thc.net.id"]
 $adminMlg = $tokens["admin.mlg@thc.net.id"]
 $secSby = $tokens["satpam.sby@thc.net.id"]
 $secSwj = $tokens["satpam.sawojajar@thc.net.id"]
-$pic1 = $tokens["vendor.splicing@mitra-fo.com"]
-$pic2 = $tokens["vendor.genset@dayapower.co.id"]
+$vendor1 = $tokens["vendor.splicing@mitra-fo.com"]
+$vendor2 = $tokens["vendor.genset@dayapower.co.id"]
 
 $locs = @((Invoke-Api -Path "/locations" -Headers (Auth $sa)).Body.data)
 $purs = @((Invoke-Api -Path "/purposes" -Headers (Auth $sa)).Body.data)
@@ -211,7 +211,7 @@ Assert-True "AUTH-02b" "unknown email returns the IDENTICAL error (no account en
 $noTok = Invoke-Api -Path "/visits"
 Assert-True "AUTH-00" "protected route without a bearer token is 401" ($noTok.Status -eq 401) "HTTP $($noTok.Status)"
 
-# Two visits in different branches, created by their own branch PIC/admin.
+# Two visits in different branches, created by their own branch vendor/admin.
 $vSby = Invoke-Api -Method POST -Path "/visits" -Headers (Auth $adminSby) `
     -Body (New-VisitInput -LocationId $locSby -PurposeIds $purposeIds[0] -Start $now.AddHours(2) -End $now.AddHours(4) -VisitorCount 1)
 $vMlg = Invoke-Api -Method POST -Path "/visits" -Headers (Auth $adminMlg) `
@@ -236,11 +236,11 @@ Assert-True "AUTH-05" "super_admin sees all nationally and can filter by locatio
     ($all.total -ge 2 -and $filtered.total -ge 1 -and @($filtered.items | Where-Object { $_.id -eq $mlgVisitId }).Count -eq 1 -and @($filtered.items | Where-Object { $_.id -eq $sbyVisitId }).Count -eq 0) `
     "all=$($all.total) filtered=$($filtered.total)"
 
-$picA = (Invoke-Api -Path "/visits?limit=100" -Headers (Auth $pic1)).Body.data
-$picB = (Invoke-Api -Path "/visits?limit=100" -Headers (Auth $pic2)).Body.data
-$picLeak = @($picA.items | Where-Object { $_.id -eq $mlgVisitId -or $_.id -eq $sbyVisitId })
-Assert-True "AUTH-06" "PIC sees only its OWN visits, never another vendor's" `
-    ($picLeak.Count -eq 0) "leaked=$($picLeak.Count)"
+$vendorA = (Invoke-Api -Path "/visits?limit=100" -Headers (Auth $vendor1)).Body.data
+$vendorB = (Invoke-Api -Path "/visits?limit=100" -Headers (Auth $vendor2)).Body.data
+$vendorLeak = @($vendorA.items | Where-Object { $_.id -eq $mlgVisitId -or $_.id -eq $sbyVisitId })
+Assert-True "AUTH-06" "vendor sees only its OWN visits, never another vendor's" `
+    ($vendorLeak.Count -eq 0) "leaked=$($vendorLeak.Count)"
 
 $newSecEmail = "qa.satpam.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())@thc.net.id"
 $cs = Invoke-Api -Method POST -Path "/users/security" -Headers (Auth $adminSby) -Body @{
@@ -385,11 +385,11 @@ $rsTooEarly = Invoke-Api -Method POST -Path "/visits/$($rsFresh.Body.data.id)/re
 Assert-True "TRAP-3" "a still-`requested` visit cannot be rescheduled (no such PRD edge)" `
     ($rsTooEarly.Status -in @(400, 409, 422)) "HTTP $($rsTooEarly.Status) $($rsTooEarly.Raw)"
 
-$picApprove = Invoke-Api -Method POST -Path "/visits/$($sbyVisitId)/approve" -Headers (Auth $pic1) -Body @{}
-Assert-True "APPR-04" "a PIC can never reach the approve route (403)" ($picApprove.Status -eq 403) "HTTP $($picApprove.Status) $($picApprove.Raw)"
+$vendorApprove = Invoke-Api -Method POST -Path "/visits/$($sbyVisitId)/approve" -Headers (Auth $vendor1) -Body @{}
+Assert-True "APPR-04" "a vendor can never reach the approve route (403)" ($vendorApprove.Status -eq 403) "HTTP $($vendorApprove.Status) $($vendorApprove.Raw)"
 
-$picCheckin = Invoke-Api -Method POST -Path "/visits/$($sbyVisitId)/checkin" -Headers (Auth $pic1) -Body @{}
-Assert-True "APPR-05" "a PIC can never reach the check-in route (403)" ($picCheckin.Status -eq 403) "HTTP $($picCheckin.Status)"
+$vendorCheckin = Invoke-Api -Method POST -Path "/visits/$($sbyVisitId)/checkin" -Headers (Auth $vendor1) -Body @{}
+Assert-True "APPR-05" "a vendor can never reach the check-in route (403)" ($vendorCheckin.Status -eq 403) "HTTP $($vendorCheckin.Status)"
 
 # The state-machine trap: a rescheduled visit must be re-approved, and can
 # never go straight to visiting.

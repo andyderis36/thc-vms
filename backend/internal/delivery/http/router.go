@@ -28,12 +28,32 @@ type UserRoutes struct {
 	List         gin.HandlerFunc
 	Create       gin.HandlerFunc
 	UpdateStatus gin.HandlerFunc
+	Update       gin.HandlerFunc
+	Delete       gin.HandlerFunc
+}
+
+// SuperAdminRoutes carries the bound super_admin back-office methods (PRD
+// §4): facility CRUD (including the hard delete), account management
+// (including the hard delete) and the visit purge. The fields stay separate
+// from UserRoutes/MasterRoutes so a nil member degrades to pass-through in
+// tests mounting a subset.
+type SuperAdminRoutes struct {
+	CreateLocation   gin.HandlerFunc
+	UpdateLocation   gin.HandlerFunc
+	DeleteLocation   gin.HandlerFunc
+	ListUsers        gin.HandlerFunc
+	CreateUser       gin.HandlerFunc
+	UpdateUserStatus gin.HandlerFunc
+	UpdateUser       gin.HandlerFunc
+	DeleteUser       gin.HandlerFunc
+	DeleteVisit      gin.HandlerFunc
 }
 
 // MasterRoutes carries the bound catalogue handler methods.
 type MasterRoutes struct {
 	Locations gin.HandlerFunc
 	Purposes  gin.HandlerFunc
+	Vendors   gin.HandlerFunc
 }
 
 // VisitRoutes carries the bound visit-lifecycle handler methods.
@@ -61,13 +81,14 @@ type UploadRoutes struct {
 
 // Chain is the pre-built middleware for each route group.
 type Chain struct {
-	Recovery     gin.HandlerFunc
-	CORS         gin.HandlerFunc
-	LoginLimiter gin.HandlerFunc
-	Authenticate gin.HandlerFunc
-	AdminOnly    gin.HandlerFunc
-	ApproveOnly  gin.HandlerFunc
-	GateOnly     gin.HandlerFunc
+	Recovery       gin.HandlerFunc
+	CORS           gin.HandlerFunc
+	LoginLimiter   gin.HandlerFunc
+	Authenticate   gin.HandlerFunc
+	AdminOnly      gin.HandlerFunc
+	ApproveOnly    gin.HandlerFunc
+	GateOnly       gin.HandlerFunc
+	SuperAdminOnly gin.HandlerFunc
 }
 
 // HealthProbes carries the bound probe methods.
@@ -80,14 +101,15 @@ type HealthProbes struct {
 // so New keeps a single parameter. A nil handler or chain member degrades to
 // pass-through so hermetic tests can mount a subset.
 type Deps struct {
-	Auth   AuthRoutes
-	Users  UserRoutes
-	Master MasterRoutes
-	Visits VisitRoutes
-	Gate   GateRoutes
-	Upload UploadRoutes
-	Health HealthProbes
-	Chain  Chain
+	Auth       AuthRoutes
+	Users      UserRoutes
+	SuperAdmin SuperAdminRoutes
+	Master     MasterRoutes
+	Visits     VisitRoutes
+	Gate       GateRoutes
+	Upload     UploadRoutes
+	Health     HealthProbes
+	Chain      Chain
 }
 
 // passthrough is the nil-member fallback used only by tests mounting a
@@ -107,12 +129,18 @@ func withFallback(next gin.HandlerFunc) gin.HandlerFunc {
 // New builds the Gin engine serving the whole MVP API under /api/v1.
 // Unauthenticated: POST /auth/login (behind the rate limiter), GET /health,
 // GET /ready. Everything else mounts Authenticate (JWT -> RequireIdentity),
-// with AdminOnly narrowing the security-account routes, ApproveOnly
-// narrowing approve/reject to super_admin and admin (a pic is refused
-// there), and GateOnly keeping check-in/out to security, admin and
+// with AdminOnly narrowing the security-account routes, SuperAdminOnly
+// narrowing the back-office facility and account routes to super_admin,
+// ApproveOnly narrowing approve/reject to super_admin and admin (a vendor is
+// refused there), and GateOnly keeping check-in/out to security, admin and
 // super_admin. EXPLICITLY NOT ROUTED (they 404): POST /visits/:id/feedback,
-// POST /visits/:id/incident, any master-data CRUD, SSO/OTP/2FA, audit-log
+// POST /visits/:id/incident, SSO/OTP/2FA, audit-log
 // viewer.
+//
+// DELETE /locations/:id is the hard removal and is refused with 409 while
+// users.location_id or visit_request.location_id still reference the row, so
+// operational history is never orphaned by accident. Deactivation via PATCH
+// /locations/:id {is_active:false} stays the supported soft removal.
 func New(d Deps) *gin.Engine {
 	engine := gin.New()
 	engine.Use(withFallback(d.Chain.Recovery))
@@ -133,9 +161,26 @@ func New(d Deps) *gin.Engine {
 	admins.GET("/users/security", withFallback(d.Users.List))
 	admins.POST("/users/security", withFallback(d.Users.Create))
 	admins.PATCH("/users/security/:id/status", withFallback(d.Users.UpdateStatus))
+	admins.PATCH("/users/security/:id", withFallback(d.Users.Update))
+	admins.DELETE("/users/security/:id", withFallback(d.Users.Delete))
+	// Pendaftaran vendor dibuka untuk admin cabang (PRD §4.1; handler menolak
+	// non-vendor dari pemanggil admin). Daftar/ubah/hapus user tetap superadmin.
+	admins.POST("/users", withFallback(d.SuperAdmin.CreateUser))
+
+	super := authed.Group("")
+	super.Use(withFallback(d.Chain.SuperAdminOnly))
+	super.POST("/locations", withFallback(d.SuperAdmin.CreateLocation))
+	super.PATCH("/locations/:id", withFallback(d.SuperAdmin.UpdateLocation))
+	super.DELETE("/locations/:id", withFallback(d.SuperAdmin.DeleteLocation))
+	super.GET("/users", withFallback(d.SuperAdmin.ListUsers))
+	super.PATCH("/users/:id/status", withFallback(d.SuperAdmin.UpdateUserStatus))
+	super.PATCH("/users/:id", withFallback(d.SuperAdmin.UpdateUser))
+	super.DELETE("/users/:id", withFallback(d.SuperAdmin.DeleteUser))
+	super.DELETE("/visits/:id", withFallback(d.SuperAdmin.DeleteVisit))
 
 	authed.GET("/locations", withFallback(d.Master.Locations))
 	authed.GET("/purposes", withFallback(d.Master.Purposes))
+	authed.GET("/vendors", withFallback(d.Master.Vendors))
 
 	authed.GET("/visits", withFallback(d.Visits.List))
 	authed.POST("/visits", withFallback(d.Visits.Create))

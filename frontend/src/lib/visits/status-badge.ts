@@ -1,4 +1,4 @@
-import type { VisitStatus } from '@/lib/api/types'
+import type { User, VisitStatus } from '@/lib/api/types'
 
 /**
  * purely data: pemetaan status kunjungan ke label Bahasa Indonesia dan
@@ -20,4 +20,12 @@ export const VISIT_STATUS_META: Record<
   rejected: { label: 'Ditolak', tone: 'danger' },
   cancelled: { label: 'Dibatalkan', tone: 'neutral' },
   rescheduled: { label: 'Jadwal Digeser', tone: 'warning' },
+}
+
+/** Nada badge per peran user — dipakai tabel users dan modal edit (satu sumber). */
+export function managedRoleTone(role: User['role']): StatusTone {
+  if (role === 'super_admin') return 'danger'
+  if (role === 'admin') return 'info'
+  if (role === 'security') return 'warning'
+  return 'neutral'
 }

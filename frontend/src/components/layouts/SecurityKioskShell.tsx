@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Tabs, type TabItem } from '@/components/ui/Tabs'
 import { useSession } from '@/lib/auth/session'
 import { LiveClock } from './LiveClock'
+import { SkipToContentLink } from './SkipToContentLink'
 
 /** Id tab antrean gerbang. Kunci `tabCounts` memakai nilai yang sama. */
 export type KioskTabId = 'upcoming' | 'on-site' | 'completed'
@@ -89,8 +90,15 @@ export function SecurityKioskShell({
 
   return (
     <div className="flex min-h-dvh flex-col bg-page">
-      {/* Topbar kiosk: full width, tanpa sidebar, kontras tinggi. */}
-      <header className="sticky top-0 z-30 flex h-topbar-kiosk items-center justify-between gap-2 bg-kiosk-topbar px-3 text-brand-contrast shadow-dropdown md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:gap-3 md:px-4 lg:gap-4 lg:px-6">
+      {/* Pintas keyboard pertama: lompat langsung ke konten utama. */}
+      <SkipToContentLink />
+
+      {/* Topbar kiosk: full width, tanpa sidebar, kontras tinggi.
+          Grid 3 kolom hanya mulai xl (1280px). Di 768-1023px grid
+          `minmax(0,1fr)_auto_minmax(0,1fr)` menjepit kolom kiri sehingga
+          badge lokasi terpotong & menabrak jam — sampai xl topbar tetap
+          flex + justify-between (§5.1 breakpoint tablet kiosk). */}
+      <header className="sticky top-0 z-30 flex h-topbar-kiosk items-center justify-between gap-2 bg-kiosk-topbar px-3 text-brand-contrast shadow-dropdown md:gap-3 md:px-4 lg:gap-4 lg:px-6 xl:grid xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
         {/* Kiri: logo THC + nama pos + badge lokasi terkunci (bukan switcher). */}
         <div className="flex min-w-0 items-center gap-3">
           <span
@@ -99,10 +107,12 @@ export function SecurityKioskShell({
           >
             THC
           </span>
-          <span className="hidden shrink-0 whitespace-nowrap text-sm font-black uppercase tracking-wide md:block">
+          {/* Label tegas "GATE ACCESS CONTROL" (§6.3) hanya di xl — di bawah
+              xl ia memaksa badge lokasi menyusut dan topbar collapse. */}
+          <span className="hidden shrink-0 whitespace-nowrap text-sm font-black uppercase tracking-wide xl:block">
             Gate Access Control
           </span>
-          <Badge tone="info" className="min-w-0 max-w-28 gap-1.5 lg:max-w-48">
+          <Badge tone="info" className="min-w-0 max-w-28 gap-1.5 md:max-w-56 xl:max-w-48">
             <MapPin aria-hidden="true" className="size-3 shrink-0" />
             <span className="truncate">{locationName}</span>
           </Badge>
@@ -153,8 +163,10 @@ export function SecurityKioskShell({
         />
       </div>
 
-      {/* Konten layar; overflow-x dikunci agar layar tak pernah scroll horizontal. */}
-      <main className="flex-1 overflow-x-hidden p-4 pb-24 md:p-6 lg:p-8">
+      {/* Konten layar; overflow-x-clip mengunci scroll horizontal TANPA membuat
+          scroll container (clip ≠ hidden) sehingga elemen sticky di dalamnya tetap
+          bekerja. min-w-0 = min-inline-size:0; id+tabIndex = sasan skip-to-content. */}
+      <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-x-clip p-4 pb-24 md:p-6 lg:p-8">
         {children}
       </main>
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { X } from 'lucide-react'
 
 export type ModalSize = 'sm' | 'md' | 'lg'
 
@@ -69,13 +70,18 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
           <h2 id={titleId} className="text-lg font-semibold text-ink">
             {title}
           </h2>
+          {/*
+            Target sentuh 44×44px (§5.2.1): `size-11` + `p-1`, lalu ikon X
+            dipatok ke sudut kanan-atas (`items-start justify-end`) agar posisi
+            visualnya persis seperti sebelumnya saat tombol hanya ~28px.
+          */}
           <button
             type="button"
             onClick={onClose}
             aria-label="Tutup"
-            className="-m-1 rounded-control p-1 text-xl leading-none text-ink-secondary hover:bg-neutral-bg"
+            className="-m-1 flex size-11 items-start justify-end rounded-control p-1 text-ink-secondary hover:bg-neutral-bg"
           >
-            &times;
+            <X aria-hidden="true" className="size-5 shrink-0" />
           </button>
         </header>
 

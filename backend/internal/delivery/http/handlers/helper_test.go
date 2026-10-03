@@ -74,18 +74,30 @@ func decodeData[T any](t *testing.T, env envelope) T {
 	return out
 }
 
-// cannedVisit is the visit every fake serves unless a test overrides it.
+// cannedVisit is the visit every fake serves unless a test overrides it. It
+// carries one rostered technician with a selfie plus the resolved vendor name
+// so the list/get/contract tests pin the photo_url and vendor_name members,
+// including the per-technician vendor_id/vendor_name pair. Location name/type
+// ride along so the list/get tests pin the Fasilitas column (location member).
+// Pic name/email ride along so the list/get tests pin kartu Informasi
+// Kunjungan (pic_user member).
 func cannedVisit() domain.VisitRequest {
 	start := time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC)
 	end := time.Date(2026, time.October, 1, 17, 0, 0, 0, time.UTC)
 	notes := "splicing FO"
 	letter := "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf"
+	selfie := "http://localhost:9000/thc-vms-bucket/id_card/visit-1/selfie.jpg"
 	return domain.VisitRequest{
 		ID:                  "visit-1",
 		VisitID:             "VST-0000000001",
 		PICUserID:           "pic-1",
+		PICUserName:         "Dimas Prasetyo",
+		PICUserEmail:        "dimas@vendor.example",
 		VendorID:            "vendor-1",
+		VendorName:          "PT Lintas Fiber",
 		LocationID:          "loc-A",
+		LocationName:        "POP Tebet",
+		LocationType:        domain.LocationPOP,
 		StartDate:           start,
 		EndDate:             end,
 		Status:              domain.VisitStatusApproved,
@@ -93,6 +105,13 @@ func cannedVisit() domain.VisitRequest {
 		IsNDAAccepted:       true,
 		Notes:               &notes,
 		CreatedAt:           time.Date(2026, time.September, 20, 10, 0, 0, 0, time.UTC),
+		Visitors: []domain.Visitor{
+			{
+				ID: "visitor-1", VisitRequestID: "visit-1",
+				Name: "Andi", IDNumber: "ID123", Phone: "0811", PhotoURL: &selfie,
+				VendorID: "vendor-1", VendorName: "PT Lintas Fiber",
+			},
+		},
 	}
 }
 
@@ -237,6 +256,13 @@ func (f *fakeStorage) Upload(_ context.Context, in domain.UploadRequest) (domain
 func (f *fakeStorage) PresignedURL(_ context.Context, _ string, _ time.Duration) (string, error) {
 	return "", nil
 }
+
+func (f *fakeStorage) ObjectKeyFromStoredURL(_ string) (string, error) {
+	return "", domain.ErrValidation
+}
+
+// strPtr boxes a string for optional DTO/domain members in tests.
+func strPtr(s string) *string { return &s }
 
 func mustStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
 	t.Helper()

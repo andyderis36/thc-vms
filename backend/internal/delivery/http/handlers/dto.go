@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"strings"
 	"time"
 
 	"thc-vms/backend/internal/domain"
@@ -12,20 +13,25 @@ import (
 // test pins that. No handler adds a key of its own.
 
 // visitorDTO mirrors VisitorItem: name/id_number/phone plus the optional
-// id_card_photo_url uploaded beforehand via POST /uploads (id_card).
+// id_card_photo_url, photo_url (selfie) and vendor_id uploaded beforehand,
+// with the resolved vendor_name alongside.
 type visitorDTO struct {
 	Name           string  `json:"name"`
 	IDNumber       string  `json:"id_number"`
 	Phone          string  `json:"phone"`
 	IDCardPhotoURL *string `json:"id_card_photo_url,omitempty"`
+	PhotoURL       *string `json:"photo_url,omitempty"`
+	VendorID       *string `json:"vendor_id,omitempty"`
+	VendorName     *string `json:"vendor_name,omitempty"`
 }
 
-// locationDTO mirrors Location. The visit usecase returns the location id
-// only, so the handler emits the id member and leaves the catalogue detail to
-// the master endpoints; every member stays optional per the schema.
+// locationDTO mirrors Location. Name/type ride along from the usecase join
+// (kolom Fasilitas FE); empty renders nil/omitted, same partial rule as
+// purposeDTO. Every member stays optional per the schema.
 type locationDTO struct {
 	ID   string  `json:"id"`
 	Name *string `json:"name,omitempty"`
+	Type *string `json:"type,omitempty"`
 }
 
 // purposeDTO mirrors Purpose. Same partial rule as locationDTO.
@@ -34,15 +40,23 @@ type purposeDTO struct {
 	Name *string `json:"name,omitempty"`
 }
 
-// userDTO mirrors User. The handler knows the pic id only, so it emits the
-// id member; profile detail belongs to the user endpoints.
+// userDTO mirrors User. Id is always present; name/email ride along from the
+// visit join (kartu Informasi Kunjungan FE). Empty renders nil/omitted, same
+// partial rule as locationDTO (User has no required members in openapi).
 type userDTO struct {
-	ID string `json:"id"`
+	ID    string  `json:"id"`
+	Name  *string `json:"name,omitempty"`
+	Email *string `json:"email,omitempty"`
 }
 
-// visitDetailDTO mirrors VisitDetail. Field notes: vendor_name is empty until
-// a vendor join is wired (the usecase returns VendorID only); purposes and
-// visitors default to empty arrays so the keys are always present.
+// visitDetailDTO mirrors VisitDetail. Field notes: vendor_name carries the
+// catalogue display name resolved by the usecase (empty when the visit names
+// no vendor); visitors come from the domain roster on reads and from the
+// echoed request input on create. purposes default to empty arrays so the
+// keys are always present. check_in_at / check_out_at / checked_in_by are
+// gate enrichment filled ONLY by the single-GET path (usecase withGateTimes);
+// list items leave them nil so the keys are omitted, and requested/approved
+// visits render no gate keys at all.
 type visitDetailDTO struct {
 	ID                  string       `json:"id"`
 	VisitID             string       `json:"visit_id"`
@@ -55,8 +69,15 @@ type visitDetailDTO struct {
 	EndDate             string       `json:"end_date"`
 	AssignmentLetterURL *string      `json:"assignment_letter_url"`
 	Notes               string       `json:"notes"`
-	Visitors            []visitorDTO `json:"visitors"`
-	CreatedAt           string       `json:"created_at"`
+	// PurposeNote mirrors VisitDetail.purpose_note (migration 000005): no
+	// omitempty so the key is always present, null when the visit carries no
+	// free-typed purpose.
+	PurposeNote *string      `json:"purpose_note"`
+	Visitors    []visitorDTO `json:"visitors"`
+	CreatedAt   string       `json:"created_at"`
+	CheckInAt   *string      `json:"check_in_at,omitempty"`
+	CheckOutAt  *string      `json:"check_out_at,omitempty"`
+	CheckedInBy *string      `json:"checked_in_by,omitempty"`
 }
 
 // visitListDTO mirrors the VisitListResponse data object: {items, total,
@@ -85,38 +106,94 @@ type uploadDTO struct {
 
 // createVisitBody mirrors CreateVisitRequest. is_multi_day is accepted but
 // ignored: the usecase DERIVES multi-day from the schedule window.
+// visitors[].vendor_id is the technician's own company (optional);
+// visitors[].photo_url is the optional selfie uploaded via the id_card
+// upload category.
 type createVisitBody struct {
-	LocationID          string   `json:"location_id"`
-	PurposeIDs          []string `json:"purpose_ids"`
-	StartDate           string   `json:"start_date"`
-	EndDate             string   `json:"end_date"`
-	IsMultiDay          bool     `json:"is_multi_day"`
-	AssignmentLetterURL *string  `json:"assignment_letter_url"`
-	IsNDAAccepted       *bool    `json:"is_nda_accepted"`
-	Notes               string   `json:"notes"`
+	LocationID string   `json:"location_id"`
+	PurposeIDs []string `json:"purpose_ids"`
+	// PurposeNote is the free-typed "tujuan lain" (migration 000005): either
+	// a non-empty purpose_ids or a non-empty purpose_note is required.
+	PurposeNote         string  `json:"purpose_note"`
+	StartDate           string  `json:"start_date"`
+	EndDate             string  `json:"end_date"`
+	IsMultiDay          bool    `json:"is_multi_day"`
+	AssignmentLetterURL *string `json:"assignment_letter_url"`
+	IsNDAAccepted       *bool   `json:"is_nda_accepted"`
+	Notes               string  `json:"notes"`
 	Visitors            []struct {
 		Name           string  `json:"name"`
 		IDNumber       string  `json:"id_number"`
 		Phone          string  `json:"phone"`
 		IDCardPhotoURL *string `json:"id_card_photo_url"`
+		PhotoURL       *string `json:"photo_url"`
+		VendorID       *string `json:"vendor_id"`
+		// VendorName is the manually typed company (migration 000005),
+		// honoured only when vendor_id is absent; it never enters the
+		// vendor catalogue.
+		VendorName *string `json:"vendor_name"`
 	} `json:"visitors"`
 }
 
 // toVisitDetail maps one domain visit onto the openapi VisitDetail shape.
 // Text pointers render as null when absent, matching the [string, "null"]
 // schema members; slices stay non-nil so they render as [] instead of null.
+// The roster (including photo_url) and vendor_name travel from the domain
+// visit: reads carry the repository-loaded roster, create carries the echoed
+// input attached by withEchoedVisitors.
 func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
+	loc := locationDTO{ID: string(v.LocationID)}
+	if v.LocationName != "" {
+		name := v.LocationName
+		loc.Name = &name
+	}
+	if v.LocationType != "" {
+		typ := string(v.LocationType)
+		loc.Type = &typ
+	}
 	detail := visitDetailDTO{
-		ID:        string(v.ID),
-		VisitID:   v.VisitID,
-		Status:    string(v.Status),
-		Location:  locationDTO{ID: string(v.LocationID)},
-		Purposes:  []purposeDTO{},
-		PICUser:   userDTO{ID: string(v.PICUserID)},
-		StartDate: v.StartDate.Format(time.RFC3339),
-		EndDate:   v.EndDate.Format(time.RFC3339),
-		Visitors:  []visitorDTO{},
-		CreatedAt: v.CreatedAt.Format(time.RFC3339),
+		ID:         string(v.ID),
+		VisitID:    v.VisitID,
+		Status:     string(v.Status),
+		Location:   loc,
+		Purposes:   []purposeDTO{},
+		PICUser:    userDTO{ID: string(v.PICUserID)},
+		VendorName: v.VendorName,
+		StartDate:  v.StartDate.Format(time.RFC3339),
+		EndDate:    v.EndDate.Format(time.RFC3339),
+		Visitors:   []visitorDTO{},
+		CreatedAt:  v.CreatedAt.Format(time.RFC3339),
+	}
+	if v.PICUserName != "" {
+		name := v.PICUserName
+		detail.PICUser.Name = &name
+	}
+	if v.PICUserEmail != "" {
+		email := v.PICUserEmail
+		detail.PICUser.Email = &email
+	}
+	for _, p := range v.Purposes {
+		dto := purposeDTO{ID: string(p.ID)}
+		if p.Name != "" {
+			name := p.Name
+			dto.Name = &name
+		}
+		detail.Purposes = append(detail.Purposes, dto)
+	}
+	for _, w := range v.Visitors {
+		dto := visitorDTO{
+			Name: w.Name, IDNumber: w.IDNumber, Phone: w.Phone,
+			IDCardPhotoURL: w.IDCardPhotoURL, PhotoURL: w.PhotoURL,
+		}
+		if w.VendorID != "" {
+			id := string(w.VendorID)
+			dto.VendorID = &id
+		}
+		if w.VendorName != "" {
+			name := w.VendorName
+			dto.VendorName = &name
+		}
+		detail.Visitors = append(detail.Visitors, dto)
 	}
 	if v.AssignmentLetterURL != nil {
 		url := *v.AssignmentLetterURL
@@ -125,16 +202,39 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 	if v.Notes != nil {
 		detail.Notes = *v.Notes
 	}
+	// The free-typed purpose travels verbatim from the domain row (nil stays
+	// null on the wire); the roster vendor_name below is the RESOLVED display
+	// name carried by the domain visit, never the raw manual input, so a
+	// catalogue win can never leak the discarded manual text.
+	detail.PurposeNote = v.PurposeNote
+	// Gate times come from the usecase enrichment, never invented here: nil
+	// pointers stay absent (omitempty) for requested/approved visits and for
+	// every list item, while visiting/completed single-GETs render RFC3339.
+	if v.CheckInAt != nil {
+		at := v.CheckInAt.Format(time.RFC3339)
+		detail.CheckInAt = &at
+	}
+	if v.CheckOutAt != nil {
+		at := v.CheckOutAt.Format(time.RFC3339)
+		detail.CheckOutAt = &at
+	}
+	if v.CheckedInBy != nil {
+		by := string(*v.CheckedInBy)
+		detail.CheckedInBy = &by
+	}
 	return detail
 }
 
-// toCreateInput maps the bound body onto visit.CreateVisitInput.
+// toCreateInput maps the bound body onto visit.CreateVisitInput. The body is
+// assumed to have passed checkCreateBody, so a present vendor_id is already a
+// well-formed UUID here.
 func toCreateInput(body createVisitBody, start, end time.Time) visit.CreateVisitInput {
 	in := visit.CreateVisitInput{
 		LocationID:    domain.UUID(body.LocationID),
 		StartDate:     start,
 		EndDate:       end,
 		Notes:         body.Notes,
+		PurposeNote:   body.PurposeNote,
 		IsNDAAccepted: body.IsNDAAccepted != nil && *body.IsNDAAccepted,
 	}
 	if body.AssignmentLetterURL != nil {
@@ -150,25 +250,37 @@ func toCreateInput(body createVisitBody, start, end time.Time) visit.CreateVisit
 			photo := *w.IDCardPhotoURL
 			visitor.IDCardPhotoURL = &photo
 		}
+		if w.PhotoURL != nil {
+			selfie := *w.PhotoURL
+			visitor.PhotoURL = &selfie
+		}
+		if w.VendorID != nil {
+			if id := strings.TrimSpace(*w.VendorID); id != "" {
+				vendorID := domain.UUID(id)
+				visitor.VendorID = &vendorID
+			}
+		}
+		// The manual company travels as-is; the usecase trims, caps and
+		// applies the catalogue-wins rule, so the response echo can never
+		// carry the raw text when a vendor_id was also sent.
+		if w.VendorName != nil {
+			name := *w.VendorName
+			visitor.VendorName = &name
+		}
 		in.Visitors = append(in.Visitors, visitor)
 	}
 	return in
 }
 
-// withEchoedVisitors attaches the request visitors to a created detail. The
-// repository returns the visit row without its visitor rows, so echoing the
-// just-validated input is the only honest visitor data the create response
-// can carry.
+// withEchoedVisitors fills the purpose shells on a created detail. The
+// repository returns the visit row without its visitor rows, so the usecase
+// attaches the trimmed domain roster (with resolved vendor_name) to the
+// created visit and toVisitDetail already renders it; the roster is kept as
+// passed and never rebuilt from the raw input here so trimming is preserved.
 func withEchoedVisitors(detail visitDetailDTO, in visit.CreateVisitInput) visitDetailDTO {
 	detail.Purposes = make([]purposeDTO, 0, len(in.PurposeIDs))
 	for _, pid := range in.PurposeIDs {
 		detail.Purposes = append(detail.Purposes, purposeDTO{ID: string(pid)})
-	}
-	detail.Visitors = make([]visitorDTO, 0, len(in.Visitors))
-	for _, w := range in.Visitors {
-		detail.Visitors = append(detail.Visitors, visitorDTO{
-			Name: w.Name, IDNumber: w.IDNumber, Phone: w.Phone, IDCardPhotoURL: w.IDCardPhotoURL,
-		})
 	}
 	return detail
 }

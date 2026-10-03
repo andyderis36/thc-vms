@@ -27,13 +27,13 @@ type ListVisitsInput struct {
 	Page   int
 	Limit  int
 	// LocationID narrows the result to one branch. Honoured only for
-	// super_admin; ignored for admin, security and pic.
+	// super_admin; ignored for admin, security and vendor.
 	LocationID *domain.UUID
 }
 
 // ListVisits builds the domain.VisitFilter from the actor. This mapping IS the
 // multi-branch isolation core and it is total: admin and security see only
-// their own branch, pic sees only its own visits, super_admin sees everything
+// their own branch, vendor sees only its own visits, super_admin sees everything
 // unless it narrows by branch, and any unknown role is refused.
 func (s *Service) ListVisits(ctx context.Context, actor Actor, in ListVisitsInput) ([]domain.VisitRequest, int64, error) {
 	filter := domain.VisitFilter{
@@ -50,7 +50,7 @@ func (s *Service) ListVisits(ctx context.Context, actor Actor, in ListVisitsInpu
 		// parameter.
 		filter.LocationID = actor.LocationID
 		filter.PICUserID = nil
-	case domain.RolePIC:
+	case domain.RoleVendor:
 		picID := actor.ID
 		filter.PICUserID = &picID
 		filter.LocationID = nil
@@ -66,5 +66,15 @@ func (s *Service) ListVisits(ctx context.Context, actor Actor, in ListVisitsInpu
 	if filter.Limit < 1 || filter.Limit > maxListLimit {
 		filter.Limit = defaultListLimit
 	}
-	return s.visits.List(ctx, filter)
+	visits, total, err := s.visits.List(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	// File links are exchanged per row AFTER the scoped repository query, so
+	// the filter above stays the single authz point: no new scope check here.
+	// See withFileLinks for the per-row HMAC cost note.
+	for i := range visits {
+		visits[i] = s.withFileLinks(ctx, visits[i])
+	}
+	return visits, total, nil
 }

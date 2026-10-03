@@ -117,7 +117,7 @@ func TestGetVisit_ResolvesBothUUIDAndVisitCode(t *testing.T) {
 
 func TestCreateVisit_Returns201WithDetail(t *testing.T) {
 	svc := &fakeVisitService{}
-	engine := newVisitEngine(svc, domain.RolePIC, "")
+	engine := newVisitEngine(svc, domain.RoleVendor, "")
 
 	payload := `{
 		"location_id": "11111111-1111-1111-1111-111111111111",
@@ -140,6 +140,99 @@ func TestCreateVisit_Returns201WithDetail(t *testing.T) {
 	}
 	if len(svc.lastCreateIn.Visitors) != 1 || len(svc.lastCreateIn.PurposeIDs) != 1 {
 		t.Fatalf("usecase input not mapped: %+v", svc.lastCreateIn)
+	}
+}
+
+func TestCreateVisit_MapsPerVisitorVendorIDAndPhotoURL(t *testing.T) {
+	created := cannedVisit()
+	created.Visitors = []domain.Visitor{{
+		ID: "visitor-1", VisitRequestID: "visit-1",
+		Name: "Andi", IDNumber: "ID123", Phone: "0811",
+		PhotoURL:   strPtr("http://localhost:9000/b/id_card/visit-1/selfie.jpg"),
+		VendorID:   "33333333-3333-3333-3333-333333333333",
+		VendorName: "PT Lintas Fiber",
+	}}
+	svc := &fakeVisitService{created: created}
+	engine := newVisitEngine(svc, domain.RoleVendor, "")
+
+	payload := `{
+		"location_id": "11111111-1111-1111-1111-111111111111",
+		"purpose_ids": ["22222222-2222-2222-2222-222222222222"],
+		"start_date": "2026-10-01T09:00:00Z",
+		"end_date": "2026-10-01T17:00:00Z",
+		"is_nda_accepted": true,
+		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811", "photo_url": "http://localhost:9000/b/id_card/visit-1/selfie.jpg", "vendor_id": "33333333-3333-3333-3333-333333333333"}]
+	}`
+	rec := serveJSON(engine, "POST", "/visits", payload)
+	mustStatus(t, rec, 201)
+	if len(svc.lastCreateIn.Visitors) != 1 || svc.lastCreateIn.Visitors[0].VendorID == nil ||
+		string(*svc.lastCreateIn.Visitors[0].VendorID) != "33333333-3333-3333-3333-333333333333" {
+		t.Fatalf("usecase per-visitor vendor not mapped: %+v", svc.lastCreateIn.Visitors)
+	}
+	if len(svc.lastCreateIn.Visitors) != 1 || svc.lastCreateIn.Visitors[0].PhotoURL == nil {
+		t.Fatalf("usecase selfie not mapped: %+v", svc.lastCreateIn.Visitors)
+	}
+	env := mustSuccess(t, rec)
+	var detail map[string]any
+	if err := json.Unmarshal(env.Data, &detail); err != nil {
+		t.Fatalf("create detail broken: %v", err)
+	}
+	visitors, ok := detail["visitors"].([]any)
+	if !ok || len(visitors) != 1 {
+		t.Fatalf("visitors echo wrong: %v", detail["visitors"])
+	}
+	echo := visitors[0].(map[string]any)
+	if echo["photo_url"] != "http://localhost:9000/b/id_card/visit-1/selfie.jpg" {
+		t.Fatalf("photo_url not echoed: %v", echo)
+	}
+	if echo["vendor_id"] != "33333333-3333-3333-3333-333333333333" {
+		t.Fatalf("vendor_id not echoed: %v", echo)
+	}
+	if echo["vendor_name"] != "PT Lintas Fiber" {
+		t.Fatalf("vendor_name not resolved: %v", echo)
+	}
+}
+
+func TestCreateVisit_RejectsMalformedPerVisitorVendorID(t *testing.T) {
+	svc := &fakeVisitService{}
+	engine := newVisitEngine(svc, domain.RoleVendor, "")
+
+	payload := `{
+		"location_id": "11111111-1111-1111-1111-111111111111",
+		"purpose_ids": ["22222222-2222-2222-2222-222222222222"],
+		"start_date": "2026-10-01T09:00:00Z",
+		"end_date": "2026-10-01T17:00:00Z",
+		"is_nda_accepted": true,
+		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811", "vendor_id": "bukan-uuid"}]
+	}`
+	rec := serveJSON(engine, "POST", "/visits", payload)
+	mustStatus(t, rec, 400)
+}
+
+func TestGetVisit_RendersVendorNameAndVisitorPhoto(t *testing.T) {
+	v := cannedVisit()
+	svc := &fakeVisitService{visitByKey: map[string]domain.VisitRequest{"visit-1": v}}
+	engine := newVisitEngine(svc, domain.RoleAdmin, "loc-A")
+
+	rec := serve(engine, "GET", "/visits/visit-1", nil, "")
+	mustStatus(t, rec, 200)
+	detail := asObject(t, mustSuccess(t, rec).Data)
+	if detail["vendor_name"] != "PT Lintas Fiber" {
+		t.Fatalf("vendor_name = %v, want PT Lintas Fiber", detail["vendor_name"])
+	}
+	visitors, ok := detail["visitors"].([]any)
+	if !ok || len(visitors) != 1 {
+		t.Fatalf("visitors wrong: %v", detail["visitors"])
+	}
+	visitor := visitors[0].(map[string]any)
+	if visitor["photo_url"] != "http://localhost:9000/thc-vms-bucket/id_card/visit-1/selfie.jpg" {
+		t.Fatalf("photo_url = %v, want the selfie URL", visitor["photo_url"])
+	}
+	if visitor["vendor_id"] != "vendor-1" {
+		t.Fatalf("vendor_id = %v, want vendor-1", visitor["vendor_id"])
+	}
+	if visitor["vendor_name"] != "PT Lintas Fiber" {
+		t.Fatalf("vendor_name = %v, want PT Lintas Fiber", visitor["vendor_name"])
 	}
 }
 
@@ -166,14 +259,14 @@ func TestReschedule_RequiresAllThreeFields(t *testing.T) {
 	for name, payload := range cases {
 		t.Run(name, func(t *testing.T) {
 			svc := &fakeVisitService{}
-			engine := newVisitEngine(svc, domain.RolePIC, "")
+			engine := newVisitEngine(svc, domain.RoleVendor, "")
 			rec := serveJSON(engine, "POST", "/visits/visit-1/reschedule", payload)
 			mustStatus(t, rec, 400)
 		})
 	}
 
 	svc := &fakeVisitService{}
-	engine := newVisitEngine(svc, domain.RolePIC, "")
+	engine := newVisitEngine(svc, domain.RoleVendor, "")
 	rec := serveJSON(engine, "POST", "/visits/visit-1/reschedule",
 		`{"start_date": "2026-10-02T09:00:00Z", "end_date": "2026-10-02T17:00:00Z", "reason": "jadwal molor"}`)
 	mustStatus(t, rec, 200)
@@ -199,9 +292,93 @@ func TestApproveAndCancel_Smoke(t *testing.T) {
 	}
 }
 
+func TestListVisits_RendersLocationNameAndType(t *testing.T) {
+	svc := &fakeVisitService{
+		listItems: []domain.VisitRequest{cannedVisit()},
+		listTotal: 1,
+	}
+	engine := newVisitEngine(svc, domain.RoleSuperAdmin, "")
+
+	rec := serve(engine, "GET", "/visits", nil, "")
+	mustStatus(t, rec, 200)
+	data := asObject(t, mustSuccess(t, rec).Data)
+	items, ok := data["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("items wrong: %v", data["items"])
+	}
+	detail := items[0].(map[string]any)
+	loc, ok := detail["location"].(map[string]any)
+	if !ok || loc == nil {
+		t.Fatalf("location missing: %v", detail["location"])
+	}
+	assertSubset(t, "Location", loc)
+	if loc["id"] != "loc-A" {
+		t.Fatalf("location.id = %v, want loc-A", loc["id"])
+	}
+	if loc["name"] != "POP Tebet" {
+		t.Fatalf("location.name = %v, want POP Tebet", loc["name"])
+	}
+	if loc["type"] != "pop" {
+		t.Fatalf("location.type = %v, want pop", loc["type"])
+	}
+}
+
+func TestListVisits_RendersPICUserNameAndEmail(t *testing.T) {
+	svc := &fakeVisitService{
+		listItems: []domain.VisitRequest{cannedVisit()},
+		listTotal: 1,
+	}
+	engine := newVisitEngine(svc, domain.RoleSuperAdmin, "")
+
+	rec := serve(engine, "GET", "/visits", nil, "")
+	mustStatus(t, rec, 200)
+	data := asObject(t, mustSuccess(t, rec).Data)
+	items, ok := data["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("items wrong: %v", data["items"])
+	}
+	detail := items[0].(map[string]any)
+	user, ok := detail["pic_user"].(map[string]any)
+	if !ok || user == nil {
+		t.Fatalf("pic_user missing: %v", detail["pic_user"])
+	}
+	assertSubset(t, "User", user)
+	if user["id"] != "pic-1" {
+		t.Fatalf("pic_user.id = %v, want pic-1", user["id"])
+	}
+	if user["name"] != "Dimas Prasetyo" {
+		t.Fatalf("pic_user.name = %v, want Dimas Prasetyo", user["name"])
+	}
+	if user["email"] != "dimas@vendor.example" {
+		t.Fatalf("pic_user.email = %v, want dimas@vendor.example", user["email"])
+	}
+}
+
+func TestGetVisit_RendersPICUserNameAndEmail(t *testing.T) {
+	svc := &fakeVisitService{
+		visitByKey: map[string]domain.VisitRequest{"visit-1": cannedVisit()},
+	}
+	engine := newVisitEngine(svc, domain.RoleSuperAdmin, "")
+
+	rec := serve(engine, "GET", "/visits/visit-1", nil, "")
+	mustStatus(t, rec, 200)
+	detail := asObject(t, mustSuccess(t, rec).Data)
+	user, ok := detail["pic_user"].(map[string]any)
+	if !ok || user == nil {
+		t.Fatalf("pic_user missing: %v", detail["pic_user"])
+	}
+	assertSubset(t, "User", user)
+	if user["name"] != "Dimas Prasetyo" {
+		t.Fatalf("pic_user.name = %v, want Dimas Prasetyo", user["name"])
+	}
+	if user["email"] != "dimas@vendor.example" {
+		t.Fatalf("pic_user.email = %v, want dimas@vendor.example", user["email"])
+	}
+}
+
 func TestQR_ReturnsVisitIDAndPayloadEqualToVisitID(t *testing.T) {
 	svc := &fakeVisitService{}
-	engine := newVisitEngine(svc, domain.RolePIC, "")
+	engine := newVisitEngine(svc, domain.RoleVendor, "")
 
 	rec := serve(engine, "GET", "/visits/visit-1/qr", nil, "")
 	mustStatus(t, rec, 200)

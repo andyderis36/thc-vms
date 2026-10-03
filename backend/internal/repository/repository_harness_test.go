@@ -112,17 +112,29 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 	return created, nil
 }
 
-// applySchema makes the scratch database match the migration. It is idempotent
-// at the harness level: an already-migrated database yields no error, because
-// the migration is applied inside a transaction that rolls back on failure.
+// applySchema makes the scratch database match the migrations, in version
+// order. It is idempotent at the harness level: an already-migrated database
+// yields no error, because a re-applied file raises only "already there"
+// SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, migrationSQL)
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL} {
+		if err := applyOne(ctx, pool, sql); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyOne executes one migration file, tolerating the SQLSTATEs a re-run
+// raises: 42P07 duplicate_table / 42710 duplicate_object (the schema is
+// already present) and 42701 duplicate_column (migration 000002 re-adding a
+// column it already added).
+func applyOne(ctx context.Context, pool *pgxpool.Pool, sql string) error {
+	_, err := pool.Exec(ctx, sql)
 	if err == nil {
 		return nil
 	}
-	// 42P07 duplicate_table / 42710 duplicate_object: the schema is already
-	// there, which is the normal case on a second run.
-	if isDuplicateObject(err) {
+	if isDuplicateObject(err) || hasSQLState(err, "42701") {
 		return nil
 	}
 	return fmt.Errorf("apply migration: %w", err)
@@ -136,6 +148,58 @@ var migrationSQL = func() string {
 	if err != nil {
 		// Leave the SQL empty: applySchema then surfaces the read failure as a
 		// setup error instead of silently testing against a half-built schema.
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationNIKSQL is the users.nik follow-up, loaded the same way so the
+// scratch schema tracks the embedded migrations the application runs.
+var migrationNIKSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000002_add_user_nik.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationVisitorVendorSQL is the visitor.vendor_id follow-up, loaded the
+// same way so the scratch schema tracks the embedded migrations the
+// application runs.
+var migrationVisitorVendorSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000003_visitor_vendor_id.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationManualCompanySQL is the manual company/purpose follow-up
+// (visitor.vendor_name_override, visit_request.purpose_note,
+// users.vendor_name_override), loaded the same way so the scratch schema
+// tracks the embedded migrations the application runs.
+var migrationManualCompanySQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000005_manual_company_and_purpose.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationRenameVendorSQL is the role rename pic -> vendor follow-up
+// (chk_role_name now admits 'vendor'), loaded the same way so the scratch
+// schema tracks the embedded migrations the application runs.
+var migrationRenameVendorSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000006_rename_pic_to_vendor.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
 		return ""
 	}
@@ -217,7 +281,7 @@ func resetTables(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatalf("truncate scratch tables: %v", err)
 	}
 	_, err = pool.Exec(ctx, `INSERT INTO role (name) VALUES
-		('super_admin'), ('admin'), ('security'), ('pic')
+		('super_admin'), ('admin'), ('security'), ('vendor')
 		ON CONFLICT (name) DO NOTHING`)
 	if err != nil {
 		t.Fatalf("seed roles: %v", err)

@@ -22,10 +22,10 @@ import (
 const (
 	// CtxUserID carries the caller's uuid string.
 	CtxUserID = "user_id"
-	// CtxUserRole carries the caller's role name (super_admin, admin, security, pic).
+	// CtxUserRole carries the caller's role name (super_admin, admin, security, vendor).
 	CtxUserRole = "user_role"
 	// CtxLocationID carries the caller's branch uuid string; absent for
-	// super_admin and pic.
+	// super_admin and vendor.
 	CtxLocationID = "location_id"
 )
 

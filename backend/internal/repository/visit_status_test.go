@@ -26,13 +26,13 @@ func TestUpdateStatus_WritesHistoryAtomically(t *testing.T) {
 	repos := NewVisitRepository(pool)
 
 	loc := seedLocation(t, pool, "Cabang Atomik", "cabang")
-	pic := seedUser(t, pool, seedUserParams{Name: "PIC Atom", Email: "atom@vendor.test", Role: "pic", Type: "external"})
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Atom", Email: "atom@vendor.test", Role: "vendor", Type: "external"})
 	admin := seedUser(t, pool, seedUserParams{Name: "Admin Atom", Email: "admin.atom@thc.test", Role: "admin", Location: loc, Type: "internal"})
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	end := start.Add(4 * time.Hour)
 	visitID := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000101", PIC: pic, Location: loc,
+		Code: "VST-0000000101", PIC: vendor, Location: loc,
 		Start: start, End: end, Status: domain.VisitStatusRequested,
 	})
 
@@ -86,12 +86,12 @@ func TestUpdateStatus_ConcurrentApproveOnlyOneWins(t *testing.T) {
 	repos := NewVisitRepository(pool)
 
 	loc := seedLocation(t, pool, "Cabang Balap", "cabang")
-	pic := seedUser(t, pool, seedUserParams{Name: "PIC Balap", Email: "balap@vendor.test", Role: "pic", Type: "external"})
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Balap", Email: "balap@vendor.test", Role: "vendor", Type: "external"})
 	admin := seedUser(t, pool, seedUserParams{Name: "Admin Balap", Email: "admin.balap@thc.test", Role: "admin", Location: loc, Type: "internal"})
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	visitID := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000102", PIC: pic, Location: loc,
+		Code: "VST-0000000102", PIC: vendor, Location: loc,
 		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusRequested,
 	})
 
@@ -140,11 +140,11 @@ func TestUpdateStatus_EmptyActorPersistsNull(t *testing.T) {
 	repos := NewVisitRepository(pool)
 
 	loc := seedLocation(t, pool, "Cabang Hantu", "cabang")
-	pic := seedUser(t, pool, seedUserParams{Name: "PIC Hantu", Email: "hantu@vendor.test", Role: "pic", Type: "external"})
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Hantu", Email: "hantu@vendor.test", Role: "vendor", Type: "external"})
 
 	start := time.Now().UTC().Add(-30 * 24 * time.Hour).Truncate(time.Second)
 	visitID := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000103", PIC: pic, Location: loc,
+		Code: "VST-0000000103", PIC: vendor, Location: loc,
 		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusRequested,
 	})
 
@@ -171,12 +171,12 @@ func TestReschedule_UpdatesWindowAndHistoryAtomically(t *testing.T) {
 
 	loc := seedLocation(t, pool, "Cabang Geser", "cabang")
 	vendor := seedVendor(t, pool, "Vendor Geser")
-	pic := seedUser(t, pool, seedUserParams{Name: "PIC Geser", Email: "geser@vendor.test", Role: "pic", Type: "external"})
+	vendorUser := seedUser(t, pool, seedUserParams{Name: "Vendor Geser", Email: "geser@vendor.test", Role: "vendor", Type: "external"})
 	admin := seedUser(t, pool, seedUserParams{Name: "Admin Geser", Email: "admin.geser@thc.test", Role: "admin", Location: loc, Type: "internal"})
 	purpose := seedPurpose(t, pool, "Maintenance Genset")
 
 	created, err := repos.Create(ctx, domain.VisitRequest{
-		PICUserID:     pic,
+		PICUserID:     vendorUser,
 		VendorID:      vendor,
 		LocationID:    loc,
 		StartDate:     time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second),

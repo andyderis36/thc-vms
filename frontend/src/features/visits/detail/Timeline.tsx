@@ -73,17 +73,37 @@ export interface TimelineProps {
   createdAt: string
   startDate: string
   endDate: string
+  /** Stempel gerbang aktual dari GET /visits/{id}; null/absen = belum terjadi. */
+  checkInAt?: string | null
+  checkOutAt?: string | null
+}
+
+/**
+ * Satu baris teks tahap gerbang dalam Bahasa Indonesia: stempel aktual
+ * (`Masuk 26 Sep 2026, 14.30`) bila gerbang sudah dilewati, иначе teks
+ * jadwal (`Jadwal mulai …`). Murni (pure) agar terkunci oleh unit test.
+ */
+export function gateDetail(
+  action: 'Masuk' | 'Keluar',
+  at: string | null | undefined,
+  scheduleIso: string,
+): string {
+  if (at !== null && at !== undefined && at !== '') {
+    return `${action} ${formatTanggalWaktu(at)}`
+  }
+  const scheduleWord = action === 'Masuk' ? 'mulai' : 'selesai'
+  return `Jadwal ${scheduleWord} ${formatTanggalWaktu(scheduleIso)}`
 }
 
 /**
  * Panel Riwayat Status (timeline vertikal) untuk SCR-04.
  *
- * KRITIS: `VisitDetail` TIDAK memiliki `check_in_at` / `check_out_at`.
- * Seluruh tahap karena itu dibangun HANYA dari progresi `status` plus
- * `created_at` (pengajuan) dan `start_date` / `end_date` (jadwal).
- * Dilarang menambahkan atau mengarang stempel waktu check-in/check-out.
+ * Tahap kedatangan/selesai memakai stempel gerbang aktual (`check_in_at` /
+ * `check_out_at` dari VisitDetail) bila ada, иначе mundur ke teks jadwal —
+ * sehingga teknisi melihat "Masuk 26 Sep 2026, 14.30" persis seperti yang
+ * dicatat satpam di gerbang (QA GATE-01/02/09).
  */
-export function Timeline({ status, createdAt, startDate, endDate }: TimelineProps) {
+export function Timeline({ status, createdAt, startDate, endDate, checkInAt, checkOutAt }: TimelineProps) {
   const activeIndex = ACTIVE_INDEX_BY_STATUS[status]
   const terminal = TERMINAL_STATUSES.has(status)
 
@@ -97,12 +117,12 @@ export function Timeline({ status, createdAt, startDate, endDate }: TimelineProp
     {
       id: 'visiting',
       label: 'Kedatangan di Lokasi',
-      detail: `Jadwal mulai ${formatTanggalWaktu(startDate)}`,
+      detail: gateDetail('Masuk', checkInAt, startDate),
     },
     {
       id: 'completed',
       label: 'Selesai',
-      detail: `Jadwal selesai ${formatTanggalWaktu(endDate)}`,
+      detail: gateDetail('Keluar', checkOutAt, endDate),
     },
   ]
 
@@ -131,7 +151,7 @@ export function Timeline({ status, createdAt, startDate, endDate }: TimelineProp
               aria-hidden="true"
               className={`absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full ${DOT_CLASS[state]}`}
             >
-              {state === 'done' && <Check className="size-3" strokeWidth={3} />}
+              {state === 'done' && <Check aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />}
             </span>
             <p className={`text-sm ${text.label}`}>{step.label}</p>
             <p className={`mt-0.5 text-label ${text.detail}`}>{step.detail}</p>
@@ -145,7 +165,7 @@ export function Timeline({ status, createdAt, startDate, endDate }: TimelineProp
             aria-hidden="true"
             className="absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full bg-neutral-bg text-neutral-text"
           >
-            <X className="size-3" strokeWidth={3} />
+            <X aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />
           </span>
           <p className="text-sm font-bold text-ink">Status akhir</p>
           <div className="mt-1">

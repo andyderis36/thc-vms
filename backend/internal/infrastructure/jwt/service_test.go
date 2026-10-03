@@ -45,7 +45,7 @@ func testDirectory() mapDirectory {
 			"role-superadmin": domain.RoleSuperAdmin,
 			"role-admin":      domain.RoleAdmin,
 			"role-security":   domain.RoleSecurity,
-			"role-pic":        domain.RolePIC,
+			"role-vendor":     domain.RoleVendor,
 		},
 		locations: map[domain.UUID]string{
 			"loc-bandung": "THC Cabang Bandung",

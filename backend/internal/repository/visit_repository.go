@@ -86,18 +86,25 @@ func (r *visitRepository) Create(
 				AssignmentLetterUrl: pgText(visit.AssignmentLetterURL),
 				IsNdaAccepted:       visit.IsNDAAccepted,
 				Notes:               pgText(visit.Notes),
+				PurposeNote:         pgText(visit.PurposeNote),
 			})
 			if err != nil {
 				return MapError(err)
 			}
 			for _, v := range visitors {
+				vendorID, err := pgNullUUID(v.VendorID)
+				if err != nil {
+					return MapError(err)
+				}
 				if _, err := q.InsertVisitor(ctx, db.InsertVisitorParams{
-					VisitRequestID: row.ID,
-					Name:           v.Name,
-					IDNumber:       v.IDNumber,
-					Phone:          v.Phone,
-					IDCardPhotoUrl: pgText(v.IDCardPhotoURL),
-					PhotoUrl:       pgText(v.PhotoURL),
+					VisitRequestID:     row.ID,
+					Name:               v.Name,
+					IDNumber:           v.IDNumber,
+					Phone:              v.Phone,
+					IDCardPhotoUrl:     pgText(v.IDCardPhotoURL),
+					PhotoUrl:           pgText(v.PhotoURL),
+					VendorID:           vendorID,
+					VendorNameOverride: pgText(v.VendorNameOverride),
 				}); err != nil {
 					return MapError(err)
 				}
@@ -121,7 +128,9 @@ func (r *visitRepository) Create(
 	return domain.VisitRequest{}, lastErr
 }
 
-// FindByID resolves one visit by primary key.
+// FindByID resolves one visit by primary key, with its technician roster
+// attached (openapi VisitorItem, including photo_url) in one extra indexed
+// lookup. A single GET pays it; the paged list batches it instead.
 func (r *visitRepository) FindByID(ctx context.Context, id domain.UUID) (domain.VisitRequest, error) {
 	parsed, err := fromDomainUUID(id)
 	if err != nil {
@@ -135,7 +144,7 @@ func (r *visitRepository) FindByID(ctx context.Context, id domain.UUID) (domain.
 	if err != nil {
 		return domain.VisitRequest{}, err
 	}
-	return visit, nil
+	return r.withVisitors(ctx, visit)
 }
 
 // FindByVisitCode resolves one visit by its printed VST-XXXXXXXXXX code: the
@@ -148,6 +157,36 @@ func (r *visitRepository) FindByVisitCode(ctx context.Context, code string) (dom
 	visit, err := visitCodeRowToDomain(row)
 	if err != nil {
 		return domain.VisitRequest{}, err
+	}
+	return r.withVisitors(ctx, visit)
+}
+
+// withVisitors attaches the technician roster and the purpose catalogue to
+// one already-mapped visit. Each travels in its own indexed lookup, so a
+// single GET pays at most two extra queries, never an N+1. Either query
+// failing is a storage error, not an empty slice: it is reported so a
+// half-built detail never renders as a visit with no visitors or purposes.
+func (r *visitRepository) withVisitors(ctx context.Context, visit domain.VisitRequest) (domain.VisitRequest, error) {
+	parsed, err := fromDomainUUID(visit.ID)
+	if err != nil {
+		return domain.VisitRequest{}, err
+	}
+	q := db.New(r.pool)
+	rows, err := q.ListVisitors(ctx, db.ListVisitorsParams{VisitRequestIds: []uuid.UUID{parsed}})
+	if err != nil {
+		return domain.VisitRequest{}, MapError(err)
+	}
+	visit.Visitors = make([]domain.Visitor, 0, len(rows))
+	for _, row := range rows {
+		visit.Visitors = append(visit.Visitors, visitorModelToDomain(row))
+	}
+	purposeRows, err := q.ListVisitPurposes(ctx, db.ListVisitPurposesParams{VisitRequestIds: []uuid.UUID{parsed}})
+	if err != nil {
+		return domain.VisitRequest{}, MapError(err)
+	}
+	visit.Purposes = make([]domain.Purpose, 0, len(purposeRows))
+	for _, row := range purposeRows {
+		visit.Purposes = append(visit.Purposes, purposeModelToDomain(row))
 	}
 	return visit, nil
 }

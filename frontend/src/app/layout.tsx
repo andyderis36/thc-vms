@@ -26,11 +26,19 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
+/**
+ * Token warna brand — nilai TS dari `--color-brand` di `./globals.css`
+ * (SSOT design system, docs/stitch-ui/02-design-system.md §2).
+ * Metadata Next.js dibangun statis sehingga tidak bisa membaca CSS variable;
+ * hex dicerminkan sekali di sini dan dipakai `viewport.themeColor` di bawah.
+ */
+const BRAND_TOKEN = '#422ad5'
+
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
-  themeColor: '#DE1B1B',
+  themeColor: BRAND_TOKEN,
 }
 
 export default function RootLayout({

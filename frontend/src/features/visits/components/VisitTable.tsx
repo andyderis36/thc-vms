@@ -1,7 +1,12 @@
+'use client'
+
+import Link from 'next/link'
+import { Check, X } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import type { Role, VisitDetail } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
+import { primaryVendorDisplay } from '@/lib/visits/vendor-display'
 
 export interface VisitTableProps {
   visits: VisitDetail[]
@@ -16,17 +21,22 @@ export interface VisitSchedule {
 }
 
 /**
- * Kolom tabel SCR-02 (desktop). Lebar dipaksa proporsional via `table-fixed`
- * agar layar 768px - 1023px TIDAK perlu scroll horizontal (larangan desain).
+ * Kolom tabel SCR-02. Lebar dipaksa proporsional via `table-fixed`.
+ *
+ * Tier responsif (design system §5.1): tabel hanya tampil di desktop
+ * (>= 1024px); tablet 768px - 1023px memakai grid 2 kolom dan ponsel
+ * (< 768px) memakai tumpukan kartu — keduanya dari `VisitCards`.
  */
 const HEADERS: Array<{ label: string; width: string }> = [
-  { label: 'Visit ID', width: 'w-[11%]' },
-  { label: 'PIC / Vendor', width: 'w-[16%]' },
-  { label: 'Fasilitas', width: 'w-[13%]' },
-  { label: 'Keperluan', width: 'w-[12%]' },
-  { label: 'Tanggal & Jam', width: 'w-[15%]' },
-  { label: 'Status', width: 'w-[16%]' },
-  { label: 'Aksi', width: 'w-[17%]' },
+  { label: 'Visit ID', width: 'w-[10%]' },
+  { label: 'Vendor/Mitra', width: 'w-[13%]' },
+  { label: 'Fasilitas', width: 'w-[11%]' },
+  { label: 'Keperluan', width: 'w-[10%]' },
+  { label: 'Teknisi', width: 'w-[14%]' },
+  { label: 'SPK', width: 'w-[8%]' },
+  { label: 'Tanggal & Jam', width: 'w-[12%]' },
+  { label: 'Status', width: 'w-[10%]' },
+  { label: 'Aksi', width: 'w-[12%]' },
 ]
 
 /** Label tipe fasilitas dalam Bahasa Indonesia (bukan mentah `pusat`, `pop`, dst). */
@@ -60,6 +70,26 @@ export function visitSchedule(
   }
 }
 
+/** Nama teknisi per kunjungan — dipakai tabel desktop & kartu mobile. */
+export interface TechnicianDisplay {
+  full: string
+  short: string
+  count: number
+}
+
+/** Gabung nama teknisi dari `visitors` (nullable-safe, bisa []). */
+export function technicianDisplay(
+  visit: Pick<VisitDetail, 'visitors'>,
+): TechnicianDisplay {
+  const names = (visit.visitors ?? [])
+    .map((visitor) => visitor.name.trim())
+    .filter((name) => name.length > 0)
+  const count = names.length
+  const full = names.join(', ')
+  const short = count > 2 ? `${names.slice(0, 2).join(', ')} +${count - 2} lainnya` : full
+  return { full, short, count }
+}
+
 /** Satu baris ringkas "26 Sep 2026, 08.00 - 16.00" untuk modal & ringkasan. */
 export function formatVisitSchedule(
   visit: Pick<VisitDetail, 'start_date' | 'end_date'>,
@@ -69,17 +99,18 @@ export function formatVisitSchedule(
 }
 
 /**
- * Tabel kunjungan desktop (>= 768px). Pasangan dari `VisitCards`.
+ * Tabel kunjungan desktop (>= 1024px). Pasangan dari `VisitCards`
+ * yang menangani ponsel (< 768px) dan tablet (768px - 1023px, 2 kolom).
  *
  * Tombol Setujui/Tolak hanya dirender bila `can(role, 'approveVisit')` DAN
- * status masih `requested` — peran `pic`/`security` TIDAK PERNAH melihat
+ * status masih `requested` — peran `vendor`/`security` TIDAK PERNAH melihat
  * kontrol approval (keamanan RBAC, lihat PRD §4).
  */
 export function VisitTable({ visits, role, onApprove, onReject }: VisitTableProps) {
   const allowApproval = can(role, 'approveVisit')
 
   return (
-    <div className="card hidden overflow-hidden md:block">
+    <div className="card hidden overflow-hidden lg:block">
       <table className="w-full table-fixed border-collapse text-left">
         <thead>
           <tr>
@@ -98,19 +129,32 @@ export function VisitTable({ visits, role, onApprove, onReject }: VisitTableProp
           {visits.map((visit) => {
             const schedule = visitSchedule(visit)
             const purposes = visit.purposes.map((purpose) => purpose.name).join(', ')
+            const vendorDisplay = primaryVendorDisplay(visit.visitors)
+            const technicians = technicianDisplay(visit)
+            const spkUrl = visit.assignment_letter_url
 
             return (
               <tr
                 key={visit.id}
                 className="border-b border-border-light transition-colors last:border-b-0 hover:bg-page"
               >
-                <td className="truncate px-4 py-3 font-mono text-sm font-semibold text-ink">
-                  {visit.visit_id}
+                <td className="truncate px-4 py-3 font-mono text-sm" title={visit.visit_id}>
+                  <Link
+                    href={`/visits/${visit.id}`}
+                    aria-label={`Lihat detail kunjungan ${visit.visit_id}`}
+                    className="font-semibold text-brand underline underline-offset-2 hover:text-brand-strong"
+                  >
+                    {visit.visit_id}
+                  </Link>
                 </td>
                 <td className="px-4 py-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-ink">{visit.pic_user.name}</p>
-                    <p className="truncate text-xs text-ink-muted">{visit.vendor_name}</p>
+                    <p className="truncate text-sm font-medium text-ink" title={visit.pic_user.name}>
+                      {visit.pic_user.name}
+                    </p>
+                    <p className="truncate text-xs text-ink-muted" title={vendorDisplay}>
+                      {vendorDisplay}
+                    </p>
                   </div>
                 </td>
                 <td className="px-4 py-3">
@@ -127,15 +171,60 @@ export function VisitTable({ visits, role, onApprove, onReject }: VisitTableProp
                   {purposes}
                 </td>
                 <td className="px-4 py-3">
+                  {technicians.count === 0 ? (
+                    <span className="text-sm text-ink-muted">—</span>
+                  ) : (
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-ink" title={technicians.full}>
+                        {technicians.short}
+                      </p>
+                      {technicians.count > 2 ? (
+                        <p className="truncate text-xs text-ink-muted">
+                          {technicians.count} orang
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  {spkUrl ? (
+                    <a
+                      href={spkUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Lihat surat tugas SPK kunjungan ${visit.visit_id}`}
+                      className="inline-flex min-h-touch items-center text-sm font-medium text-brand underline underline-offset-2 hover:text-brand-strong"
+                    >
+                      Lihat SPK
+                    </a>
+                  ) : (
+                    <span className="text-sm text-ink-muted">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm text-ink">{schedule.dateLabel}</p>
-                    <p className="truncate text-xs text-ink-secondary">{schedule.timeLabel}</p>
+                    <p className="truncate text-sm text-ink" title={schedule.dateLabel}>
+                      {schedule.dateLabel}
+                    </p>
+                    <p className="truncate text-xs text-ink-secondary" title={schedule.timeLabel}>
+                      {schedule.timeLabel}
+                    </p>
                   </div>
                 </td>
                 <td className="px-4 py-3">
                   <StatusBadge status={visit.status} className="max-w-full" />
                 </td>
                 <td className="px-4 py-3">
+                  {/*
+                    Sel Aksi 12% (~86px di 1024px, ~117px di 1280px) tak muat
+                    menampung ikon + label sekaligus (Setujui+ikon ~110px).
+                    Pola: ikon-saja di lg–xl (48px, muat di sel sempit),
+                    label teks kembali di xl+ tanpa ikon; nama aksi tetap
+                    terbaca screen reader lewat aria-label di kedua mode.
+                    Tanpa hak approval / status bukan `requested`: sel diisi
+                    strip "—" (bukan sel kosong). Navigasi detail lewat link
+                    Visit ID.
+                  */}
                   {allowApproval && visit.status === 'requested' ? (
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Button
@@ -145,7 +234,8 @@ export function VisitTable({ visits, role, onApprove, onReject }: VisitTableProp
                         aria-label={`Setujui kunjungan ${visit.visit_id}`}
                         onClick={() => onApprove(visit)}
                       >
-                        Setujui
+                        <Check className="size-4 xl:hidden" aria-hidden="true" />
+                        <span className="hidden xl:inline">Setujui</span>
                       </Button>
                       <Button
                         size="sm"
@@ -154,13 +244,12 @@ export function VisitTable({ visits, role, onApprove, onReject }: VisitTableProp
                         aria-label={`Tolak kunjungan ${visit.visit_id}`}
                         onClick={() => onReject(visit)}
                       >
-                        Tolak
+                        <X className="size-4 xl:hidden" aria-hidden="true" />
+                        <span className="hidden xl:inline">Tolak</span>
                       </Button>
                     </div>
                   ) : (
-                    <span className="text-ink-muted" aria-hidden="true">
-                      —
-                    </span>
+                    <span className="text-sm text-ink-muted">—</span>
                   )}
                 </td>
               </tr>

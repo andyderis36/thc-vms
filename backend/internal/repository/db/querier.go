@@ -6,9 +6,32 @@ package db
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 type Querier interface {
+	// DELETE /users/:id pre-check 2: gate and audit rows written BY the account
+	// as staff (check_in.checked_in_by, check_out.checked_out_by,
+	// status_history.changed_by, all without cascade). A non-zero total blocks
+	// the delete with 409.
+	CountStaffReferences(ctx context.Context, arg CountStaffReferencesParams) (int32, error)
+	// DELETE /locations/:id pre-check 1: accounts stationed at the facility
+	// (users.location_id, no cascade, so a remaining row blocks the delete).
+	CountUsersByLocation(ctx context.Context, arg CountUsersByLocationParams) (int64, error)
+	// DELETE /locations/:id pre-check 2: visits hosted at the facility
+	// (visit_request.location_id, no cascade, so a remaining row blocks it).
+	CountVisitsByLocation(ctx context.Context, arg CountVisitsByLocationParams) (int64, error)
+	// =============================================================================
+	// SUPER_ADMIN HARD DELETE (DELETE /users/:id, super_admin only). The Go layer
+	// runs the Count* pre-checks below FIRST and refuses with 409 while a visit,
+	// gate record or history row still references the account; the DELETE itself
+	// is the second line of defence (a raced reference surfaces as 23503 -> 409
+	// via MapError). There is no status transition here: the row is removed.
+	// =============================================================================
+	// DELETE /users/:id pre-check 1: visits owned by the account as PIC
+	// (visit_request.pic_user_id, no cascade, so a remaining row blocks the delete).
+	CountVisitsByPIC(ctx context.Context, arg CountVisitsByPICParams) (int64, error)
 	CountVisitsForLocation(ctx context.Context, arg CountVisitsForLocationParams) (int64, error)
 	CountVisitsForPIC(ctx context.Context, arg CountVisitsForPICParams) (int64, error)
 	// Companion count; predicate is byte-for-byte the ListVisitsForSuperAdmin one.
@@ -33,7 +56,7 @@ type Querier interface {
 	//     admin       : ListVisitsForLocation     (location_id REQUIRED)
 	//     security    : ListVisitsForLocation     (location_id REQUIRED,
 	//                                              + date_from/date_to = TODAY, PRD L97)
-	//     pic         : ListVisitsForPIC          (pic_user_id REQUIRED)
+	//     vendor       : ListVisitsForPIC          (pic_user_id REQUIRED)
 	//   Each list query has a Count* twin with the identical predicate so the
 	//   {items,total,page,limit} envelope (openapi L896-913) cannot drift from the
 	//   page it is counting.
@@ -43,6 +66,20 @@ type Querier interface {
 	// by chk_visit_request_visit_id_format. status is pinned to 'requested'
 	// (PRD L133) and cannot be set by the request body.
 	CreateVisit(ctx context.Context, arg CreateVisitParams) (VisitRequest, error)
+	// DELETE /locations/:id (super_admin only). A missing id surfaces
+	// pgx.ErrNoRows (-> 404 via MapError); a raced reference surfaces 23503
+	// (-> 409).
+	DeleteLocation(ctx context.Context, arg DeleteLocationParams) (uuid.UUID, error)
+	// DELETE /users/:id (super_admin only). A missing id surfaces pgx.ErrNoRows
+	// (-> 404 via MapError); a raced reference surfaces 23503 (-> 409).
+	DeleteUser(ctx context.Context, arg DeleteUserParams) (uuid.UUID, error)
+	// DELETE /visits/:id (super_admin only, any status). The child tables
+	// (visitor, visit_purpose, status_history, check_in, check_out) all carry
+	// ON DELETE CASCADE, so removing the single visit row cleans its roster,
+	// purposes, history and gate records atomically. A missing id surfaces
+	// pgx.ErrNoRows (-> 404 via MapError). There is deliberately no status
+	// guard: a super_admin may purge a visit in any lifecycle state.
+	DeleteVisit(ctx context.Context, arg DeleteVisitParams) (uuid.UUID, error)
 	// Boolean form of the same check, for call sites that only need the flag.
 	ExistsCheckIn(ctx context.Context, arg ExistsCheckInParams) (bool, error)
 	ExistsCheckOut(ctx context.Context, arg ExistsCheckOutParams) (bool, error)
@@ -55,7 +92,11 @@ type Querier interface {
 	// row as pgx.ErrNoRows, which is the existence check.
 	GetCheckInByVisitRequest(ctx context.Context, arg GetCheckInByVisitRequestParams) (CheckIn, error)
 	GetCheckOutByVisitRequest(ctx context.Context, arg GetCheckOutByVisitRequestParams) (CheckOut, error)
-	GetLocationByID(ctx context.Context, arg GetLocationByIDParams) (GetLocationByIDRow, error)
+	GetLocationByID(ctx context.Context, arg GetLocationByIDParams) (Location, error)
+	// Detail read for PATCH /users/{id}/status (super_admin only). Same
+	// projection as GetUserByID plus the resolved role NAME, which the status
+	// guard needs to refuse touches on other super_admin accounts.
+	GetManagedUserByID(ctx context.Context, arg GetManagedUserByIDParams) (GetManagedUserByIDRow, error)
 	// =============================================================================
 	// users.sql - Authentication, profile projection and branch security accounts.
 	//
@@ -68,10 +109,14 @@ type Querier interface {
 	// Login lookup (POST /auth/login). Returns the projection the openapi `User`
 	// schema needs (openapi L629-660) plus password_hash, which never leaves the
 	// auth usecase. The CASE normalises a missing join to a Go nil rather than an
-	// empty string so `"location_id": null` is emitted for super_admin/pic.
+	// empty string so `"location_id": null` is emitted for super_admin/vendor.
 	GetUserByEmailForLogin(ctx context.Context, arg GetUserByEmailForLoginParams) (GetUserByEmailForLoginRow, error)
 	// Profile read for GET /auth/me and for every owner-scoped response.
 	GetUserByID(ctx context.Context, arg GetUserByIDParams) (GetUserByIDRow, error)
+	// Resolves one company name for the auth profile (GET /auth/me + login
+	// response vendor_name). A missing id surfaces pgx.ErrNoRows (-> 404 via
+	// MapError); callers that tolerate absence check for it explicitly.
+	GetVendorName(ctx context.Context, arg GetVendorNameParams) (string, error)
 	// Detail read for GET /visits/{id} (openapi L309-327) and for every
 	// owner-scoped response. The projection is the visit row plus the joined names
 	// the openapi VisitDetail schema needs (location, vendor_name, pic_user).
@@ -113,6 +158,24 @@ type Querier interface {
 	//   (PRD L147, PRD L129).
 	// =============================================================================
 	InsertCheckOut(ctx context.Context, arg InsertCheckOutParams) (CheckOut, error)
+	// =============================================================================
+	// SUPER_ADMIN FACILITY WRITES (PRD §4: kelola lokasi). New facilities start
+	// active; the soft removal stays deactivation via is_active, while the hard
+	// removal is DELETE /locations/:id (super_admin only, with the Count*
+	// pre-checks below refusing with 409 while users or visits still reference
+	// the row; the DELETE itself is the second line of defence, 23503 -> 409).
+	// =============================================================================
+	// POST /locations (super_admin only). timezone defaults to 'WIB' in Go before
+	// this runs; the chk_location_type / chk_location_timezone CHECKs are the
+	// second line of defence (23514 -> 400 via MapError).
+	InsertLocation(ctx context.Context, arg InsertLocationParams) (Location, error)
+	// POST /users (super_admin only). Unlike InsertSecurityUser this insert takes
+	// type, status and vendor_id as parameters: admin rows are type 'internal'
+	// with a branch location, vendor rows are type 'external' with no location and
+	// an optional vendor. The enforce_user_location_invariant trigger rejects any
+	// pairing the Go validation missed (check_violation -> 400 via MapError) and
+	// users_email_key rejects a duplicate email (23505 -> 409 via MapError).
+	InsertManagedUser(ctx context.Context, arg InsertManagedUserParams) (InsertManagedUserRow, error)
 	// POST /users/security (openapi L140-159). A branch security officer is always
 	// `type = 'internal'` and starts `active`; the role id is passed in so the caller
 	// resolves the 'security' role, and the trigger rejects a NULL location_id for it
@@ -125,22 +188,54 @@ type Querier interface {
 	// already rejects a duplicate (visit, purpose) pair.
 	InsertVisitPurpose(ctx context.Context, arg InsertVisitPurposeParams) error
 	// POST /visits visitors[] (openapi L816-822), up to 10 rows per visit (QA
-	// VISIT-05). Cascades to nothing on insert; the visit FK is ON DELETE CASCADE so
-	// deleting a visit removes its roster.
+	// VISIT-05). vendor_id is the technician's own company (openapi VisitorItem);
+	// NULL for internal staff. vendor_name_override is the manually typed company
+	// (migration 000005), stored ONLY when vendor_id is absent: a sent vendor_id
+	// wins and the Go caller passes NULL for the override. Cascades to nothing on
+	// insert; the visit FK is ON DELETE CASCADE so deleting a visit removes its
+	// roster.
 	InsertVisitor(ctx context.Context, arg InsertVisitorParams) (Visitor, error)
 	// =============================================================================
-	// master.sql - Read-only master data for the pickers on SCR-03.
+	// master.sql - Master data for the pickers on SCR-03 plus the super_admin
+	// facility writes (PRD §4: kelola lokasi).
 	//
-	//   Both endpoints are read-only in the MVP (PRD L83: "MVP menggunakan database
-	//   seeding"), so there is deliberately no INSERT/UPDATE here. Rows are written
-	//   by the seeds program and, for locations, toggled by super_admin later.
+	//   The SCR-03 pickers stay read-only (PRD L83: "MVP menggunakan database
+	//   seeding"): rows are written by the seeds program and read through the
+	//   List/Get queries below. The super_admin CRUD is append-only in the write
+	//   direction: INSERT (POST /locations) and partial UPDATE
+	//   (PATCH /locations/:id). There is deliberately no DELETE: location rows
+	//   are referenced by visits.location_id and users.location_id (restrict
+	//   FKs), and the MVP has no restore flow, so deactivation via is_active is
+	//   the only removal (YAGNI).
 	//   The active filter matches the openapi summaries "fasilitas ... THC aktif"
 	//   (openapi L196) and only active purposes are offered to a PIC.
 	// =============================================================================
 	// GET /locations (openapi L193-203) -> the Location schema (openapi L719-738).
+	// The ?active_only=true (default) path: only facilities still operating are
+	// offered, which is what the SCR-03 visit form consumes.
 	ListActiveLocations(ctx context.Context) ([]ListActiveLocationsRow, error)
 	// GET /purposes (openapi L205-215) -> the Purpose schema (openapi L750-758).
 	ListActivePurposes(ctx context.Context) ([]ListActivePurposesRow, error)
+	// GET /vendors -> the [{id, name}] company dropdown the PIC/admin forms
+	// consume. Only non-blacklisted companies are offered, mirroring the
+	// active-only purpose catalogue above.
+	ListActiveVendors(ctx context.Context) ([]ListActiveVendorsRow, error)
+	// GET /locations?active_only=false (super_admin console only): every
+	// facility row including deactivated ones, so a switched-off branch stays
+	// visible and can be reactivated via PATCH /locations/:id. Same column
+	// shape plus the is_active flag the console renders.
+	ListAllLocations(ctx context.Context) ([]Location, error)
+	// =============================================================================
+	// SUPER_ADMIN MANAGED ACCOUNTS (PRD §4: kelola admin/vendor + security semua
+	// cabang). Same bound-parameter scoping invariant as above: role, search and
+	// location_id are NULLable bound values, never interpolated SQL text.
+	// =============================================================================
+	// GET /users (super_admin only). role narrows to one of admin|vendor|security
+	// (validated in Go before this runs); search matches nama atau email
+	// case-insensitively; location_id narrows to one branch. All three filters
+	// are optional, so an empty filter lists every account with no pagination,
+	// consistent with ListSecurityUsers. ORDER BY keeps the listing stable.
+	ListManagedUsers(ctx context.Context, arg ListManagedUsersParams) ([]ListManagedUsersRow, error)
 	// GET /users/security (openapi L119-138). `sqlc.narg('location_id')` is the whole
 	// scoping mechanism: an admin/security caller passes its own location (PRD L110),
 	// a super_admin passes NULL to see every branch or a location to filter (PRD L109).
@@ -150,8 +245,9 @@ type Querier interface {
 	ListStatusHistory(ctx context.Context, arg ListStatusHistoryParams) ([]ListStatusHistoryRow, error)
 	ListVisitPurposes(ctx context.Context, arg ListVisitPurposesParams) ([]ListVisitPurposesRow, error)
 	// Roster for SCR-04 / SCR-05. Batched per page with a single IN (...) by the
-	// repository to avoid an N+1 over the visit list.
-	ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]Visitor, error)
+	// repository to avoid an N+1 over the visit list. The vendor name rides along
+	// for the openapi VisitorItem vendor_name member.
+	ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]ListVisitorsRow, error)
 	// Admin scope (PRD L110) and Security scope (PRD L111, L97). location_id is a
 	// REQUIRED plain parameter - the caller cannot pass NULL, so a bug in the auth
 	// middleware surfaces as a scan error instead of a cross-branch data leak.
@@ -160,7 +256,7 @@ type Querier interface {
 	// NULL for `admin`. The equality on vr.location_id uses idx_visit_request_location.
 	ListVisitsForLocation(ctx context.Context, arg ListVisitsForLocationParams) ([]ListVisitsForLocationRow, error)
 	// PIC / external-staff scope (PRD L112, AGENTS.md rule 6.1): strictly
-	// WHERE pic_user_id = auth_user.id. A PIC can never widen this to see another
+	// WHERE pic_user_id = auth_user.id. A vendor can never widen this to see another
 	// vendor's visits, whatever they send in the query string. Uses idx_visit_pic
 	// (PRD L209).
 	ListVisitsForPIC(ctx context.Context, arg ListVisitsForPICParams) ([]ListVisitsForPICRow, error)
@@ -210,6 +306,22 @@ type Querier interface {
 	// row count of a single overnight window - deliberately not adding a 5th index
 	// beyond the four PRD L206-209 mandates, since the sweep runs once per tick.
 	SweepStaleVisitingVisits(ctx context.Context) ([]SweepStaleVisitingVisitsRow, error)
+	// PATCH /locations/:id (super_admin only). Every column is a NULLable bound
+	// value: a NULL keeps the stored column via COALESCE, so the body may carry
+	// any subset of fields. is_active flips here are the deactivation path that
+	// replaces DELETE.
+	UpdateLocation(ctx context.Context, arg UpdateLocationParams) (Location, error)
+	// =============================================================================
+	// SUPER_ADMIN ACCOUNT EDIT (PATCH /users/:id, super_admin only). Partial
+	// update via COALESCE like UpdateLocation in master.sql: a NULL member keeps
+	// the stored column, so the body may carry any subset of name, email, phone,
+	// location_id, vendor_id and password (a non-empty password resets the
+	// bcrypt hash; guarded by the superadmin self/other-superadmin rules).
+	// Role, type and status are NEVER writable here (role is immutable, status
+	// via .../status); the location invariant trigger still guards every pairing
+	// (check_violation -> 400) and users_email_key guards email (23505 -> 409).
+	// =============================================================================
+	UpdateManagedUser(ctx context.Context, arg UpdateManagedUserParams) (UpdateManagedUserRow, error)
 	// Successful login bookkeeping. Also refreshes updated_at (see the migration
 	// header: the repository layer owns this column).
 	UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error

@@ -30,7 +30,7 @@ Dokumen ini adalah **pedoman wajib tertinggi (*supreme directive*)** bagi setiap
   1. `super_admin`: Kantor Pusat (Akses global seluruh cabang, monitoring all, kelola master data & user).
   2. `admin`: Admin Kantor Cabang / POP (Terisolasi per `location_id`, approve kunjungan cabangnya, kelola satpam cabangnya, eksekusi check-in/out backup).
   3. `security`: Petugas Jaga Gerbang/POP (Terisolasi per `location_id`, operasional verifikasi tamu check-in & check-out).
-  4. `pic`: Customer / Teknisi Vendor Eksternal (Mengajukan izin, melihat status kunjungan miliknya, membawa kartu QR Code).
+  4. `vendor` (Vendor/Mitra): Customer / Teknisi Vendor Eksternal (Mengajukan izin, melihat status kunjungan miliknya, membawa kartu QR Code).
 
 ---
 
@@ -122,7 +122,7 @@ thc-vms/
   * Jika role = `admin` atau `security`: **Wajib** di-filter ketat oleh backend:
     `WHERE location_id = auth_user.location_id`.
   * Jika role = `super_admin`: Mengizinkan query lintas cabang atau filter opsional `?location_id=...`.
-  * Jika role = `pic`: **Wajib** di-filter ketat oleh backend:
+  * Jika role = `vendor`: **Wajib** di-filter ketat oleh backend:
     `WHERE pic_user_id = auth_user.id`.
 
 ### 6.2 Validasi Jadwal Check-in (Toleransi 2 Jam)
@@ -154,9 +154,9 @@ thc-vms/
 
 ## 7. HAL-HAL YANG DILARANG KERAS (*WHAT AI MUST NEVER DO*)
 
-1. **JANGAN** membuat fitur pendaftaran mandiri publik (self-registration) untuk vendor/PIC di MVP. Akun vendor didaftarkan secara manual oleh Admin/Superadmin.
+1. **JANGAN** membuat fitur pendaftaran mandiri publik (self-registration) untuk vendor di MVP. Akun vendor didaftarkan secara manual oleh Admin/Superadmin.
 2. **JANGAN** membuat layar terpisah untuk Emergency Evacuation List gedung (sudah digantikan oleh tab *Sedang di Lokasi* pada SCR-02).
-3. **JANGAN** menempatkan tombol Approve/Reject/Check-in pada tampilan peran PIC.
+3. **JANGAN** menempatkan tombol Approve/Reject/Check-in pada tampilan peran vendor.
 4. **JANGAN** membocorkan data kunjungan cabang lain kepada Admin Cabang yang berbeda.
 5. **JANGAN** melakukan hardcode URL bucket atau database credentials; selalu gunakan `.env` dan `os.Getenv()`.
 6. **JANGAN** mengubah kontrak response JSON dari standar: `{ "success": true, "data": ... }` atau `{ "success": false, "error": { "code": "...", "message": "..." } }`.

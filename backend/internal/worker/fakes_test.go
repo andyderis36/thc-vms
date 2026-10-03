@@ -85,6 +85,16 @@ func (f *fakeVisitRepo) Reschedule(_ context.Context, _ domain.UUID, _, _ time.T
 	return nil
 }
 
+// DeleteVisit removes one visit from the fake roster. The worker never calls
+// it; it exists only so the fake keeps satisfying domain.VisitRepository.
+func (f *fakeVisitRepo) DeleteVisit(_ context.Context, id domain.UUID) error {
+	if _, ok := f.visits[id]; !ok {
+		return fmt.Errorf("fakeVisitRepo: missing visit: %w", domain.ErrNotFound)
+	}
+	delete(f.visits, id)
+	return nil
+}
+
 type fakeAutoRules struct {
 	stale      []domain.VisitRequest
 	noShow     []domain.VisitRequest

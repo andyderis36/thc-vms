@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -86,6 +87,36 @@ func textPtr(t pgtype.Text) *string {
 	}
 	out := t.String
 	return &out
+}
+
+// resolveVendorDisplayName renders the public vendor_name every read funnels
+// through (visitor roster, managed-user console, auth profile): the manually
+// typed company (migration 000005) when present, otherwise the catalogue
+// name, "" when neither exists. The write paths never store both halves (a
+// sent vendor_id discards the manual text), so an override present implies
+// no catalogue link; a blank-but-valid override is treated as absent so a
+// whitespace-only row can never shadow the catalogue. The manual value NEVER
+// reaches the vendor catalogue/dropdown: ListActiveVendors reads the vendor
+// table only, which these columns do not touch.
+func resolveVendorDisplayName(override, catalogue pgtype.Text) string {
+	if override.Valid && strings.TrimSpace(override.String) != "" {
+		return strings.TrimSpace(override.String)
+	}
+	if catalogue.Valid {
+		return catalogue.String
+	}
+	return ""
+}
+
+// resolveVendorDisplayPtr is the *string variant for projections whose
+// vendor_name member is nullable on the wire (ManagedUser.VendorName,
+// auth Profile.VendorName): nil renders as JSON null.
+func resolveVendorDisplayPtr(override, catalogue pgtype.Text) *string {
+	if name := resolveVendorDisplayName(override, catalogue); name != "" {
+		out := name
+		return &out
+	}
+	return nil
 }
 
 // pgTimestamptz maps an optional instant to a nullable timestamptz.

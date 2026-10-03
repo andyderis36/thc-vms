@@ -2,12 +2,12 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
+import { useEffect } from 'react'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { toast } from 'sonner'
 import {
   ArrowLeft,
   CalendarClock,
-  Check,
   FileText,
   MapPin,
   ShieldCheck,
@@ -18,15 +18,23 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
-import { Spinner } from '@/components/ui/Spinner'
 import { Textarea } from '@/components/ui/Textarea'
 import { ApiError } from '@/lib/api/fetcher'
 import {
   useCreateVisitMutation,
   useLocationsQuery,
   usePurposesQuery,
+  useVendorsQuery,
 } from '@/lib/api/hooks'
 import type { CreateVisitRequest } from '@/lib/api/types'
+import { useSession } from '@/lib/auth/session'
+import {
+  areTechnicianRowsBlank,
+  loadTechnicianRoster,
+  saveTechnicianRoster,
+} from '@/lib/visits/technician-autosave'
+import { resolveVendorInput } from '@/lib/visits/vendor-input'
+import { PurposeDropdown } from './PurposeDropdown'
 import { TechnicianList } from './TechnicianList'
 import { UploadBox } from './UploadBox'
 import { visitFormSchema, type VisitFormValues } from './visit-schema'
@@ -45,30 +53,93 @@ export function VisitForm() {
   const router = useRouter()
   const locationsQuery = useLocationsQuery()
   const purposesQuery = usePurposesQuery()
+  const vendorsQuery = useVendorsQuery()
   const createVisit = useCreateVisitMutation()
+  const { user } = useSession()
 
   const {
     control,
     register,
     handleSubmit,
     setValue,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<VisitFormValues>({
     resolver: zodResolver(visitFormSchema),
     defaultValues: {
       location_id: '',
       purpose_ids: [],
+      purpose_note: '',
       start_date: '',
       end_date: '',
       is_multi_day: false,
       assignment_letter: null,
       notes: '',
-      technicians: [{ name: '', id_number: '', phone: '', id_card_photo: null }],
+      technicians: [
+        { name: '', id_number: '', phone: '', id_card_photo: null, selfie: { url: '', name: '' }, vendor_name: '' },
+      ],
       is_nda_accepted: false,
     },
   })
 
   const purposeIds = useWatch({ control, name: 'purpose_ids' }) ?? []
+
+  // Prefill TEKS vendor milik pengguna yang sedang masuk pada baris teknisi
+  // pertama, bila baris itu masih kosong. Katalog vendor TIDAK dipakai untuk
+  // mencocokkan nama di sini — pemetaan ke vendor_id/vendor_name terjadi saat
+  // submit lewat `resolveVendorInput`.
+  const ownVendorName = user?.vendor_name ?? ''
+  const userId = user?.id
+
+  /*
+   * Autosave roster per-akun (`localStorage` kunci
+   * `thc-vms:technicians:<userId>`): muat daftar teknisi terakhir yang
+   * berhasil dikirim akun ini, hanya bila SEMUA baris awal masih kosong —
+   * ketikan pengguna tidak pernah ditimpa. Foto sengaja TIDAK pernah
+   * dipulihkan; berkas wajib dipilih ulang tiap pengajuan. Nomor KTP/SIM
+   * juga TIDAK pernah dipulihkan — autosave tidak pernah menyimpan PII
+   * identitas, jadi kolomnya selalu mulai kosong.
+   *
+   * Precedence isian baris (dan baris lain yang masih kosong):
+   *   saved-roster > nama vendor akun > kosong
+   * — roster tersimpan menang lebih dulu; nama vendor akun di bawah hanya
+   * mengisi bila roster (atau ketikan) meninggalkan baris masih kosong.
+   *
+   * URUTAN EFEK KRITIS: efek load ini DIDAHULUKAN dari prefill vendor akun.
+   * Keduanya berjalan berurutan pada commit yang sama saat sesi selesai
+   * hydrate; bila vendor akun jalan lebih dulu, baris 1 tak lagi kosong dan
+   * syarat "semua baris kosong" gagal — roster tidak akan pernah termuat.
+   */
+  useEffect(() => {
+    if (userId === undefined || userId === '') return
+    if (!areTechnicianRowsBlank(getValues('technicians'))) return
+    const saved = loadTechnicianRoster(userId)
+    if (saved === null) return
+    // `loadTechnicianRoster` sudah membatasi MAX_TECHNICIANS dan hanya
+    // mengembalikan 3 field teks (nama, No. HP, nama vendor); Nomor KTP/SIM
+    // selalu dikosongkan (PII tidak pernah dipersist) dan foto dikosongkan
+    // (unduh ulang wajib).
+    setValue(
+      'technicians',
+      saved.map((row) => ({
+        name: row.name,
+        id_number: '',
+        phone: row.phone,
+        id_card_photo: null,
+        selfie: { url: '', name: '' },
+        vendor_name: row.vendor_name,
+      })),
+      { shouldDirty: false },
+    )
+  }, [userId, getValues, setValue])
+
+  useEffect(() => {
+    if (ownVendorName.trim() === '') return
+    const current = getValues('technicians.0.vendor_name')
+    if (current === undefined || current.trim() === '') {
+      setValue('technicians.0.vendor_name', ownVendorName, { shouldDirty: false })
+    }
+  }, [ownVendorName, getValues, setValue])
 
   const locationOptions = (locationsQuery.data ?? []).map((location) => ({
     value: location.id,
@@ -83,9 +154,15 @@ export function VisitForm() {
   }
 
   async function onSubmit(values: VisitFormValues): Promise<void> {
+    const vendors = vendorsQuery.data ?? []
+    const purposeNote = (values.purpose_note ?? '').trim()
+
     const body: CreateVisitRequest = {
       location_id: values.location_id,
       purpose_ids: values.purpose_ids,
+      // "Tujuan lain" mengisi kontrak `purpose_note` (≤200); `purpose_ids`
+      // boleh kosong selama field ini terisi (divalidasi zod sebelum submit).
+      ...(purposeNote !== '' ? { purpose_note: purposeNote } : {}),
       start_date: new Date(values.start_date).toISOString(),
       end_date: new Date(values.end_date).toISOString(),
       is_multi_day: values.is_multi_day,
@@ -94,12 +171,20 @@ export function VisitForm() {
         values.notes !== undefined && values.notes !== ''
           ? values.notes
           : undefined,
-      visitors: values.technicians.map((technician) => ({
-        name: technician.name,
-        id_number: technician.id_number,
-        phone: technician.phone,
-        id_card_photo_url: technician.id_card_photo?.url ?? null,
-      })),
+      visitors: values.technicians.map((technician) => {
+        // Teks baris dipetakan ke kontrak BE: cocok persis dengan katalog
+        // (case-insensitive) → `vendor_id`; selain itu → `vendor_name` manual;
+        // kosong → tanpa field. Nama ketikan manual TIDAK masuk katalog.
+        const resolvedVendor = resolveVendorInput(technician.vendor_name, vendors)
+        return {
+          name: technician.name,
+          id_number: technician.id_number,
+          phone: technician.phone,
+          id_card_photo_url: technician.id_card_photo?.url ?? null,
+          photo_url: technician.selfie.url,
+          ...resolvedVendor,
+        }
+      }),
     }
     if (values.assignment_letter !== null && values.assignment_letter !== undefined) {
       body.assignment_letter_url = values.assignment_letter.url
@@ -107,6 +192,13 @@ export function VisitForm() {
 
     try {
       const created = await createVisit.mutateAsync({ body })
+      // Autosave roster teks per-akun TEPAT SEBELUM navigasi: agar pengajuan
+      // berikutnya bisa pre-fill. Hanya 3 field teks (nama, HP, vendor);
+      // nomor identitas (PII) dan foto tidak pernah disimpan. Tanpa user id
+      // → lewati (tanpa autosave, bukan galat).
+      if (user?.id !== undefined && user.id !== '') {
+        saveTechnicianRoster(user.id, values.technicians)
+      }
       toast.success(
         'Permohonan kunjungan berhasil dikirim dan sedang menunggu persetujuan admin cabang.',
       )
@@ -134,7 +226,7 @@ export function VisitForm() {
           className="min-h-touch self-start"
           onClick={() => router.push('/dashboard')}
         >
-          <ArrowLeft aria-hidden="true" className="size-4" />
+          <ArrowLeft aria-hidden="true" className="size-4 shrink-0" />
           Kembali ke Dashboard
         </Button>
         <h1 className="text-xl font-bold text-ink sm:text-2xl">
@@ -155,82 +247,55 @@ export function VisitForm() {
           </CardTitle>
         </CardHeader>
         <CardBody className="flex flex-col gap-4">
-          <Select
-            label="Fasilitas Tujuan"
-            required
-            fieldSize="gate"
-            placeholder={
-              locationsQuery.isPending
-                ? 'Memuat fasilitas…'
-                : 'Pilih fasilitas (Cabang / POP / miniPOP)'
-            }
-            options={locationOptions}
-            disabled={locationsQuery.isPending || locationsQuery.isError}
-            error={
-              errors.location_id?.message ??
-              (locationsQuery.isError
-                ? 'Gagal memuat daftar fasilitas. Silakan muat ulang halaman.'
-                : undefined)
-            }
-            {...register('location_id')}
-          />
+          {/* 1 kolom di ponsel, 2 kolom >= sm: Fasilitas | Tujuan Kunjungan */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Select
+              label="Fasilitas Tujuan"
+              required
+              fieldSize="gate"
+              placeholder={
+                locationsQuery.isPending
+                  ? 'Memuat fasilitas…'
+                  : 'Pilih fasilitas (Cabang / POP / miniPOP)'
+              }
+              options={locationOptions}
+              disabled={locationsQuery.isPending || locationsQuery.isError}
+              error={
+                errors.location_id?.message ??
+                (locationsQuery.isError
+                  ? 'Gagal memuat daftar fasilitas. Silakan muat ulang halaman.'
+                  : undefined)
+              }
+              {...register('location_id')}
+            />
 
-          <div className="flex flex-col gap-1.5">
-            <span className="text-label font-semibold text-ink">
-              Tujuan Kunjungan
-              <span className="text-brand"> *</span>
-            </span>
+            <div className="flex flex-col gap-1.5">
+              <PurposeDropdown
+                label="Tujuan Kunjungan"
+                required
+                placeholder="Pilih tujuan kunjungan"
+                purposes={purposesQuery.data ?? []}
+                selectedIds={purposeIds}
+                onToggle={togglePurpose}
+                isLoading={purposesQuery.isPending}
+                isError={purposesQuery.isError}
+                error={errors.purpose_ids?.message}
+              />
 
-            {purposesQuery.isPending ? (
-              <span className="inline-flex items-center gap-2 text-sm text-ink-secondary">
-                <Spinner size="sm" />
-                Memuat tujuan kunjungan…
-              </span>
-            ) : (
-              <div
-                role="group"
-                aria-label="Tujuan kunjungan"
-                className="flex flex-wrap gap-2"
-              >
-                {(purposesQuery.data ?? []).map((purpose) => {
-                  const selected = purposeIds.includes(purpose.id)
-                  return (
-                    <button
-                      key={purpose.id}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => togglePurpose(purpose.id)}
-                      className={[
-                        'inline-flex min-h-touch items-center gap-1.5 rounded-full border px-4 text-label font-semibold transition-colors',
-                        selected
-                          ? 'border-brand bg-brand text-brand-contrast'
-                          : 'border-border-mid bg-surface text-ink-secondary hover:bg-neutral-bg hover:text-ink',
-                      ]
-                        .filter(Boolean)
-                        .join(' ')}
-                    >
-                      {selected ? (
-                        <Check aria-hidden="true" className="size-4" />
-                      ) : null}
-                      {purpose.name}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-
-            {purposesQuery.isError ? (
-              <p className="text-xs text-danger-text">
-                Gagal memuat daftar tujuan kunjungan. Silakan muat ulang
-                halaman.
-              </p>
-            ) : null}
-            {errors.purpose_ids?.message !== undefined ? (
-              <p role="alert" className="text-xs text-danger-text">
-                {errors.purpose_ids.message}
-              </p>
-            ) : null}
+              {/* Tujuan bebas-teks — memetakan ke `purpose_note`. Teks di sini
+                  TIDAK pernah menjadi saran/salinan tujuan dari katalog. */}
+              <Input
+                label="Tujuan lain (opsional)"
+                placeholder="Tulis tujuan bila tidak ada di daftar"
+                hint="Opsional — maksimal 200 karakter. Cukup isi ini bila tidak memilih tujuan dari daftar."
+                autoComplete="off"
+                maxLength={200}
+                error={errors.purpose_note?.message}
+                {...register('purpose_note')}
+              />
+            </div>
           </div>
+
         </CardBody>
       </Card>
 
@@ -290,7 +355,18 @@ export function VisitForm() {
         register={register}
         setValue={setValue}
         errors={errors}
+        defaultVendorName={ownVendorName}
       />
+      {/* Petunjuk halus: hanya nama, No. HP, dan nama vendor dari pengiriman
+          terakhir yang tersimpan lokal per-akun di peramban ini; nomor
+          identitas (PII) dan foto tidak ikut. */}
+      <p className="-mt-2 px-1 text-xs text-ink-secondary">
+        Nama, No. HP, dan nama vendor dari pengisian terakhir tersimpan
+        otomatis di peramban ini dan terisi kembali saat formulir dibuka —
+        semuanya masih bisa diedit. Nomor KTP/SIM tidak disimpan (kolomnya
+        selalu terisi kosong), dan foto (KTP / selfie) tidak disimpan serta
+        wajib diunggah ulang setiap kali.
+      </p>
 
       {/* 4. Surat Tugas / SPK Vendor */}
       <Card>
@@ -310,7 +386,9 @@ export function VisitForm() {
             render={({ field }) => (
               <UploadBox
                 label="Unggah Surat Tugas / Surat Perintah Kerja"
-                hint="Format PDF, JPG, atau PNG — maksimal 5 MB."
+                hint="Format PDF, JPG, atau PNG — maksimal 5 MB. Bisa dipilih dari galeri, kamera, atau berkas perangkat."
+                idleButtonLabel="Pilih dari Galeri / Berkas"
+                changeButtonLabel="Ganti Berkas"
                 category="assignment_letter"
                 value={field.value ?? null}
                 onChange={field.onChange}
@@ -371,8 +449,13 @@ export function VisitForm() {
         </CardBody>
       </Card>
 
-      {/* Bilah kirim menempel di bawah layar; menempel di atas bottom nav. */}
-      <div className="fixed inset-x-0 bottom-bottomnav z-40 border-t border-border-light bg-surface px-4 py-4 lg:bottom-0">
+      {/*
+        Bilah kirim menempel di bawah viewport (sticky, BUKAN fixed): tetap
+        terlihat saat mengisi form panjang tanpa menimpa sidebar shell mana
+        pun (admin 250px / superadmin 260px / PIC tanpa sidebar). Di ponsel
+        menempel di atas bottom nav; di desktop di tepi bawah viewport.
+      */}
+      <div className="sticky bottom-bottomnav z-30 mt-6 border-t border-border-light bg-surface px-4 py-4 lg:bottom-0">
         <Button type="submit" size="gate" fullWidth loading={isSubmitting}>
           Kirim Permohonan Kunjungan
         </Button>

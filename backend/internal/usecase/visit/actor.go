@@ -5,6 +5,8 @@
 package visit
 
 import (
+	"time"
+
 	"thc-vms/backend/internal/domain"
 )
 
@@ -49,12 +51,27 @@ func (a Actor) requireBranch(locationID domain.UUID) error {
 // Service is the visit lifecycle usecase. Every port arrives via constructor
 // injection; there are no globals and no singletons.
 type Service struct {
-	visits domain.VisitRepository
-	master domain.MasterDataRepository
-	clock  domain.Clock
+	visits   domain.VisitRepository
+	master   domain.MasterDataRepository
+	vendors  domain.VendorRepository
+	clock    domain.Clock
+	checkIns domain.CheckInOutRepository
+	// storage mints the short-lived file URLs served on reads. It is wired
+	// after construction via WithFileLinks so existing NewService callers
+	// (tests, workers) keep compiling; a nil storage fails reads closed
+	// (blank URLs) rather than leaking raw private-bucket addresses.
+	storage domain.IStorageService
+	// presignTTL is the presigned-URL lifetime forwarded to the adapter.
+	// Always positive: WithFileLinks clamps, effectivePresignTTL repeats
+	// the guard for Services built without the setter.
+	presignTTL time.Duration
 }
 
-// NewService wires the visit usecase to its domain ports.
-func NewService(visits domain.VisitRepository, master domain.MasterDataRepository, clock domain.Clock) *Service {
-	return &Service{visits: visits, master: master, clock: clock}
+// NewService wires the visit usecase to its domain ports. checkIns may be nil
+// (tests, workers): a nil port only disables gate-time enrichment on GetVisit,
+// it never fails the read. vendors may be nil in hermetic tests: a nil
+// catalogue skips vendor existence validation on CreateVisit, it never fails
+// the write; production always wires the real catalogue.
+func NewService(visits domain.VisitRepository, master domain.MasterDataRepository, clock domain.Clock, checkIns domain.CheckInOutRepository, vendors domain.VendorRepository) *Service {
+	return &Service{visits: visits, master: master, clock: clock, checkIns: checkIns, vendors: vendors}
 }

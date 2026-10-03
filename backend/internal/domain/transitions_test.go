@@ -17,10 +17,10 @@ var allowedTransitions = []struct {
 	from domain.VisitStatus
 	to   domain.VisitStatus
 }{
-	{"submitted by PIC or Admin", "", domain.VisitStatusRequested},
+	{"submitted by vendor or Admin", "", domain.VisitStatusRequested},
 	{"approved by branch admin", domain.VisitStatusRequested, domain.VisitStatusApproved},
 	{"rejected by branch admin", domain.VisitStatusRequested, domain.VisitStatusRejected},
-	{"cancelled by PIC or admin", domain.VisitStatusRequested, domain.VisitStatusCancelled},
+	{"cancelled by vendor or admin", domain.VisitStatusRequested, domain.VisitStatusCancelled},
 	{"checked in at the gate", domain.VisitStatusApproved, domain.VisitStatusVisiting},
 	{"new schedule proposed", domain.VisitStatusApproved, domain.VisitStatusRescheduled},
 	{"cancelled before day H", domain.VisitStatusApproved, domain.VisitStatusCancelled},
