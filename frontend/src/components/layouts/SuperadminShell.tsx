@@ -356,19 +356,23 @@ export function SuperadminShell({
 
         {/* Topbar mobile / tablet (< 1024px) */}
         <header className="sticky top-0 z-30 flex h-topbar items-center gap-2 border-b border-border-light bg-surface px-4 lg:hidden">
-          {logoMark}
-          <span className="truncate text-sm font-bold text-ink">THC VMS PUSAT</span>
-          {renderBranchSelect(`${MOBILE_SELECT_CLASS} ml-auto`)}
+          {/* Tombol hamburger di urutan PERTAMA (paling kiri, sebelum logo)
+              agar searah dengan laci drawer yang meluncur dari kiri. */}
           <Button
             variant="ghost"
             size="sm"
             aria-label="Buka menu navigasi"
             aria-expanded={drawerOpen}
-            className="min-h-touch"
+            className="min-h-touch shrink-0"
             onClick={() => setDrawerOpen(true)}
           >
             <Menu className="size-5" aria-hidden="true" />
           </Button>
+          {logoMark}
+          <span className="truncate text-sm font-bold text-ink">THC VMS PUSAT</span>
+          {/* `ml-auto` tetap di sini: mendorong sisa konten (switcher cabang)
+              ke tepi kanan setelah tombol menu dipindah ke depan. */}
+          {renderBranchSelect(`${MOBILE_SELECT_CLASS} ml-auto`)}
         </header>
 
         {/* Konten utama — min-w-0 (min-inline-size:0) menjamin tidak ada scroll

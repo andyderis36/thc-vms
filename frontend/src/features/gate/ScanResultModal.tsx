@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { VisitSummary } from '@/features/visits/components/ApproveModal'
 import { VisitorPhoto } from '@/features/visits/detail/VisitorPhoto'
+import { VisitFilePhoto } from '@/features/visits/detail/VisitFilePhoto'
 import type { VisitDetail } from '@/lib/api/types'
 
 export interface ScanResultModalProps {
@@ -104,11 +105,19 @@ export function ScanResultModal({
                 key={`${index}-${visitor.id_number}`}
                 className="flex items-start gap-3 rounded-control border border-border-light p-3"
               >
-                <VisitorPhoto
-                  src={selfieUrl}
-                  visitorName={visitor.name}
-                  variant="selfie"
-                />
+                {selfieUrl !== null && selfieUrl !== '' ? (
+                  <VisitFilePhoto
+                    visitId={visit.id}
+                    visitor={visitor}
+                    variant="selfie"
+                  />
+                ) : (
+                  <VisitorPhoto
+                    src={null}
+                    visitorName={visitor.name}
+                    variant="selfie"
+                  />
+                )}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-ink">
                     {visitor.name}
@@ -121,10 +130,11 @@ export function ScanResultModal({
                   </p>
                   <div className="mt-1.5 flex flex-wrap gap-2">
                     {ktpUrl !== null && ktpUrl !== '' ? (
-                      <VisitorPhoto
-                        src={ktpUrl}
-                        visitorName={visitor.name}
+                      <VisitFilePhoto
+                        visitId={visit.id}
+                        visitor={visitor}
                         variant="ktp"
+                        triggerLabel="Lihat Foto KTP"
                       />
                     ) : (
                       <span className="text-badge text-ink-muted">

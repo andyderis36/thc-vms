@@ -13,7 +13,9 @@ export interface QrCardProps {
   /** Kode kunjungan untuk ditampilkan (mis. `VST-2026090001`). */
   visitCode: string
   /** QR diminta bila status `approved` (check-in) atau `visiting`
-   * (check-out, QR yang SAMA). Status lain tidak memicu fetch. */
+   * (check-out, QR yang SAMA). `rescheduled` butuh persetujuan ulang,
+   * jadi QR disembunyikan sampai status kembali `approved`.
+   * Status lain tidak memicu fetch. */
   qrVisible: boolean
 }
 

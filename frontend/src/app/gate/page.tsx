@@ -7,13 +7,25 @@ import { SecurityKioskShell, type KioskTabId } from '@/components/layouts/Securi
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { RequireRole } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
-import { useCheckInVisitMutation, useCheckOutVisitMutation, useVisitsQuery } from '@/lib/api/hooks'
+import {
+  useCheckInVisitMutation,
+  useCheckOutVisitMutation,
+  usePendingApprovalCount,
+  useVisitsQuery,
+} from '@/lib/api/hooks'
 import type { Role, VisitDetail, VisitStatus } from '@/lib/api/types'
+import { mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
 import { ScannerPanel, type ScanPhase } from '@/features/gate/ScannerPanel'
 import { GateQueue } from '@/features/gate/GateQueue'
+import { GuestSelectContext } from '@/features/gate/GuestCard'
 import { ScanResultModal } from '@/features/gate/ScanResultModal'
 
-/** Peta tab gerbang -> status kunjungan yang queried dari API. */
+/**
+ * Peta tab gerbang -> status utama yang queried dari API.
+ * Tab `upcoming` HANYA menyetor `approved` di sini; kunjungan `rescheduled`
+ * (juga check-in-able) di-query terpisah lalu digabungkan client-side oleh
+ * `mergeUpcomingQueue` — lihat `GateContent`.
+ */
 const TAB_STATUS: Record<KioskTabId, VisitStatus> = {
   upcoming: 'approved',
   'on-site': 'visiting',
@@ -57,14 +69,36 @@ function GateContent() {
   const { user } = useSession()
   const role: Role | null = user !== null ? user.role : null
 
+  const isUpcoming = tab === 'upcoming'
   const visitsQuery = useVisitsQuery({ status: TAB_STATUS[tab], limit: 50 })
+  // Tab "Akan Hadir" juga menampilkan kunjungan `rescheduled` (keduanya
+  // check-in-able). Query kedua HANYA aktif di tab upcoming agar tab lain
+  // tetap single-query; hasilnya digabung client-side oleh mergeUpcomingQueue.
+  const rescheduledQuery = useVisitsQuery({ status: 'rescheduled', limit: 50 }, isUpcoming)
   const checkIn = useCheckInVisitMutation()
   const checkOut = useCheckOutVisitMutation()
-  // Badge antrean shell admin/superadmin (limit 1 — hanya total yang dipakai).
-  const pendingQuery = useVisitsQuery({ status: 'requested', limit: 1 })
-  const pendingCount = pendingQuery.data?.total ?? 0
+  // Badge antrean shell admin/superadmin (server-total, limit 1 — hanya total
+  // yang dipakai): requested + rescheduled, keduanya menunggu keputusan.
+  const { pendingCount } = usePendingApprovalCount()
 
-  const visits = useMemo(() => visitsQuery.data?.items ?? [], [visitsQuery.data])
+  /**
+   * Semantik gabungan (keputusan, terdokumentasi):
+   * - `visits`: gabungan `approved` + `rescheduled` hanya di tab upcoming
+   *   (dedupe by id, urut `start_date` ASC); tab lain tetap daftar utama
+   *   apa adanya.
+   * - Loading: menunggu query UTAMA ATAU query rescheduled (saat tab
+   *   upcoming) — antrean baru dirender saat kedua daftar sudah settle.
+   * - Error: HANYA dari query utama. Kegagalan query rescheduled tidak
+   *   boleh mengosongkan daftar approved (items-nya jatuh ke `[]`, daftar
+   *   tetap tampil) — jadi tidak pernah mem-blank antrean yang valid.
+   * - Retry: refetch query utama, dan juga query rescheduled saat upcoming.
+   */
+  const visits = useMemo(() => {
+    const primary = visitsQuery.data?.items ?? []
+    if (!isUpcoming) return primary
+    return mergeUpcomingQueue(primary, rescheduledQuery.data?.items ?? [])
+  }, [isUpcoming, visitsQuery.data, rescheduledQuery.data])
+  const queueLoading = visitsQuery.isPending || (isUpcoming && rescheduledQuery.isPending)
 
   /**
    * Hasil pemindaian memuat kode QR mentah. Payload QR dari backend bersifat
@@ -109,6 +143,27 @@ function GateContent() {
         message: error instanceof Error ? error.message : 'Terjadi kesalahan di pos jaga.',
       })
     }
+  }
+
+  /**
+   * Klik Visit ID pada kartu antrean: muat ULANG data lewat `resolveVisit`
+   * (helper yang sama dengan alur pindai) lalu buka `ScanResultModal`.
+   * Baris daftar bisa basi (polling tertunda / status berubah), jadi konfirmasi
+   * tidak pernah bertumpu pada data cache antrean — identik dengan hasil scan.
+   */
+  async function handleSelectVisit(visit: VisitDetail) {
+    // Naikkan resetKey seperti siklus pindai agar kunci kamera ScannerPanel
+    // terlepas; siklus ditutup oleh handleScanClose/handleScanConfirm yang
+    // sudah ada (tanpa perubahan perilaku scanner).
+    setScanResetKey((key) => key + 1)
+    const fresh = await resolveVisit(visit.visit_id)
+    if (fresh === null) {
+      toast.error(`Detail ${visit.visit_id} gagal dimuat. Coba lagi.`)
+      return
+    }
+    setScanVisit(fresh)
+    setScanError(null)
+    setScanOpen(true)
   }
 
   async function handleCheckIn(visit: VisitDetail) {
@@ -189,16 +244,23 @@ function GateContent() {
         />
       </div>
       <div className="min-w-0 lg:w-[58%]">
-        <GateQueue
-          tab={tab}
-          visits={visits}
-          isLoading={visitsQuery.isPending}
-          isError={visitsQuery.isError}
-          onRetry={() => void visitsQuery.refetch()}
-          pendingVisitId={pendingVisitId}
-          onCheckIn={(visit) => void handleCheckIn(visit)}
-          onCheckOut={(visit) => void handleCheckOut(visit)}
-        />
+        {/* Konteks pengganti prop-drilling: GateQueue tidak diubah, tetapi
+            GuestCard tetap menerima handler klik kartu untuk popup detail. */}
+        <GuestSelectContext.Provider value={handleSelectVisit}>
+          <GateQueue
+            tab={tab}
+            visits={visits}
+            isLoading={queueLoading}
+            isError={visitsQuery.isError}
+            onRetry={() => {
+              void visitsQuery.refetch()
+              if (isUpcoming) void rescheduledQuery.refetch()
+            }}
+            pendingVisitId={pendingVisitId}
+            onCheckIn={(visit) => void handleCheckIn(visit)}
+            onCheckOut={(visit) => void handleCheckOut(visit)}
+          />
+        </GuestSelectContext.Provider>
       </div>
       <ScanResultModal
         visit={scanVisit}

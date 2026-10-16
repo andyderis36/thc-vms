@@ -583,7 +583,7 @@ export const handlers: RequestHandler[] = [
         400,
       );
     }
-    if (visit.status !== 'requested' && visit.status !== 'rescheduled') {
+    if (visit.status !== 'requested') {
       return fail('CONFLICT', INVALID_TRANSITION_MESSAGE, 409);
     }
     visit.status = 'rejected';

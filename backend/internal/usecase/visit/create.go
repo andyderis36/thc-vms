@@ -63,7 +63,8 @@ type CreateVisitInput struct {
 	PurposeNote string
 	// AssignmentLetterURL is the MinIO/S3 URL of the vendor's Surat Tugas /
 	// SPK, uploaded beforehand through POST /uploads with the
-	// assignment_letter category. Optional, per the openapi schema.
+	// assignment_letter category. Mandatory for new requests; data filed
+	// before this rule is grandfathered (no check on read/update paths).
 	AssignmentLetterURL *string
 }
 
@@ -95,6 +96,12 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 		if err := validateVisitor(visitor, i+1); err != nil {
 			return domain.VisitRequest{}, err
 		}
+	}
+	// AssignmentLetterURL is mandatory for NEW requests only; grandfathered
+	// rows without one keep flowing through get/list/update/reschedule
+	// untouched (no check exists on those paths).
+	if strings.TrimSpace(textOrEmpty(in.AssignmentLetterURL)) == "" {
+		return domain.VisitRequest{}, domain.ValidationFailure("Surat Tugas / SPK wajib diunggah.")
 	}
 	if err := ValidatePhotoURL(textOrEmpty(in.AssignmentLetterURL)); err != nil {
 		return domain.VisitRequest{}, err

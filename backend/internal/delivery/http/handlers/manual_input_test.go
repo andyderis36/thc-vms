@@ -31,6 +31,7 @@ func visitBodyJSON(locationID string, purposeIDs []string, purposeNote string, e
 		"end_date": "2026-10-01T17:00:00Z",
 		"is_nda_accepted": true,
 		"notes": "splicing FO",
+		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
 		"visitors": [
 			{"name":"Andi","id_number":"3578010100000001","phone":"0811"%s},
 			{"name":"Budi","id_number":"3578010200000002","phone":"0812"}
@@ -119,7 +120,10 @@ func TestCreateVisit_PurposeNoteOnlyAccepted(t *testing.T) {
 func TestCreateVisit_PurposeNoteAlongsideCataloguePurpose(t *testing.T) {
 	note := "Tambahan: ganti rectifier"
 	purposeID := "22222222-2222-2222-2222-222222222222"
-	svc := &fakeVisitService{created: manualCompanyVisit()}
+	created := manualCompanyVisit()
+	created.PurposeNote = &note
+	created.Purposes = []domain.Purpose{{ID: domain.UUID(purposeID), Name: "Splicing FO", IsActive: true}}
+	svc := &fakeVisitService{created: created}
 	engine := newVisitEngine(svc, domain.RoleSuperAdmin, "")
 
 	rec := serveJSON(engine, "POST", "/visits", visitBodyJSON(
@@ -137,6 +141,10 @@ func TestCreateVisit_PurposeNoteAlongsideCataloguePurpose(t *testing.T) {
 	purposes, ok := data["purposes"].([]any)
 	if !ok || len(purposes) != 1 {
 		t.Errorf("purposes = %v, want the one catalogue purpose echoed", data["purposes"])
+	} else if purpose, ok := purposes[0].(map[string]any); !ok {
+		t.Errorf("purposes[0] is not an object: %#v", purposes[0])
+	} else if purpose["name"] != "Splicing FO" {
+		t.Errorf("purposes[0].name = %v, want the catalogue name (bukan shell ID-only)", purpose["name"])
 	}
 }
 

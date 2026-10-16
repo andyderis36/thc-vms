@@ -630,6 +630,66 @@ paths:
         '404':
           description: Kunjungan tidak ditemukan
 
+  /visits/{id}/file:
+    get:
+      tags: [Visits]
+      summary: Streaming satu slot berkas kunjungan (tahan tunnel, tanpa presigned URL)
+      description: |
+        Menyajikan isi satu slot berkas penyimpanan (surat tugas/SPK, foto KTP, atau selfie teknisi) sebagai aliran biner inline langsung dari backend, bukan URL presigned MinIO/S3. Endpoint ini dimiliki backend sepenuhnya (bukan proksi Next.js): URL presigned mengikat host storage pada tanda tangannya sehingga rusak saat dibuka lewat tunnel atau domain berbeda, sedangkan endpoint ini selalu lewat host API yang sama dengan aplikasi sehingga selamat melewati tunnel. Cakupan baca sama persis dengan `GET /visits/{id}`: global untuk super_admin, terkunci cabang untuk admin/security, dan milik sendiri untuk vendor (vendor lain dijawab 404 agar tidak membocorkan keberadaan data). Tidak ada migrasi maupun dependensi baru; URL presigned pada respons list/detail tidak berubah.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID kunjungan. Kode bisnis `VST-...` tidak diterima di sini (ID tidak valid → 400).
+        - name: kind
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [assignment_letter, id_card, selfie]
+          description: Slot berkas yang disajikan. `assignment_letter` tinggal di baris kunjungan; `id_card`/`selfie` tinggal di baris tiap teknisi.
+        - name: visitor_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: UUID teknisi. Wajib untuk `id_card`/`selfie`; diabaikan untuk `assignment_letter`.
+      responses:
+        '200':
+          description: "Isi berkas disajikan inline (`Content-Disposition: inline`, `Cache-Control: private, no-store`, `Pragma: no-cache`, `X-Content-Type-Options: nosniff`, `Accept-Ranges: bytes` beserta `Content-Length`)"
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Potongan berkas untuk request `Range` (seek pratinjau; `Content-Range` menyertai respons)
+        '400':
+          description: ID/kind/visitor_id tidak valid (kode `VALIDATION_ERROR`, pesan Indonesia)
+        '401':
+          description: JWT tidak ada/tidak valid (kode `UNAUTHORIZED`)
+        '403':
+          description: Lintas cabang untuk admin/security (kode `FORBIDDEN_BRANCH`) — tanpa membocorkan data
+        '404':
+          description: Kunjungan tidak dikenal, slot kosong, teknisi tidak dikenal, atau milik vendor lain (kode `NOT_FOUND`, pesan "Berkas tidak tersedia." atau "Kunjungan tidak ditemukan.")
+        '500':
+          description: Gagal baca storage (kode `INTERNAL_ERROR`)
+
   /visits/{id}/approve:
     post:
       tags: [Visits]
@@ -705,7 +765,7 @@ paths:
                   type: string
       responses:
         '200':
-          description: Kunjungan dijadwalkan ulang (Status -> rescheduled)
+          description: Kunjungan dijadwalkan ulang (Status -> rescheduled). Jadwal dapat digeser berulang kali, tetapi kunjungan harus disetujui kembali oleh admin sebelum check-in.
 
   /visits/{id}/cancel:
     post:
@@ -784,7 +844,7 @@ paths:
                   type: string
       responses:
         '200':
-          description: Check-in berhasil (Status -> visiting; dicatat atas id pelaksana, superadmin lintas cabang saat darurat)
+          description: Check-in berhasil (Status approved -> visiting; dicatat atas id pelaksana, superadmin lintas cabang saat darurat)
         '400':
           description: Di luar rentang toleransi waktu jadwal (±2 jam) atau QR tidak valid
         '403':
@@ -1247,6 +1307,10 @@ components:
       type: object
       required: [name, id_number, phone]
       properties:
+        id:
+          type: string
+          format: uuid
+          description: ID baris visitor (UUID); diisi pada respons baca (list/detail), absen pada echo create. Wajib dipakai sebagai visitor_id pada GET /visits/{id}/file — id_number (nomor KTP) DITOLAK endpoint berkas.
         name:
           type: string
         id_number:
@@ -1273,7 +1337,7 @@ components:
 
     CreateVisitRequest:
       type: object
-      required: [location_id, start_date, end_date, visitors, is_nda_accepted]
+      required: [location_id, start_date, end_date, visitors, is_nda_accepted, assignment_letter_url]
       properties:
         location_id:
           type: string
@@ -1301,7 +1365,7 @@ components:
         assignment_letter_url:
           type: string
           format: uri
-          description: URL berkas surat tugas / SPK vendor yang telah diunggah ke /uploads
+          description: URL berkas surat tugas / SPK vendor yang telah diunggah ke /uploads — wajib untuk pengajuan baru; data lama tanpa SPK grandfathered (tetap 200 pada GET/list/update/reschedule/approve)
         is_nda_accepted:
           type: boolean
           description: Persetujuan digital terhadap ketentuan keamanan THC

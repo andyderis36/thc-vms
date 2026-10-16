@@ -27,3 +27,4 @@ dummy-assets/
 node_modules/
 .vite/
 thc-vms-acc.pdf
+user-feedback.txt

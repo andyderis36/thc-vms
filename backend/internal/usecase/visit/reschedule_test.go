@@ -60,6 +60,56 @@ func TestReschedule_SetsRescheduledAndNotVisiting(t *testing.T) {
 	}
 }
 
+func TestReschedule_AllowsOnlyRequestedApprovedRescheduledSources(t *testing.T) {
+	// Given: one visit in each of the 8 lifecycle states.
+	// When:  the branch admin reschedules it.
+	// Then:  only requested, approved and rescheduled are accepted; the other
+	//        five are refused with ErrInvalidTransition and zero writes.
+	allowed := map[domain.VisitStatus]bool{
+		domain.VisitStatusRequested:   true,
+		domain.VisitStatusApproved:    true,
+		domain.VisitStatusRescheduled: true,
+	}
+	start := time.Date(2026, time.October, 7, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, time.October, 7, 17, 0, 0, 0, time.UTC)
+	for _, status := range domain.AllVisitStatuses() {
+		t.Run(string(status), func(t *testing.T) {
+			repo := newFakeVisitRepo(t)
+			visit := domain.VisitRequest{
+				ID:            domain.UUID("visit-src"),
+				VisitID:       "VST-0000000099",
+				PICUserID:     domain.UUID("pic-1"),
+				LocationID:    domain.UUID("loc-A"),
+				StartDate:     start,
+				EndDate:       end,
+				Status:        status,
+				IsNDAAccepted: true,
+			}
+			seedVisit(repo, visit)
+			svc := newTestService(repo, nil, testNow())
+			actor := testActor(domain.RoleAdmin, "admin-1", "loc-A")
+
+			err := svc.Reschedule(context.Background(), actor, visit.ID, start, end, "jadwal teknisi berubah")
+
+			if allowed[status] {
+				if err != nil {
+					t.Fatalf("Reschedule from %q = %v, want nil", status, err)
+				}
+				if len(repo.rescheduleCalls) != 1 {
+					t.Fatalf("rescheduleCalls = %d, want 1", len(repo.rescheduleCalls))
+				}
+				return
+			}
+			if !errors.Is(err, domain.ErrInvalidTransition) {
+				t.Fatalf("Reschedule from %q = %v, want ErrInvalidTransition", status, err)
+			}
+			if repo.writes != 0 {
+				t.Errorf("writes = %d, want 0 on refused source %q", repo.writes, status)
+			}
+		})
+	}
+}
+
 func TestReschedule_RejectsBadWindowAndMissingReason(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	seedApprovedVisit(repo)

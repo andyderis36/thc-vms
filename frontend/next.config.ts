@@ -20,6 +20,36 @@ const nextConfig: NextConfig = {
   // request cross-origin ("Blocked cross-origin request") dan halaman
   // via tunnel gagal hidrasi (putih polos). Dev-only, tidak ke build.
   allowedDevOrigins: ['*.trycloudflare.com'],
+  images: {
+    /*
+     * Origin presigned MinIO dev — diambil PERSIS dari backend/.env.example:
+     *   S3_ENDPOINT=localhost:9000
+     *   S3_PUBLIC_BASE_URL=http://localhost:9000/thc-vms-bucket
+     *   S3_USE_SSL=false
+     * → satu origin: http://localhost:9000 (path-style /thc-vms-bucket/...).
+     *
+     * `search` sengaja DIHAPUS (wildcard `**` tersirat) karena URL presigned
+     * membawa query `?X-Amz-Algorithm=...` — `search: ''` akan memblokirnya
+     * dengan HTTP 400.
+     *
+     * SWAP HOST PRODUCTION: ganti blok di bawah dengan origin S3/R2 hasil
+     * deploy (protocol 'https', hostname asli, port ''), selaras dengan
+     * S3_ENDPOINT / S3_PUBLIC_BASE_URL backend produksi — mis. akun
+     * Cloudflare R2 atau regional AWS S3. Jangan hardcode di tempat lain.
+     *
+     * `images.minimumCacheTTL` TIDAK di-set (default Next): berkas KTP/selfie
+     * bisa diunggah ulang dan URL presigned berganti tiap 15 menit, jadi
+     * tidak ada jaminan immutable untuk di-cache lama.
+     */
+    remotePatterns: [
+      {
+        protocol: 'http',
+        hostname: 'localhost',
+        port: '9000',
+        pathname: '/**',
+      },
+    ],
+  },
 }
 
 export default nextConfig

@@ -56,7 +56,19 @@ const CENTRE_NAV_ID = 'new-visit'
 const QR_VISIBLE_STATUSES: ReadonlySet<VisitStatus> = new Set<VisitStatus>([
   'approved',
   'visiting',
+  // `rescheduled` SENGAJA tidak ada: kunjungan yang dijadwalkan ulang wajib
+  // disetujui ulang sebelum check-in (backend menolak rescheduled->visiting),
+  // jadi QR disembunyikan sampai status kembali `approved`.
 ])
+
+/**
+ * Predikat murni: status apa pun yang menampilkan kartu QR di SCR-04.
+ * Satu-satunya sumber kebenaran untuk `showQr` halaman detail dan
+ * `resolveActiveHref` di bawah — ubah di sini bila himpunannya berubah.
+ */
+export function isQrVisible(status: VisitStatus): boolean {
+  return QR_VISIBLE_STATUSES.has(status)
+}
 
 /**
  * Rute detail SCR-04 (`/visits/[id]`) tidak punya pasangan di `PIC_NAV`,
@@ -67,7 +79,7 @@ const QR_VISIBLE_STATUSES: ReadonlySet<VisitStatus> = new Set<VisitStatus>([
 function resolveActiveHref(activeHref: string, visitStatus: VisitStatus | undefined): string {
   const isDetailRoute = activeHref.startsWith('/visits/') && activeHref !== '/visits/new'
   if (!isDetailRoute) return activeHref
-  return visitStatus !== undefined && QR_VISIBLE_STATUSES.has(visitStatus)
+  return visitStatus !== undefined && isQrVisible(visitStatus)
     ? '/qr'
     : '/dashboard'
 }

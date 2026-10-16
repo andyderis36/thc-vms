@@ -10,7 +10,141 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const getVisitsByIDs = `-- name: GetVisitsByIDs :many
+SELECT
+    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    l.name AS location_name, l.type AS location_type,
+    l.address AS location_address, l.city AS location_city,
+    l.timezone AS location_timezone,
+    v.name AS vendor_name,
+    pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
+FROM visit_request vr
+JOIN location l ON l.id = vr.location_id
+LEFT JOIN vendor v ON v.id = vr.vendor_id
+JOIN users pu ON pu.id = vr.pic_user_id
+WHERE vr.id = ANY($1::uuid[])
+`
+
+type GetVisitsByIDsParams struct {
+	VisitIds []uuid.UUID `json:"visit_ids"`
+}
+
+type GetVisitsByIDsRow struct {
+	ID                  uuid.UUID   `json:"id"`
+	VisitID             string      `json:"visit_id"`
+	PicUserID           uuid.UUID   `json:"pic_user_id"`
+	VendorID            pgtype.UUID `json:"vendor_id"`
+	LocationID          uuid.UUID   `json:"location_id"`
+	StartDate           time.Time   `json:"start_date"`
+	EndDate             time.Time   `json:"end_date"`
+	IsMultiDay          bool        `json:"is_multi_day"`
+	Status              string      `json:"status"`
+	AssignmentLetterUrl pgtype.Text `json:"assignment_letter_url"`
+	IsNdaAccepted       bool        `json:"is_nda_accepted"`
+	Notes               pgtype.Text `json:"notes"`
+	CreatedAt           time.Time   `json:"created_at"`
+	UpdatedAt           time.Time   `json:"updated_at"`
+	PurposeNote         pgtype.Text `json:"purpose_note"`
+	LocationName        string      `json:"location_name"`
+	LocationType        string      `json:"location_type"`
+	LocationAddress     pgtype.Text `json:"location_address"`
+	LocationCity        pgtype.Text `json:"location_city"`
+	LocationTimezone    string      `json:"location_timezone"`
+	VendorName          pgtype.Text `json:"vendor_name"`
+	PicName             string      `json:"pic_name"`
+	PicEmail            string      `json:"pic_email"`
+	PicPhone            pgtype.Text `json:"pic_phone"`
+}
+
+// Batched detail read for the auto-rule worker hydrate(): one round trip for
+// a whole capped sweep instead of FindByID-per-id (S1 N+1 kill). The
+// projection is byte-for-byte the GetVisitByID one (visits.sql) so the same
+// domain mapping applies; callers restore sweep order themselves.
+func (q *Queries) GetVisitsByIDs(ctx context.Context, arg GetVisitsByIDsParams) ([]GetVisitsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, getVisitsByIDs, arg.VisitIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetVisitsByIDsRow{}
+	for rows.Next() {
+		var i GetVisitsByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VisitID,
+			&i.PicUserID,
+			&i.VendorID,
+			&i.LocationID,
+			&i.StartDate,
+			&i.EndDate,
+			&i.IsMultiDay,
+			&i.Status,
+			&i.AssignmentLetterUrl,
+			&i.IsNdaAccepted,
+			&i.Notes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PurposeNote,
+			&i.LocationName,
+			&i.LocationType,
+			&i.LocationAddress,
+			&i.LocationCity,
+			&i.LocationTimezone,
+			&i.VendorName,
+			&i.PicName,
+			&i.PicEmail,
+			&i.PicPhone,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCheckInsByVisitIDs = `-- name: ListCheckInsByVisitIDs :many
+SELECT id, visit_request_id, checked_in_at, checked_in_by, photo_url, badge_code FROM check_in WHERE visit_request_id = ANY($1::uuid[])
+`
+
+type ListCheckInsByVisitIDsParams struct {
+	VisitRequestIds []uuid.UUID `json:"visit_request_ids"`
+}
+
+// Batched existence read for the R2 no-show sweep: one round trip for the
+// whole candidate set instead of one GetCheckInByVisitRequest probe per
+// visit. Rides the UNIQUE index on check_in(visit_request_id).
+func (q *Queries) ListCheckInsByVisitIDs(ctx context.Context, arg ListCheckInsByVisitIDsParams) ([]CheckIn, error) {
+	rows, err := q.db.Query(ctx, listCheckInsByVisitIDs, arg.VisitRequestIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CheckIn{}
+	for rows.Next() {
+		var i CheckIn
+		if err := rows.Scan(
+			&i.ID,
+			&i.VisitRequestID,
+			&i.CheckedInAt,
+			&i.CheckedInBy,
+			&i.PhotoUrl,
+			&i.BadgeCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 const sweepNoShowApprovedVisits = `-- name: SweepNoShowApprovedVisits :many
 SELECT vr.id, vr.visit_id, vr.status, vr.pic_user_id, vr.location_id, vr.start_date, vr.end_date
@@ -19,6 +153,7 @@ WHERE vr.status = 'approved'
   AND vr.end_date < now() - interval '2 hours'
   AND NOT EXISTS (SELECT 1 FROM check_in ci WHERE ci.visit_request_id = vr.id)
 ORDER BY vr.end_date ASC
+LIMIT 500
 FOR UPDATE OF vr SKIP LOCKED
 `
 
@@ -35,6 +170,7 @@ type SweepNoShowApprovedVisitsRow struct {
 // R2: approved, past end_date + 2h, and check_in has no row for the visit.
 // Uses idx_visit_status for the status scan and the UNIQUE index on
 // check_in(visit_request_id) for the anti-join probe.
+// Capped at 500 rows per tick (S4), same as its sibling sweeps.
 func (q *Queries) SweepNoShowApprovedVisits(ctx context.Context) ([]SweepNoShowApprovedVisitsRow, error) {
 	rows, err := q.db.Query(ctx, sweepNoShowApprovedVisits)
 	if err != nil {
@@ -70,6 +206,7 @@ FROM visit_request vr
 WHERE vr.status = 'requested'
   AND vr.created_at < now() - interval '7 days'
 ORDER BY vr.created_at ASC
+LIMIT 500
 FOR UPDATE OF vr SKIP LOCKED
 `
 
@@ -115,6 +252,8 @@ type SweepStaleRequestedVisitsRow struct {
 // legitimate check-in, so the visit is definitively a no-show.
 // =============================================================================
 // R1: an unanswered request 7 days old is abandoned (PRD L137).
+// Capped at 500 rows per tick (S4): one sweep locks and migrates at most one
+// batch, never the whole table.
 func (q *Queries) SweepStaleRequestedVisits(ctx context.Context) ([]SweepStaleRequestedVisitsRow, error) {
 	rows, err := q.db.Query(ctx, sweepStaleRequestedVisits)
 	if err != nil {
@@ -149,6 +288,7 @@ FROM visit_request vr
 WHERE vr.status = 'visiting'
   AND vr.end_date < now() - interval '24 hours'
 ORDER BY vr.end_date ASC
+LIMIT 500
 FOR UPDATE OF vr SKIP LOCKED
 `
 
@@ -166,6 +306,7 @@ type SweepStaleVisitingVisitsRow struct {
 // does not cover end_date, so this sweep relies on the status index plus the
 // row count of a single overnight window - deliberately not adding a 5th index
 // beyond the four PRD L206-209 mandates, since the sweep runs once per tick.
+// Capped at 500 rows per tick (S4), same as its sibling sweeps.
 func (q *Queries) SweepStaleVisitingVisits(ctx context.Context) ([]SweepStaleVisitingVisitsRow, error) {
 	rows, err := q.db.Query(ctx, sweepStaleVisitingVisits)
 	if err != nil {

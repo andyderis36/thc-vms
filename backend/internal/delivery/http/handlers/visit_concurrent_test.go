@@ -19,6 +19,7 @@ func TestCreateVisit_ConcurrentOverlappingVisitsBothAccepted(t *testing.T) {
 		"start_date": "2026-10-01T09:00:00Z",
 		"end_date": "2026-10-01T17:00:00Z",
 		"is_nda_accepted": true,
+		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
 		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
 	}`
 	first := serveJSON(engine, "POST", "/visits", payload)

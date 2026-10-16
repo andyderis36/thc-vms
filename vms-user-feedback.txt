@@ -1,0 +1,20 @@
+#user question:
+1. 
+
+#user answer:
+1. 
+
+#user feedback: 
+1. page detail visit misal "/visits/0f6a496b-6a6d-4078-babe-e21d42b77524": superadmin/koordianator wilayah/vendor tidak bisa mengubah jadwal kunjungan masih error. - apakah harus menuggu approval baru bisa ubah jadwal? harusnya tanpa approval tetap bisa mengubah, dan setelah approval juga bisa ubah jadwal tanpa meminta approval dan generate barcode baru lagi. ini kusus untuk visit data dengan status diminta, disetujui, dan digeser. selain status itu harusnya jangan boleh geser jadwal ya pastikan lagi.
+2. field "surat tugas/SPK Vendor" sifatnya wajib diisi. - belum solved
+3. di halaman visit detail, pada bagian "riwayat status" ketika sudah "selesai" kenapa checkpoint node masih berwarna biru? seharusnya hijau dengan centang. - (belum di perbaiki)
+4. ketika login sebagai vendor setelah add new visit, lalu otomatis navigasi ke halaman detail visit(/visits/5911e047-1843-4460-9853-bd95d9a8e4c7) tetapi data di page tersebut(misal "Informasi Kunjungan") tidak langsung update/muncul, harus direfresh dulu baru muncul datanya - belum solved
+5. setelah add new visit dan belum diapprove, gak bisa merubah jadwal visit. seharusnya data visit bisa diubah jadwal/geser jadwal terlepas sudah approved atau belum.  periksa kembali dengan benar. ini sama seperti no.1
+6. berikan pesan popup atau toast jika ada pesan warning misal ada field yang belum terisi. misal field add new visit.
+7. ada yang salah dengan label dropdown di page "/visits/new" pada "Fasilitas Tujuan", ini cuplikannya (Kantor Cabang Sambas - Sambas
+Kantor Pusat THC (Pontianak) - Pontianak
+POP Mempawah - Mempawah
+POP Singkawang - Singkawang
+miniPOP Aruk - Sambas).
+
+# user feedback ini berdasarkan UAT dan QA testing dari tim QA. mungkin saja ada kesalahpahaman user terkait kondisi atau perilaku di aplikasi/logic flow sehingga menimbulkan issues.

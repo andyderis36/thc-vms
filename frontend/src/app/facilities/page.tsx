@@ -17,8 +17,8 @@ import {
   useCreateLocationMutation,
   useDeleteLocationMutation,
   useLocationsQuery,
+  usePendingApprovalCount,
   useUpdateLocationMutation,
-  useVisitsQuery,
 } from '@/lib/api/hooks'
 import type { Location } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
@@ -155,15 +155,15 @@ function FacilitiesScreen() {
   // Halaman admin butuh SEMUA baris (aktif + nonaktif) agar fasilitas yang
   // dinonaktifkan tetap terlihat dan bisa diaktifkan lagi.
   const locationsQuery = useLocationsQuery(false)
-  // Badge antrean shell: total requested lintas cabang (limit 1 — hanya total yang dipakai).
-  const pendingQuery = useVisitsQuery({ status: 'requested', limit: 1 })
+  // Badge antrean shell: total requested + rescheduled lintas cabang
+  // (server-total, limit 1 — hanya total yang dipakai); lihat usePendingApprovalCount.
+  const { pendingCount } = usePendingApprovalCount()
 
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data])
   const rows = useMemo(
     () => applyFacilityFilters(locations, { search, branchId, type: typeFilter, status: statusFilter }),
     [locations, search, branchId, typeFilter, statusFilter],
   )
-  const pendingCount = pendingQuery.data?.total ?? 0
 
   const emptyTitle =
     locations.length === 0 ? 'Belum ada fasilitas' : 'Tidak ada fasilitas yang cocok'

@@ -79,6 +79,11 @@ type UploadRoutes struct {
 	Upload gin.HandlerFunc
 }
 
+// FileRoutes carries the bound scoped file-stream handler method.
+type FileRoutes struct {
+	File gin.HandlerFunc
+}
+
 // Chain is the pre-built middleware for each route group.
 type Chain struct {
 	Recovery       gin.HandlerFunc
@@ -108,6 +113,7 @@ type Deps struct {
 	Visits     VisitRoutes
 	Gate       GateRoutes
 	Upload     UploadRoutes
+	File       FileRoutes
 	Health     HealthProbes
 	Chain      Chain
 }
@@ -133,9 +139,10 @@ func withFallback(next gin.HandlerFunc) gin.HandlerFunc {
 // narrowing the back-office facility and account routes to super_admin,
 // ApproveOnly narrowing approve/reject to super_admin and admin (a vendor is
 // refused there), and GateOnly keeping check-in/out to security, admin and
-// super_admin. EXPLICITLY NOT ROUTED (they 404): POST /visits/:id/feedback,
-// POST /visits/:id/incident, SSO/OTP/2FA, audit-log
-// viewer.
+// super_admin. GET /visits/:id/file streams a stored file slot inline (the
+// usecase scopes the branch/owner and answers 404 otherwise). EXPLICITLY NOT
+// ROUTED (they 404): POST /visits/:id/feedback, POST /visits/:id/incident,
+// SSO/OTP/2FA, audit-log viewer.
 //
 // DELETE /locations/:id is the hard removal and is refused with 409 while
 // users.location_id or visit_request.location_id still reference the row, so
@@ -185,6 +192,7 @@ func New(d Deps) *gin.Engine {
 	authed.GET("/visits", withFallback(d.Visits.List))
 	authed.POST("/visits", withFallback(d.Visits.Create))
 	authed.GET("/visits/:id", withFallback(d.Visits.Get))
+	authed.GET("/visits/:id/file", withFallback(d.File.File))
 	authed.GET("/visits/:id/qr", withFallback(d.Visits.QR))
 	authed.POST("/visits/:id/reschedule", withFallback(d.Visits.Reschedule))
 	authed.POST("/visits/:id/cancel", withFallback(d.Visits.Cancel))

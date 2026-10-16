@@ -29,23 +29,28 @@
 
 -- name: SweepStaleRequestedVisits :many
 -- R1: an unanswered request 7 days old is abandoned (PRD L137).
+-- Capped at 500 rows per tick (S4): one sweep locks and migrates at most one
+-- batch, never the whole table.
 SELECT vr.id, vr.visit_id, vr.status, vr.pic_user_id, vr.location_id, vr.start_date, vr.end_date
 FROM visit_request vr
 WHERE vr.status = 'requested'
   AND vr.created_at < now() - interval '7 days'
 ORDER BY vr.created_at ASC
+LIMIT 500
 FOR UPDATE OF vr SKIP LOCKED;
 
 -- name: SweepNoShowApprovedVisits :many
 -- R2: approved, past end_date + 2h, and check_in has no row for the visit.
 -- Uses idx_visit_status for the status scan and the UNIQUE index on
 -- check_in(visit_request_id) for the anti-join probe.
+-- Capped at 500 rows per tick (S4), same as its sibling sweeps.
 SELECT vr.id, vr.visit_id, vr.status, vr.pic_user_id, vr.location_id, vr.start_date, vr.end_date
 FROM visit_request vr
 WHERE vr.status = 'approved'
   AND vr.end_date < now() - interval '2 hours'
   AND NOT EXISTS (SELECT 1 FROM check_in ci WHERE ci.visit_request_id = vr.id)
 ORDER BY vr.end_date ASC
+LIMIT 500
 FOR UPDATE OF vr SKIP LOCKED;
 
 -- name: SweepStaleVisitingVisits :many
@@ -53,9 +58,35 @@ FOR UPDATE OF vr SKIP LOCKED;
 -- does not cover end_date, so this sweep relies on the status index plus the
 -- row count of a single overnight window - deliberately not adding a 5th index
 -- beyond the four PRD L206-209 mandates, since the sweep runs once per tick.
+-- Capped at 500 rows per tick (S4), same as its sibling sweeps.
 SELECT vr.id, vr.visit_id, vr.status, vr.pic_user_id, vr.location_id, vr.start_date, vr.end_date
 FROM visit_request vr
 WHERE vr.status = 'visiting'
   AND vr.end_date < now() - interval '24 hours'
 ORDER BY vr.end_date ASC
+LIMIT 500
 FOR UPDATE OF vr SKIP LOCKED;
+
+-- name: GetVisitsByIDs :many
+-- Batched detail read for the auto-rule worker hydrate(): one round trip for
+-- a whole capped sweep instead of FindByID-per-id (S1 N+1 kill). The
+-- projection is byte-for-byte the GetVisitByID one (visits.sql) so the same
+-- domain mapping applies; callers restore sweep order themselves.
+SELECT
+    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    l.name AS location_name, l.type AS location_type,
+    l.address AS location_address, l.city AS location_city,
+    l.timezone AS location_timezone,
+    v.name AS vendor_name,
+    pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
+FROM visit_request vr
+JOIN location l ON l.id = vr.location_id
+LEFT JOIN vendor v ON v.id = vr.vendor_id
+JOIN users pu ON pu.id = vr.pic_user_id
+WHERE vr.id = ANY(sqlc.arg('visit_ids')::uuid[]);
+
+-- name: ListCheckInsByVisitIDs :many
+-- Batched existence read for the R2 no-show sweep: one round trip for the
+-- whole candidate set instead of one GetCheckInByVisitRequest probe per
+-- visit. Rides the UNIQUE index on check_in(visit_request_id).
+SELECT * FROM check_in WHERE visit_request_id = ANY(sqlc.arg('visit_request_ids')::uuid[]);

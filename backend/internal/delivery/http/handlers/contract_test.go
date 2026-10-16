@@ -15,7 +15,7 @@ import (
 // each schema allows. A handler emitting any other key fails this test.
 var openapiKeys = map[string]map[string]bool{
 	"VisitorItem": {
-		"name": true, "id_number": true, "phone": true, "id_card_photo_url": true,
+		"id": true, "name": true, "id_number": true, "phone": true, "id_card_photo_url": true,
 		"photo_url": true, "vendor_id": true, "vendor_name": true,
 	},
 	"Location": {
@@ -100,6 +100,7 @@ func TestResponseKeysAreSubsetOfOpenapi(t *testing.T) {
 		"start_date": "2026-10-01T09:00:00Z",
 		"end_date": "2026-10-01T17:00:00Z",
 		"is_nda_accepted": true,
+		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
 		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
 	}`
 

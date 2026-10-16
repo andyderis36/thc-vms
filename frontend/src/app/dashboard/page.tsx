@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   AlertTriangle,
@@ -25,12 +25,13 @@ import { ApproveModal, apiErrorMessage } from '@/features/visits/components/Appr
 import { RejectModal } from '@/features/visits/components/RejectModal'
 import { VisitCards } from '@/features/visits/components/VisitCards'
 import { VisitTable } from '@/features/visits/components/VisitTable'
-import { useLocationsQuery, useVisitsQuery } from '@/lib/api/hooks'
+import { useLocationsQuery, usePendingApprovalCount, useVisitsQuery } from '@/lib/api/hooks'
 import type { VisitDetail, VisitListParams, VisitStatus } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
 import { VISIT_STATUS_META } from '@/lib/visits/status-badge'
+import { mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
 
 /**
  * SCR-02 — Dashboard Kunjungan & Antrean.
@@ -41,10 +42,16 @@ import { VISIT_STATUS_META } from '@/lib/visits/status-badge'
  * `useQuery` memakai konteks root dan navigasi dashboard↔gate tidak blank/loop.
  *
  * Dua kunci query disengaja:
- * 1. Tanpa `status` → metrik 4 kartu, hitung tab, dan `pendingCount` shell
- *    (tidak berubah saat pengguna ganti tab).
+ * 1. Tanpa `status` → metrik 4 kartu dan hitung tab (tidak berubah saat
+ *    pengguna ganti tab); `pendingCount` sendiri kini dari
+ *    usePendingApprovalCount — total server, konsisten dengan halaman lain.
  * 2. Dengan `status` → baris tabel/kartu. Saat `status` undefined, kedua
  *    objek params identik sehingga cache React Query menyatukannya.
+ *
+ * Kunci ketiga (opsional): tab "Menunggu Approval" (`status: requested`)
+ * juga menampilkan kunjungan `rescheduled` — keduanya menunggu keputusan —
+ * digabung client-side oleh `mergeUpcomingQueue`. Query-nya hanya aktif di
+ * tab tersebut (pola sama dengan antrean "Akan Hadir" gerbang).
  */
 export default function DashboardPage() {
   // Tanpa provider ganda: pakai SessionProvider + QueryClient + Toaster milik root layout.
@@ -114,6 +121,32 @@ function DashboardScreen() {
 
   const baseQuery = useVisitsQuery(baseParams)
   const listQuery = useVisitsQuery(listParams)
+  // Tab "Menunggu Approval" (status requested) juga menampilkan kunjungan
+  // `rescheduled` — keduanya menunggu keputusan admin. Query kedua HANYA
+  // aktif di tab tersebut agar tab lain tetap single-query; hasilnya digabung
+  // client-side oleh mergeUpcomingQueue (dedupe by id, urut kronologis) —
+  // persis pola antrean "Akan Hadir" gerbang.
+  const menungguRescheduledQuery = useVisitsQuery(
+    { ...baseParams, status: 'rescheduled' },
+    statusFilter === 'requested',
+  )
+  // `pendingCount` mencakup `requested` + `rescheduled` (keduanya menunggu
+  // keputusan) → tab, kartu metrik, dan badge shell selalu satu angka.
+  // PERUBAHAN SADAR (konsistensi): sumbernya kini total SERVER, bukan filter
+  // client atas halaman `baseQuery` `limit:100` yang bisa undercount saat >100
+  // item — sumber yang sama dengan badge di 6 halaman lain; scope cabang/peran
+  // tetap ikut backend. (Harus dipanggil sebelum early-return `user === null`
+  // agar urutan hook stabil.)
+  const { pendingCount } = usePendingApprovalCount()
+  // Galat HANYA dari query utama: kegagalan query rescheduled menghasilkan
+  // items `[]` sehingga daftar requested yang valid tidak pernah dikosongkan.
+  const rows: VisitDetail[] = useMemo(() => {
+    const primary = listQuery.data?.items ?? []
+    if (statusFilter !== 'requested') return primary
+    return mergeUpcomingQueue(primary, menungguRescheduledQuery.data?.items ?? [])
+  }, [statusFilter, listQuery.data, menungguRescheduledQuery.data])
+  const rowsLoading =
+    listQuery.isPending || (statusFilter === 'requested' && menungguRescheduledQuery.isPending)
 
   if (user === null) return null
 
@@ -121,10 +154,8 @@ function DashboardScreen() {
   const allowApproval = can(role, 'approveVisit')
   const canSubmit = can(role, 'submitVisit')
 
-  const rows: VisitDetail[] = listQuery.data?.items ?? []
   const baseItems: VisitDetail[] = baseQuery.data?.items ?? []
   const totalCount = baseQuery.data?.total ?? 0
-  const pendingCount = baseItems.filter((visit) => visit.status === 'requested').length
   const visitingCount = baseItems.filter((visit) => visit.status === 'visiting').length
   const completedCount = baseItems.filter((visit) => visit.status === 'completed').length
 
@@ -318,7 +349,7 @@ function DashboardScreen() {
       <Tabs className="mt-5" tabs={tabs} value={tabValue} onChange={handleTabChange} />
 
       <div className="mt-4">
-        {listQuery.isPending ? (
+        {rowsLoading ? (
           <div className="card flex items-center justify-center gap-3 py-12 text-sm text-ink-secondary">
             <Spinner size="sm" />
             Memuat kunjungan…
@@ -330,7 +361,14 @@ function DashboardScreen() {
               Gagal memuat daftar kunjungan
             </p>
             <p className="mt-2 text-sm text-ink-secondary">{apiErrorMessage(listQuery.error)}</p>
-            <Button variant="secondary" className="mt-4 min-h-touch" onClick={() => void listQuery.refetch()}>
+            <Button
+              variant="secondary"
+              className="mt-4 min-h-touch"
+              onClick={() => {
+                void listQuery.refetch()
+                if (statusFilter === 'requested') void menungguRescheduledQuery.refetch()
+              }}
+            >
               Coba Lagi
             </Button>
           </div>

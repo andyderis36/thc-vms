@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -101,6 +103,15 @@ func (h *VisitHandler) Create(c *gin.Context) {
 	}
 	var body createVisitBody
 	if err := c.ShouldBindJSON(&body); err != nil {
+		// assignment_letter_url is the ONLY member carrying a binding tag,
+		// so a non-syntax bind failure is always the missing SPK: answer
+		// the FE-aligned wording, not the generic body message.
+		var syntaxErr *json.SyntaxError
+		var typeErr *json.UnmarshalTypeError
+		if !errors.As(err, &syntaxErr) && !errors.As(err, &typeErr) {
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Surat Tugas / SPK wajib diunggah.")
+			return
+		}
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Isi permohonan kunjungan tidak valid.")
 		return
 	}
@@ -124,7 +135,14 @@ func (h *VisitHandler) Create(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	response.Created(c, withEchoedVisitors(toVisitDetail(created), in))
+	// The create path returns the bare row, so re-read through the GET path
+	// before answering 201: the same usecase/repository enrichment fills
+	// location/pic names, vendor_name, named purposes, roster and SPK URL.
+	// A failed re-read never fails the create; the bare row still answers.
+	if enriched, gerr := h.visits.GetVisit(c.Request.Context(), actor, string(created.ID)); gerr == nil {
+		created = enriched
+	}
+	response.Created(c, toVisitDetail(created))
 }
 
 // Get serves GET /visits/{id}. The key is a uuid OR a VST- business code for
@@ -251,6 +269,11 @@ func checkCreateBody(body createVisitBody) string {
 	}
 	if body.IsNDAAccepted == nil {
 		return "Persetujuan NDA wajib diisi."
+	}
+	// SPK is mandatory for NEW requests only; grandfathered rows without one
+	// keep flowing through GET/list/update/reschedule/approve untouched.
+	if body.AssignmentLetterURL == nil || strings.TrimSpace(*body.AssignmentLetterURL) == "" {
+		return "Surat Tugas / SPK wajib diunggah."
 	}
 	return ""
 }

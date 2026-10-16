@@ -22,7 +22,7 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Spinner } from '@/components/ui/Spinner'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
-import { PicMobileShell } from '@/components/layouts/PicMobileShell'
+import { PicMobileShell, isQrVisible } from '@/components/layouts/PicMobileShell'
 import { SecurityKioskShell } from '@/components/layouts/SecurityKioskShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { ApproveModal } from '@/features/visits/components/ApproveModal'
@@ -32,12 +32,15 @@ import { QrCard } from '@/features/visits/detail/QrCard'
 import { RescheduleModal } from '@/features/visits/detail/RescheduleModal'
 import { Timeline, formatTanggalWaktu } from '@/features/visits/detail/Timeline'
 import { VisitorPhoto } from '@/features/visits/detail/VisitorPhoto'
+import { VisitFilePhoto } from '@/features/visits/detail/VisitFilePhoto'
+import { useVisitFile } from '@/features/visits/hooks/useVisitFile'
 import { ApiError } from '@/lib/api/fetcher'
 import { useDeleteVisitMutation, useVisitQuery } from '@/lib/api/hooks'
 import type { Role, VisitDetail, VisitStatus } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import { isApprovableStatus, isRejectableStatus } from '@/lib/visits/visit-status'
 import { toast } from 'sonner'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 
@@ -134,13 +137,52 @@ function ErrorBlock({ error, onRetry }: ErrorBlockProps) {
   )
 }
 
+/**
+ * Panel "Dokumen Surat Tugas" — berkas dimuat lewat endpoint berkas
+ * kunjungan sebagai object URL (tahan lintas host; bukan presigned MinIO).
+ * Selama memuat / bila gagal, tampilkan paragraf netral yang sama persis
+ * dengan kondisi tanpa dokumen (galat berbahasa Indonesia bila ada).
+ */
+function SuratTugasPanel({ visit }: { visit: VisitDetail }) {
+  const { objectUrl, error } = useVisitFile({
+    visitId: visit.id,
+    kind: 'assignment_letter',
+  })
+
+  if (objectUrl === null) {
+    return (
+      <p className="mt-4 rounded-control bg-neutral-bg px-4 py-3 text-sm text-neutral-text">
+        {error ?? 'Belum ada dokumen surat tugas yang dilampirkan.'}
+      </p>
+    )
+  }
+
+  return (
+    <div className="mt-4 flex flex-col items-start gap-2">
+      <a
+        href={objectUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Lihat dokumen surat tugas ${visit.visit_id}`}
+        className="inline-flex min-h-touch items-center justify-center gap-2 rounded-control border border-brand px-4 text-label font-semibold uppercase tracking-wide text-brand transition duration-150 hover:bg-brand-soft"
+      >
+        <ExternalLink aria-hidden="true" className="size-4 shrink-0" />
+        Lihat Dokumen
+      </a>
+      <p className="text-label text-ink-muted">
+        Berkas dibuka di tab baru langsung dari penyimpanan MinIO / S3.
+      </p>
+    </div>
+  )
+}
+
 interface RoleShellProps {
   role: Role
   visitId: string
   /**
    * Status kunjungan bila sudah termuat. SHELL-04 (Vendor/Mitra) memakainya untuk
-   * memetakan rute detail ini ke tab Vendor/Mitra yang benar (approved/visiting ->
-   * `/qr`, selainnya -> `/dashboard`) sehingga SCR-04 selalu punya
+   * memetakan rute detail ini ke tab Vendor/Mitra yang benar (approved/visiting
+   * -> `/qr`, selainnya -> `/dashboard`) sehingga SCR-04 selalu punya
    * `aria-current`. Shell lain mengabaikannya.
    */
   visitStatus?: VisitStatus
@@ -233,18 +275,22 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
   const canReschedule = !isTerminal && can(role, 'rescheduleVisit')
   const canCancel = !isTerminal && can(role, 'cancelVisit')
   // Persetujuan di SCR-04 (inventaris §3: modal approve/reject ada di SCR-02
-  // & SCR-04): hanya status requested + peran berhak. Gaya tombol disamakan
-  // dengan VisitTable (success/danger, min-h-touch, aria-label).
-  // Vendor/Mitra & security tidak memiliki `approveVisit`/`rejectVisit` sehingga kedua
-  // tombol itu tidak pernah dirender untuk mereka (PRD §4 — RBAC murni).
-  const canApprove = visit.status === 'requested' && can(role, 'approveVisit')
-  const canReject = visit.status === 'requested' && can(role, 'rejectVisit')
+  // & SCR-04): status requested ATAU rescheduled + peran berhak — backend
+  // mengizinkan `rescheduled→approved` (perlu persetujuan ulang setelah jadwal
+  // digeser). Tolak tetap HANYA requested (`rescheduled→rejected` ilegal).
+  // Gaya tombol disamakan dengan VisitTable (success/danger, min-h-touch,
+  // aria-label). Vendor/Mitra & security tidak memiliki `approveVisit`/
+  // `rejectVisit` sehingga kedua tombol itu tidak pernah dirender untuk
+  // mereka (PRD §4 — RBAC murni).
+  const canApprove = isApprovableStatus(visit.status) && can(role, 'approveVisit')
+  const canReject = isRejectableStatus(visit.status) && can(role, 'rejectVisit')
   const showActions = canReschedule || canCancel || canApprove || canReject
-  // QR tampil selama `approved` (untuk check-in) DAN `visiting` (untuk
-  // check-out): payload QR == visit_id stabil per kunjungan, dan scanner
-  // gerbang mengarahkan otomatis approved->check-in, visiting->check-out.
-  // Status lain (requested/cancelled/completed/...) menyembunyikan QR.
-  const showQr = visit.status === 'approved' || visit.status === 'visiting'
+  // QR tampil selama `approved` (untuk check-in) dan `visiting` (untuk
+  // check-out, QR yang SAMA). `rescheduled` WAJIB disetujui ulang sebelum
+  // check-in (backend menolak rescheduled->visiting), jadi QR disembunyikan
+  // sampai status kembali `approved`. Status lain (requested/cancelled/
+  // completed/...) menyembunyikan QR.
+  const showQr = isQrVisible(visit.status)
 
   const purposeChips =
     visit.purposes.length > 0 ? (
@@ -396,21 +442,7 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                 ada dokumen — jika tetap dirender, href="" membuka tab kosong.
               */}
               {visit.assignment_letter_url ? (
-                <div className="mt-4 flex flex-col items-start gap-2">
-                  <a
-                    href={visit.assignment_letter_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`Lihat dokumen surat tugas ${visit.visit_id}`}
-                    className="inline-flex min-h-touch items-center justify-center gap-2 rounded-control border border-brand px-4 text-label font-semibold uppercase tracking-wide text-brand transition duration-150 hover:bg-brand-soft"
-                  >
-                    <ExternalLink aria-hidden="true" className="size-4 shrink-0" />
-                    Lihat Dokumen
-                  </a>
-                  <p className="text-label text-ink-muted">
-                    Berkas dibuka di tab baru langsung dari penyimpanan MinIO / S3.
-                  </p>
-                </div>
+                <SuratTugasPanel visit={visit} />
               ) : (
                 <p className="mt-4 rounded-control bg-neutral-bg px-4 py-3 text-sm text-neutral-text">
                   Belum ada dokumen surat tugas yang dilampirkan.
@@ -436,11 +468,19 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                         key={`${index}-${visitor.id_number}`}
                         className="flex items-start gap-3 py-3"
                       >
-                        <VisitorPhoto
-                          src={selfieUrl}
-                          visitorName={visitor.name}
-                          variant="selfie"
-                        />
+                        {selfieUrl !== null && selfieUrl !== '' ? (
+                          <VisitFilePhoto
+                            visitId={visit.id}
+                            visitor={visitor}
+                            variant="selfie"
+                          />
+                        ) : (
+                          <VisitorPhoto
+                            src={null}
+                            visitorName={visitor.name}
+                            variant="selfie"
+                          />
+                        )}
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-ink">
                             {visitor.name}
@@ -456,15 +496,12 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                           </p>
                           <div className="mt-1.5 flex flex-wrap gap-2">
                             {ktpUrl !== null && ktpUrl !== '' ? (
-                              <a
-                                href={ktpUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-label={`Lihat Foto KTP ${visitor.name}`}
-                                className="inline-flex min-h-touch items-center rounded-badge border border-border-mid px-2.5 text-badge font-semibold text-brand"
-                              >
-                                Lihat Foto KTP
-                              </a>
+                              <VisitFilePhoto
+                                visitId={visit.id}
+                                visitor={visitor}
+                                variant="ktp"
+                                triggerLabel="Lihat Foto KTP"
+                              />
                             ) : (
                               <span className="text-badge text-ink-muted">
                                 Foto KTP tidak tersedia

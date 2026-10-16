@@ -144,7 +144,7 @@ func TestFail_ProjectsDomainSentinelOntoStatusAndCode(t *testing.T) {
 		},
 		{
 			name:       "invalid status transition",
-			err:        domain.NewInvalidTransition(domain.VisitStatusRescheduled, domain.VisitStatusVisiting),
+			err:        domain.NewInvalidTransition(domain.VisitStatusApproved, domain.VisitStatusRejected),
 			wantStatus: http.StatusConflict,
 			wantCode:   "INVALID_TRANSITION",
 			wantMsg:    "Transisi status kunjungan tidak diizinkan.",

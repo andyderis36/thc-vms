@@ -113,12 +113,16 @@ func TestCheckIn_RefusesRescheduledVisitUntilReapproved(t *testing.T) {
 	actor := gate.Actor{ID: "sec-1", Role: domain.RoleSecurity, LocationID: uuidPtr("loc-A")}
 	// When: check-in runs before re-approval.
 	_, err := svc.CheckIn(t.Context(), actor, string(visit.ID), gate.CheckInInput{})
-	// Then: conflict, and the visit keeps its rescheduled status.
+	// Then: conflict with the re-approval demand, and the visit keeps its
+	// rescheduled status.
 	if err == nil {
 		t.Fatal("expected rescheduled check-in to be refused, got nil")
 	}
 	if !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("expected ErrConflict, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "harus disetujui kembali") {
+		t.Fatalf("expected re-approval message, got %q", err.Error())
 	}
 	if len(visits.writes) != 0 || len(checks.checkIns) != 0 {
 		t.Fatalf("refused check-in must not write: %d status writes, %d check-ins",

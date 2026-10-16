@@ -86,26 +86,36 @@ type Transition struct {
 }
 
 // allowedTransitions is the complete rule set from the PRD state machine
-// (docs/0. PRD section 5, L131-154): twelve edges, no more. Anything absent
-// from this list is refused by CanTransition, including the moves the diagram
-// only forbids by omission (rescheduled->visiting, approved->rejected, and
-// every exit from a terminal status).
+// (docs/0. PRD section 5): fourteen edges, no more. Anything absent from this
+// list is refused by CanTransition, including the moves the diagram only
+// forbids by omission (rescheduled->visiting, approved->rejected, and every
+// exit from a terminal status).
+//
+// A schedule change may be moved again without re-approval:
+// rescheduled->rescheduled lets a visit be rescheduled repeatedly, and
+// requested->rescheduled lets a vendor move the window of a request that has
+// not been approved yet. Check-in still needs approval first:
+// rescheduled->visiting stays forbidden, so a rescheduled visit must travel
+// rescheduled->approved before the gate lets it in. The rescheduled status is
+// informational (badge + history) on top of that rule.
 var allowedTransitions = []Transition{
 	{From: VisitStatusNone, To: VisitStatusRequested, Trigger: TriggerSubmit},
 	{From: VisitStatusRequested, To: VisitStatusApproved, Trigger: TriggerApprove},
 	{From: VisitStatusRequested, To: VisitStatusRejected, Trigger: TriggerReject},
 	{From: VisitStatusRequested, To: VisitStatusCancelled, Trigger: TriggerCancel},
+	{From: VisitStatusRequested, To: VisitStatusRescheduled, Trigger: TriggerReschedule},
 	{From: VisitStatusApproved, To: VisitStatusVisiting, Trigger: TriggerCheckIn},
 	{From: VisitStatusApproved, To: VisitStatusRescheduled, Trigger: TriggerReschedule},
 	{From: VisitStatusApproved, To: VisitStatusCancelled, Trigger: TriggerCancel},
 	{From: VisitStatusApproved, To: VisitStatusNotVisit, Trigger: TriggerNoShow},
 	{From: VisitStatusRescheduled, To: VisitStatusApproved, Trigger: TriggerApprove},
+	{From: VisitStatusRescheduled, To: VisitStatusRescheduled, Trigger: TriggerReschedule},
 	{From: VisitStatusRescheduled, To: VisitStatusCancelled, Trigger: TriggerCancel},
 	{From: VisitStatusVisiting, To: VisitStatusCompleted, Trigger: TriggerCheckOut},
 	{From: VisitStatusVisiting, To: VisitStatusCompleted, Trigger: TriggerAutoComplete},
 }
 
-// AllTransitions returns a copy of the twelve legal edges.
+// AllTransitions returns a copy of the fourteen legal edges.
 func AllTransitions() []Transition {
 	return slices.Clone(allowedTransitions)
 }
@@ -150,7 +160,7 @@ func (e *TransitionError) Unwrap() error {
 }
 
 // CanTransition reports whether a visit may move from one status to another,
-// returning nil for the twelve legal edges and a *TransitionError wrapping
+// returning nil for the fourteen legal edges and a *TransitionError wrapping
 // ErrInvalidTransition for everything else.
 func CanTransition(from, to VisitStatus) error {
 	if len(TransitionTriggersFrom(from, to)) > 0 {

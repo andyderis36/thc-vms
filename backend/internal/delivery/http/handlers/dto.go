@@ -14,8 +14,11 @@ import (
 
 // visitorDTO mirrors VisitorItem: name/id_number/phone plus the optional
 // id_card_photo_url, photo_url (selfie) and vendor_id uploaded beforehand,
-// with the resolved vendor_name alongside.
+// with the resolved vendor_name alongside. ID carries the visitor row UUID on
+// reads (omitted on create-echo, which has no stored rows yet); the gate file
+// endpoint requires it, so callers must use ID, never id_number.
 type visitorDTO struct {
+	ID             *string `json:"id,omitempty"`
 	Name           string  `json:"name"`
 	IDNumber       string  `json:"id_number"`
 	Phone          string  `json:"phone"`
@@ -118,7 +121,10 @@ type createVisitBody struct {
 	StartDate           string  `json:"start_date"`
 	EndDate             string  `json:"end_date"`
 	IsMultiDay          bool    `json:"is_multi_day"`
-	AssignmentLetterURL *string `json:"assignment_letter_url"`
+	// AssignmentLetterURL is mandatory on CREATE (binding required); the
+	// exact FE-aligned wording comes from checkCreateBody, which also
+	// rejects the empty/whitespace case this tag cannot see.
+	AssignmentLetterURL *string `json:"assignment_letter_url" binding:"required"`
 	IsNDAAccepted       *bool   `json:"is_nda_accepted"`
 	Notes               string  `json:"notes"`
 	Visitors            []struct {
@@ -139,8 +145,8 @@ type createVisitBody struct {
 // Text pointers render as null when absent, matching the [string, "null"]
 // schema members; slices stay non-nil so they render as [] instead of null.
 // The roster (including photo_url) and vendor_name travel from the domain
-// visit: reads carry the repository-loaded roster, create carries the echoed
-// input attached by withEchoedVisitors.
+// visit: reads carry the repository-loaded roster, create carries the
+// re-read GET enrichment (handler re-reads the created row before 201).
 func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 	loc := locationDTO{ID: string(v.LocationID)}
 	if v.LocationName != "" {
@@ -184,6 +190,10 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 		dto := visitorDTO{
 			Name: w.Name, IDNumber: w.IDNumber, Phone: w.Phone,
 			IDCardPhotoURL: w.IDCardPhotoURL, PhotoURL: w.PhotoURL,
+		}
+		if w.ID != "" {
+			id := string(w.ID)
+			dto.ID = &id
 		}
 		if w.VendorID != "" {
 			id := string(w.VendorID)
@@ -270,19 +280,6 @@ func toCreateInput(body createVisitBody, start, end time.Time) visit.CreateVisit
 		in.Visitors = append(in.Visitors, visitor)
 	}
 	return in
-}
-
-// withEchoedVisitors fills the purpose shells on a created detail. The
-// repository returns the visit row without its visitor rows, so the usecase
-// attaches the trimmed domain roster (with resolved vendor_name) to the
-// created visit and toVisitDetail already renders it; the roster is kept as
-// passed and never rebuilt from the raw input here so trimming is preserved.
-func withEchoedVisitors(detail visitDetailDTO, in visit.CreateVisitInput) visitDetailDTO {
-	detail.Purposes = make([]purposeDTO, 0, len(in.PurposeIDs))
-	for _, pid := range in.PurposeIDs {
-		detail.Purposes = append(detail.Purposes, purposeDTO{ID: string(pid)})
-	}
-	return detail
 }
 
 // toUploadDTO maps a storage result onto the UploadFileResponse data object.

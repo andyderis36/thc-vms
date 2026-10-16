@@ -126,6 +126,7 @@ func TestCreateVisit_Returns201WithDetail(t *testing.T) {
 		"end_date": "2026-10-01T17:00:00Z",
 		"is_nda_accepted": true,
 		"notes": "splicing FO",
+		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
 		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
 	}`
 	rec := serveJSON(engine, "POST", "/visits", payload)
@@ -140,6 +141,95 @@ func TestCreateVisit_Returns201WithDetail(t *testing.T) {
 	}
 	if len(svc.lastCreateIn.Visitors) != 1 || len(svc.lastCreateIn.PurposeIDs) != 1 {
 		t.Fatalf("usecase input not mapped: %+v", svc.lastCreateIn)
+	}
+}
+
+// TestCreateVisit_EchoMatchesGetDetail pins the 201 echo contract: the create
+// response must carry the same enriched members as GET /visits/{id} (location
+// name, pic_user name/email, vendor_name, named purposes, roster, SPK URL),
+// minus the gate times which belong to the single-GET path only.
+func TestCreateVisit_EchoMatchesGetDetail(t *testing.T) {
+	enriched := cannedVisit()
+	enriched.Purposes = []domain.Purpose{
+		{ID: "22222222-2222-2222-2222-222222222222", Name: "Splicing FO", IsActive: true},
+	}
+	// The repository returns the bare row on create (no join names, no
+	// purposes); the handler must re-read via the GET path before answering
+	// 201 so the echo is as complete as a GET.
+	bare := domain.VisitRequest{
+		ID:          enriched.ID,
+		VisitID:     enriched.VisitID,
+		PICUserID:   enriched.PICUserID,
+		LocationID:  enriched.LocationID,
+		Status:      domain.VisitStatusRequested,
+		StartDate:   enriched.StartDate,
+		EndDate:     enriched.EndDate,
+		CreatedAt:   enriched.CreatedAt,
+		Visitors:    enriched.Visitors,
+	}
+	svc := &fakeVisitService{
+		created:    bare,
+		visitByKey: map[string]domain.VisitRequest{string(bare.ID): enriched},
+	}
+	engine := newVisitEngine(svc, domain.RoleVendor, "")
+
+	payload := `{
+		"location_id": "loc-A",
+		"purpose_ids": ["22222222-2222-2222-2222-222222222222"],
+		"start_date": "2026-10-01T09:00:00Z",
+		"end_date": "2026-10-01T17:00:00Z",
+		"is_nda_accepted": true,
+		"notes": "splicing FO",
+		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
+		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
+	}`
+	rec := serveJSON(engine, "POST", "/visits", payload)
+	mustStatus(t, rec, 201)
+	detail := asObject(t, mustSuccess(t, rec).Data)
+
+	loc, ok := detail["location"].(map[string]any)
+	if !ok || loc == nil {
+		t.Fatalf("location missing in 201 echo: %v", detail["location"])
+	}
+	if loc["name"] != "POP Tebet" {
+		t.Fatalf("location.name = %v, want POP Tebet (echo selengkap GET)", loc["name"])
+	}
+	user, ok := detail["pic_user"].(map[string]any)
+	if !ok || user == nil {
+		t.Fatalf("pic_user missing in 201 echo: %v", detail["pic_user"])
+	}
+	if user["name"] != "Dimas Prasetyo" {
+		t.Fatalf("pic_user.name = %v, want Dimas Prasetyo", user["name"])
+	}
+	if user["email"] != "dimas@vendor.example" {
+		t.Fatalf("pic_user.email = %v, want dimas@vendor.example", user["email"])
+	}
+	if detail["vendor_name"] != "PT Lintas Fiber" {
+		t.Fatalf("vendor_name = %v, want PT Lintas Fiber", detail["vendor_name"])
+	}
+	purposes, ok := detail["purposes"].([]any)
+	if !ok || len(purposes) != 1 {
+		t.Fatalf("purposes echo wrong: %v", detail["purposes"])
+	}
+	purpose := purposes[0].(map[string]any)
+	if purpose["id"] != "22222222-2222-2222-2222-222222222222" {
+		t.Fatalf("purpose.id = %v, want the catalogue id", purpose["id"])
+	}
+	if purpose["name"] != "Splicing FO" {
+		t.Fatalf("purpose.name = %v, want Splicing FO (bukan shell ID-only)", purpose["name"])
+	}
+	visitors, ok := detail["visitors"].([]any)
+	if !ok || len(visitors) != 1 {
+		t.Fatalf("visitors echo wrong: %v", detail["visitors"])
+	}
+	if visitors[0].(map[string]any)["name"] != "Andi" {
+		t.Fatalf("roster name = %v, want Andi", visitors[0].(map[string]any)["name"])
+	}
+	if detail["assignment_letter_url"] != "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf" {
+		t.Fatalf("assignment_letter_url = %v, want the SPK URL", detail["assignment_letter_url"])
+	}
+	if _, hasCheckIn := detail["check_in_at"]; hasCheckIn {
+		t.Fatalf("201 echo must not carry gate times, got %v", detail["check_in_at"])
 	}
 }
 
@@ -161,6 +251,7 @@ func TestCreateVisit_MapsPerVisitorVendorIDAndPhotoURL(t *testing.T) {
 		"start_date": "2026-10-01T09:00:00Z",
 		"end_date": "2026-10-01T17:00:00Z",
 		"is_nda_accepted": true,
+		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
 		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811", "photo_url": "http://localhost:9000/b/id_card/visit-1/selfie.jpg", "vendor_id": "33333333-3333-3333-3333-333333333333"}]
 	}`
 	rec := serveJSON(engine, "POST", "/visits", payload)
@@ -203,6 +294,7 @@ func TestCreateVisit_RejectsMalformedPerVisitorVendorID(t *testing.T) {
 		"start_date": "2026-10-01T09:00:00Z",
 		"end_date": "2026-10-01T17:00:00Z",
 		"is_nda_accepted": true,
+		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
 		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811", "vendor_id": "bukan-uuid"}]
 	}`
 	rec := serveJSON(engine, "POST", "/visits", payload)

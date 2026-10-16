@@ -11,13 +11,13 @@ import (
 )
 
 // configEnvKeys is every variable documented in docs/5. LOCAL_DEV.md section
-// 4.1 plus the two pool knobs the PRD and auth diagram require. Tests unset
-// all of them so each case starts from a known, empty environment.
+// 4.1 plus the pool knobs. Tests unset all of them so each case starts from a
+// known, empty environment.
 var configEnvKeys = []string{
 	"APP_NAME", "APP_ENV", "APP_PORT", "APP_DEBUG",
 	"DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE",
-	"DB_MAX_CONNS", "DB_MIN_CONNS", "DB_MAX_CONN_LIFETIME",
-	"DB_MAX_CONN_IDLE_TIME", "DB_ACQUIRE_TIMEOUT",
+	"DB_MAX_CONNS", "DB_MIN_CONNS", "DB_MIN_IDLE_CONNS", "DB_MAX_CONN_LIFETIME",
+	"DB_MAX_CONN_LIFETIME_JITTER", "DB_MAX_CONN_IDLE_TIME", "DB_ACQUIRE_TIMEOUT",
 	"JWT_SECRET", "JWT_EXPIRATION_HOURS",
 	"STORAGE_DRIVER", "S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY",
 	"S3_BUCKET_NAME", "S3_USE_SSL", "S3_REGION", "S3_PUBLIC_BASE_URL",
@@ -39,9 +39,10 @@ func clearEnv(t *testing.T, keys ...string) {
 func TestLoad_PoolDefaultsWhenEnvIsAbsent(t *testing.T) {
 	// Given: an environment with no THC variables at all.
 	// When:  the configuration is loaded.
-	// Then:  the pgxpool knobs fall back to the PRD values:
-	//        MaxConns 50, MinConns 10, MaxConnLifetime 1h,
-	//        MaxConnIdleTime 15m, AcquireTimeout 5s.
+	// Then:  the pgxpool knobs fall back to the laptop-safe (S4) defaults:
+	//        MaxConns 10, MinConns 0, MinIdleConns 1, MaxConnLifetime 30m
+	//        with a 5m jitter, MaxConnIdleTime 10m. The dial timeout is the
+	//        fixed 5s and AcquireTimeout keeps its legacy 5s default.
 	clearEnv(t, configEnvKeys...)
 	t.Setenv("JWT_SECRET", "unit-test-secret")
 
@@ -50,20 +51,53 @@ func TestLoad_PoolDefaultsWhenEnvIsAbsent(t *testing.T) {
 		t.Fatalf("Load() unexpected error: %v", err)
 	}
 
-	if cfg.DB.MaxConns != 50 {
-		t.Errorf("DB.MaxConns = %d, want 50", cfg.DB.MaxConns)
+	if cfg.DB.MaxConns != 10 {
+		t.Errorf("DB.MaxConns = %d, want 10", cfg.DB.MaxConns)
 	}
-	if cfg.DB.MinConns != 10 {
-		t.Errorf("DB.MinConns = %d, want 10", cfg.DB.MinConns)
+	if cfg.DB.MinConns != 0 {
+		t.Errorf("DB.MinConns = %d, want 0", cfg.DB.MinConns)
 	}
-	if cfg.DB.MaxConnLifetime != time.Hour {
-		t.Errorf("DB.MaxConnLifetime = %s, want 1h", cfg.DB.MaxConnLifetime)
+	if cfg.DB.MinIdleConns != 1 {
+		t.Errorf("DB.MinIdleConns = %d, want 1", cfg.DB.MinIdleConns)
 	}
-	if cfg.DB.MaxConnIdleTime != 15*time.Minute {
-		t.Errorf("DB.MaxConnIdleTime = %s, want 15m", cfg.DB.MaxConnIdleTime)
+	if cfg.DB.MaxConnLifetime != 30*time.Minute {
+		t.Errorf("DB.MaxConnLifetime = %s, want 30m", cfg.DB.MaxConnLifetime)
+	}
+	if cfg.DB.MaxConnLifetimeJitter != 5*time.Minute {
+		t.Errorf("DB.MaxConnLifetimeJitter = %s, want 5m", cfg.DB.MaxConnLifetimeJitter)
+	}
+	if cfg.DB.MaxConnIdleTime != 10*time.Minute {
+		t.Errorf("DB.MaxConnIdleTime = %s, want 10m", cfg.DB.MaxConnIdleTime)
+	}
+	if cfg.DB.ConnectTimeout != 5*time.Second {
+		t.Errorf("DB.ConnectTimeout = %s, want the fixed 5s dial timeout", cfg.DB.ConnectTimeout)
 	}
 	if cfg.DB.AcquireTimeout != 5*time.Second {
-		t.Errorf("DB.AcquireTimeout = %s, want 5s", cfg.DB.AcquireTimeout)
+		t.Errorf("DB.AcquireTimeout = %s, want the legacy 5s default", cfg.DB.AcquireTimeout)
+	}
+}
+
+func TestLoad_AcquireTimeoutIsNotTheDialTimeout(t *testing.T) {
+	// Given: DB_ACQUIRE_TIMEOUT is overridden to 3s.
+	// When:  the configuration is loaded.
+	// Then:  the legacy env knob is preserved verbatim (backward compatible),
+	//        but the dial timeout stays the fixed 5s. pgx v5 exposes no
+	//        pool-level acquire timeout, so the two values must never be
+	//        conflated: pool waits are bounded by the per-request context.
+	clearEnv(t, configEnvKeys...)
+	t.Setenv("JWT_SECRET", "unit-test-secret")
+	t.Setenv("DB_ACQUIRE_TIMEOUT", "3s")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+
+	if cfg.DB.AcquireTimeout != 3*time.Second {
+		t.Errorf("DB.AcquireTimeout = %s, want 3s (env preserved)", cfg.DB.AcquireTimeout)
+	}
+	if cfg.DB.ConnectTimeout != 5*time.Second {
+		t.Errorf("DB.ConnectTimeout = %s, want the fixed 5s dial timeout independent of DB_ACQUIRE_TIMEOUT", cfg.DB.ConnectTimeout)
 	}
 }
 
@@ -144,33 +178,35 @@ func TestLoad_ParsesEveryTypedValue(t *testing.T) {
 	// Then:  each field carries the parsed value, not the raw string.
 	clearEnv(t, configEnvKeys...)
 	for key, value := range map[string]string{
-		"APP_NAME":              "THC-VMS-Backend",
-		"APP_ENV":               "staging",
-		"APP_PORT":              "9090",
-		"APP_DEBUG":             "false",
-		"DB_HOST":               "db.internal",
-		"DB_PORT":               "6543",
-		"DB_USER":               "vms",
-		"DB_PASSWORD":           "not-a-real-password",
-		"DB_NAME":               "vms_staging",
-		"DB_SSLMODE":            "require",
-		"DB_MAX_CONNS":          "120",
-		"DB_MIN_CONNS":          "25",
-		"DB_MAX_CONN_LIFETIME":  "90m",
-		"DB_MAX_CONN_IDLE_TIME": "7m",
-		"DB_ACQUIRE_TIMEOUT":    "3s",
-		"JWT_SECRET":            "unit-test-secret",
-		"JWT_EXPIRATION_HOURS":  "8",
-		"STORAGE_DRIVER":        "s3",
-		"S3_ENDPOINT":           "s3.example.internal:9000",
-		"S3_ACCESS_KEY_ID":      "AKIAEXAMPLE",
-		"S3_SECRET_ACCESS_KEY":  "not-a-real-secret",
-		"S3_BUCKET_NAME":        "vms-bucket",
-		"S3_USE_SSL":            "true",
-		"S3_REGION":             "ap-southeast-1",
-		"S3_PUBLIC_BASE_URL":    "https://cdn.example.internal/vms-bucket",
-		"MAX_UPLOAD_SIZE_MB":    "12",
-		"ALLOWED_MIME_TYPES":    "application/pdf",
+		"APP_NAME":                    "THC-VMS-Backend",
+		"APP_ENV":                     "staging",
+		"APP_PORT":                    "9090",
+		"APP_DEBUG":                   "false",
+		"DB_HOST":                     "db.internal",
+		"DB_PORT":                     "6543",
+		"DB_USER":                     "vms",
+		"DB_PASSWORD":                 "not-a-real-password",
+		"DB_NAME":                     "vms_staging",
+		"DB_SSLMODE":                  "require",
+		"DB_MAX_CONNS":                "120",
+		"DB_MIN_CONNS":                "25",
+		"DB_MIN_IDLE_CONNS":           "8",
+		"DB_MAX_CONN_LIFETIME":        "90m",
+		"DB_MAX_CONN_LIFETIME_JITTER": "2m",
+		"DB_MAX_CONN_IDLE_TIME":       "7m",
+		"DB_ACQUIRE_TIMEOUT":          "3s",
+		"JWT_SECRET":                  "unit-test-secret",
+		"JWT_EXPIRATION_HOURS":        "8",
+		"STORAGE_DRIVER":              "s3",
+		"S3_ENDPOINT":                 "s3.example.internal:9000",
+		"S3_ACCESS_KEY_ID":            "AKIAEXAMPLE",
+		"S3_SECRET_ACCESS_KEY":        "not-a-real-secret",
+		"S3_BUCKET_NAME":              "vms-bucket",
+		"S3_USE_SSL":                  "true",
+		"S3_REGION":                   "ap-southeast-1",
+		"S3_PUBLIC_BASE_URL":          "https://cdn.example.internal/vms-bucket",
+		"MAX_UPLOAD_SIZE_MB":          "12",
+		"ALLOWED_MIME_TYPES":          "application/pdf",
 	} {
 		t.Setenv(key, value)
 	}
@@ -189,14 +225,17 @@ func TestLoad_ParsesEveryTypedValue(t *testing.T) {
 	if cfg.App.Debug {
 		t.Error("App.Debug = true, want false")
 	}
-	if cfg.DB.MaxConns != 120 || cfg.DB.MinConns != 25 {
-		t.Errorf("pool = %d/%d, want 120/25", cfg.DB.MaxConns, cfg.DB.MinConns)
+	if cfg.DB.MaxConns != 120 || cfg.DB.MinConns != 25 || cfg.DB.MinIdleConns != 8 {
+		t.Errorf("pool = %d/%d/%d, want 120/25/8", cfg.DB.MaxConns, cfg.DB.MinConns, cfg.DB.MinIdleConns)
 	}
-	if cfg.DB.MaxConnLifetime != 90*time.Minute || cfg.DB.MaxConnIdleTime != 7*time.Minute {
-		t.Errorf("lifetime/idle = %s/%s, want 90m/7m", cfg.DB.MaxConnLifetime, cfg.DB.MaxConnIdleTime)
+	if cfg.DB.MaxConnLifetime != 90*time.Minute || cfg.DB.MaxConnLifetimeJitter != 2*time.Minute || cfg.DB.MaxConnIdleTime != 7*time.Minute {
+		t.Errorf("lifetime/jitter/idle = %s/%s/%s, want 90m/2m/7m", cfg.DB.MaxConnLifetime, cfg.DB.MaxConnLifetimeJitter, cfg.DB.MaxConnIdleTime)
 	}
 	if cfg.DB.AcquireTimeout != 3*time.Second {
 		t.Errorf("DB.AcquireTimeout = %s, want 3s", cfg.DB.AcquireTimeout)
+	}
+	if cfg.DB.ConnectTimeout != 5*time.Second {
+		t.Errorf("DB.ConnectTimeout = %s, want the fixed 5s dial timeout", cfg.DB.ConnectTimeout)
 	}
 	if cfg.JWT.TTL() != 8*time.Hour {
 		t.Errorf("JWT.TTL() = %s, want 8h", cfg.JWT.TTL())
@@ -220,7 +259,9 @@ func TestLoad_RejectsMalformedValues(t *testing.T) {
 	for _, tc := range []struct{ name, key, value string }{
 		{"port is not a number", "APP_PORT", "eighty-eighty"},
 		{"pool size is not a number", "DB_MAX_CONNS", "many"},
+		{"min idle is not a number", "DB_MIN_IDLE_CONNS", "some"},
 		{"lifetime is not a duration", "DB_MAX_CONN_LIFETIME", "one hour"},
+		{"lifetime jitter is not a duration", "DB_MAX_CONN_LIFETIME_JITTER", "a bit"},
 		{"acquire timeout is not a duration", "DB_ACQUIRE_TIMEOUT", "5 seconds"},
 		{"expiration is not a number", "JWT_EXPIRATION_HOURS", "a day"},
 		{"upload size is not a number", "MAX_UPLOAD_SIZE_MB", "big"},

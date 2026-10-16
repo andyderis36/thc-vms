@@ -74,7 +74,12 @@ export const visitFormSchema = z
     start_date: z.string().min(1, 'Waktu mulai wajib diisi.'),
     end_date: z.string().min(1, 'Waktu selesai wajib diisi.'),
     is_multi_day: z.boolean(),
-    assignment_letter: assignmentLetterSchema.nullish(),
+    assignment_letter: assignmentLetterSchema
+      .nullish()
+      .refine(
+        (value): boolean => value != null,
+        'Surat Tugas / SPK wajib diunggah.',
+      ),
     notes: z.string().trim().optional(),
     technicians: z
       .array(technicianSchema)

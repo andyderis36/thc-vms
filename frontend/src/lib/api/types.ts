@@ -160,10 +160,26 @@ export interface Vendor {
 }
 
 export interface VisitorItem {
+  /**
+   * ID baris visitor (UUID) — diisi pada respons baca; absen (undefined) pada
+   * echo create. Satu-satunya nilai sah untuk `visitor_id` pada endpoint
+   * berkas; jangan pernah mengirim `id_number` ke sana (400).
+   */
+  id?: string;
   name: string;
   id_number: string;
   phone: string;
+  /**
+   * URL presigned MinIO/S3 (opaque, berumur pendek). Saat konteks kunjungan
+   * (`visit_id`) tersedia, lebih disukai lewat endpoint berkas
+   * `GET /visits/{id}/file?kind=id_card` (`src/lib/api/files.ts`) — tahan lintas host.
+   */
   id_card_photo_url: string | null;
+  /**
+   * URL presigned MinIO/S3 (opaque, berumur pendek). Saat konteks kunjungan
+   * (`visit_id`) tersedia, lebih disukai lewat endpoint berkas
+   * `GET /visits/{id}/file?kind=selfie` (`src/lib/api/files.ts`) — tahan lintas host.
+   */
   photo_url?: string | null;
   vendor_id?: string | null;
   vendor_name?: string | null;
@@ -189,6 +205,11 @@ export interface VisitDetail {
   vendor_name: string;
   start_date: string;
   end_date: string;
+  /**
+   * URL presigned MinIO/S3 (opaque, berumur pendek). Karena `id` kunjungan
+   * tersedia di type ini, lebih disukai lewat endpoint berkas
+   * `GET /visits/{id}/file?kind=assignment_letter` (`src/lib/api/files.ts`).
+   */
   assignment_letter_url: string | null;
   notes: string | null;
   /** "Tujuan lain" (teks bebas ≤200) — null/kosong bila tak diisi. */

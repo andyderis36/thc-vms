@@ -105,9 +105,11 @@ func run(ctx context.Context) error {
 	})
 	// File links on visit reads are short-lived presigned URLs of our own
 	// private bucket (never the raw stored address); the TTL comes from
-	// S3_PRESIGN_TTL_MINUTES and is guaranteed positive by config.
+	// S3_PRESIGN_TTL_MINUTES and is guaranteed positive by config. The object
+	// reader powers the scoped GET /visits/:id/file stream (bytes, not links).
 	visitSvc := visit.NewService(visits, master, clock, checkins, repository.NewVendorRepository(pool)).
-		WithFileLinks(store, cfg.Storage.PresignTTL())
+		WithFileLinks(store, cfg.Storage.PresignTTL()).
+		WithObjectReader(store)
 	gateSvc := gate.NewService(gate.Dependencies{
 		Visits: visits, CheckIns: checkins, Clock: clock, Logger: logger,
 	})
@@ -145,6 +147,7 @@ func run(ctx context.Context) error {
 		adminRoleID, vendorRoleID,
 	)
 	uploadHandler := handlers.NewUploadHandler(store, cfg.Upload.MaxSizeBytes)
+	fileHandler := handlers.NewFileHandler(visitSvc)
 	healthHandler := deliveryhttp.NewHealthHandler(pool)
 
 	// The anti-bruteforce limit is a deployment choice, not a spec constant: the
@@ -158,7 +161,8 @@ func run(ctx context.Context) error {
 	// accepts positive integers and would fall back to 5 on -1.
 	// Production keeps the default 5 attempts per minute.
 	var loginLimiter gin.HandlerFunc
-	if os.Getenv("AUTH_RATE_LIMIT") != "-1" {		loginLimiter = middleware.NewRateLimiter(
+	if os.Getenv("AUTH_RATE_LIMIT") != "-1" {
+		loginLimiter = middleware.NewRateLimiter(
 			envInt("AUTH_RATE_LIMIT", middleware.DefaultAuthRateLimit),
 			envDuration("AUTH_RATE_WINDOW", middleware.DefaultAuthRateWindow),
 		).Middleware()
@@ -200,6 +204,7 @@ func run(ctx context.Context) error {
 			CheckIn: gateHandler.CheckIn, CheckOut: gateHandler.CheckOut,
 		},
 		Upload: deliveryhttp.UploadRoutes{Upload: uploadHandler.Upload},
+		File:   deliveryhttp.FileRoutes{File: fileHandler.File},
 		Health: deliveryhttp.HealthProbes{Health: healthHandler.Health, Ready: healthHandler.Ready},
 		Chain: deliveryhttp.Chain{
 			Recovery: middleware.Recovery(),

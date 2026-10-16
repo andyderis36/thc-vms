@@ -330,6 +330,18 @@ export function AdminBranchShell({
 
         {/* Topbar mobile / tablet (< 1024px) */}
         <header className="sticky top-0 z-30 flex h-topbar items-center gap-3 border-b border-border-light bg-surface px-4 lg:hidden">
+          {/* Tombol hamburger di urutan PERTAMA (paling kiri, sebelum logo)
+              agar searah dengan laci drawer yang meluncur dari kiri. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Buka menu navigasi"
+            aria-expanded={drawerOpen}
+            className="min-h-touch shrink-0"
+            onClick={() => setDrawerOpen(true)}
+          >
+            <Menu className="size-5" aria-hidden="true" />
+          </Button>
           {logoMark}
           <span className="truncate text-sm font-bold text-ink">THC VMS</span>
           {/* Chip cabang terkunci di mobile — tetap statis, tidak interaktif. */}
@@ -341,17 +353,9 @@ export function AdminBranchShell({
             <span className="truncate">{locationName !== null ? locationName : 'Cabang'}</span>
             <span className="sr-only">(terkunci)</span>
           </span>
+          {/* `ml-auto` tetap di span avatar: mendorong sisa konten (avatar)
+              ke tepi kanan setelah tombol menu dipindah ke depan. */}
           <span className="ml-auto shrink-0">{avatar}</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Buka menu navigasi"
-            aria-expanded={drawerOpen}
-            className="min-h-touch"
-            onClick={() => setDrawerOpen(true)}
-          >
-            <Menu className="size-5" aria-hidden="true" />
-          </Button>
         </header>
 
         {/* Konten utama — min-w-0 (min-inline-size:0) menjamin tidak ada scroll

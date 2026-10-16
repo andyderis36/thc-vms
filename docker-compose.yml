@@ -1,8 +1,14 @@
 services:
   postgres:
     image: postgres:18-alpine
+    # Jangan pernah re-pull image yang sudah ada lokal — start harus
+    # offline-friendly (insiden pull Docker Hub gagal, Okt 2026).
+    pull_policy: missing
     container_name: thc-vms-postgres
     restart: always
+    # Resource cap (non-swarm, single-instance): batasi RAM & CPU per service.
+    mem_limit: 1G
+    cpus: 1.0
     environment:
       POSTGRES_USER: thc_user
       POSTGRES_PASSWORD: thc_password_local
@@ -18,9 +24,15 @@ services:
       retries: 5
 
   minio:
+    # Pakai :latest yang sudah ada lokal & terbukti jalan. Pin RELEASE
+    # dihapus karena memaksa pull tiap start (rapuh saat registry batuk).
+    # Versi known-good terakhir: RELEASE.2025-09-07T16-13-09Z.
     image: minio/minio:latest
+    pull_policy: missing
     container_name: thc-vms-minio
     restart: always
+    mem_limit: 512M
+    cpus: 1.0
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -31,21 +43,9 @@ services:
     volumes:
       - miniodata_local:/data
 
-  # One-shot: buatkan bucket privat S3_BUCKET_NAME (thc-vms-bucket) bila
-  # belum ada. Bucket TETAP privat (tanpa `mc anonymous`) karena backend
-  # melayani berkas lewat presigned URL ber-TTL (S3_PRESIGN_TTL_MINUTES).
-  minio-init:
-    image: minio/mc:latest
-    container_name: thc-vms-minio-init
-    restart: "no"
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      /usr/bin/mc alias set localminio http://minio:9000 minioadmin minioadmin;
-      /usr/bin/mc mb localminio/thc-vms-bucket --ignore-existing;
-      exit 0;
-      "
+  # minio-init DIHAPUS (Okt 2026): butuh image minio/mc yang tidak ada lokal
+  # dan memaksa pull tiap start. Pembuatan bucket thc-vms-bucket sudah
+  # ditangani backend EnsureBucket saat startup — bucket tetap privat.
 
 volumes:
   pgdata_local:

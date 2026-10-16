@@ -7,11 +7,15 @@ import (
 	"thc-vms/backend/internal/domain"
 )
 
-// allowedTransitions enumerates the 12 transitions the PRD state machine
-// (docs/0. PRD section 5, L131-154) permits. Anything not listed here is
-// rejected by CanTransition - including the transitions that are forbidden
-// only by omission in the diagram and are therefore the classic
-// implementation bug.
+// allowedTransitions enumerates the 14 transitions the PRD state machine
+// (docs/0. PRD section 5) permits. Anything not listed here is rejected by
+// CanTransition - including the transitions that are forbidden only by
+// omission in the diagram and are therefore the classic implementation bug.
+//
+// A schedule change may be moved again without re-approval
+// (rescheduled->rescheduled), and an unapproved request may be rescheduled
+// before it is approved (requested->rescheduled), but check-in still needs
+// re-approval first: rescheduled->visiting stays forbidden by omission.
 var allowedTransitions = []struct {
 	name string
 	from domain.VisitStatus
@@ -23,9 +27,11 @@ var allowedTransitions = []struct {
 	{"cancelled by vendor or admin", domain.VisitStatusRequested, domain.VisitStatusCancelled},
 	{"checked in at the gate", domain.VisitStatusApproved, domain.VisitStatusVisiting},
 	{"new schedule proposed", domain.VisitStatusApproved, domain.VisitStatusRescheduled},
+	{"requested visit rescheduled before approval", domain.VisitStatusRequested, domain.VisitStatusRescheduled},
 	{"cancelled before day H", domain.VisitStatusApproved, domain.VisitStatusCancelled},
 	{"no show after day H", domain.VisitStatusApproved, domain.VisitStatusNotVisit},
 	{"new schedule approved", domain.VisitStatusRescheduled, domain.VisitStatusApproved},
+	{"schedule moved again without re-approval", domain.VisitStatusRescheduled, domain.VisitStatusRescheduled},
 	{"reschedule withdrawn", domain.VisitStatusRescheduled, domain.VisitStatusCancelled},
 	{"checked out at the gate", domain.VisitStatusVisiting, domain.VisitStatusCompleted},
 	{"auto completed after end date +24h", domain.VisitStatusVisiting, domain.VisitStatusCompleted},
@@ -49,9 +55,14 @@ var forbiddenTransitions = []struct {
 	{"cannot re-approve an on-site visit", domain.VisitStatusVisiting, domain.VisitStatusApproved},
 	{"cannot skip the requested state", "", domain.VisitStatusApproved},
 	{"cannot go straight to visiting", domain.VisitStatusRequested, domain.VisitStatusVisiting},
+	{"cannot reschedule an on-site visit", domain.VisitStatusVisiting, domain.VisitStatusRescheduled},
+	{"cannot reschedule a completed visit", domain.VisitStatusCompleted, domain.VisitStatusRescheduled},
+	{"cannot reschedule a cancelled visit", domain.VisitStatusCancelled, domain.VisitStatusRescheduled},
+	{"cannot reschedule a rejected visit", domain.VisitStatusRejected, domain.VisitStatusRescheduled},
+	{"cannot reschedule a no-show visit", domain.VisitStatusNotVisit, domain.VisitStatusRescheduled},
 }
 
-func TestCanTransition_AllowsTheTwelvePRDTransitions(t *testing.T) {
+func TestCanTransition_AllowsTheFourteenPRDTransitions(t *testing.T) {
 	// Given: every transition the PRD state machine declares.
 	// When:  each one is submitted to the rule set.
 	// Then:   each one is accepted with a nil error.
@@ -102,12 +113,12 @@ func TestCanTransition_RejectsUnknownStatusValues(t *testing.T) {
 	}
 }
 
-func TestTransitionRuleSet_HasExactlyTwelveEntries(t *testing.T) {
-	// Given: the PRD declares 12 legal moves.
+func TestTransitionRuleSet_HasExactlyFourteenEntries(t *testing.T) {
+	// Given: the PRD declares 14 legal moves.
 	// When:  the whole rule set is counted.
-	// Then:   there are exactly 12, so no extra path sneaks in.
-	if got := len(domain.AllTransitions()); got != 12 {
-		t.Fatalf("len(AllTransitions()) = %d, want 12", got)
+	// Then:   there are exactly 14, so no extra path sneaks in.
+	if got := len(domain.AllTransitions()); got != 14 {
+		t.Fatalf("len(AllTransitions()) = %d, want 14", got)
 	}
 }
 

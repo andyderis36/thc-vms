@@ -12,28 +12,58 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Toaster } from 'sonner'
 
+/** Batas atas jeda retry eksponensial (ms) — jeda tidak tumbuh tanpa batas. */
+const MAX_RETRY_DELAY_MS = 30_000
+
 /**
- * Default opsi cache yang mengikuti SLO produk: P95 respons API < 150 ms dan
- * ~1.000 req/detik. `staleTime` 30 detik untuk data operasional, sedangkan
- * master data memakai 5 menit (lihat `hooks.ts`) sehingga N petugas gerbang
- * tidak menuju API Go sekaligus. `retry: 1` menjaga kegagalan tetap terasa
- * cepat — bukan tersembunyi di balik tiga exponential backoff.
- *
- * `gcTime` (bukan `cacheTime` — istilah v4) menahan cache 10 menit supaya
- * pindah menu tidak memicu permintaan ulang.
+ * Backoff eksponensial 1 dtk → 2 → 4 → 8 … dibatasi `MAX_RETRY_DELAY_MS`.
+ * Nilainya identik dengan default TanStack Query, ditulis eksplisit agar
+ * kontrak ketahanan jaringan buruk (S5) jelas dan teruji.
  */
-function makeQueryClient(): QueryClient {
+function exponentialRetryDelay(retryAttempt: number): number {
+  return Math.min(1000 * 2 ** retryAttempt, MAX_RETRY_DELAY_MS)
+}
+
+/**
+ * Default opsi cache (diet data S5 + ketahanan jaringan buruk):
+ * - `staleTime: Infinity` — master data (lokasi/purposes/vendor) tak pernah
+ *   dianggap basi; query operasional menyetor `staleTime` 30 detik sendiri
+ *   di `hooks.ts`, dan `me` memakai 0.
+ * - `gcTime: 24 jam` — cache dipertahankan sehari penuh supaya pindah menu
+ *   tidak memicu permintaan ulang.
+ * - `refetchOnWindowFocus: false` — kembali fokus tidak lagi memicu refetch
+ *   (reaksi fokus dihapus dari lapisan global & opsi detail/QR).
+ * - `refetchOnReconnect: true` — pemulihan jaringan tetap menyegarkan data.
+ * - `retry: 2` + `retryDelay` eksponensial (cap 30 detik) — koneksi seluler
+ *   putus-putus diberi dua kesempatan ulang dengan jeda membesar sebelum
+ *   menyerah. `hooks.ts` menyelaraskan kebijakan per-query (galat definitif
+ *   401/403/404 tidak diulang).
+ * - `retry: 0` (mutasi) — POST TIDAK pernah diulang otomatis (mencegah
+ *   duplikasi check-in/approve); nilai ini sudah benar dan dipertahankan.
+ * - `networkMode: 'online'` — dieksplisitkan: request menunggu jaringan
+ *   kembali daring, bukan dipaksa jalan saat offline.
+ *
+ * Persistensi cache (`query-persist-client`) SENGAJA DITUNDA: paket resmi
+ * `@tanstack/react-query-persist-client` belum terpasang di `package.json`,
+ * jadi kita tidak menambah dependensi baru dan tidak memasang persist untuk
+ * master query (locations/purposes). Bila paket itu kelak terpasang, persist
+ * master 24 jam + `buster=APP_VERSION` boleh diaktifkan.
+ */
+export function makeQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        staleTime: 30 * 1000,
-        gcTime: 10 * 60 * 1000,
-        retry: 1,
-        refetchOnWindowFocus: true,
+        staleTime: Number.POSITIVE_INFINITY,
+        gcTime: 24 * 60 * 60 * 1000,
+        retry: 2,
+        retryDelay: exponentialRetryDelay,
+        networkMode: 'online',
+        refetchOnWindowFocus: false,
         refetchOnReconnect: true,
       },
       mutations: {
         retry: 0,
+        networkMode: 'online',
       },
     },
   })

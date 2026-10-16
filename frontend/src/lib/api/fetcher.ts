@@ -7,6 +7,7 @@
  */
 
 import type { UploadCategory, UploadFileResult } from '@/lib/api/types';
+import { prepareUpload } from '@/lib/uploads/compressImage';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -153,8 +154,15 @@ export async function uploadFile(
   file: File,
   category: UploadCategory,
 ): Promise<UploadFileResult> {
+  // Validasi 5 MB + MIME pre-kompresi, kompresi foto (≤1600px, JPEG q0.8),
+  // lalu validasi post-kompresi — semuanya sebelum baris byte apa pun
+  // menyentuh jaringan. Pesan penolakan tetap bahasa Indonesia.
+  const prepared = await prepareUpload(file);
+  if (!prepared.ok) {
+    throw new ApiError(prepared.message, 400, 'VALIDATION_ERROR');
+  }
   const form = new FormData();
-  form.append('file', file);
+  form.append('file', prepared.file);
   form.append('category', category);
   return apiFetch<UploadFileResult>('/uploads', { method: 'POST', body: form });
 }

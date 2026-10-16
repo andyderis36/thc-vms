@@ -176,6 +176,12 @@ func (f *fakeVisitService) GetVisit(_ context.Context, _ visit.Actor, key string
 	if v, ok := f.visitByKey[key]; ok {
 		return v, nil
 	}
+	// A created visit re-reads itself through the GET path in production, so
+	// the fallback serves the created row when a test sets no explicit GET
+	// row. An explicit visitByKey entry still wins (enriched re-read case).
+	if f.created.ID != "" {
+		return f.created, nil
+	}
 	return cannedVisit(), nil
 }
 

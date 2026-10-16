@@ -13,14 +13,16 @@ import { ApproveModal, apiErrorMessage } from '@/features/visits/components/Appr
 import { RejectModal } from '@/features/visits/components/RejectModal'
 import { VisitCards } from '@/features/visits/components/VisitCards'
 import { VisitTable } from '@/features/visits/components/VisitTable'
-import { useLocationsQuery, useVisitsQuery } from '@/lib/api/hooks'
+import { useLocationsQuery, usePendingApprovalCount, useVisitsQuery } from '@/lib/api/hooks'
 import type { Role, VisitDetail, VisitListParams } from '@/lib/api/types'
 import { RequireRole } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import { mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
 
 /**
  * Halaman mandiri Antrean Approval — irisan fokus SCR-02 untuk
- * `super_admin` dan `admin`: hanya kunjungan `requested` (milik cabang
+ * `super_admin` dan `admin`: kunjungan `requested` + `rescheduled` (keduanya
+ * menunggu keputusan; `rescheduled→approved` legal di backend — milik cabang
  * untuk admin — backend memfilter otomatis) + aksi Setujui/Tolak.
  * Tabel desktop (>= 1024px) + kartu responsif (ponsel 1 kolom, tablet 2
  * kolom) dipakai ulang dari dashboard (DRY).
@@ -67,23 +69,31 @@ function ApprovalsScreen() {
   }, [searchInput])
 
   const locationsQuery = useLocationsQuery()
-  // Badge antrean shell + subtitle: total requested TANPA filter pencarian
-  // (limit 1 — hanya total yang dipakai), persis pola halaman users.
-  const pendingQuery = useVisitsQuery({ status: 'requested', limit: 1 })
+  // Badge antrean shell + subtitle: total requested + rescheduled TANPA filter
+  // pencarian (server-total, limit 1 — hanya total yang dipakai), persis pola
+  // halaman users — lihat usePendingApprovalCount.
+  const { pendingCount } = usePendingApprovalCount()
 
   // `search` & `location_id` adalah query param kontrak GET /visits
   // (openapi §/visits) — tersambung langsung ke server, bukan filter mati.
-  const listParams: VisitListParams = useMemo(
+  // Params yang SAMA dipakai oleh kedua query status agar filter pencarian/
+  // cabang berlaku identik pada sisi `requested` dan `rescheduled`.
+  const baseListParams: VisitListParams = useMemo(
     () => ({
-      status: 'requested',
       limit: 100,
       ...(search !== '' ? { search } : {}),
       ...(isSuperAdmin && locationId !== 'all' ? { location_id: locationId } : {}),
     }),
     [search, locationId, isSuperAdmin],
   )
-  const listQuery = useVisitsQuery(listParams)
-  const rows = useMemo(() => listQuery.data?.items ?? [], [listQuery.data])
+  const listQuery = useVisitsQuery({ ...baseListParams, status: 'requested' })
+  const rescheduledQuery = useVisitsQuery({ ...baseListParams, status: 'rescheduled' })
+  // Gabung client-side: dedupe by id + urut kronologis `start_date` ASC —
+  // pola yang sama dengan antrean "Akan Hadir" gerbang (mergeUpcomingQueue).
+  const rows = useMemo(
+    () => mergeUpcomingQueue(listQuery.data?.items ?? [], rescheduledQuery.data?.items ?? []),
+    [listQuery.data, rescheduledQuery.data],
+  )
 
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data])
   const locationOptions: SelectOption[] = useMemo(
@@ -102,7 +112,6 @@ function ApprovalsScreen() {
     )
   }
 
-  const pendingCount = pendingQuery.data?.total ?? 0
   const isFiltered = search !== '' || locationId !== 'all'
 
   return (
@@ -139,8 +148,10 @@ function ApprovalsScreen() {
         </div>
       </div>
 
+      {/* Galat HANYA dari query utama — kegagalan query rescheduled tidak
+          boleh mengosongkan daftar requested yang valid (pola gerbang). */}
       <div className="mt-4">
-        {listQuery.isPending ? (
+        {listQuery.isPending || rescheduledQuery.isPending ? (
           <div className="card flex items-center justify-center gap-3 py-12 text-sm text-ink-secondary">
             <Spinner size="sm" />
             Memuat antrean…
@@ -152,7 +163,14 @@ function ApprovalsScreen() {
               Gagal memuat antrean approval
             </p>
             <p className="mt-2 text-sm text-ink-secondary">{apiErrorMessage(listQuery.error)}</p>
-            <Button variant="secondary" className="mt-4 min-h-touch" onClick={() => void listQuery.refetch()}>
+            <Button
+              variant="secondary"
+              className="mt-4 min-h-touch"
+              onClick={() => {
+                void listQuery.refetch()
+                void rescheduledQuery.refetch()
+              }}
+            >
               Coba Lagi
             </Button>
           </div>

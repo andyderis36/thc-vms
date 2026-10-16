@@ -73,6 +73,15 @@ func ShouldAutoComplete(visit domain.VisitRequest, cutoff time.Time) bool {
 	return visit.Status == domain.VisitStatusVisiting && !visit.EndDate.After(cutoff)
 }
 
+// CheckInBatchProber is an OPTIONAL extension of domain.CheckInOutRepository:
+// ports that can answer check-in existence for many visits in one round trip
+// implement it, and the R2 sweep prefers it over per-visit probes. Ports that
+// do not implement it keep the per-visit hasCheckIn fallback below, so
+// existing adapters and fakes work unchanged.
+type CheckInBatchProber interface {
+	FindCheckInsByVisits(ctx context.Context, ids []domain.UUID) (map[domain.UUID]bool, error)
+}
+
 // Dependencies wires the sweep runner to its ports. Clock is mandatory in
 // production (domain.SystemClock) and frozen in tests; Logger defaults to
 // slog.Default when nil.
@@ -186,17 +195,22 @@ func (s *Service) sweepNoShow(ctx context.Context, cutoff time.Time, summary *Su
 		s.logger.Error("auto-rule sweep listing failed", "rule", RuleNoShow, "err", err)
 		return
 	}
+	present, batchOK := s.prefetchCheckIns(ctx, candidates)
 	for i := range candidates {
 		visit, ok := s.refresh(ctx, candidates[i].ID, summary, RuleNoShow)
 		if !ok {
 			continue
 		}
-		hasCheckIn, err := s.hasCheckIn(ctx, visit.ID)
-		if err != nil {
-			summary.Failures = append(summary.Failures, Failure{Rule: RuleNoShow, VisitID: visit.ID, Err: err})
-			s.logger.Error("auto-rule check-in probe failed",
-				"rule", RuleNoShow, "visit_id", visit.ID, "err", err)
-			continue
+		hasCheckIn := present[visit.ID]
+		if !batchOK {
+			var err error
+			hasCheckIn, err = s.hasCheckIn(ctx, visit.ID)
+			if err != nil {
+				summary.Failures = append(summary.Failures, Failure{Rule: RuleNoShow, VisitID: visit.ID, Err: err})
+				s.logger.Error("auto-rule check-in probe failed",
+					"rule", RuleNoShow, "visit_id", visit.ID, "err", err)
+				continue
+			}
 		}
 		if !ShouldMarkNoShow(visit, cutoff, hasCheckIn) {
 			summary.Skipped++
@@ -240,6 +254,35 @@ func (s *Service) refresh(ctx context.Context, id domain.UUID, summary *Summary,
 		return domain.VisitRequest{}, false
 	}
 	return visit, true
+}
+
+// prefetchCheckIns resolves check-in existence for the whole R2 candidate
+// set in ONE round trip when the port implements CheckInBatchProber. The
+// second return is false when the port has no batch seam (or the batch
+// failed), and the caller falls back to per-visit hasCheckIn probes: a batch
+// failure degrades to the old path instead of aborting the sweep.
+func (s *Service) prefetchCheckIns(
+	ctx context.Context,
+	candidates []domain.VisitRequest,
+) (map[domain.UUID]bool, bool) {
+	if len(candidates) == 0 {
+		return nil, false
+	}
+	prober, ok := s.checkIns.(CheckInBatchProber)
+	if !ok {
+		return nil, false
+	}
+	ids := make([]domain.UUID, 0, len(candidates))
+	for i := range candidates {
+		ids = append(ids, candidates[i].ID)
+	}
+	present, err := prober.FindCheckInsByVisits(ctx, ids)
+	if err != nil {
+		s.logger.Error("auto-rule batched check-in probe failed, falling back to single probes",
+			"rule", RuleNoShow, "err", err)
+		return nil, false
+	}
+	return present, true
 }
 
 // hasCheckIn reports whether a check-in row exists. A missing row (ErrNotFound)

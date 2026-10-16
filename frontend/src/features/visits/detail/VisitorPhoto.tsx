@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 import { ImageOff, Users } from 'lucide-react'
 
 import { Modal } from '@/components/ui/Modal'
@@ -14,6 +15,12 @@ interface VisitorPhotoProps {
   /** Nama teknisi — dipakai untuk `alt` dan teks galat yang dapat diakses. */
   visitorName: string
   variant: VisitorPhotoVariant
+  /**
+   * Bila diisi, trigger berupa tombol teks (bukan thumbnail) dengan label ini;
+   * klik tetap membuka dialog pratinjau yang sama. Dipakai halaman detail
+   * untuk mempertahankan tombol "Lihat Foto KTP".
+   */
+  triggerLabel?: string
 }
 
 /** Bentuk kotak: selfie persegi 56px, KTP lanskap 80×56 (di atas baris teks). */
@@ -21,6 +28,25 @@ const SHAPE_CLASS: Record<VisitorPhotoVariant, string> = {
   selfie: 'size-14',
   ktp: 'h-14 w-20',
 }
+
+/** Dimensi attr `width`/`height` next/image — persis ukuran kotak SHAPE_CLASS. */
+const SHAPE_DIMS: Record<VisitorPhotoVariant, { width: number; height: number }> = {
+  selfie: { width: 56, height: 56 },
+  ktp: { width: 80, height: 56 },
+}
+
+/** `sizes` thumbnail = lebar kotak tetap (56px / 80px) agar srcset tak mengunduh berkas besar. */
+const THUMB_SIZES: Record<VisitorPhotoVariant, string> = {
+  selfie: '56px',
+  ktp: '80px',
+}
+
+/**
+ * `sizes` pratinjau modal: konten modal `lg` = `max-w-lg` (512px) − `p-6` (2×24px)
+ * = 464px; di layar sempit lebar dikurangi `p-4` overlay (2×16px) → `100vw − 80px`
+ * (512 + 2×16 = 544px adalah titik pindahnya).
+ */
+const PREVIEW_SIZES = '(max-width: 544px) calc(100vw - 80px), 464px'
 
 /** Label Indonesia yang terlihat — pengawas harus bisa membedakan KTP vs selfie. */
 const VARIANT_LABEL: Record<VisitorPhotoVariant, string> = {
@@ -58,13 +84,18 @@ export function photoPreviewAriaLabel(variant: VisitorPhotoVariant, visitorName:
  * - Thumbnail dapat diklik (tombol `type="button"` yang dapat difokus keyboard)
  *   untuk membuka dialog `Modal` berisi foto besar + caption + `alt` Indonesia;
  *   Esc / klik backdrop / tombol Tutup menutup dialog dan fokus kembali ke
- *   thumbnail (ditangani `Modal`).
+ *   thumbnail (ditangani `Modal`). Bila `triggerLabel` diisi, yang tampil
+ *   adalah tombol teks tersebut (bukan thumbnail) dengan dialog yang sama.
  * - `alt` & `aria-label` selalu berbahasa Indonesia, caption terlihat membedakan
  *   "Foto KTP" dan "Foto selfie".
+ * - Thumbnail & pratinjau dirender lewat `next/image` (lazy + `sizes` eksplisit)
+ *   agar dikompresi optimizer Next; origin presigned MinIO dev
+ *   `http://localhost:9000` diizinkan lewat `images.remotePatterns` di
+ *   `next.config.ts`.
  *
  * URL tidak pernah diubah di sini — backend yang menerbitkan presigned URL.
  */
-export function VisitorPhoto({ src, visitorName, variant }: VisitorPhotoProps) {
+export function VisitorPhoto({ src, visitorName, variant, triggerLabel }: VisitorPhotoProps) {
   const [loadFailed, setLoadFailed] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const rawSrc = typeof src === 'string' ? src.trim() : ''
@@ -100,20 +131,34 @@ export function VisitorPhoto({ src, visitorName, variant }: VisitorPhotoProps) {
   return (
     <figure className="shrink-0">
       {hasImage ? (
-        <button
-          type="button"
-          onClick={() => setPreviewOpen(true)}
-          aria-label={photoPreviewAriaLabel(variant, visitorName)}
-          className="block cursor-zoom-in"
-        >
-          <img
-            src={rawSrc}
-            alt={altText}
-            loading="lazy"
-            onError={() => setLoadFailed(true)}
-            className={`${SHAPE_CLASS[variant]} rounded-control border border-border-light object-cover`}
-          />
-        </button>
+        triggerLabel !== undefined && triggerLabel !== '' ? (
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            aria-label={photoPreviewAriaLabel(variant, visitorName)}
+            className="inline-flex min-h-touch items-center rounded-badge border border-border-mid px-2.5 text-badge font-semibold text-brand"
+          >
+            {triggerLabel}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            aria-label={photoPreviewAriaLabel(variant, visitorName)}
+            className="block cursor-zoom-in"
+          >
+            <Image
+              src={rawSrc}
+              alt={altText}
+              width={SHAPE_DIMS[variant].width}
+              height={SHAPE_DIMS[variant].height}
+              sizes={THUMB_SIZES[variant]}
+              loading="lazy"
+              onError={() => setLoadFailed(true)}
+              className={`${SHAPE_CLASS[variant]} rounded-control border border-border-light object-cover`}
+            />
+          </button>
+        )
       ) : (
         <span
           role="img"
@@ -147,9 +192,19 @@ export function VisitorPhoto({ src, visitorName, variant }: VisitorPhotoProps) {
             <ImageOff aria-hidden="true" className="size-12 shrink-0" />
           </span>
         ) : (
-          <img
+          /*
+           * Attr width/height hanya memreserve kotak SEBELUM gambar terunduh
+           * (anti-CLS); begitu termuat, tinggi mengikuti rasio natural gambar
+           * (`height: auto` dari preflight Tailwind) — kotak akhir identik
+           * persis dengan `<img>` polos sebelumnya (verifikasi di Chrome).
+           */
+          <Image
             src={rawSrc}
             alt={altText}
+            width={464}
+            height={348}
+            sizes={PREVIEW_SIZES}
+            loading="lazy"
             onError={() => setLoadFailed(true)}
             className="max-h-[60vh] w-full rounded-control border border-border-light object-contain"
           />

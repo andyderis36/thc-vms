@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/Button'
 import type { Role, VisitDetail } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
 import { primaryVendorDisplay } from '@/lib/visits/vendor-display'
+import { isApprovableStatus, isRejectableStatus } from '@/lib/visits/visit-status'
+import { SpkFileLink } from './SpkFileLink'
 
 export interface VisitTableProps {
   visits: VisitDetail[]
@@ -102,9 +104,11 @@ export function formatVisitSchedule(
  * Tabel kunjungan desktop (>= 1024px). Pasangan dari `VisitCards`
  * yang menangani ponsel (< 768px) dan tablet (768px - 1023px, 2 kolom).
  *
- * Tombol Setujui/Tolak hanya dirender bila `can(role, 'approveVisit')` DAN
- * status masih `requested` — peran `vendor`/`security` TIDAK PERNAH melihat
- * kontrol approval (keamanan RBAC, lihat PRD §4).
+ * Tombol Setujui dirender bila `can(role, 'approveVisit')` DAN status
+ * `requested` ATAU `rescheduled` (transisi `rescheduled→approved` legal di
+ * backend); Tolak HANYA untuk `requested` (`rescheduled→rejected` ilegal).
+ * Peran `vendor`/`security` TIDAK PERNAH melihat kontrol approval (keamanan
+ * RBAC, lihat PRD §4).
  */
 export function VisitTable({ visits, role, onApprove, onReject }: VisitTableProps) {
   const allowApproval = can(role, 'approveVisit')
@@ -188,15 +192,14 @@ export function VisitTable({ visits, role, onApprove, onReject }: VisitTableProp
                 </td>
                 <td className="px-4 py-3">
                   {spkUrl ? (
-                    <a
-                      href={spkUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={`Lihat surat tugas SPK kunjungan ${visit.visit_id}`}
+                    <SpkFileLink
+                      visitId={visit.id}
                       className="inline-flex min-h-touch items-center text-sm font-medium text-brand underline underline-offset-2 hover:text-brand-strong"
+                      ariaLabel={`Lihat surat tugas SPK kunjungan ${visit.visit_id}`}
+                      fallback={<span className="text-sm text-ink-muted">—</span>}
                     >
                       Lihat SPK
-                    </a>
+                    </SpkFileLink>
                   ) : (
                     <span className="text-sm text-ink-muted">—</span>
                   )}
@@ -221,11 +224,12 @@ export function VisitTable({ visits, role, onApprove, onReject }: VisitTableProp
                     Pola: ikon-saja di lg–xl (48px, muat di sel sempit),
                     label teks kembali di xl+ tanpa ikon; nama aksi tetap
                     terbaca screen reader lewat aria-label di kedua mode.
-                    Tanpa hak approval / status bukan `requested`: sel diisi
-                    strip "—" (bukan sel kosong). Navigasi detail lewat link
-                    Visit ID.
+                    Tanpa hak approval / status di luar `requested`+`rescheduled`:
+                    sel diisi strip "—" (bukan sel kosong). Tolak hanya untuk
+                    `requested` — `rescheduled→rejected` ilegal di backend.
+                    Navigasi detail lewat link Visit ID.
                   */}
-                  {allowApproval && visit.status === 'requested' ? (
+                  {allowApproval && isApprovableStatus(visit.status) ? (
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Button
                         size="sm"
@@ -237,16 +241,18 @@ export function VisitTable({ visits, role, onApprove, onReject }: VisitTableProp
                         <Check className="size-4 xl:hidden" aria-hidden="true" />
                         <span className="hidden xl:inline">Setujui</span>
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        className="min-h-touch px-3"
-                        aria-label={`Tolak kunjungan ${visit.visit_id}`}
-                        onClick={() => onReject(visit)}
-                      >
-                        <X className="size-4 xl:hidden" aria-hidden="true" />
-                        <span className="hidden xl:inline">Tolak</span>
-                      </Button>
+                      {isRejectableStatus(visit.status) ? (
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          className="min-h-touch px-3"
+                          aria-label={`Tolak kunjungan ${visit.visit_id}`}
+                          onClick={() => onReject(visit)}
+                        >
+                          <X className="size-4 xl:hidden" aria-hidden="true" />
+                          <span className="hidden xl:inline">Tolak</span>
+                        </Button>
+                      ) : null}
                     </div>
                   ) : (
                     <span className="text-sm text-ink-muted">—</span>

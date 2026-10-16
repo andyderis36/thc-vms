@@ -27,8 +27,11 @@ type MinIOAdapter struct {
 	policy        policy
 }
 
-// compile-time proof that the adapter satisfies the port it is written for.
-var _ domain.IStorageService = (*MinIOAdapter)(nil)
+// compile-time proof that the adapter satisfies the ports it is written for.
+var (
+	_ domain.IStorageService = (*MinIOAdapter)(nil)
+	_ domain.ObjectReader    = (*MinIOAdapter)(nil)
+)
 
 // NewMinIOAdapter builds the adapter from configuration. Endpoint, credentials
 // and bucket name are mandatory: a half-configured storage driver must fail at
@@ -137,6 +140,33 @@ func (a *MinIOAdapter) PresignedURL(ctx context.Context, objectKey string, expir
 		return "", fmt.Errorf("storage: presign %q: %w", objectKey, err)
 	}
 	return presigned.String(), nil
+}
+
+// OpenObject streams one stored object for inline serving behind the scoped
+// GET /visits/:id/file endpoint. The body is the live S3 stream, never a
+// buffered copy: GetObject only dials, Stat fires the single HEAD that
+// resolves size, content type and mtime (and surfaces a missing key), and the
+// caller streams and closes the body. A missing key surfaces the S3 NoSuchKey
+// error, which the usecase maps onto its 404.
+func (a *MinIOAdapter) OpenObject(ctx context.Context, objectKey string) (domain.ObjectContent, error) {
+	if strings.TrimSpace(objectKey) == "" {
+		return domain.ObjectContent{}, fmt.Errorf("storage: object key kosong: %w", domain.ErrValidation)
+	}
+	obj, err := a.client.GetObject(ctx, a.bucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return domain.ObjectContent{}, fmt.Errorf("storage: open %q: %w", objectKey, err)
+	}
+	info, err := obj.Stat()
+	if err != nil {
+		_ = obj.Close()
+		return domain.ObjectContent{}, fmt.Errorf("storage: stat %q: %w", objectKey, err)
+	}
+	return domain.ObjectContent{
+		Content:     obj,
+		Size:        info.Size,
+		ContentType: info.ContentType,
+		ModTime:     info.LastModified,
+	}, nil
 }
 
 // RemoveObject deletes a stored object. It is not part of the port: the MVP API

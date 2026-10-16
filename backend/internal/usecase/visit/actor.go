@@ -65,6 +65,11 @@ type Service struct {
 	// Always positive: WithFileLinks clamps, effectivePresignTTL repeats
 	// the guard for Services built without the setter.
 	presignTTL time.Duration
+	// objectReader streams stored objects for the scoped GET /visits/:id/file
+	// endpoint. It is wired after construction via WithObjectReader so
+	// existing NewService callers keep compiling; a nil reader fails reads
+	// closed (404) rather than leaking raw private-bucket addresses.
+	objectReader domain.ObjectReader
 }
 
 // NewService wires the visit usecase to its domain ports. checkIns may be nil

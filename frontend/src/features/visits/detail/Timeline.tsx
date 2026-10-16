@@ -50,7 +50,7 @@ const ACTIVE_INDEX_BY_STATUS: Record<VisitStatus, number> = {
   rescheduled: 0,
   approved: 1,
   visiting: 2,
-  completed: 3,
+  completed: 4,
   rejected: 0,
   cancelled: 0,
   not_visit: 0,

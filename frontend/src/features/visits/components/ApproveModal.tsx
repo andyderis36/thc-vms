@@ -1,12 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Textarea } from '@/components/ui/Textarea'
 import { useApproveVisitMutation } from '@/lib/api/hooks'
+import { queryKeys } from '@/lib/api/query-keys'
 import type { VisitDetail } from '@/lib/api/types'
 import { primaryVendorDisplay } from '@/lib/visits/vendor-display'
 import { formatVisitSchedule } from './VisitTable'
@@ -73,6 +75,7 @@ export interface ApproveModalProps {
 export function ApproveModal({ open, visit, onClose }: ApproveModalProps) {
   const [notes, setNotes] = useState('')
   const approve = useApproveVisitMutation()
+  const queryClient = useQueryClient()
 
   useEffect(() => {
     if (open) setNotes('')
@@ -84,6 +87,12 @@ export function ApproveModal({ open, visit, onClose }: ApproveModalProps) {
       { visitId: visit.id, body: notes.trim() !== '' ? { notes: notes.trim() } : undefined },
       {
         onSuccess: () => {
+          // Halaman detail bisa dibuka via UUID (`/visits/<uuid>` dari daftar)
+          // ATAU kode bisnis (`/visits/VST-...`, direct-open). Hook mutasi sudah
+          // meng-invalidate kunci UUID + daftar; invalidate juga kunci kode bisnis
+          // (detail + QR) agar halaman direct-open tidak basi.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.visits.detail(visit.visit_id) })
+          void queryClient.invalidateQueries({ queryKey: queryKeys.visits.qr(visit.visit_id) })
           toast.success(`Kunjungan ${visit.visit_id} disetujui`)
           onClose()
         },

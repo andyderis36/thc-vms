@@ -1,0 +1,28 @@
+#todo/task, general:
+1. ketika mobile view, humberger menu di navbar kanan atas, tapi kog sidebar menu muncul dari kiri? mungkin salah posisi humberger menunya. periksa semua tampilan mobile view yang ada humberger menu di navbar dari semua role akun!
+
+
+#jangan commit/push tanpa perintah!!!
+#KERJAKAN DENGAN TELITI, HATI-HATI, TEPAT, PROFESSIONAL!!!
+#CLEAN CODE, CLEAN ARCHITECTURE!!!	
+#PRINSIP SOLID, DRY, KISS, YAGNI!!!
+#kerjakan dengan sub-agent jika memungkinkan untuk menghemat token!!!
+
+#todo/task, untuk role superadmin/admin(koor. wilayah):
+1.
+
+
+#todo/task, untuk role pic/vendor/visitor:
+1. 
+
+
+#pending todo/task:
+1. 
+
+
+###
+1. ubah total UI dengan "https://www.jokoui.web.id/components/application", tapi color palette biru tetap dipertahankan.
+
+
+###
+lanjut kerjakan task yang terhenti!!! panggil lagi sub-agent!!!

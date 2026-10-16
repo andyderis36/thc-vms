@@ -1,11 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Textarea } from '@/components/ui/Textarea'
 import { useRejectVisitMutation } from '@/lib/api/hooks'
+import { queryKeys } from '@/lib/api/query-keys'
 import type { VisitDetail } from '@/lib/api/types'
 import { apiErrorMessage, VisitSummary } from './ApproveModal'
 
@@ -26,6 +28,7 @@ export interface RejectModalProps {
 export function RejectModal({ open, visit, onClose }: RejectModalProps) {
   const [reason, setReason] = useState('')
   const reject = useRejectVisitMutation()
+  const queryClient = useQueryClient()
 
   useEffect(() => {
     if (open) setReason('')
@@ -40,6 +43,12 @@ export function RejectModal({ open, visit, onClose }: RejectModalProps) {
       { visitId: visit.id, body: { reason: trimmed } },
       {
         onSuccess: () => {
+          // Halaman detail bisa dibuka via UUID (`/visits/<uuid>` dari daftar)
+          // ATAU kode bisnis (`/visits/VST-...`, direct-open). Hook mutasi sudah
+          // meng-invalidate kunci UUID + daftar; invalidate juga kunci kode bisnis
+          // (detail + QR) agar halaman direct-open tidak basi.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.visits.detail(visit.visit_id) })
+          void queryClient.invalidateQueries({ queryKey: queryKeys.visits.qr(visit.visit_id) })
           toast.success(`Kunjungan ${visit.visit_id} ditolak`)
           onClose()
         },

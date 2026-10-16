@@ -7,7 +7,7 @@ import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { VisitForm } from '@/features/visits/form/VisitForm'
 import { RequireRole } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
-import { useVisitsQuery } from '@/lib/api/hooks'
+import { usePendingApprovalCount } from '@/lib/api/hooks'
 
 /**
  * Pemilih shell berdasar peran sesi — SETIAP peran memakai shellnya sendiri
@@ -19,9 +19,9 @@ import { useVisitsQuery } from '@/lib/api/hooks'
 function RoleShell({ children }: { children: ReactNode }) {
   const { user } = useSession()
   const role = user?.role ?? null
-  // Badge antrean shell (limit 1 — hanya total yang dipakai).
-  const pendingQuery = useVisitsQuery({ status: 'requested', limit: 1 })
-  const pendingCount = pendingQuery.data?.total ?? 0
+  // Badge antrean shell: requested + rescheduled (server-total, limit 1) —
+  // keduanya menunggu keputusan; lihat usePendingApprovalCount.
+  const { pendingCount } = usePendingApprovalCount()
 
   if (role === 'vendor') {
     return <PicMobileShell activeHref="/visits/new">{children}</PicMobileShell>

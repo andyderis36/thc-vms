@@ -2,13 +2,14 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { toast } from 'sonner'
 import {
   ArrowLeft,
   CalendarClock,
   FileText,
+  History,
   MapPin,
   ShieldCheck,
   StickyNote,
@@ -25,14 +26,23 @@ import {
   useLocationsQuery,
   usePurposesQuery,
   useVendorsQuery,
+  useVisitsQuery,
 } from '@/lib/api/hooks'
 import type { CreateVisitRequest } from '@/lib/api/types'
 import { useSession } from '@/lib/auth/session'
+import {
+  selectLatestVisit,
+  toTechnicianRows,
+} from '@/lib/visits/prefill-last-visit'
 import {
   areTechnicianRowsBlank,
   loadTechnicianRoster,
   saveTechnicianRoster,
 } from '@/lib/visits/technician-autosave'
+import {
+  isLocationScopeUnresolved,
+  scopeLocationOptions,
+} from '@/lib/visits/location-scope'
 import { resolveVendorInput } from '@/lib/visits/vendor-input'
 import { PurposeDropdown } from './PurposeDropdown'
 import { TechnicianList } from './TechnicianList'
@@ -63,7 +73,7 @@ export function VisitForm() {
     handleSubmit,
     setValue,
     getValues,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<VisitFormValues>({
     resolver: zodResolver(visitFormSchema),
     defaultValues: {
@@ -83,6 +93,21 @@ export function VisitForm() {
   })
 
   const purposeIds = useWatch({ control, name: 'purpose_ids' }) ?? []
+
+  /*
+   * Prefill dari kunjungan terakhir (khusus peran `vendor`): halaman
+   * riwayat `GET /visits?limit=20` diambil HANYA ketika tombol ditekan
+   * (`enabled only when needed`) — pengurutan backend `start_date DESC`,
+   * jadi pemilihan yang terbaru dibuat dilakukan klien via
+   * `selectLatestVisit` (maks `created_at`).
+   */
+  const [prefillRequested, setPrefillRequested] = useState(false)
+  const prefillStartedAt = useRef(0)
+  const isVendor = user?.role === 'vendor'
+  const prefillQuery = useVisitsQuery(
+    { limit: 20 },
+    isVendor && prefillRequested,
+  )
 
   // Prefill TEKS vendor milik pengguna yang sedang masuk pada baris teknisi
   // pertama, bila baris itu masih kosong. Katalog vendor TIDAK dipakai untuk
@@ -141,16 +166,86 @@ export function VisitForm() {
     }
   }, [ownVendorName, getValues, setValue])
 
-  const locationOptions = (locationsQuery.data ?? []).map((location) => ({
-    value: location.id,
-    label: `${location.name} — ${location.city}`,
-  }))
+  /*
+   * Penerapan prefill — berjalan HANYA setelah tombol ditekan (tidak pernah
+   * otomatis), sehingga tidak pernah bertarung dengan efek autosave roster /
+   * prefill nama vendor akun di atas. HANYA baris roster teknisi yang
+   * ditimpa; fasilitas, tujuan, jadwal, SPK, catatan, dan SOP tetap pada
+   * nilai awal kosong (data itu bervariasi tiap kunjungan, hanya kru yang
+   * stabil).
+   *
+   * Dipilih `setValue('technicians', …)` bertarget — BUKAN `reset()` seluruh
+   * formulir — agar nilai + status dirty/touched field lain tidak tersentuh:
+   * `reset()` akan me-re-baseline SEMUA field menjadi pristine dan mencuci
+   * ketikan pengguna sebelum klik menjadi "bersih". `shouldDirty: false`
+   * (sama seperti efek autosave roster di atas) menjaga perilaku guard
+   * konfirmasi + `isDirty` identik dengan sebelumnya pada alur baku.
+   *
+   * Guard `errorUpdatedAt`: refetch klik TERBARU dimulai pada commit yang
+   * sama dengan klik, sedangkan snapshot galat di render itu masih milik
+   * klik sebelumnya — galat basi tidak boleh di-toast (tunggu hasil baru).
+   */
+  useEffect(() => {
+    if (!prefillRequested) return
+    if (prefillQuery.isPending || prefillQuery.isFetching) return
+    if (
+      prefillQuery.isError &&
+      prefillQuery.errorUpdatedAt < prefillStartedAt.current
+    ) {
+      return
+    }
+    setPrefillRequested(false)
+    if (prefillQuery.isError) {
+      toast.error(
+        prefillQuery.error instanceof ApiError
+          ? prefillQuery.error.message
+          : 'Gagal memuat riwayat kunjungan. Silakan coba lagi.',
+      )
+      return
+    }
+    const latest = selectLatestVisit(prefillQuery.data?.items)
+    if (latest === undefined) {
+      toast.info('Belum ada riwayat kunjungan')
+      return
+    }
+    setValue('technicians', toTechnicianRows(latest), { shouldDirty: false })
+    toast.success(
+      'Data kunjungan terakhir dimuat — periksa kembali sebelum kirim',
+    )
+  }, [prefillRequested, prefillQuery, setValue])
+
+  // `GET /locations` global-by-design; scoping per-peran dilakukan klien.
+  // Sesi belum ter-hydrate (`user` null) → fallback non-scope agar perilaku
+  // lama (tanpa filter) tetap sama.
+  const locationScopeUser = user ?? { role: 'vendor' as const, location_id: null }
+  const locationOptions = scopeLocationOptions(
+    locationsQuery.data ?? [],
+    locationScopeUser,
+  )
+  const locationLocked = isLocationScopeUnresolved(locationScopeUser)
 
   function togglePurpose(purposeId: string): void {
     const next = purposeIds.includes(purposeId)
       ? purposeIds.filter((id) => id !== purposeId)
       : [...purposeIds, purposeId]
     setValue('purpose_ids', next, { shouldDirty: true, shouldValidate: true })
+  }
+
+  /*
+   * Klik "Gunakan data kunjungan terakhir": bila formulir sudah kotor
+   * (`isDirty`), timpaan dikonfirmasi dulu lewat dialog bawaan peramban —
+   * dibatalkan berarti batal diam-diam (tanpa fetch, tanpa toast).
+   */
+  function handleUseLastVisit(): void {
+    if (prefillRequested) return
+    if (isDirty) {
+      const confirmed = window.confirm(
+        'Isi formulir saat ini akan ditimpa dengan data kunjungan terakhir. Lanjutkan?',
+      )
+      if (!confirmed) return
+    }
+    prefillStartedAt.current = Date.now()
+    setPrefillRequested(true)
   }
 
   async function onSubmit(values: VisitFormValues): Promise<void> {
@@ -215,7 +310,9 @@ export function VisitForm() {
   return (
     <form
       noValidate
-      onSubmit={handleSubmit(onSubmit)}
+      onSubmit={handleSubmit(onSubmit, () =>
+        toast.warning('Lengkapi field wajib sebelum mengirim permohonan.'),
+      )}
       className="flex flex-col gap-4 pb-28"
     >
       <div className="flex flex-col gap-1">
@@ -236,6 +333,20 @@ export function VisitForm() {
           Isi formulir berikut untuk mengajukan izin kunjungan teknisi ke
           fasilitas THC.
         </p>
+        {/* Prefill riwayat — hanya untuk vendor; admin/superadmin tak melihatnya. */}
+        {isVendor ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="min-h-touch self-start"
+            loading={prefillRequested}
+            onClick={handleUseLastVisit}
+          >
+            <History aria-hidden="true" className="size-4 shrink-0" />
+            Gunakan data kunjungan terakhir
+          </Button>
+        ) : null}
       </div>
 
       {/* 1. Fasilitas & Keperluan */}
@@ -259,7 +370,11 @@ export function VisitForm() {
                   : 'Pilih fasilitas (Cabang / POP / miniPOP)'
               }
               options={locationOptions}
-              disabled={locationsQuery.isPending || locationsQuery.isError}
+              disabled={
+                locationsQuery.isPending ||
+                locationsQuery.isError ||
+                locationLocked
+              }
               error={
                 errors.location_id?.message ??
                 (locationsQuery.isError

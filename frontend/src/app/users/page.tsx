@@ -20,9 +20,9 @@ import {
   useUpdateManagedUserMutation,
   useLocationsQuery,
   useManagedUsersQuery,
+  usePendingApprovalCount,
   useUpdateManagedUserStatusMutation,
   useVendorsQuery,
-  useVisitsQuery,
 } from '@/lib/api/hooks'
 import type {
   CreateManagedUserRequest,
@@ -147,8 +147,9 @@ function UsersScreen() {
   }, [searchInput])
 
   const locationsQuery = useLocationsQuery()
-  // Badge antrean shell: total requested lintas cabang (limit 1 — hanya total yang dipakai).
-  const pendingQuery = useVisitsQuery({ status: 'requested', limit: 1 })
+  // Badge antrean shell: total requested + rescheduled lintas cabang
+  // (server-total, limit 1 — hanya total yang dipakai); lihat usePendingApprovalCount.
+  const { pendingCount } = usePendingApprovalCount()
 
   const params = useMemo(
     () => toManagedUserListParams({ role: roleFilter, search, locationId }),
@@ -164,7 +165,6 @@ function UsersScreen() {
     () => (usersQuery.data ?? []).filter((user) => user.role !== 'security'),
     [usersQuery.data],
   )
-  const pendingCount = pendingQuery.data?.total ?? 0
 
   const locationOptions: SelectOption[] = useMemo(
     () => [

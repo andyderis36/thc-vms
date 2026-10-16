@@ -15,9 +15,10 @@ import (
 	"time"
 )
 
-// Defaults mirror docs/5. LOCAL_DEV.md section 4.1; the pool knobs follow the
-// PRD section 6.1.2 (MaxConns 50, MinConns 10, MaxConnLifetime 1h,
-// MaxConnIdleTime 15m) and the auth diagram (acquire timeout 5s).
+// Defaults are the laptop-safe baseline (S4): a small pool that costs nothing
+// when idle and never exhausts a developer Postgres max_connections. A modest
+// VPS should raise MaxConns/MinConns via the environment (see .env.example);
+// every value below is overridable except the fixed dial timeout.
 const (
 	defaultAppName   = "THC-VMS-Backend"
 	defaultAppEnv    = "local"
@@ -25,8 +26,22 @@ const (
 	defaultDBHost    = "localhost"
 	defaultDBPort    = 5432
 	defaultDBSSLMode = "disable"
-	defaultMaxConns  = 50
-	defaultMinConns  = 10
+
+	defaultMaxConns     = 10
+	defaultMinConns     = 0
+	defaultMinIdleConns = 1
+	// defaultMaxConnLifetime recycles connections well before a NAT/proxy idle
+	// window can silently drop them; the jitter spreads the recycle so a fleet
+	// of processes never reconnects in lockstep (thundering herd).
+	defaultMaxConnLifetime       = 30 * time.Minute
+	defaultMaxConnLifetimeJitter = 5 * time.Minute
+	defaultMaxConnIdleTime       = 10 * time.Minute
+	// defaultConnectTimeout is a DIAL budget (TCP + TLS + startup), not a pool
+	// acquire timeout. pgx v5 has no pool-level acquire timeout; a request's
+	// wait for a free connection is bounded by its own context. Retained as the
+	// legacy default for the deprecated DB_ACQUIRE_TIMEOUT knob.
+	defaultConnectTimeout = 5 * time.Second
+	defaultAcquireTimeout = 5 * time.Second
 
 	defaultJWTExpirationHours = 24
 
@@ -66,9 +81,20 @@ type Database struct {
 	SSLMode         string
 	MaxConns        int32
 	MinConns        int32
+	MinIdleConns    int32
 	MaxConnLifetime time.Duration
-	MaxConnIdleTime time.Duration
-	AcquireTimeout  time.Duration
+	// MaxConnLifetimeJitter randomizes MaxConnLifetime so connections created
+	// together do not expire together.
+	MaxConnLifetimeJitter time.Duration
+	MaxConnIdleTime       time.Duration
+	// ConnectTimeout is the fixed dial budget handed to the pgx driver. It is
+	// deliberately not env-driven and never derived from AcquireTimeout.
+	ConnectTimeout time.Duration
+	// AcquireTimeout is Deprecated: pgx v5 exposes no pool-level acquire
+	// timeout (pool waits are bounded by the per-request context). The knob is
+	// parsed and preserved so existing .env files keep working, but it is NOT
+	// wired into the pool and has no runtime effect.
+	AcquireTimeout time.Duration
 }
 
 // DSN assembles the postgres:// URL the pgx driver dials, so the password
@@ -164,15 +190,23 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	maxLifetime, err := durationEnv("DB_MAX_CONN_LIFETIME", time.Hour)
+	minIdleConns, err := intEnv("DB_MIN_IDLE_CONNS", defaultMinIdleConns)
 	if err != nil {
 		return nil, err
 	}
-	maxIdleTime, err := durationEnv("DB_MAX_CONN_IDLE_TIME", 15*time.Minute)
+	maxLifetime, err := durationEnv("DB_MAX_CONN_LIFETIME", defaultMaxConnLifetime)
 	if err != nil {
 		return nil, err
 	}
-	acquireTimeout, err := durationEnv("DB_ACQUIRE_TIMEOUT", 5*time.Second)
+	maxLifetimeJitter, err := durationEnv("DB_MAX_CONN_LIFETIME_JITTER", defaultMaxConnLifetimeJitter)
+	if err != nil {
+		return nil, err
+	}
+	maxIdleTime, err := durationEnv("DB_MAX_CONN_IDLE_TIME", defaultMaxConnIdleTime)
+	if err != nil {
+		return nil, err
+	}
+	acquireTimeout, err := durationEnv("DB_ACQUIRE_TIMEOUT", defaultAcquireTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -212,17 +246,20 @@ func Load() (*Config, error) {
 			Debug:       appDebug,
 		},
 		DB: Database{
-			Host:            stringEnv("DB_HOST", defaultDBHost),
-			Port:            dbPort,
-			User:            os.Getenv("DB_USER"),
-			Password:        os.Getenv("DB_PASSWORD"),
-			Name:            os.Getenv("DB_NAME"),
-			SSLMode:         stringEnv("DB_SSLMODE", defaultDBSSLMode),
-			MaxConns:        int32(maxConns),
-			MinConns:        int32(minConns),
-			MaxConnLifetime: maxLifetime,
-			MaxConnIdleTime: maxIdleTime,
-			AcquireTimeout:  acquireTimeout,
+			Host:                  stringEnv("DB_HOST", defaultDBHost),
+			Port:                  dbPort,
+			User:                  os.Getenv("DB_USER"),
+			Password:              os.Getenv("DB_PASSWORD"),
+			Name:                  os.Getenv("DB_NAME"),
+			SSLMode:               stringEnv("DB_SSLMODE", defaultDBSSLMode),
+			MaxConns:              int32(maxConns),
+			MinConns:              int32(minConns),
+			MinIdleConns:          int32(minIdleConns),
+			MaxConnLifetime:       maxLifetime,
+			MaxConnLifetimeJitter: maxLifetimeJitter,
+			MaxConnIdleTime:       maxIdleTime,
+			ConnectTimeout:        defaultConnectTimeout,
+			AcquireTimeout:        acquireTimeout,
 		},
 		JWT: JWT{
 			Secret:          secret,

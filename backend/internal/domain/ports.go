@@ -63,6 +63,31 @@ type IStorageService interface {
 	ObjectKeyFromStoredURL(rawURL string) (string, error)
 }
 
+// ObjectContent is the streamed payload of one stored object: the open body
+// plus the headers an HTTP file response needs. The body streams straight
+// from the bucket (never buffered whole: the 5 MB upload ceiling does not
+// make whole-file reads free); the caller owns closing Content.
+type ObjectContent struct {
+	Content     io.ReadCloser
+	Size        int64
+	ContentType string
+	ModTime     time.Time
+}
+
+// ObjectReader is the read half of object storage behind the scoped
+// GET /visits/:id/file endpoint. It reuses the IStorageService key reversal
+// (own-bucket prefix rule) and adds the byte fetch, so a usecase composed
+// with one adapter can resolve a stored URL to a key and stream it without
+// ever handing a raw private-bucket URL to the frontend.
+type ObjectReader interface {
+	// ObjectKeyFromStoredURL reverses a stored absolute file URL back to its
+	// bucket object key, refusing foreign, empty or traversal-carrying URLs.
+	ObjectKeyFromStoredURL(rawURL string) (string, error)
+	// OpenObject streams one stored object for inline serving. A missing key
+	// is ErrNotFound.
+	OpenObject(ctx context.Context, objectKey string) (ObjectContent, error)
+}
+
 // UserRepository is the port the PostgreSQL adapter implements for accounts.
 type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (User, error)

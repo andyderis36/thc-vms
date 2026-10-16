@@ -13,8 +13,9 @@ import (
 //
 // PROMINENT CONTRACT: the visit lands in rescheduled, NOT in visiting, and it
 // must be re-approved by an admin before check-in, because the domain state
-// machine forbids the rescheduled -> visiting edge by omission. The gate agent
-// owns check-in; this usecase never writes visiting.
+// machine forbids the rescheduled -> visiting edge by omission. Rescheduling
+// again from rescheduled is legal, so the schedule can be moved repeatedly.
+// The gate agent owns check-in; this usecase never writes visiting.
 func (s *Service) Reschedule(ctx context.Context, actor Actor, visitID domain.UUID, start time.Time, end time.Time, reason string) error {
 	if err := validateWindow(start, end); err != nil {
 		return err

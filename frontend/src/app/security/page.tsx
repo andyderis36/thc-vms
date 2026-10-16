@@ -5,7 +5,7 @@ import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Spinner } from '@/components/ui/Spinner'
 import { SecurityUserPanel } from '@/features/security/components/SecurityUserModal'
-import { useVisitsQuery } from '@/lib/api/hooks'
+import { usePendingApprovalCount } from '@/lib/api/hooks'
 import type { Role } from '@/lib/api/types'
 import { RequireRole } from '@/lib/auth/guards'
 import { getRoleLabel } from '@/lib/auth/capabilities'
@@ -44,8 +44,9 @@ function SecurityScreen() {
   const { user } = useSession()
   const role = user !== null ? user.role : null
 
-  // Badge antrean shell: total requested (limit 1 — hanya total yang dipakai).
-  const pendingQuery = useVisitsQuery({ status: 'requested', limit: 1 })
+  // Badge antrean shell: total requested + rescheduled (server-total,
+  // limit 1 — hanya total yang dipakai); lihat usePendingApprovalCount.
+  const { pendingCount } = usePendingApprovalCount()
 
   if (role === null) {
     return (
@@ -56,7 +57,7 @@ function SecurityScreen() {
   }
 
   return (
-    <RoleShell role={role} pendingCount={pendingQuery.data?.total ?? 0}>
+    <RoleShell role={role} pendingCount={pendingCount}>
       <div className="mb-5 min-w-0">
         <h1 className="text-xl font-bold text-ink">Kelola {getRoleLabel('security')}</h1>
         <p className="mt-1 text-sm text-ink-secondary">

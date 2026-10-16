@@ -131,6 +131,11 @@ type Querier interface {
 	GetVisitByVisitCode(ctx context.Context, arg GetVisitByVisitCodeParams) (GetVisitByVisitCodeRow, error)
 	// Same lock, entered via the scanned/manual visit code.
 	GetVisitByVisitCodeForUpdate(ctx context.Context, arg GetVisitByVisitCodeForUpdateParams) (GetVisitByVisitCodeForUpdateRow, error)
+	// Batched detail read for the auto-rule worker hydrate(): one round trip for
+	// a whole capped sweep instead of FindByID-per-id (S1 N+1 kill). The
+	// projection is byte-for-byte the GetVisitByID one (visits.sql) so the same
+	// domain mapping applies; callers restore sweep order themselves.
+	GetVisitsByIDs(ctx context.Context, arg GetVisitsByIDsParams) ([]GetVisitsByIDsRow, error)
 	// =============================================================================
 	// checkin.sql - Security gate check-in (SCR-05, openapi L459-487).
 	//
@@ -225,6 +230,10 @@ type Querier interface {
 	// visible and can be reactivated via PATCH /locations/:id. Same column
 	// shape plus the is_active flag the console renders.
 	ListAllLocations(ctx context.Context) ([]Location, error)
+	// Batched existence read for the R2 no-show sweep: one round trip for the
+	// whole candidate set instead of one GetCheckInByVisitRequest probe per
+	// visit. Rides the UNIQUE index on check_in(visit_request_id).
+	ListCheckInsByVisitIDs(ctx context.Context, arg ListCheckInsByVisitIDsParams) ([]CheckIn, error)
 	// =============================================================================
 	// SUPER_ADMIN MANAGED ACCOUNTS (PRD §4: kelola admin/vendor + security semua
 	// cabang). Same bound-parameter scoping invariant as above: role, search and
@@ -270,6 +279,7 @@ type Querier interface {
 	// R2: approved, past end_date + 2h, and check_in has no row for the visit.
 	// Uses idx_visit_status for the status scan and the UNIQUE index on
 	// check_in(visit_request_id) for the anti-join probe.
+	// Capped at 500 rows per tick (S4), same as its sibling sweeps.
 	SweepNoShowApprovedVisits(ctx context.Context) ([]SweepNoShowApprovedVisitsRow, error)
 	// =============================================================================
 	// worker.sql - Auto-rule background sweeps (PRD L48-57 "Auto-Rule Background
@@ -300,11 +310,14 @@ type Querier interface {
 	// legitimate check-in, so the visit is definitively a no-show.
 	// =============================================================================
 	// R1: an unanswered request 7 days old is abandoned (PRD L137).
+	// Capped at 500 rows per tick (S4): one sweep locks and migrates at most one
+	// batch, never the whole table.
 	SweepStaleRequestedVisits(ctx context.Context) ([]SweepStaleRequestedVisitsRow, error)
 	// R3: still 'visiting' a full day after the scheduled end (PRD L148). idx_visit_date
 	// does not cover end_date, so this sweep relies on the status index plus the
 	// row count of a single overnight window - deliberately not adding a 5th index
 	// beyond the four PRD L206-209 mandates, since the sweep runs once per tick.
+	// Capped at 500 rows per tick (S4), same as its sibling sweeps.
 	SweepStaleVisitingVisits(ctx context.Context) ([]SweepStaleVisitingVisitsRow, error)
 	// PATCH /locations/:id (super_admin only). Every column is a NULLable bound
 	// value: a NULL keeps the stored column via COALESCE, so the body may carry

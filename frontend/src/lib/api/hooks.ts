@@ -62,29 +62,59 @@ import type {
   UpdateSecurityUserRequest,
   UpdateUserStatusRequest,
   UploadCategory,
+  VisitDetail,
   VisitListParams,
+  VisitStatus,
 } from '@/lib/api/types'
 
 /**
- * Master data (kantor/POP + tujuan kunjungan) praktis tidak pernah berubah dan
- * dibaca bareng oleh banyak petugas pos sekaligus. Target produk: P95 < 150 ms
- * dan ~1.000 req/detik, jadi 5 menit cache mencegah N pengguna gerbang
- * membanjiri API Go dengan permintaan identik.
+ * Master data (kantor/POP + tujuan + katalog vendor) praktis tidak pernah
+ * berubah dan dibaca bareng oleh banyak petugas pos sekaligus. Diet data S5:
+ * `staleTime: Infinity` + `gcTime: 24 jam` — N pengguna gerbang tidak
+ * menuju API Go dengan permintaan identik, dan pindah menu tidak memicu
+ * refetch. Klien global di `providers.tsx` memakai default yang sama.
  */
-const MASTER_STALE_TIME = 5 * 60 * 1000
+const MASTER_STALE_TIME = Number.POSITIVE_INFINITY
+const MASTER_GC_TIME = 24 * 60 * 60 * 1000
 
 /** Kunjungan berubah cepat (approval, check-in) — 30 detik sudah cukup untuk layar. */
 const VISIT_STALE_TIME = 30 * 1000
 
 /**
- * Pembaruan otomatis layar detail kunjungan (SCR-04 sisi vendor):
- * QR & "Riwayat Status" wajib menyegarkan diri tanpa reload manual —
- * misalnya saat admin menyetujui atau satpam check-in/out dari klien lain.
- * Polling 12 detik (di dalam rentang 10–15 detik) + refetch saat jendela
- * kembali fokus; `refetchIntervalInBackground: false` menjaga agar tab yang
- * tersembunyi tidak membanjiri API.
+ * Pembaruan otomatis layar detail kunjungan (SCR-04 sisi vendor): QR &
+ * "Riwayat Status" menyegarkan diri tanpa reload manual — misalnya saat admin
+ * menyetujui, satpam check-in, atau satpam check-out dari klien lain. Diet
+ * baterai/data S5: hanya polling saat tab terlihat, dan hanya untuk status yang
+ * masih bergerak — `approved` (menunggu datang) dan `visiting` (di dalam
+ * gerbang, menunggu check-out). Status terminal (`completed`/`cancelled`/
+ * `rejected`/`not_visit`), `requested` (belum ada konten cepat berubah), dan
+ * `rescheduled` menghentikan polling; `document.hidden` juga menghentikannya.
  */
-const VISIT_DETAIL_REFETCH_INTERVAL = 12_000
+const VISIT_DETAIL_REFETCH_INTERVAL = 60_000
+
+/**
+ * Jendela check-out gerbang sengaja dipoll lebih rapat: `visiting` adalah
+ * transisi keluar yang akan datang dan tamu biasanya masih berdiri di depan pos,
+ * jadi jeda 60 detik membuat pas tertinggal "masih di lokasi" sampai satu menit
+ * setelah check-out. 30 detik memotong separuh lag itu tanpa melipatgandakan
+ * laju permintaan; karena jendela `visiting` pendek dan terbatas, total tambahan
+ * beban tetap kecil — masih sesuai diet S5.
+ */
+const VISIT_VISITING_REFETCH_INTERVAL = 30_000
+
+/**
+ * Gerbang jeda polling detail/QR: `false` bila tab tersembunyi
+ * (`document.hidden`) ATAU status kunjungan terminal/`requested`/`rescheduled`/
+ * belum termuat. `approved` → 60 detik, `visiting` → 30 detik (lihat
+ * `VISIT_*_REFETCH_INTERVAL`). Status `undefined` (data belum termuat)
+ * diperlakukan fail-closed → polling berhenti sampai status diketahui.
+ */
+function visitRefetchInterval(status: VisitStatus | undefined): number | false {
+  if (typeof document !== 'undefined' && document.hidden) return false
+  if (status === 'approved') return VISIT_DETAIL_REFETCH_INTERVAL
+  if (status === 'visiting') return VISIT_VISITING_REFETCH_INTERVAL
+  return false
+}
 
 /**
  * Prefix kunci yang tetap diturunkan dari `queryKeys`, bukan string yang
@@ -96,10 +126,15 @@ const SECURITY_USERS_PREFIX = queryKeys.securityUsers().slice(0, 1)
 const MANAGED_USERS_PREFIX = queryKeys.managedUsers().slice(0, 1)
 const LOCATIONS_PREFIX = queryKeys.locations().slice(0, 1)
 
-/** 401/403/404 bersifat definitif — mengulanginya hanya menambah beban API. */
+/**
+ * 401/403/404 bersifat definitif — mengulanginya hanya menambah beban API.
+ * Selain galat definitif itu, kegagalan jaringan/5xx diulang sampai 2 kali
+ * (selaras default global `retry: 2` + backoff eksponensial cap 30 detik)
+ * demi ketahanan S5 di koneksi seluler yang putus-putus.
+ */
 function shouldRetry(failureCount: number, error: unknown): boolean {
   const isDefinitive = error instanceof ApiError && [401, 403, 404].includes(error.status)
-  return !isDefinitive && failureCount < 1
+  return !isDefinitive && failureCount < 2
 }
 
 /** Status kunjungan berubah → segarkan seluruh daftar + detail + QR kunjungan itu. */
@@ -139,14 +174,16 @@ export const locationsQueryOptions = (activeOnly?: boolean) =>
     queryKey: queryKeys.locations(activeOnly),
     queryFn: () => listLocations(activeOnly),
     staleTime: MASTER_STALE_TIME,
+    gcTime: MASTER_GC_TIME,
     retry: shouldRetry,
   })
 
-/** Sama seperti lokasi: tujuan kunjungan jarang berubah, jadi layak 5 menit. */
+/** Sama seperti lokasi: tujuan kunjungan jarang berubah — Infinity + gcTime 24 jam. */
 export const purposesQueryOptions = queryOptions({
   queryKey: queryKeys.purposes(),
   queryFn: () => listPurposes(),
   staleTime: MASTER_STALE_TIME,
+  gcTime: MASTER_GC_TIME,
   retry: shouldRetry,
 })
 
@@ -155,6 +192,7 @@ export const vendorsQueryOptions = queryOptions({
   queryKey: queryKeys.vendors(),
   queryFn: () => listVendors(),
   staleTime: MASTER_STALE_TIME,
+  gcTime: MASTER_GC_TIME,
   retry: shouldRetry,
 })
 
@@ -174,29 +212,32 @@ export function visitDetailQueryOptions(id: string | null) {
     enabled: id !== null,
     staleTime: VISIT_STALE_TIME,
     retry: shouldRetry,
-    // Pembaruan mandiri SCR-04 vendor (lihat konstanta di atas).
-    refetchInterval: VISIT_DETAIL_REFETCH_INTERVAL,
+    // Pembaruan mandiri SCR-04 vendor: polling hanya saat tab terlihat dan
+    // status masih bergerak — approved 60 detik, visiting 30 detik (jendela
+    // check-out); refetch-on-focus dihapus (lihat `visitRefetchInterval`).
+    refetchInterval: (query) => visitRefetchInterval(query.state.data?.status),
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
   })
 }
 
 /**
- * QR hanya ada untuk kunjungan berstatus `approved`; status lain dibalas 404,
- * jadi pemanggil wajib mengaktifkan query ini hanya setelah status terverifikasi
- * dan `shouldRetry` menyingkirkan 404 dari percobaan ulang.
+ * `GET /visits/{id}/qr` mengembalikan `{ visit_id, qr_code_payload }` untuk
+ * kunjungan apa pun yang boleh dilihat aktor (handler tidak menggerbangi status);
+ * payload yang sama dipakai saat check-in (`approved`) maupun check-out
+ * (`visiting`). Karena itu `status` di sini hanya mengatur gerbang polling QR
+ * (lihat `visitRefetchInterval`), bukan keabsahan payload.
  */
-export function visitQrQueryOptions(id: string | null) {
+export function visitQrQueryOptions(id: string | null, status?: VisitStatus) {
   return queryOptions({
     queryKey: queryKeys.visits.qr(id ?? ''),
     queryFn: () => getVisitQr(id ?? ''),
     enabled: id !== null,
     staleTime: VISIT_STALE_TIME,
     retry: shouldRetry,
-    // QR wajib ikut polling agar kartu QR selalu sinkron (lihat konstanta di atas).
-    refetchInterval: VISIT_DETAIL_REFETCH_INTERVAL,
+    // QR mengikuti gerbang status yang sama selama tab terlihat — approved 60
+    // detik / visiting 30 detik (diet S5); tanpa refetch-on-focus.
+    refetchInterval: () => visitRefetchInterval(status),
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
   })
 }
 
@@ -243,13 +284,31 @@ export function useVisitsQuery(params: VisitListParams, enabled = true) {
   return useQuery({ ...visitsQueryOptions(params), enabled })
 }
 
+/** Total antrean approval (requested + rescheduled) untuk badge shell — server-total, scope cabang/peran ikut backend. */
+export function usePendingApprovalCount(enabled = true) {
+  const requested = useVisitsQuery({ status: 'requested', limit: 1 }, enabled)
+  const rescheduled = useVisitsQuery({ status: 'rescheduled', limit: 1 }, enabled)
+  return {
+    pendingCount: (requested.data?.total ?? 0) + (rescheduled.data?.total ?? 0),
+    isPending: requested.isPending || rescheduled.isPending,
+    isError: requested.isError,
+    refetch: () => { void requested.refetch(); void rescheduled.refetch() },
+  }
+}
+
 export function useVisitQuery(id: string | null) {
   return useQuery(visitDetailQueryOptions(id))
 }
 
 /** `enabled` berasal dari pemanggil — teruskan true untuk status `approved` (check-in) atau `visiting` (check-out, QR yang sama). */
 export function useVisitQrQuery(id: string | null, enabled = true) {
-  return useQuery({ ...visitQrQueryOptions(id), enabled: id !== null && enabled })
+  const queryClient = useQueryClient()
+  // Status kunjungan diambil dari cache detail (halaman yang sama sudah
+  // memakainya) sebagai gerbang polling QR — tanpa langganan query baru.
+  const visitStatus = queryClient.getQueryData<VisitDetail>(
+    queryKeys.visits.detail(id ?? ''),
+  )?.status
+  return useQuery({ ...visitQrQueryOptions(id, visitStatus), enabled: id !== null && enabled })
 }
 
 export function useSecurityUsersQuery(locationId?: string, enabled = true) {
