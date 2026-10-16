@@ -1,0 +1,14 @@
+# THC-VMS production deploy — the ONLY trigger (no webhook alongside it).
+# Requires a Gitea Actions self-hosted runner installed ON the Ubuntu VPS
+# (labels below must match the runner). The runner executes the repo's
+# deploy/deploy.sh, which self-pulls latest main before deploying.
+name: deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, vps]
+    steps:
+      - name: Deploy latest main on VPS
+        run: /home/vms/thc-vms/deploy/deploy.sh
