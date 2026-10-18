@@ -1,5 +1,11 @@
 .omo/run-continuation/
+
+# Catatan & catatan QA pribadi — lokal saja, tidak pernah di-commit.
+# Sebagian pernah ikut ter-track di commit lama, lalu di-untrack dari index.
 thc-notepad.txt
+vms-notepad.txt
+vms-user-feedback.txt
+user-feedback.txt
 
 # Local runtime state written by vms.ps1 (pids, logs, the compiled server).
 .runtime/
@@ -27,4 +33,3 @@ dummy-assets/
 node_modules/
 .vite/
 thc-vms-acc.pdf
-user-feedback.txt

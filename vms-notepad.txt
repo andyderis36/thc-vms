@@ -1,12 +1,15 @@
 #todo/task, general:
-1. ketika mobile view, humberger menu di navbar kanan atas, tapi kog sidebar menu muncul dari kiri? mungkin salah posisi humberger menunya. periksa semua tampilan mobile view yang ada humberger menu di navbar dari semua role akun!
-
+1. ada berapa total semua status kunjungan/visitor yang bisa terjadi? 
+2. dan setiap status masing masing terjadi karena apa? misal status terjadi karena trigger otomatis dari sistem karena kondisi/situasi/perilaku tertentu, dan ada juga status terjadi karena trigger manual dari user.
+3. apakah setiap user role sudah punya trigger manual untuk setiap status? misal user vendor/mitra punya trigger button/CTA batalkan kunjungan, atau juga button lain dan user role lain jika ada. mungkin lebih ke scope user superadmin, admin, dan vendor/mitra.
+4. "http://localhost:3210/facilities", kenapa bisa menambahkan fasilitas kantor pusat lebih dari 1? harusnya kantor pusat itu hanya ada 1 dan tidak bisa ditambahkan lagi, kecuali kantor pusat belum ada maka di modal/form tambah fasilitas akan muncul pilihan dropdown kantor pusat.
 
 #jangan commit/push tanpa perintah!!!
 #KERJAKAN DENGAN TELITI, HATI-HATI, TEPAT, PROFESSIONAL!!!
 #CLEAN CODE, CLEAN ARCHITECTURE!!!	
 #PRINSIP SOLID, DRY, KISS, YAGNI!!!
 #kerjakan dengan sub-agent jika memungkinkan untuk menghemat token!!!
+
 
 #todo/task, untuk role superadmin/admin(koor. wilayah):
 1.
@@ -21,7 +24,7 @@
 
 
 ###
-1. ubah total UI dengan "https://www.jokoui.web.id/components/application", tapi color palette biru tetap dipertahankan.
+1.
 
 
 ###
