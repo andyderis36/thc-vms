@@ -99,21 +99,27 @@ type fakeAutoRules struct {
 	stale      []domain.VisitRequest
 	noShow     []domain.VisitRequest
 	overstayed []domain.VisitRequest
+	reminders  []domain.VisitRequest
 	staleErr   error
 	noShowErr  error
 	overErr    error
+	remindErr  error
 }
 
 func (f *fakeAutoRules) FindStaleRequested(_ context.Context, _ time.Time) ([]domain.VisitRequest, error) {
 	return f.stale, f.staleErr
 }
 
-func (f *fakeAutoRules) FindNoShowApproved(_ context.Context, _ time.Time) ([]domain.VisitRequest, error) {
+func (f *fakeAutoRules) FindNoShow(_ context.Context, _ time.Time) ([]domain.VisitRequest, error) {
 	return f.noShow, f.noShowErr
 }
 
 func (f *fakeAutoRules) FindOverstayedVisiting(_ context.Context, _ time.Time) ([]domain.VisitRequest, error) {
 	return f.overstayed, f.overErr
+}
+
+func (f *fakeAutoRules) FindUpcomingApproved(_ context.Context, _, _ time.Time) ([]domain.VisitRequest, error) {
+	return f.reminders, f.remindErr
 }
 
 type fakeCheckInOutRepo struct {
@@ -152,16 +158,46 @@ func (f *fakeCheckInOutRepo) FindCheckOutByVisit(_ context.Context, _ domain.UUI
 	return domain.CheckOut{}, fmt.Errorf("fakeCheckInOutRepo: missing: %w", domain.ErrNotFound)
 }
 
+type notifyWrite struct {
+	visit domain.VisitRequest
+	tpl   *domain.NotificationTemplate
+}
+
+type fakeNotificationRepo struct {
+	writes    []notifyWrite
+	insertErr error
+}
+
+func (f *fakeNotificationRepo) List(_ context.Context, _ domain.NotificationFilter) ([]domain.Notification, int64, int64, error) {
+	return nil, 0, 0, nil
+}
+
+func (f *fakeNotificationRepo) MarkRead(_ context.Context, _, _ domain.UUID) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeNotificationRepo) MarkAllRead(_ context.Context, _ domain.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeNotificationRepo) InsertForVisit(_ context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate) error {
+	if f.insertErr != nil {
+		return f.insertErr
+	}
+	f.writes = append(f.writes, notifyWrite{visit: visit, tpl: tpl})
+	return nil
+}
+
 func mkVisit(id domain.UUID, status domain.VisitStatus, createdAt, start, end time.Time) domain.VisitRequest {
 	return domain.VisitRequest{
-		ID:         id,
-		VisitID:    "VST-" + string(id),
-		PICUserID:  "pic-1",
-		LocationID: "loc-A",
-		StartDate:  start,
-		EndDate:    end,
-		Status:     status,
-		CreatedAt:  createdAt,
-		UpdatedAt:  createdAt,
+		ID:           id,
+		VisitID:      "VST-" + string(id),
+		VendorUserID: "vendor-1",
+		LocationID:   "loc-A",
+		StartDate:    start,
+		EndDate:      end,
+		Status:       status,
+		CreatedAt:    createdAt,
+		UpdatedAt:    createdAt,
 	}
 }

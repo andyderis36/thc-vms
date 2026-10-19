@@ -29,7 +29,7 @@ func TestSweepQueries_AreCappedAt500(t *testing.T) {
 	// When/Then: each sweep block is capped and still skips locked rows.
 	for _, name := range []string{
 		"SweepStaleRequestedVisits",
-		"SweepNoShowApprovedVisits",
+		"SweepNoShowVisits",
 		"SweepStaleVisitingVisits",
 	} {
 		block := sweepBlock(t, string(raw), name)
@@ -96,7 +96,7 @@ func TestHydrate_IssuesOneBatchQuery(t *testing.T) {
 		},
 	}
 	// When: the sweep hydrates its 6 ids.
-	got, err := repo.hydrate(context.Background(), ids, domain.VisitStatusRequested,
+	got, err := repo.hydrate(context.Background(), ids, []domain.VisitStatus{domain.VisitStatusRequested},
 		func(domain.VisitRequest) bool { return true })
 	// Then: exactly one batch load carried all 6 ids ...
 	if err != nil {
@@ -130,7 +130,7 @@ func TestHydrate_EmptySweepIssuesNoQuery(t *testing.T) {
 			return nil, nil
 		},
 	}
-	got, err := repo.hydrate(context.Background(), nil, domain.VisitStatusRequested,
+	got, err := repo.hydrate(context.Background(), nil, []domain.VisitStatus{domain.VisitStatusRequested},
 		func(domain.VisitRequest) bool { return true })
 	if err != nil {
 		t.Fatalf("hydrate: %v", err)

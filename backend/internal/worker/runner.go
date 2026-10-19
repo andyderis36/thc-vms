@@ -8,9 +8,11 @@ import (
 )
 
 // DefaultInterval is the auto-rule sweep period when WORKER_INTERVAL is
-// absent: one sweep per hour. The 7-day, 2-hour and 24-hour rule horizons
-// are absolute instants, so an hourly tick can never skip a transition.
-const DefaultInterval = time.Hour
+// absent: one sweep per 15 minutes. The 7-day, 2-hour and 24-hour rule horizons
+// are absolute instants, so this tick can never skip a transition; the shorter
+// period exists so the R4 reminder window (ReminderWindow) is polled often
+// enough not to miss a visit that enters it between ticks.
+const DefaultInterval = 15 * time.Minute
 
 // intervalEnv names the variable configuring the sweep period as a Go
 // duration (for example "30m", "1h"). Malformed values fall back to the
@@ -93,6 +95,7 @@ func (r *Runner) tick(ctx context.Context) {
 		"cancelled", summary.Cancelled,
 		"no_show", summary.NoShow,
 		"completed", summary.Completed,
+		"reminded", summary.Reminded,
 		"skipped", summary.Skipped,
 		"failures", len(summary.Failures))
 }

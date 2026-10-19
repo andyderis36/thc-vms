@@ -1,11 +1,23 @@
 flowchart TD
-    Start([Periodic Scheduler: Go Background Goroutine / Cron]) --> CekExpired{Cek Kunjungan 'requested' > 7 Hari?}
-    CekExpired -- Ya --> AutoCancel[Update Status: cancelled & Log History]
-    CekExpired -- Tidak --> CekOverstay
-    
-    CekOverstay{Cek Kunjungan 'visiting' > end_date + 24 Jam?}
-    CekOverstay -- Ya --> AutoComplete[Update Status: completed & Flag Selesai Otomatis]
-    CekOverstay -- Tidak --> Selesai([Selesai])
-    
+    Start([Runner In-Process: satu goroutine, interval WORKER_INTERVAL default 15 menit]) --> R2
+
+    R2{Cek Kunjungan Pre-Arrival requested/approved/rescheduled, end_date + 2 Jam lewat, dan belum ada Check-in?}
+    R2 -- Ya --> NoShow[Update Status: not_visit & Log History]
+    R2 -- Tidak --> R1
+
+    R1{Cek Kunjungan 'requested' dengan created_at sudah lewat 7 Hari DAN end_date belum lewat 2 Jam (saling lepas dengan R2)?}
+    R1 -- Ya --> AutoCancel[Update Status: cancelled & Log History]
+    R1 -- Tidak --> R3
+
+    R3{Cek Kunjungan 'visiting' dengan end_date sudah lewat 24 Jam?}
+    R3 -- Ya --> AutoComplete[Update Status: completed & Log History]
+    R3 -- Tidak --> R4
+
+    R4{Cek Kunjungan 'approved' dengan start_date dalam 45 Menit ke depan?}
+    R4 -- Ya --> Reminder[Kirim Tepat 1 Notifikasi ke Vendor Pengaju]
+    R4 -- Tidak --> Selesai([Selesai])
+
+    NoShow --> Selesai
     AutoCancel --> Selesai
     AutoComplete --> Selesai
+    Reminder --> Selesai

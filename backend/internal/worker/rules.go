@@ -19,14 +19,18 @@ const (
 	// RequestedTimeout is the PRD "Timeout 7 Hari": a requested visit with no
 	// answer for 7 days is abandoned (R1).
 	RequestedTimeout = 7 * 24 * time.Hour
-	// NoShowGrace is the R2 horizon: once now passes end_date+2h the check-in
-	// window has closed, so an approved visit with no check-in row is a
-	// definitive no-show.
-	NoShowGrace = 2 * time.Hour
+	// NoShowGrace is the R2 horizon: once now passes end_date+NoShowGrace the
+	// check-in window has closed, so a pre-arrival visit with no check-in row
+	// is a definitive no-show. It aliases the domain value so the worker and
+	// the sweep repository cannot drift.
+	NoShowGrace = domain.NoShowGrace
 	// AutoCompleteDelay is the PRD "Auto-Complete (End Date + 24 Jam)": a
 	// visit still marked visiting a full day after its scheduled end is
 	// closed automatically (R3).
 	AutoCompleteDelay = 24 * time.Hour
+	// ReminderWindow is the R4 lead time: an approved visit whose start_date
+	// falls inside (now, now+ReminderWindow] gets one reminder to its vendor user.
+	ReminderWindow = 45 * time.Minute
 )
 
 // Rule identifiers used in history notes, logs and failure reports.
@@ -34,13 +38,14 @@ const (
 	RuleAutoCancel   = "R1"
 	RuleNoShow       = "R2"
 	RuleAutoComplete = "R3"
+	RuleReminder     = "R4"
 )
 
 // Automatic-transition history notes: stable, Bahasa, carrying the rule id so
 // the audit trail tells a worker write apart from a manual one.
 const (
 	noteAutoCancel   = "Otomatis dibatalkan: pengajuan tanpa respons selama 7 hari (R1)."
-	noteNoShow       = "Otomatis ditandai tidak hadir: jendela check-in telah ditutup tanpa kedatangan (R2)."
+	noteNoShow       = "Otomatis ditandai tidak hadir: jadwal kunjungan terlewat tanpa kedatangan (R2)."
 	noteAutoComplete = "Otomatis diselesaikan: 24 jam setelah jadwal berakhir (R3)."
 )
 
@@ -61,16 +66,37 @@ func ShouldAutoCancel(visit domain.VisitRequest, cutoff time.Time) bool {
 	return visit.Status == domain.VisitStatusRequested && !visit.CreatedAt.After(cutoff)
 }
 
-// ShouldMarkNoShow is the R2 evaluator: approved AND the check-in window has
-// closed (end at or before the cut-off) AND no check-in row exists.
+// ShouldMarkNoShow is the R2 evaluator: a pre-arrival status (requested,
+// approved or rescheduled) AND the check-in window has closed (end at or
+// before the cut-off) AND no check-in row exists.
 func ShouldMarkNoShow(visit domain.VisitRequest, cutoff time.Time, hasCheckIn bool) bool {
-	return visit.Status == domain.VisitStatusApproved && !visit.EndDate.After(cutoff) && !hasCheckIn
+	return isNoShowSource(visit.Status) && !visit.EndDate.After(cutoff) && !hasCheckIn
+}
+
+// isNoShowSource reports whether a status is one the R2 sweep may close: every
+// state a visit can hold before it checks in.
+func isNoShowSource(status domain.VisitStatus) bool {
+	switch status {
+	case domain.VisitStatusRequested, domain.VisitStatusApproved, domain.VisitStatusRescheduled:
+		return true
+	default:
+		return false
+	}
 }
 
 // ShouldAutoComplete is the R3 evaluator: visiting AND end at or before the
 // 24-hour cut-off. Inclusive: exactly end+24h completes.
 func ShouldAutoComplete(visit domain.VisitRequest, cutoff time.Time) bool {
 	return visit.Status == domain.VisitStatusVisiting && !visit.EndDate.After(cutoff)
+}
+
+// ShouldRemind is the R4 evaluator: approved AND the scheduled start falls
+// inside the half-open window (now, now+window]. A start exactly at the window
+// edge still reminds; a start already in the past never does.
+func ShouldRemind(visit domain.VisitRequest, now time.Time, window time.Duration) bool {
+	return visit.Status == domain.VisitStatusApproved &&
+		visit.StartDate.After(now) &&
+		!visit.StartDate.After(now.Add(window))
 }
 
 // CheckInBatchProber is an OPTIONAL extension of domain.CheckInOutRepository:
@@ -84,13 +110,15 @@ type CheckInBatchProber interface {
 
 // Dependencies wires the sweep runner to its ports. Clock is mandatory in
 // production (domain.SystemClock) and frozen in tests; Logger defaults to
-// slog.Default when nil.
+// slog.Default when nil. Notifications is OPTIONAL: when nil the R4 reminder
+// sweep is skipped (R1-R3 need only Visits/Rules/CheckIns).
 type Dependencies struct {
-	Visits   domain.VisitRepository
-	Rules    domain.VisitAutoRuleRepository
-	CheckIns domain.CheckInOutRepository
-	Clock    domain.Clock
-	Logger   *slog.Logger
+	Visits        domain.VisitRepository
+	Rules         domain.VisitAutoRuleRepository
+	CheckIns      domain.CheckInOutRepository
+	Notifications domain.NotificationRepository
+	Clock         domain.Clock
+	Logger        *slog.Logger
 }
 
 // Failure records one visit (or one sweep listing) the runner could not
@@ -107,17 +135,19 @@ type Summary struct {
 	Cancelled int
 	NoShow    int
 	Completed int
+	Reminded  int
 	Skipped   int
 	Failures  []Failure
 }
 
 // Service runs the three automatic rules against the injected ports.
 type Service struct {
-	visits   domain.VisitRepository
-	rules    domain.VisitAutoRuleRepository
-	checkIns domain.CheckInOutRepository
-	clock    domain.Clock
-	logger   *slog.Logger
+	visits        domain.VisitRepository
+	rules         domain.VisitAutoRuleRepository
+	checkIns      domain.CheckInOutRepository
+	notifications domain.NotificationRepository
+	clock         domain.Clock
+	logger        *slog.Logger
 }
 
 // NewService builds a sweep runner, defaulting a nil clock to the wall clock
@@ -132,11 +162,12 @@ func NewService(deps Dependencies) *Service {
 		logger = slog.Default()
 	}
 	return &Service{
-		visits:   deps.Visits,
-		rules:    deps.Rules,
-		checkIns: deps.CheckIns,
-		clock:    clock,
-		logger:   logger,
+		visits:        deps.Visits,
+		rules:         deps.Rules,
+		checkIns:      deps.CheckIns,
+		notifications: deps.Notifications,
+		clock:         clock,
+		logger:        logger,
 	}
 }
 
@@ -153,13 +184,19 @@ func (s *Service) Run(ctx context.Context) Summary {
 	}
 	now := s.clock.Now()
 	r1, r2, r3 := Thresholds(now)
-	s.sweepRequested(ctx, r1, &summary)
+	// R2 runs before R1: an overdue request is a no-show, so the no-show sweep
+	// must claim it first. R1 then re-reads a flipped row as not_visit and
+	// skips it, which keeps the two sweeps disjoint even for a visit that is
+	// both stale and past its window.
 	s.sweepNoShow(ctx, r2, &summary)
+	s.sweepRequested(ctx, r1, &summary)
 	s.sweepOverstayed(ctx, r3, &summary)
+	s.sweepReminders(ctx, now, &summary)
 	s.logger.Info("auto-rule sweep finished",
 		"cancelled", summary.Cancelled,
 		"no_show", summary.NoShow,
 		"completed", summary.Completed,
+		"reminded", summary.Reminded,
 		"skipped", summary.Skipped,
 		"failures", len(summary.Failures))
 	return summary
@@ -186,10 +223,10 @@ func (s *Service) sweepRequested(ctx context.Context, cutoff time.Time, summary 
 	}
 }
 
-// sweepNoShow applies R2: approved visits past the closed window with no
-// check-in row become not_visit.
+// sweepNoShow applies R2: pre-arrival visits (requested, approved or
+// rescheduled) past the closed window with no check-in row become not_visit.
 func (s *Service) sweepNoShow(ctx context.Context, cutoff time.Time, summary *Summary) {
-	candidates, err := s.rules.FindNoShowApproved(ctx, cutoff)
+	candidates, err := s.rules.FindNoShow(ctx, cutoff)
 	if err != nil {
 		summary.Failures = append(summary.Failures, Failure{Rule: RuleNoShow, Err: err})
 		s.logger.Error("auto-rule sweep listing failed", "rule", RuleNoShow, "err", err)
@@ -240,6 +277,40 @@ func (s *Service) sweepOverstayed(ctx context.Context, cutoff time.Time, summary
 			continue
 		}
 		s.apply(ctx, visit, domain.VisitStatusCompleted, noteAutoComplete, summary, RuleAutoComplete, &summary.Completed)
+	}
+}
+
+// sweepReminders applies R4: approved visits starting within ReminderWindow get
+// one reminder notification to their vendor user. It mutates no visit; idempotency is
+// the notification store's (user_id, type, visit_request_id) unique constraint,
+// so repeated ticks, restarts and concurrent workers never double-post.
+func (s *Service) sweepReminders(ctx context.Context, now time.Time, summary *Summary) {
+	if s.notifications == nil {
+		return
+	}
+	windowEnd := now.Add(ReminderWindow)
+	candidates, err := s.rules.FindUpcomingApproved(ctx, now, windowEnd)
+	if err != nil {
+		summary.Failures = append(summary.Failures, Failure{Rule: RuleReminder, Err: err})
+		s.logger.Error("auto-rule sweep listing failed", "rule", RuleReminder, "err", err)
+		return
+	}
+	for i := range candidates {
+		visit, ok := s.refresh(ctx, candidates[i].ID, summary, RuleReminder)
+		if !ok {
+			continue
+		}
+		if !ShouldRemind(visit, now, ReminderWindow) {
+			summary.Skipped++
+			continue
+		}
+		if err := s.notifications.InsertForVisit(ctx, visit, domain.ReminderNotification(visit.VisitID)); err != nil {
+			summary.Failures = append(summary.Failures, Failure{Rule: RuleReminder, VisitID: visit.ID, Err: err})
+			s.logger.Error("auto-rule reminder emit failed", "rule", RuleReminder, "visit_id", visit.ID, "err", err)
+			continue
+		}
+		summary.Reminded++
+		s.logger.Info("auto-rule reminder emitted", "rule", RuleReminder, "visit_id", visit.ID)
 	}
 }
 

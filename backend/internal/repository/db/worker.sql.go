@@ -15,16 +15,16 @@ import (
 
 const getVisitsByIDs = `-- name: GetVisitsByIDs :many
 SELECT
-    vr.id, vr.visit_id, vr.pic_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
     l.name AS location_name, l.type AS location_type,
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-JOIN users pu ON pu.id = vr.pic_user_id
+JOIN users pu ON pu.id = vr.vendor_user_id
 WHERE vr.id = ANY($1::uuid[])
 `
 
@@ -35,7 +35,7 @@ type GetVisitsByIDsParams struct {
 type GetVisitsByIDsRow struct {
 	ID                  uuid.UUID   `json:"id"`
 	VisitID             string      `json:"visit_id"`
-	PicUserID           uuid.UUID   `json:"pic_user_id"`
+	VendorUserID        uuid.UUID   `json:"vendor_user_id"`
 	VendorID            pgtype.UUID `json:"vendor_id"`
 	LocationID          uuid.UUID   `json:"location_id"`
 	StartDate           time.Time   `json:"start_date"`
@@ -54,9 +54,9 @@ type GetVisitsByIDsRow struct {
 	LocationCity        pgtype.Text `json:"location_city"`
 	LocationTimezone    string      `json:"location_timezone"`
 	VendorName          pgtype.Text `json:"vendor_name"`
-	PicName             string      `json:"pic_name"`
-	PicEmail            string      `json:"pic_email"`
-	PicPhone            pgtype.Text `json:"pic_phone"`
+	VendorUserName      string      `json:"vendor_user_name"`
+	VendorUserEmail     string      `json:"vendor_user_email"`
+	VendorUserPhone     pgtype.Text `json:"vendor_user_phone"`
 }
 
 // Batched detail read for the auto-rule worker hydrate(): one round trip for
@@ -75,7 +75,7 @@ func (q *Queries) GetVisitsByIDs(ctx context.Context, arg GetVisitsByIDsParams) 
 		if err := rows.Scan(
 			&i.ID,
 			&i.VisitID,
-			&i.PicUserID,
+			&i.VendorUserID,
 			&i.VendorID,
 			&i.LocationID,
 			&i.StartDate,
@@ -94,9 +94,9 @@ func (q *Queries) GetVisitsByIDs(ctx context.Context, arg GetVisitsByIDsParams) 
 			&i.LocationCity,
 			&i.LocationTimezone,
 			&i.VendorName,
-			&i.PicName,
-			&i.PicEmail,
-			&i.PicPhone,
+			&i.VendorUserName,
+			&i.VendorUserEmail,
+			&i.VendorUserPhone,
 		); err != nil {
 			return nil, err
 		}
@@ -146,45 +146,45 @@ func (q *Queries) ListCheckInsByVisitIDs(ctx context.Context, arg ListCheckInsBy
 	return items, nil
 }
 
-const sweepNoShowApprovedVisits = `-- name: SweepNoShowApprovedVisits :many
-SELECT vr.id, vr.visit_id, vr.status, vr.pic_user_id, vr.location_id, vr.start_date, vr.end_date
+const sweepNoShowVisits = `-- name: SweepNoShowVisits :many
+SELECT vr.id, vr.visit_id, vr.status, vr.vendor_user_id, vr.location_id, vr.start_date, vr.end_date
 FROM visit_request vr
-WHERE vr.status = 'approved'
-  AND vr.end_date < now() - interval '2 hours'
+WHERE vr.status IN ('requested', 'approved', 'rescheduled')
+  AND vr.end_date <= now() - interval '2 hours'
   AND NOT EXISTS (SELECT 1 FROM check_in ci WHERE ci.visit_request_id = vr.id)
 ORDER BY vr.end_date ASC
 LIMIT 500
 FOR UPDATE OF vr SKIP LOCKED
 `
 
-type SweepNoShowApprovedVisitsRow struct {
-	ID         uuid.UUID `json:"id"`
-	VisitID    string    `json:"visit_id"`
-	Status     string    `json:"status"`
-	PicUserID  uuid.UUID `json:"pic_user_id"`
-	LocationID uuid.UUID `json:"location_id"`
-	StartDate  time.Time `json:"start_date"`
-	EndDate    time.Time `json:"end_date"`
+type SweepNoShowVisitsRow struct {
+	ID           uuid.UUID `json:"id"`
+	VisitID      string    `json:"visit_id"`
+	Status       string    `json:"status"`
+	VendorUserID uuid.UUID `json:"vendor_user_id"`
+	LocationID   uuid.UUID `json:"location_id"`
+	StartDate    time.Time `json:"start_date"`
+	EndDate      time.Time `json:"end_date"`
 }
 
-// R2: approved, past end_date + 2h, and check_in has no row for the visit.
-// Uses idx_visit_status for the status scan and the UNIQUE index on
-// check_in(visit_request_id) for the anti-join probe.
+// R2: any pre-arrival status, past end_date + 2h (domain.NoShowGrace), and
+// check_in has no row for the visit. Uses idx_visit_status for the status scan
+// and the UNIQUE index on check_in(visit_request_id) for the anti-join probe.
 // Capped at 500 rows per tick (S4), same as its sibling sweeps.
-func (q *Queries) SweepNoShowApprovedVisits(ctx context.Context) ([]SweepNoShowApprovedVisitsRow, error) {
-	rows, err := q.db.Query(ctx, sweepNoShowApprovedVisits)
+func (q *Queries) SweepNoShowVisits(ctx context.Context) ([]SweepNoShowVisitsRow, error) {
+	rows, err := q.db.Query(ctx, sweepNoShowVisits)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SweepNoShowApprovedVisitsRow{}
+	items := []SweepNoShowVisitsRow{}
 	for rows.Next() {
-		var i SweepNoShowApprovedVisitsRow
+		var i SweepNoShowVisitsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.VisitID,
 			&i.Status,
-			&i.PicUserID,
+			&i.VendorUserID,
 			&i.LocationID,
 			&i.StartDate,
 			&i.EndDate,
@@ -201,23 +201,24 @@ func (q *Queries) SweepNoShowApprovedVisits(ctx context.Context) ([]SweepNoShowA
 
 const sweepStaleRequestedVisits = `-- name: SweepStaleRequestedVisits :many
 
-SELECT vr.id, vr.visit_id, vr.status, vr.pic_user_id, vr.location_id, vr.start_date, vr.end_date
+SELECT vr.id, vr.visit_id, vr.status, vr.vendor_user_id, vr.location_id, vr.start_date, vr.end_date
 FROM visit_request vr
 WHERE vr.status = 'requested'
   AND vr.created_at < now() - interval '7 days'
+  AND vr.end_date > now() - interval '2 hours'
 ORDER BY vr.created_at ASC
 LIMIT 500
 FOR UPDATE OF vr SKIP LOCKED
 `
 
 type SweepStaleRequestedVisitsRow struct {
-	ID         uuid.UUID `json:"id"`
-	VisitID    string    `json:"visit_id"`
-	Status     string    `json:"status"`
-	PicUserID  uuid.UUID `json:"pic_user_id"`
-	LocationID uuid.UUID `json:"location_id"`
-	StartDate  time.Time `json:"start_date"`
-	EndDate    time.Time `json:"end_date"`
+	ID           uuid.UUID `json:"id"`
+	VisitID      string    `json:"visit_id"`
+	Status       string    `json:"status"`
+	VendorUserID uuid.UUID `json:"vendor_user_id"`
+	LocationID   uuid.UUID `json:"location_id"`
+	StartDate    time.Time `json:"start_date"`
+	EndDate      time.Time `json:"end_date"`
 }
 
 // =============================================================================
@@ -230,8 +231,8 @@ type SweepStaleRequestedVisitsRow struct {
 //	mutate anything. The worker then, inside the SAME transaction per batch:
 //	  1. runs the sweep        -> the rows are already locked, so the ids cannot
 //	                             be re-selected by a second worker instance;
-//	  2. UpdateVisitStatus     -> requested->cancelled | approved->not_visit
-//	                             | visiting->completed;
+//	  2. UpdateVisitStatus     -> requested->cancelled | (requested|approved|
+//	                             rescheduled)->not_visit | visiting->completed;
 //	  3. InsertStatusHistory   -> changed_by = NULL, notes = the rule id.
 //	Keeping the mutation out of the query file is what lets the caller batch the
 //	whole sweep into one atomic, auditable transaction (PRD L129).
@@ -240,8 +241,9 @@ type SweepStaleRequestedVisitsRow struct {
 //	on - or double-process - rows another instance is already migrating.
 //
 // R1  requested, untouched for 7 days   -> cancelled   (PRD L137 "Timeout 7 Hari")
-// R2  approved, window already closed,
+// R2  pre-arrival (requested | approved | rescheduled),
 //
+//	window already closed,
 //	never checked in                   -> not_visit   (PRD L142 "No Show")
 //
 // R3  visiting, end_date + 24h elapsed   -> completed   (PRD L148 "Auto-Complete")
@@ -249,9 +251,15 @@ type SweepStaleRequestedVisitsRow struct {
 // R2 derives its 2-hour grace from the check-in validity window
 // [start_date - 2h, end_date + 2h] (AGENTS.md rule 6.2, PRD L121-123, QA
 // GATE-05): once now() > end_date + 2h the guard can no longer perform a
-// legitimate check-in, so the visit is definitively a no-show.
+// legitimate check-in, so the visit is definitively a no-show. The grace is
+// domain.NoShowGrace; keep the two in step.
+//
+// R1 and R2 predicates are DISJOINT on end_date: R2 owns end_date <= now()-2h,
+// R1 owns end_date > now()-2h, together partitioning every requested row.
 // =============================================================================
-// R1: an unanswered request 7 days old is abandoned (PRD L137).
+// R1: an unanswered request 7 days old is abandoned (PRD L137). Only requests
+// whose window has NOT fully closed are R1's business: an overdue request is
+// claimed by R2 instead, so end_date > now()-2h keeps the two sweeps disjoint.
 // Capped at 500 rows per tick (S4): one sweep locks and migrates at most one
 // batch, never the whole table.
 func (q *Queries) SweepStaleRequestedVisits(ctx context.Context) ([]SweepStaleRequestedVisitsRow, error) {
@@ -267,7 +275,7 @@ func (q *Queries) SweepStaleRequestedVisits(ctx context.Context) ([]SweepStaleRe
 			&i.ID,
 			&i.VisitID,
 			&i.Status,
-			&i.PicUserID,
+			&i.VendorUserID,
 			&i.LocationID,
 			&i.StartDate,
 			&i.EndDate,
@@ -283,7 +291,7 @@ func (q *Queries) SweepStaleRequestedVisits(ctx context.Context) ([]SweepStaleRe
 }
 
 const sweepStaleVisitingVisits = `-- name: SweepStaleVisitingVisits :many
-SELECT vr.id, vr.visit_id, vr.status, vr.pic_user_id, vr.location_id, vr.start_date, vr.end_date
+SELECT vr.id, vr.visit_id, vr.status, vr.vendor_user_id, vr.location_id, vr.start_date, vr.end_date
 FROM visit_request vr
 WHERE vr.status = 'visiting'
   AND vr.end_date < now() - interval '24 hours'
@@ -293,13 +301,13 @@ FOR UPDATE OF vr SKIP LOCKED
 `
 
 type SweepStaleVisitingVisitsRow struct {
-	ID         uuid.UUID `json:"id"`
-	VisitID    string    `json:"visit_id"`
-	Status     string    `json:"status"`
-	PicUserID  uuid.UUID `json:"pic_user_id"`
-	LocationID uuid.UUID `json:"location_id"`
-	StartDate  time.Time `json:"start_date"`
-	EndDate    time.Time `json:"end_date"`
+	ID           uuid.UUID `json:"id"`
+	VisitID      string    `json:"visit_id"`
+	Status       string    `json:"status"`
+	VendorUserID uuid.UUID `json:"vendor_user_id"`
+	LocationID   uuid.UUID `json:"location_id"`
+	StartDate    time.Time `json:"start_date"`
+	EndDate      time.Time `json:"end_date"`
 }
 
 // R3: still 'visiting' a full day after the scheduled end (PRD L148). idx_visit_date
@@ -320,7 +328,71 @@ func (q *Queries) SweepStaleVisitingVisits(ctx context.Context) ([]SweepStaleVis
 			&i.ID,
 			&i.VisitID,
 			&i.Status,
-			&i.PicUserID,
+			&i.VendorUserID,
+			&i.LocationID,
+			&i.StartDate,
+			&i.EndDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sweepUpcomingApprovedVisits = `-- name: SweepUpcomingApprovedVisits :many
+
+SELECT vr.id, vr.visit_id, vr.status, vr.vendor_user_id, vr.location_id, vr.start_date, vr.end_date
+FROM visit_request vr
+WHERE vr.status = 'approved'
+  AND vr.start_date > $1::timestamptz
+  AND vr.start_date <= $2::timestamptz
+ORDER BY vr.start_date ASC
+LIMIT 500
+`
+
+type SweepUpcomingApprovedVisitsParams struct {
+	Now       time.Time `json:"now"`
+	WindowEnd time.Time `json:"window_end"`
+}
+
+type SweepUpcomingApprovedVisitsRow struct {
+	ID           uuid.UUID `json:"id"`
+	VisitID      string    `json:"visit_id"`
+	Status       string    `json:"status"`
+	VendorUserID uuid.UUID `json:"vendor_user_id"`
+	LocationID   uuid.UUID `json:"location_id"`
+	StartDate    time.Time `json:"start_date"`
+	EndDate      time.Time `json:"end_date"`
+}
+
+// R4  approved, starts within the reminder window -> notify (no status change)
+// R4 differs from R1-R3 in one decisive way: it MUTATES NOTHING. It only needs
+// a read of the due visits so the worker can INSERT a reminder notification;
+// the idempotency comes from the notification unique constraint, not from a row
+// lock. Hence: no FOR UPDATE / SKIP LOCKED (a lock would be pointless and would
+// make concurrent sweeps queue for no reason).
+// R4: approved visits whose start_date falls inside (now, window_end]. The window
+// bounds are BOUND parameters so the worker's injected clock - and therefore the
+// 45-minute ReminderWindow - drives the rule and stays unit-testable.
+// Capped at 500 rows per tick, matching the sibling sweeps.
+func (q *Queries) SweepUpcomingApprovedVisits(ctx context.Context, arg SweepUpcomingApprovedVisitsParams) ([]SweepUpcomingApprovedVisitsRow, error) {
+	rows, err := q.db.Query(ctx, sweepUpcomingApprovedVisits, arg.Now, arg.WindowEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SweepUpcomingApprovedVisitsRow{}
+	for rows.Next() {
+		var i SweepUpcomingApprovedVisitsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VisitID,
+			&i.Status,
+			&i.VendorUserID,
 			&i.LocationID,
 			&i.StartDate,
 			&i.EndDate,

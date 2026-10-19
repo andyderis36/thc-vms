@@ -6,6 +6,7 @@ package domain
 import (
 	"fmt"
 	"slices"
+	"time"
 )
 
 // VisitStatus is the lifecycle state of a visit request. The vocabulary is
@@ -26,7 +27,9 @@ const (
 	VisitStatusVisiting VisitStatus = "visiting"
 	// VisitStatusCompleted marks a visit closed by check-out or auto-complete.
 	VisitStatusCompleted VisitStatus = "completed"
-	// VisitStatusNotVisit marks an approved visit with no check-in (no show).
+	// VisitStatusNotVisit marks a visit whose window closed without a check-in
+	// (no show): an approved visit that never arrived, or an overdue request /
+	// reschedule that was never approved and never visited.
 	VisitStatusNotVisit VisitStatus = "not_visit"
 	// VisitStatusRejected marks a request the branch admin refused.
 	VisitStatusRejected VisitStatus = "rejected"
@@ -35,6 +38,13 @@ const (
 	// VisitStatusRescheduled holds a visit whose dates are being renegotiated.
 	VisitStatusRescheduled VisitStatus = "rescheduled"
 )
+
+// NoShowGrace is the R2 no-show horizon: once now passes end_date+NoShowGrace
+// the check-in window [start_date-2h, end_date+2h] has fully closed, so a visit
+// still in a pre-arrival status with no check-in row is a definitive no-show
+// (AGENTS.md rule 6.2, PRD L142). The worker and the sweep repository both
+// derive their threshold from this one value.
+const NoShowGrace = 2 * time.Hour
 
 // AllVisitStatuses returns the eight statuses in enum order.
 func AllVisitStatuses() []VisitStatus {
@@ -86,10 +96,14 @@ type Transition struct {
 }
 
 // allowedTransitions is the complete rule set from the PRD state machine
-// (docs/0. PRD section 5): fourteen edges, no more. Anything absent from this
+// (docs/0. PRD section 5): sixteen edges, no more. Anything absent from this
 // list is refused by CanTransition, including the moves the diagram only
 // forbids by omission (rescheduled->visiting, approved->rejected, and every
 // exit from a terminal status).
+//
+// requested->not_visit and rescheduled->not_visit close an unapproved request
+// or reschedule whose window passed with no check-in, so the R2 no-show rule
+// owns every pre-arrival status.
 //
 // A schedule change may be moved again without re-approval:
 // rescheduled->rescheduled lets a visit be rescheduled repeatedly, and
@@ -104,6 +118,7 @@ var allowedTransitions = []Transition{
 	{From: VisitStatusRequested, To: VisitStatusRejected, Trigger: TriggerReject},
 	{From: VisitStatusRequested, To: VisitStatusCancelled, Trigger: TriggerCancel},
 	{From: VisitStatusRequested, To: VisitStatusRescheduled, Trigger: TriggerReschedule},
+	{From: VisitStatusRequested, To: VisitStatusNotVisit, Trigger: TriggerNoShow},
 	{From: VisitStatusApproved, To: VisitStatusVisiting, Trigger: TriggerCheckIn},
 	{From: VisitStatusApproved, To: VisitStatusRescheduled, Trigger: TriggerReschedule},
 	{From: VisitStatusApproved, To: VisitStatusCancelled, Trigger: TriggerCancel},
@@ -111,11 +126,12 @@ var allowedTransitions = []Transition{
 	{From: VisitStatusRescheduled, To: VisitStatusApproved, Trigger: TriggerApprove},
 	{From: VisitStatusRescheduled, To: VisitStatusRescheduled, Trigger: TriggerReschedule},
 	{From: VisitStatusRescheduled, To: VisitStatusCancelled, Trigger: TriggerCancel},
+	{From: VisitStatusRescheduled, To: VisitStatusNotVisit, Trigger: TriggerNoShow},
 	{From: VisitStatusVisiting, To: VisitStatusCompleted, Trigger: TriggerCheckOut},
 	{From: VisitStatusVisiting, To: VisitStatusCompleted, Trigger: TriggerAutoComplete},
 }
 
-// AllTransitions returns a copy of the fourteen legal edges.
+// AllTransitions returns a copy of the sixteen legal edges.
 func AllTransitions() []Transition {
 	return slices.Clone(allowedTransitions)
 }
@@ -160,7 +176,7 @@ func (e *TransitionError) Unwrap() error {
 }
 
 // CanTransition reports whether a visit may move from one status to another,
-// returning nil for the fourteen legal edges and a *TransitionError wrapping
+// returning nil for the sixteen legal edges and a *TransitionError wrapping
 // ErrInvalidTransition for everything else.
 func CanTransition(from, to VisitStatus) error {
 	if len(TransitionTriggersFrom(from, to)) > 0 {

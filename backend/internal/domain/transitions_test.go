@@ -7,7 +7,7 @@ import (
 	"thc-vms/backend/internal/domain"
 )
 
-// allowedTransitions enumerates the 14 transitions the PRD state machine
+// allowedTransitions enumerates the 16 transitions the PRD state machine
 // (docs/0. PRD section 5) permits. Anything not listed here is rejected by
 // CanTransition - including the transitions that are forbidden only by
 // omission in the diagram and are therefore the classic implementation bug.
@@ -16,6 +16,10 @@ import (
 // (rescheduled->rescheduled), and an unapproved request may be rescheduled
 // before it is approved (requested->rescheduled), but check-in still needs
 // re-approval first: rescheduled->visiting stays forbidden by omission.
+//
+// The R2 no-show rule closes every pre-arrival status whose window passed with
+// no check-in: the approved case plus the overdue requested and rescheduled
+// cases.
 var allowedTransitions = []struct {
 	name string
 	from domain.VisitStatus
@@ -30,9 +34,11 @@ var allowedTransitions = []struct {
 	{"requested visit rescheduled before approval", domain.VisitStatusRequested, domain.VisitStatusRescheduled},
 	{"cancelled before day H", domain.VisitStatusApproved, domain.VisitStatusCancelled},
 	{"no show after day H", domain.VisitStatusApproved, domain.VisitStatusNotVisit},
+	{"overdue requested visit never arrived", domain.VisitStatusRequested, domain.VisitStatusNotVisit},
 	{"new schedule approved", domain.VisitStatusRescheduled, domain.VisitStatusApproved},
 	{"schedule moved again without re-approval", domain.VisitStatusRescheduled, domain.VisitStatusRescheduled},
 	{"reschedule withdrawn", domain.VisitStatusRescheduled, domain.VisitStatusCancelled},
+	{"overdue rescheduled visit never arrived", domain.VisitStatusRescheduled, domain.VisitStatusNotVisit},
 	{"checked out at the gate", domain.VisitStatusVisiting, domain.VisitStatusCompleted},
 	{"auto completed after end date +24h", domain.VisitStatusVisiting, domain.VisitStatusCompleted},
 }
@@ -62,7 +68,7 @@ var forbiddenTransitions = []struct {
 	{"cannot reschedule a no-show visit", domain.VisitStatusNotVisit, domain.VisitStatusRescheduled},
 }
 
-func TestCanTransition_AllowsTheFourteenPRDTransitions(t *testing.T) {
+func TestCanTransition_AllowsTheSixteenPRDTransitions(t *testing.T) {
 	// Given: every transition the PRD state machine declares.
 	// When:  each one is submitted to the rule set.
 	// Then:   each one is accepted with a nil error.
@@ -113,12 +119,56 @@ func TestCanTransition_RejectsUnknownStatusValues(t *testing.T) {
 	}
 }
 
-func TestTransitionRuleSet_HasExactlyFourteenEntries(t *testing.T) {
-	// Given: the PRD declares 14 legal moves.
+func TestTransitionRuleSet_HasExactlySixteenEntries(t *testing.T) {
+	// Given: the PRD declares 14 legal moves plus the 2 R2 pre-arrival no-show edges.
 	// When:  the whole rule set is counted.
-	// Then:   there are exactly 14, so no extra path sneaks in.
-	if got := len(domain.AllTransitions()); got != 14 {
-		t.Fatalf("len(AllTransitions()) = %d, want 14", got)
+	// Then:   there are exactly 16, so no extra path sneaks in.
+	if got := len(domain.AllTransitions()); got != 16 {
+		t.Fatalf("len(AllTransitions()) = %d, want 16", got)
+	}
+}
+
+// TestNoShow_ClosesEveryPreArrivalStatus pins the R2 vocabulary: the two new
+// pre-arrival edges are legal, not_visit stays terminal, and the rule set holds
+// exactly sixteen edges.
+func TestNoShow_ClosesEveryPreArrivalStatus(t *testing.T) {
+	// Given: the pre-arrival statuses R2 may close.
+	// When:  each is asked to move to not_visit.
+	// Then:   the move is accepted for requested, approved and rescheduled.
+	for _, from := range []domain.VisitStatus{
+		domain.VisitStatusRequested,
+		domain.VisitStatusApproved,
+		domain.VisitStatusRescheduled,
+	} {
+		if err := domain.CanTransition(from, domain.VisitStatusNotVisit); err != nil {
+			t.Errorf("CanTransition(%q, not_visit) = %v, want nil", from, err)
+		}
+	}
+	// And not_visit is still a closed state.
+	if !domain.IsTerminal(domain.VisitStatusNotVisit) {
+		t.Error("IsTerminal(not_visit) = false, want true")
+	}
+	// And the rule set grew by exactly the two new edges.
+	if got := len(domain.AllTransitions()); got != 16 {
+		t.Fatalf("len(AllTransitions()) = %d, want 16", got)
+	}
+}
+
+// TestTransitionNotification_NotVisitIsAVendorNotice proves the automatic
+// not_visit move (system == changed_by IS NULL) emits the vendor
+// auto-cancelled notice, which is what a rescheduled no-show produces.
+func TestTransitionNotification_NotVisitIsAVendorNotice(t *testing.T) {
+	// Given/When: a system-driven move to not_visit.
+	tpl := domain.TransitionNotification(domain.VisitStatusNotVisit, true, "VST-0000000001")
+	// Then: it is a vendor-facing auto-cancelled notice, non-nil.
+	if tpl == nil {
+		t.Fatal("TransitionNotification(not_visit, system) = nil, want a vendor notice")
+	}
+	if tpl.Type != domain.NotificationVisitAutoCancelled {
+		t.Fatalf("type = %q, want %q", tpl.Type, domain.NotificationVisitAutoCancelled)
+	}
+	if tpl.Audience != domain.NotificationAudienceVendor {
+		t.Fatalf("audience = %q, want %q", tpl.Audience, domain.NotificationAudienceVendor)
 	}
 }
 

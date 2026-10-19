@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,20 +63,21 @@ func (r *visitAutoRuleRepository) FindStaleRequested(
 	for _, row := range rows {
 		ids = append(ids, row.ID)
 	}
-	return r.hydrate(ctx, ids, domain.VisitStatusRequested, func(visit domain.VisitRequest) bool {
+	return r.hydrate(ctx, ids, []domain.VisitStatus{domain.VisitStatusRequested}, func(visit domain.VisitRequest) bool {
 		return visit.CreatedAt.Before(before)
 	})
 }
 
-// FindNoShowApproved returns approved visits whose window closed before the
-// horizon with no check-in (R2: the SQL pre-filters to end_date < now() - 2h
-// plus the check_in anti-join; the Go comparison keeps rows with
-// end_date + 2h at or before the caller's horizon).
-func (r *visitAutoRuleRepository) FindNoShowApproved(
+// FindNoShow returns pre-arrival visits (requested, approved or rescheduled)
+// whose window closed before the horizon with no check-in (R2: the SQL
+// pre-filters to end_date <= now() - 2h plus the check_in anti-join; the Go
+// comparison keeps rows with end_date + domain.NoShowGrace at or before the
+// caller's horizon).
+func (r *visitAutoRuleRepository) FindNoShow(
 	ctx context.Context,
 	before time.Time,
 ) ([]domain.VisitRequest, error) {
-	rows, err := db.New(r.pool).SweepNoShowApprovedVisits(ctx)
+	rows, err := db.New(r.pool).SweepNoShowVisits(ctx)
 	if err != nil {
 		return nil, MapError(err)
 	}
@@ -83,8 +85,12 @@ func (r *visitAutoRuleRepository) FindNoShowApproved(
 	for _, row := range rows {
 		ids = append(ids, row.ID)
 	}
-	return r.hydrate(ctx, ids, domain.VisitStatusApproved, func(visit domain.VisitRequest) bool {
-		return !visit.EndDate.Add(2 * time.Hour).After(before)
+	return r.hydrate(ctx, ids, []domain.VisitStatus{
+		domain.VisitStatusRequested,
+		domain.VisitStatusApproved,
+		domain.VisitStatusRescheduled,
+	}, func(visit domain.VisitRequest) bool {
+		return !visit.EndDate.Add(domain.NoShowGrace).After(before)
 	})
 }
 
@@ -103,8 +109,34 @@ func (r *visitAutoRuleRepository) FindOverstayedVisiting(
 	for _, row := range rows {
 		ids = append(ids, row.ID)
 	}
-	return r.hydrate(ctx, ids, domain.VisitStatusVisiting, func(visit domain.VisitRequest) bool {
+	return r.hydrate(ctx, ids, []domain.VisitStatus{domain.VisitStatusVisiting}, func(visit domain.VisitRequest) bool {
 		return !visit.EndDate.Add(24 * time.Hour).After(before)
+	})
+}
+
+// FindUpcomingApproved returns approved visits whose start_date falls inside
+// (now, windowEnd] (R4 reminder window). Unlike R1-R3 this sweep takes its
+// window as bound parameters and takes no row lock: the reminder only inserts
+// and never transitions the visit. The Go re-check mirrors the SQL so a visit
+// approved or started between the sweep and the hydrate read is dropped.
+func (r *visitAutoRuleRepository) FindUpcomingApproved(
+	ctx context.Context,
+	now time.Time,
+	windowEnd time.Time,
+) ([]domain.VisitRequest, error) {
+	rows, err := db.New(r.pool).SweepUpcomingApprovedVisits(ctx, db.SweepUpcomingApprovedVisitsParams{
+		Now:       now,
+		WindowEnd: windowEnd,
+	})
+	if err != nil {
+		return nil, MapError(err)
+	}
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return r.hydrate(ctx, ids, []domain.VisitStatus{domain.VisitStatusApproved}, func(visit domain.VisitRequest) bool {
+		return visit.StartDate.After(now) && !visit.StartDate.After(windowEnd)
 	})
 }
 
@@ -142,28 +174,28 @@ func (r *visitAutoRuleRepository) loadVisitsBatch(
 // /visits/{id}.
 func batchVisitRowToDomain(row db.GetVisitsByIDsRow) (domain.VisitRequest, error) {
 	return visitFieldsToDomain(
-		row.ID, row.VisitID, row.PicUserID, row.VendorID, row.LocationID,
+		row.ID, row.VisitID, row.VendorUserID, row.VendorID, row.LocationID,
 		row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 		row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
 		row.PurposeNote,
 		row.CreatedAt, row.UpdatedAt, row.VendorName,
 		row.LocationName, row.LocationType,
-		row.PicName, row.PicEmail,
+		row.VendorUserName, row.VendorUserEmail,
 	)
 }
 
 // hydrate loads the swept ids with ONE batch load and keeps the visits that
-// still hold the rule's source status and satisfy the caller's horizon.
-// Sweep order is preserved so R1/R2/R3 keep their oldest-first migration
-// order. Re-checking the status matters because the sweep lock is released
-// when its statement ends: a visit approved or checked in between the sweep
-// and this read must not be reported under its stale status. An id missing
-// from the batch (raced delete) is skipped: the row is gone, so there is
-// nothing to transition.
+// still hold one of the rule's source statuses and satisfy the caller's
+// horizon. Sweep order is preserved so R1/R2/R3 keep their oldest-first
+// migration order. Re-checking the statuses matters because the sweep lock is
+// released when its statement ends: a visit approved or checked in between the
+// sweep and this read must not be reported under its stale status. An id
+// missing from the batch (raced delete) is skipped: the row is gone, so there
+// is nothing to transition.
 func (r *visitAutoRuleRepository) hydrate(
 	ctx context.Context,
 	ids []uuid.UUID,
-	status domain.VisitStatus,
+	statuses []domain.VisitStatus,
 	keep func(domain.VisitRequest) bool,
 ) ([]domain.VisitRequest, error) {
 	out := make([]domain.VisitRequest, 0, len(ids))
@@ -187,7 +219,7 @@ func (r *visitAutoRuleRepository) hydrate(
 		if !ok {
 			continue
 		}
-		if visit.Status != status || !keep(visit) {
+		if !slices.Contains(statuses, visit.Status) || !keep(visit) {
 			continue
 		}
 		out = append(out, visit)
