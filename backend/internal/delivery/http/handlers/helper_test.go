@@ -79,8 +79,8 @@ func decodeData[T any](t *testing.T, env envelope) T {
 // so the list/get/contract tests pin the photo_url and vendor_name members,
 // including the per-technician vendor_id/vendor_name pair. Location name/type
 // ride along so the list/get tests pin the Fasilitas column (location member).
-// Pic name/email ride along so the list/get tests pin kartu Informasi
-// Kunjungan (pic_user member).
+// Vendor user name/email ride along so the list/get tests pin kartu Informasi
+// Kunjungan (vendor_user + legacy pic_user member).
 func cannedVisit() domain.VisitRequest {
 	start := time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC)
 	end := time.Date(2026, time.October, 1, 17, 0, 0, 0, time.UTC)
@@ -90,9 +90,9 @@ func cannedVisit() domain.VisitRequest {
 	return domain.VisitRequest{
 		ID:                  "visit-1",
 		VisitID:             "VST-0000000001",
-		PICUserID:           "pic-1",
-		PICUserName:         "Dimas Prasetyo",
-		PICUserEmail:        "dimas@vendor.example",
+		VendorUserID:        "vendor-1",
+		VendorUserName:      "Dimas Prasetyo",
+		VendorUserEmail:     "dimas@vendor.example",
 		VendorID:            "vendor-1",
 		VendorName:          "PT Lintas Fiber",
 		LocationID:          "loc-A",

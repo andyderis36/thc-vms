@@ -11,11 +11,19 @@ import (
 )
 
 type Querier interface {
+	// Companion count; predicate is byte-for-byte the ListAuditLogs one.
+	CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) (int64, error)
+	// Companion count; predicate is byte-for-byte the ListNotificationsForUser one
+	// so {items,total} cannot drift from the page it counts.
+	CountNotificationsForUser(ctx context.Context, arg CountNotificationsForUserParams) (int64, error)
 	// DELETE /users/:id pre-check 2: gate and audit rows written BY the account
 	// as staff (check_in.checked_in_by, check_out.checked_out_by,
 	// status_history.changed_by, all without cascade). A non-zero total blocks
 	// the delete with 409.
 	CountStaffReferences(ctx context.Context, arg CountStaffReferencesParams) (int32, error)
+	// Global unread count for the badge: unaffected by the location_id filter
+	// (openapi NotificationListResponse.data.unread_count).
+	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
 	// DELETE /locations/:id pre-check 1: accounts stationed at the facility
 	// (users.location_id, no cascade, so a remaining row blocks the delete).
 	CountUsersByLocation(ctx context.Context, arg CountUsersByLocationParams) (int64, error)
@@ -29,13 +37,13 @@ type Querier interface {
 	// is the second line of defence (a raced reference surfaces as 23503 -> 409
 	// via MapError). There is no status transition here: the row is removed.
 	// =============================================================================
-	// DELETE /users/:id pre-check 1: visits owned by the account as PIC
-	// (visit_request.pic_user_id, no cascade, so a remaining row blocks the delete).
-	CountVisitsByPIC(ctx context.Context, arg CountVisitsByPICParams) (int64, error)
+	// DELETE /users/:id pre-check 1: visits owned by the account as vendor user
+	// (visit_request.vendor_user_id, no cascade, so a remaining row blocks the delete).
+	CountVisitsByVendorUser(ctx context.Context, arg CountVisitsByVendorUserParams) (int64, error)
 	CountVisitsForLocation(ctx context.Context, arg CountVisitsForLocationParams) (int64, error)
-	CountVisitsForPIC(ctx context.Context, arg CountVisitsForPICParams) (int64, error)
 	// Companion count; predicate is byte-for-byte the ListVisitsForSuperAdmin one.
 	CountVisitsForSuperAdmin(ctx context.Context, arg CountVisitsForSuperAdminParams) (int64, error)
+	CountVisitsForVendorUser(ctx context.Context, arg CountVisitsForVendorUserParams) (int64, error)
 	// =============================================================================
 	// visits.sql - Visit request lifecycle (PRD L129-L154 state machine).
 	//
@@ -56,7 +64,7 @@ type Querier interface {
 	//     admin       : ListVisitsForLocation     (location_id REQUIRED)
 	//     security    : ListVisitsForLocation     (location_id REQUIRED,
 	//                                              + date_from/date_to = TODAY, PRD L97)
-	//     vendor       : ListVisitsForPIC          (pic_user_id REQUIRED)
+	//     vendor       : ListVisitsForVendorUser          (vendor_user_id REQUIRED)
 	//   Each list query has a Count* twin with the identical predicate so the
 	//   {items,total,page,limit} envelope (openapi L896-913) cannot drift from the
 	//   page it is counting.
@@ -87,7 +95,7 @@ type Querier interface {
 	// round trip and lets the usecase verify every id is still an active purpose
 	// before inserting into visit_purpose.
 	GetActivePurposesByIDs(ctx context.Context, arg GetActivePurposesByIDsParams) ([]GetActivePurposesByIDsRow, error)
-	// Existence + fact read used by the auto-rule worker (SweepNoShowApprovedVisits)
+	// Existence + fact read used by the auto-rule worker (SweepNoShowVisits)
 	// and by SCR-05 to render the "Sedang di Lokasi" badge. pgx reports a missing
 	// row as pgx.ErrNoRows, which is the existence check.
 	GetCheckInByVisitRequest(ctx context.Context, arg GetCheckInByVisitRequestParams) (CheckIn, error)
@@ -119,7 +127,7 @@ type Querier interface {
 	GetVendorName(ctx context.Context, arg GetVendorNameParams) (string, error)
 	// Detail read for GET /visits/{id} (openapi L309-327) and for every
 	// owner-scoped response. The projection is the visit row plus the joined names
-	// the openapi VisitDetail schema needs (location, vendor_name, pic_user).
+	// the openapi VisitDetail schema needs (location, vendor_name, vendor_user).
 	GetVisitByID(ctx context.Context, arg GetVisitByIDParams) (GetVisitByIDRow, error)
 	// Row lock for the status-write path. `FOR UPDATE OF vr` is required (not the
 	// bare form) because the projection LEFT JOINs vendor, and PostgreSQL refuses
@@ -136,6 +144,28 @@ type Querier interface {
 	// projection is byte-for-byte the GetVisitByID one (visits.sql) so the same
 	// domain mapping applies; callers restore sweep order themselves.
 	GetVisitsByIDs(ctx context.Context, arg GetVisitsByIDsParams) ([]GetVisitsByIDsRow, error)
+	// =============================================================================
+	// audit.sql - Append-only audit trail (ERD L172-182, migration 000007).
+	//
+	// SCOPE NOTE
+	//   Audit rows are written by the application AFTER the authorisation check
+	//   has passed, so no role-scoped list variants exist here (contrast with
+	//   visits.sql, where branch isolation forces three statically-written list
+	//   queries). Read access is gated by the Go layer: super_admin may list the
+	//   full trail, other roles never reach these queries.
+	//
+	// FILTER INVARIANT
+	//   Every filter is NULLable (narg) so "no filter" is expressed by a NULL
+	//   bound value, never by removing a predicate at runtime. The Count twin
+	//   carries the byte-for-byte identical predicate so the {items,total}
+	//   envelope cannot drift from the page it is counting.
+	// =============================================================================
+	// Single append path for every auditable action. user_id is NULL for
+	// system-initiated rows (background auto-rule worker, no acting user - same
+	// rationale as status_history.changed_by in visits.sql InsertStatusHistory).
+	// timestamp defaults to now() and is omitted from the insert so the database
+	// owns the event time, not the caller clock.
+	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
 	// =============================================================================
 	// checkin.sql - Security gate check-in (SCR-05, openapi L459-487).
 	//
@@ -186,9 +216,44 @@ type Querier interface {
 	// resolves the 'security' role, and the trigger rejects a NULL location_id for it
 	// (PRD L111).
 	InsertSecurityUser(ctx context.Context, arg InsertSecurityUserParams) (InsertSecurityUserRow, error)
+	// =============================================================================
+	// notifications.sql - Persisted per-user notification store (migration 000008).
+	//
+	// The READ-ONLY derived feed (UNION over status_history/check_in/check_out) has
+	// been replaced by materialised rows: one row per (recipient, event type, visit).
+	//
+	// WRITE PATH
+	//   Rows are written INSIDE the existing visit status-write transactions (see
+	//   internal/repository/notification_emit.go), so a notice can never exist
+	//   without its triggering transition. Recipients are resolved by SQL fan-out:
+	//     staff  = every ACTIVE national super_admin plus the ACTIVE admin/security
+	//              stationed at the visit's branch (users.location_id).
+	//     vendor = the visit's vendor_user_id, but ONLY when that account holds the
+	//              'vendor' role (company-wide fan-out is deliberately rejected).
+	//
+	// IDEMPOTENCY
+	//   Every insert carries ON CONFLICT (user_id, type, visit_request_id) DO
+	//   NOTHING. That unique constraint is the SINGLE de-duplication mechanism: it
+	//   makes the reminder sweep safe across ticks, restarts and concurrent
+	//   workers, and lets the one-off backfill command be re-run without
+	//   double-posting.
+	//
+	// READ PATH
+	//   Reads are user-scoped (WHERE user_id = caller). The optional location_id
+	//   narrows a super_admin's national feed by branch; it never widens a scoped
+	//   caller because the user_id predicate is always present.
+	// =============================================================================
+	// Fan-out to the visit's staff audience: every active super_admin (national)
+	// plus the active admin/security at the visit's location. ON CONFLICT keeps the
+	// write idempotent per (recipient, type, visit).
+	InsertStaffNotifications(ctx context.Context, arg InsertStaffNotificationsParams) error
 	// Atomic audit append (PRD L129). changed_by is NULL for the background
 	// auto-rule worker, which has no acting user.
 	InsertStatusHistory(ctx context.Context, arg InsertStatusHistoryParams) (StatusHistory, error)
+	// Single-recipient insert: the visit's vendor user, but only if that account is a
+	// 'vendor'. A vendor account that is internal staff (admin-posted request) receives
+	// nothing here; the staff fan-out above already covers them.
+	InsertVendorNotification(ctx context.Context, arg InsertVendorNotificationParams) error
 	// visit_purpose is a pure join table (ERD L107-110) whose composite primary key
 	// already rejects a duplicate (visit, purpose) pair.
 	InsertVisitPurpose(ctx context.Context, arg InsertVisitPurposeParams) error
@@ -213,7 +278,7 @@ type Querier interface {
 	//   FKs), and the MVP has no restore flow, so deactivation via is_active is
 	//   the only removal (YAGNI).
 	//   The active filter matches the openapi summaries "fasilitas ... THC aktif"
-	//   (openapi L196) and only active purposes are offered to a PIC.
+	//   (openapi L196) and only active purposes are offered to a vendor user.
 	// =============================================================================
 	// GET /locations (openapi L193-203) -> the Location schema (openapi L719-738).
 	// The ?active_only=true (default) path: only facilities still operating are
@@ -221,7 +286,7 @@ type Querier interface {
 	ListActiveLocations(ctx context.Context) ([]ListActiveLocationsRow, error)
 	// GET /purposes (openapi L205-215) -> the Purpose schema (openapi L750-758).
 	ListActivePurposes(ctx context.Context) ([]ListActivePurposesRow, error)
-	// GET /vendors -> the [{id, name}] company dropdown the PIC/admin forms
+	// GET /vendors -> the [{id, name}] company dropdown the vendor-user/admin forms
 	// consume. Only non-blacklisted companies are offered, mirroring the
 	// active-only purpose catalogue above.
 	ListActiveVendors(ctx context.Context) ([]ListActiveVendorsRow, error)
@@ -230,6 +295,23 @@ type Querier interface {
 	// visible and can be reactivated via PATCH /locations/:id. Same column
 	// shape plus the is_active flag the console renders.
 	ListAllLocations(ctx context.Context) ([]Location, error)
+	// Filtered trail read. date_from is inclusive, date_to is exclusive (half-open
+	// [from, to) window, same convention as the visits.sql list queries).
+	// ORDER BY is fully specified (id last) so LIMIT/OFFSET pagination cannot
+	// repeat or drop a row.
+	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
+	// One-off backfill source (cmd/backfill-notifications): the UNION of every
+	// event that should have produced a notification before the store existed.
+	//   requested : every visit_request at its created_at (Create writes no history row)
+	//   status    : every status_history row, mapped through the same status->template
+	//               rule (is_system = changed_by IS NULL distinguishes auto from manual)
+	//   check_in  : every gate check-in at its timestamp
+	//   check_out : every gate check-out at its timestamp
+	// The command maps each row through the domain templates and inserts through
+	// InsertStaffNotifications / InsertVendorNotification, so duplicate event types
+	// collapse on the unique constraint. No time parameter: the full history is
+	// replayed once, and re-running is a no-op thanks to ON CONFLICT DO NOTHING.
+	ListBackfillNotificationEvents(ctx context.Context) ([]ListBackfillNotificationEventsRow, error)
 	// Batched existence read for the R2 no-show sweep: one round trip for the
 	// whole candidate set instead of one GetCheckInByVisitRequest probe per
 	// visit. Rides the UNIQUE index on check_in(visit_request_id).
@@ -245,6 +327,9 @@ type Querier interface {
 	// are optional, so an empty filter lists every account with no pagination,
 	// consistent with ListSecurityUsers. ORDER BY keeps the listing stable.
 	ListManagedUsers(ctx context.Context, arg ListManagedUsersParams) ([]ListManagedUsersRow, error)
+	// One page of the caller's own notifications, newest first, joined to the visit
+	// and its location for the visit_id/location_name the wire shape needs.
+	ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]ListNotificationsForUserRow, error)
 	// GET /users/security (openapi L119-138). `sqlc.narg('location_id')` is the whole
 	// scoping mechanism: an admin/security caller passes its own location (PRD L110),
 	// a super_admin passes NULL to see every branch or a location to filter (PRD L109).
@@ -264,23 +349,31 @@ type Querier interface {
 	// date_from/date_to to today for `security` (PRD L97 "Hari Ini") and leaves them
 	// NULL for `admin`. The equality on vr.location_id uses idx_visit_request_location.
 	ListVisitsForLocation(ctx context.Context, arg ListVisitsForLocationParams) ([]ListVisitsForLocationRow, error)
-	// PIC / external-staff scope (PRD L112, AGENTS.md rule 6.1): strictly
-	// WHERE pic_user_id = auth_user.id. A vendor can never widen this to see another
-	// vendor's visits, whatever they send in the query string. Uses idx_visit_pic
-	// (PRD L209).
-	ListVisitsForPIC(ctx context.Context, arg ListVisitsForPICParams) ([]ListVisitsForPICRow, error)
 	// Superadmin scope (PRD L109): no location filter, or one optional location
 	// filter. `status`, `date_from`, `date_to` and `search` are all NULLable
 	// (narg) so "no filter" is expressed by a NULL bound value, never by removing
-	// a predicate at runtime.
+	// a predicate at runtime. sort_by/sort_order ride along as bound parameters
+	// compared inside static CASE branches (never concatenated): an unknown or
+	// NULL value matches no branch and the listing falls back to created_at desc.
 	// ORDER BY is fully specified (id last) so LIMIT/OFFSET pagination cannot
 	// repeat or drop a row.
 	ListVisitsForSuperAdmin(ctx context.Context, arg ListVisitsForSuperAdminParams) ([]ListVisitsForSuperAdminRow, error)
-	// R2: approved, past end_date + 2h, and check_in has no row for the visit.
-	// Uses idx_visit_status for the status scan and the UNIQUE index on
-	// check_in(visit_request_id) for the anti-join probe.
+	// Vendor-user / external-staff scope (PRD L112, AGENTS.md rule 6.1): strictly
+	// WHERE vendor_user_id = auth_user.id. A vendor can never widen this to see another
+	// vendor's visits, whatever they send in the query string. Uses idx_visit_vendor_user
+	// (PRD L209).
+	ListVisitsForVendorUser(ctx context.Context, arg ListVisitsForVendorUserParams) ([]ListVisitsForVendorUserRow, error)
+	// Mark every unread notification of the caller read; returns the count.
+	MarkAllNotificationsRead(ctx context.Context, arg MarkAllNotificationsReadParams) (int64, error)
+	// Mark ONE owned notification read. The user_id predicate is the ownership
+	// guard: a notification owned by somebody else matches no row and the caller
+	// answers 404.
+	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error)
+	// R2: any pre-arrival status, past end_date + 2h (domain.NoShowGrace), and
+	// check_in has no row for the visit. Uses idx_visit_status for the status scan
+	// and the UNIQUE index on check_in(visit_request_id) for the anti-join probe.
 	// Capped at 500 rows per tick (S4), same as its sibling sweeps.
-	SweepNoShowApprovedVisits(ctx context.Context) ([]SweepNoShowApprovedVisitsRow, error)
+	SweepNoShowVisits(ctx context.Context) ([]SweepNoShowVisitsRow, error)
 	// =============================================================================
 	// worker.sql - Auto-rule background sweeps (PRD L48-57 "Auto-Rule Background
 	// Worker", PRD L133-153 state machine, PRD L137 / L142 / L148).
@@ -290,8 +383,8 @@ type Querier interface {
 	//   mutate anything. The worker then, inside the SAME transaction per batch:
 	//     1. runs the sweep        -> the rows are already locked, so the ids cannot
 	//                                be re-selected by a second worker instance;
-	//     2. UpdateVisitStatus     -> requested->cancelled | approved->not_visit
-	//                                | visiting->completed;
+	//     2. UpdateVisitStatus     -> requested->cancelled | (requested|approved|
+	//                                rescheduled)->not_visit | visiting->completed;
 	//     3. InsertStatusHistory   -> changed_by = NULL, notes = the rule id.
 	//   Keeping the mutation out of the query file is what lets the caller batch the
 	//   whole sweep into one atomic, auditable transaction (PRD L129).
@@ -300,16 +393,23 @@ type Querier interface {
 	//   on - or double-process - rows another instance is already migrating.
 	//
 	// R1  requested, untouched for 7 days   -> cancelled   (PRD L137 "Timeout 7 Hari")
-	// R2  approved, window already closed,
+	// R2  pre-arrival (requested | approved | rescheduled),
+	//     window already closed,
 	//     never checked in                   -> not_visit   (PRD L142 "No Show")
 	// R3  visiting, end_date + 24h elapsed   -> completed   (PRD L148 "Auto-Complete")
 	//
 	// R2 derives its 2-hour grace from the check-in validity window
 	// [start_date - 2h, end_date + 2h] (AGENTS.md rule 6.2, PRD L121-123, QA
 	// GATE-05): once now() > end_date + 2h the guard can no longer perform a
-	// legitimate check-in, so the visit is definitively a no-show.
+	// legitimate check-in, so the visit is definitively a no-show. The grace is
+	// domain.NoShowGrace; keep the two in step.
+	//
+	// R1 and R2 predicates are DISJOINT on end_date: R2 owns end_date <= now()-2h,
+	// R1 owns end_date > now()-2h, together partitioning every requested row.
 	// =============================================================================
-	// R1: an unanswered request 7 days old is abandoned (PRD L137).
+	// R1: an unanswered request 7 days old is abandoned (PRD L137). Only requests
+	// whose window has NOT fully closed are R1's business: an overdue request is
+	// claimed by R2 instead, so end_date > now()-2h keeps the two sweeps disjoint.
 	// Capped at 500 rows per tick (S4): one sweep locks and migrates at most one
 	// batch, never the whole table.
 	SweepStaleRequestedVisits(ctx context.Context) ([]SweepStaleRequestedVisitsRow, error)
@@ -319,6 +419,17 @@ type Querier interface {
 	// beyond the four PRD L206-209 mandates, since the sweep runs once per tick.
 	// Capped at 500 rows per tick (S4), same as its sibling sweeps.
 	SweepStaleVisitingVisits(ctx context.Context) ([]SweepStaleVisitingVisitsRow, error)
+	// R4  approved, starts within the reminder window -> notify (no status change)
+	// R4 differs from R1-R3 in one decisive way: it MUTATES NOTHING. It only needs
+	// a read of the due visits so the worker can INSERT a reminder notification;
+	// the idempotency comes from the notification unique constraint, not from a row
+	// lock. Hence: no FOR UPDATE / SKIP LOCKED (a lock would be pointless and would
+	// make concurrent sweeps queue for no reason).
+	// R4: approved visits whose start_date falls inside (now, window_end]. The window
+	// bounds are BOUND parameters so the worker's injected clock - and therefore the
+	// 45-minute ReminderWindow - drives the rule and stays unit-testable.
+	// Capped at 500 rows per tick, matching the sibling sweeps.
+	SweepUpcomingApprovedVisits(ctx context.Context, arg SweepUpcomingApprovedVisitsParams) ([]SweepUpcomingApprovedVisitsRow, error)
 	// PATCH /locations/:id (super_admin only). Every column is a NULLable bound
 	// value: a NULL keeps the stored column via COALESCE, so the body may carry
 	// any subset of fields. is_active flips here are the deactivation path that

@@ -153,7 +153,7 @@ func TestRBAC_VendorCannotReachAdminRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/users/security",
-		withTestIdentity(deliveryhttp.Identity{UserID: "pic-1", Role: domain.RoleVendor}),
+		withTestIdentity(deliveryhttp.Identity{UserID: "vendor-1", Role: domain.RoleVendor}),
 		middleware.RequireRoles(domain.RoleSuperAdmin, domain.RoleAdmin),
 		okHandler,
 	)

@@ -60,8 +60,9 @@ type LoginResult struct {
 
 // Deps bundles the service collaborators in one named struct so the
 // constructor keeps a single parameter. Every field is required except
-// Vendors (nil catalogue means vendor names stay nil) and Clock (nil falls
-// back to the wall clock).
+// Vendors (nil catalogue means vendor names stay nil), Clock (nil falls back
+// to the wall clock) and Audit (nil disables the login trail: hermetic tests
+// and unwired callers log in exactly as before).
 type Deps struct {
 	Users     domain.UserRepository
 	Roles     RoleDirectory
@@ -69,6 +70,7 @@ type Deps struct {
 	Vendors   domain.VendorRepository
 	Issuer    Issuer
 	Clock     domain.Clock
+	Audit     domain.AuditRepository
 }
 
 // Service is the authentication usecase.
@@ -79,6 +81,7 @@ type Service struct {
 	vendors   domain.VendorRepository
 	issuer    Issuer
 	clock     domain.Clock
+	audit     domain.AuditRepository
 }
 
 // NewService wires the collaborators. A nil Clock defaults to SystemClock;
@@ -94,6 +97,7 @@ func NewService(d Deps) *Service {
 		vendors:   d.Vendors,
 		issuer:    d.Issuer,
 		clock:     d.Clock,
+		audit:     d.Audit,
 	}
 }
 

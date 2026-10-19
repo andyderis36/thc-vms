@@ -103,7 +103,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Email dan password wajib diisi.")
 		return
 	}
-	result, err := h.auth.Login(c.Request.Context(), body.Email, body.Password)
+	// The login audit row needs the request provenance (IP + User-Agent):
+	// it travels on the context so the usecase stays Gin-free.
+	ctx := deliveryhttp.ContextWithRequestMeta(c.Request.Context(), c)
+	result, err := h.auth.Login(ctx, body.Email, body.Password)
 	if err != nil {
 		response.Fail(c, err)
 		return

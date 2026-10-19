@@ -11,7 +11,7 @@
 --   FKs), and the MVP has no restore flow, so deactivation via is_active is
 --   the only removal (YAGNI).
 --   The active filter matches the openapi summaries "fasilitas ... THC aktif"
---   (openapi L196) and only active purposes are offered to a PIC.
+--   (openapi L196) and only active purposes are offered to a vendor user.
 -- =============================================================================
 
 -- name: ListActiveLocations :many
@@ -45,7 +45,7 @@ WHERE is_active = true
 ORDER BY name ASC;
 
 -- name: ListActiveVendors :many
--- GET /vendors -> the [{id, name}] company dropdown the PIC/admin forms
+-- GET /vendors -> the [{id, name}] company dropdown the vendor-user/admin forms
 -- consume. Only non-blacklisted companies are offered, mirroring the
 -- active-only purpose catalogue above.
 SELECT id, name

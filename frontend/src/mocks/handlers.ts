@@ -15,12 +15,15 @@ import {
 import type {
   Location,
   LoginResult,
+  NotificationItem,
+  NotificationType,
   QrPayload,
   UploadFileResult,
   User,
   Vendor,
   VisitDetail,
   VisitListResult,
+  VisitStatus,
 } from '@/lib/api/types';
 
 const API_BASE: string =
@@ -156,7 +159,105 @@ function scopeVisits(
     );
   }
   // Vendor/Mitra hanya melihat kunjungan miliknya sendiri.
-  return db.visits.filter((visit) => visit.pic_user.id === user.id);
+  return db.visits.filter((visit) => visit.vendor_user.id === user.id);
+}
+
+/** Peta status kunjungan → jenis peristiwa notifikasi; status tanpa peristiwa = null. */
+function notificationTypeFor(status: VisitStatus): NotificationType | null {
+  switch (status) {
+    case 'requested':
+      return 'visit_requested';
+    case 'rescheduled':
+      return 'visit_rescheduled';
+    case 'visiting':
+      return 'visit_check_in';
+    case 'completed':
+      return 'visit_check_out';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Judul + pesan notifikasi per jenis (cermin template domain backend).
+ * `Record<NotificationType, …>` menjaga mock tetap sinkron dengan enum kontrak.
+ */
+const NOTIFICATION_TEMPLATES: Record<
+  NotificationType,
+  { title: string; message: (visitCode: string) => string }
+> = {
+  visit_requested: {
+    title: 'Permintaan kunjungan baru',
+    message: (code) => `Permintaan ${code} menunggu persetujuan.`,
+  },
+  visit_rescheduled: {
+    title: 'Jadwal kunjungan diperbarui',
+    message: (code) => `Permintaan ${code} dijadwalkan ulang.`,
+  },
+  visit_check_in: {
+    title: 'Check-in tamu',
+    message: (code) => `Tamu ${code} telah check-in.`,
+  },
+  visit_check_out: {
+    title: 'Check-out tamu',
+    message: (code) => `Tamu ${code} telah check-out.`,
+  },
+  visit_approved: {
+    title: 'Kunjungan disetujui',
+    message: (code) => `Permintaan ${code} telah disetujui.`,
+  },
+  visit_rejected: {
+    title: 'Kunjungan ditolak',
+    message: (code) => `Permintaan ${code} ditolak.`,
+  },
+  visit_reminder: {
+    title: 'Pengingat kunjungan',
+    message: (code) => `Kunjungan ${code} akan dimulai sebentar lagi.`,
+  },
+  visit_auto_cancelled: {
+    title: 'Kunjungan dibatalkan otomatis',
+    message: (code) => `Permintaan ${code} batal otomatis.`,
+  },
+};
+
+/**
+ * Status "sudah dibaca" per notifikasi — mock in-memory (dev-only); backend
+ * menyimpannya di kolom `notification.is_read`.
+ */
+const readNotificationIds = new Set<string>();
+
+/**
+ * Bangun feed notifikasi milik pemanggil dari kunjungan ter-scope-nya.
+ * Padanan mock dari tabel `notification` backend: newest-first, satu baris per
+ * (kunjungan, jenis), dengan `is_read` dibaca dari `readNotificationIds`.
+ */
+function notificationsFor(
+  user: User,
+  locationQuery: string | null,
+): NotificationItem[] {
+  const items: NotificationItem[] = [];
+  for (const visit of scopeVisits(user, locationQuery)) {
+    const type = notificationTypeFor(visit.status);
+    if (type === null) {
+      continue;
+    }
+    const id = `${visit.id}:${type}`;
+    const template = NOTIFICATION_TEMPLATES[type];
+    items.push({
+      id,
+      type,
+      visit_request_id: visit.id,
+      visit_id: visit.visit_id,
+      location_id: visit.location.id,
+      location_name: visit.location.name,
+      title: template.title,
+      message: template.message(visit.visit_id),
+      is_read: readNotificationIds.has(id),
+      occurred_at: visit.created_at,
+    });
+  }
+  items.sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
+  return items;
 }
 
 /** `true` bila satu kunjungan boleh dilihat/diaksi pemanggil. */
@@ -169,7 +270,7 @@ function isVisitInScope(user: User, visit: VisitDetail): boolean {
       user.location_id !== null && visit.location.id === user.location_id
     );
   }
-  return visit.pic_user.id === user.id;
+  return visit.vendor_user.id === user.id;
 }
 
 /** Cari kunjungan by UUID maupun kode `visit_id`. */
@@ -348,13 +449,70 @@ export const handlers: RequestHandler[] = [
       items = items.filter(
         (visit) =>
           visit.visit_id.toLowerCase().includes(searchParam) ||
-          visit.pic_user.name.toLowerCase().includes(searchParam),
+          visit.vendor_user.name.toLowerCase().includes(searchParam),
       );
     }
     const total = items.length;
     const paged = items.slice((page - 1) * limit, page * limit);
     const result: VisitListResult = { items: paged, total, page, limit };
     return ok(result);
+  }),
+
+  // -- Notifikasi (feed read-only untuk lonceng header) ----------------------
+  http.get(`${API_BASE}/notifications`, async ({ request }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    await delay(150);
+    const url = new URL(request.url);
+    const locationParam = url.searchParams.get('location_id');
+    const pageRaw = Number.parseInt(
+      url.searchParams.get('page') ?? '1',
+      10,
+    );
+    const limitRaw = Number.parseInt(
+      url.searchParams.get('limit') ?? '20',
+      10,
+    );
+    const page = Number.isNaN(pageRaw) || pageRaw < 1 ? 1 : pageRaw;
+    const limit = Number.isNaN(limitRaw) || limitRaw < 1 ? 20 : limitRaw;
+
+    const all = notificationsFor(auth, locationParam);
+    const total = all.length;
+    const unreadCount = all.filter((item) => !item.is_read).length;
+    const paged = all.slice((page - 1) * limit, page * limit);
+    return ok({ items: paged, total, unread_count: unreadCount, page, limit });
+  }),
+
+  http.patch(`${API_BASE}/notifications/:id`, async ({ request, params }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    const id = String(params['id'] ?? '');
+    const owned = notificationsFor(auth, null).find((item) => item.id === id);
+    if (owned === undefined) {
+      return fail(
+        'NOT_FOUND',
+        'Notifikasi tidak ditemukan.',
+        404,
+      );
+    }
+    readNotificationIds.add(id);
+    return ok({ id, is_read: true });
+  }),
+
+  http.post(`${API_BASE}/notifications/read-all`, async ({ request }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    const owned = notificationsFor(auth, null).filter((item) => !item.is_read);
+    for (const item of owned) {
+      readNotificationIds.add(item.id);
+    }
+    return ok({ updated: owned.length });
   }),
 
   // -- Visits: create ---------------------------------------------------------
@@ -445,6 +603,8 @@ export const handlers: RequestHandler[] = [
       status: 'requested',
       location,
       purposes: matchedPurposes,
+      vendor_user: auth,
+      // Fase 1: backend masih dual-emit `pic_user` (nilai sama) — jangan dihapus.
       pic_user: auth,
       vendor_name: auth.vendor_name ?? 'Internal THC',
       start_date: new Date(startMs).toISOString(),
@@ -614,7 +774,7 @@ export const handlers: RequestHandler[] = [
       if (visit === undefined) {
         return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
       }
-      if (auth.role === 'vendor' && visit.pic_user.id !== auth.id) {
+      if (auth.role === 'vendor' && visit.vendor_user.id !== auth.id) {
         return fail(
           'FORBIDDEN',
           'Anda hanya dapat menjadwalkan ulang kunjungan milik Anda.',
@@ -677,7 +837,7 @@ export const handlers: RequestHandler[] = [
     if (visit === undefined) {
       return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
     }
-    if (auth.role === 'vendor' && visit.pic_user.id !== auth.id) {
+    if (auth.role === 'vendor' && visit.vendor_user.id !== auth.id) {
       return fail(
         'FORBIDDEN',
         'Anda hanya dapat membatalkan kunjungan milik Anda.',
@@ -1013,7 +1173,7 @@ export const handlers: RequestHandler[] = [
       );
     }
     const referenced =
-      db.visits.some((visit) => visit.pic_user.id === target.id) ||
+      db.visits.some((visit) => visit.vendor_user.id === target.id) ||
       db.visits.some((visit) => visit.checked_in_by === target.id);
     if (referenced) {
       return fail(
@@ -1444,7 +1604,7 @@ export const handlers: RequestHandler[] = [
     return ok(target);
   }),
 
-  // -- Security users: ubah satpam (admin cabang terkunci; super_admin bebas) ----
+  // -- Security users: ubah pengawas (admin cabang terkunci; super_admin bebas) ----
   http.patch(`${API_BASE}/users/security/:id`, async ({ request, params }) => {
     const auth = getAuthUser(request);
     if (auth === null) {
@@ -1453,7 +1613,7 @@ export const handlers: RequestHandler[] = [
     if (auth.role !== 'super_admin' && auth.role !== 'admin') {
       return fail(
         'FORBIDDEN',
-        'Anda tidak memiliki izin untuk mengubah satpam.',
+        'Anda tidak memiliki izin untuk mengubah pengawas.',
         403,
       );
     }
@@ -1573,7 +1733,7 @@ export const handlers: RequestHandler[] = [
         403,
       );
     }
-    const referenced = db.visits.some((visit) => visit.pic_user.id === target.id);
+    const referenced = db.visits.some((visit) => visit.vendor_user.id === target.id);
     if (referenced) {
       return fail(
         'CONFLICT',

@@ -8,6 +8,8 @@
 import { apiFetch, clearToken, storeToken, uploadFile } from '@/lib/api/fetcher';
 import type {
   ApproveRequest,
+  AuditLogListParams,
+  AuditLogListResult,
   CancelRequest,
   CheckInRequest,
   CreateLocationRequest,
@@ -18,6 +20,8 @@ import type {
   LoginRequest,
   LoginResult,
   ManagedUserListParams,
+  NotificationListParams,
+  NotificationListResult,
   Purpose,
   QrPayload,
   RejectRequest,
@@ -88,13 +92,22 @@ export function listVendors(): Promise<Vendor[]> {
 // Visits
 // ---------------------------------------------------------------------------
 
+/**
+ * `GET /visits` — seluruh query param kontrak (openapi §/visits) diteruskan
+ * apa adanya; string kosong dibuang sehingga filter kosong tidak pernah
+ * menghasilkan `?q=`/`?date_from=`/dst. yang ikut memecah kunci cache.
+ */
 export function listVisits(params: VisitListParams = {}): Promise<VisitListResult> {
   const query = new URLSearchParams();
   if (params.status !== undefined) query.set('status', params.status);
-  if (params.location_id !== undefined) query.set('location_id', params.location_id);
-  if (params.search !== undefined) query.set('search', params.search);
+  if (params.location_id !== undefined && params.location_id !== '') query.set('location_id', params.location_id);
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.date_from !== undefined && params.date_from !== '') query.set('date_from', params.date_from);
+  if (params.date_to !== undefined && params.date_to !== '') query.set('date_to', params.date_to);
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.sort_by !== undefined) query.set('sort_by', params.sort_by);
+  if (params.order !== undefined) query.set('order', params.order);
   const search = query.toString();
   return apiFetch<VisitListResult>(search === '' ? '/visits' : `/visits?${search}`);
 }
@@ -250,4 +263,55 @@ export function deleteManagedUser(id: string): Promise<void> {
 /** `DELETE /locations/{id}` — 204 kosong; 409 bila masih direferensikan. */
 export function deleteLocation(id: string): Promise<void> {
   return apiFetch<void>(`/locations/${id}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Audit (super_admin saja)
+// ---------------------------------------------------------------------------
+
+/** `GET /audit-logs` — daftar jejak audit berfilter; 403 untuk non-super_admin. */
+export function listAuditLogs(params: AuditLogListParams = {}): Promise<AuditLogListResult> {
+  const query = new URLSearchParams();
+  if (params.user_id !== undefined && params.user_id !== '') query.set('user_id', params.user_id);
+  if (params.entity !== undefined && params.entity !== '') query.set('entity', params.entity);
+  if (params.action !== undefined && params.action !== '') query.set('action', params.action);
+  if (params.date_from !== undefined && params.date_from !== '')
+    query.set('date_from', params.date_from);
+  if (params.date_to !== undefined && params.date_to !== '') query.set('date_to', params.date_to);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const search = query.toString();
+  return apiFetch<AuditLogListResult>(search === '' ? '/audit-logs' : `/audit-logs?${search}`);
+}
+
+// ---------------------------------------------------------------------------
+// Notifikasi (feed lonceng header)
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET /notifications` — feed read-only untuk lonceng header. `location_id`
+ * hanya dikirim bila terisi (bermakna untuk super_admin); admin/security
+ * di-scope backend ke cabangnya sendiri dan vendor ditolak 403.
+ */
+export function listNotifications(params: NotificationListParams = {}): Promise<NotificationListResult> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.location_id !== undefined && params.location_id !== '')
+    query.set('location_id', params.location_id);
+  const search = query.toString();
+  return apiFetch<NotificationListResult>(search === '' ? '/notifications' : `/notifications?${search}`);
+}
+
+/** `PATCH /notifications/{id}` — tandai satu notifikasi milik pemanggil sebagai dibaca. */
+export function markNotificationRead(id: string): Promise<{ id: string; is_read: true }> {
+  return apiFetch<{ id: string; is_read: true }>(`/notifications/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_read: true }),
+  });
+}
+
+/** `POST /notifications/read-all` — tandai semua notifikasi milik pemanggil sebagai dibaca. */
+export function markAllNotificationsRead(): Promise<{ updated: number }> {
+  return apiFetch<{ updated: number }>('/notifications/read-all', { method: 'POST' });
 }

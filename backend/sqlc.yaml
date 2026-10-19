@@ -28,6 +28,10 @@ sql:
       - "migrations/000004_visitor_vendor_index.up.sql"
       - "migrations/000005_manual_company_and_purpose.up.sql"
       - "migrations/000006_rename_pic_to_vendor.up.sql"
+      - "migrations/000007_audit_log.up.sql"
+      - "migrations/000008_create_notification.up.sql"
+      - "migrations/000009_rename_pic_user_to_vendor_user.up.sql"
+      - "migrations/000010_rename_demo_accounts_to_vendor_security.up.sql"
     queries: "internal/repository/db/queries"
 
     gen:

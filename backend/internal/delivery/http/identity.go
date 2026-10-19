@@ -9,6 +9,8 @@
 package http
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
 
 	"thc-vms/backend/internal/delivery/http/response"
@@ -101,6 +103,25 @@ func RequireIdentity() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// RequestMetaFromGin reads the network provenance of one request for the
+// audit trail: the client IP plus the User-Agent header. Length caps come
+// from domain.RequestMetaFor. There is deliberately NO logging middleware:
+// provenance is captured only here, at the explicit audit call sites, after
+// authorisation has passed.
+//
+// Callers store the result on the request context with
+// ContextWithRequestMeta so usecases stay Gin-free; repository audited
+// mutations receive the provenance inside domain.AuditEntry instead.
+func RequestMetaFromGin(c *gin.Context) domain.RequestMeta {
+	return domain.RequestMetaFor(c.ClientIP(), c.GetHeader("User-Agent"))
+}
+
+// ContextWithRequestMeta stores Gin-derived provenance on a standard context
+// for one handler call (typically right before invoking the usecase).
+func ContextWithRequestMeta(ctx context.Context, c *gin.Context) context.Context {
+	return domain.ContextWithRequestMeta(ctx, RequestMetaFromGin(c))
 }
 
 // stringKey reads one public key tolerating the string and named-string

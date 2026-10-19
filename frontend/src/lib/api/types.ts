@@ -201,7 +201,12 @@ export interface VisitDetail {
   status: VisitStatus;
   location: Location;
   purposes: Purpose[];
-  pic_user: User;
+  vendor_user: User;
+  /**
+   * @deprecated Alias lama — hanya dipertahankan selama transisi Fase 1 dan
+   * akan dihapus setelah semua klien membaca `vendor_user`.
+   */
+  pic_user?: User;
   vendor_name: string;
   start_date: string;
   end_date: string;
@@ -228,12 +233,43 @@ export interface VisitListResult {
   limit: number;
 }
 
+/**
+ * Pasangan urutan `GET /visits` (openapi §/visits): `?sort_by=` & `?order=`.
+ * Kosakata tertutup — nilai di luar daftar ditolak backend 400
+ * VALIDATION_ERROR, jadi hanya boleh dikirim tepat salah satu nilai ini.
+ */
+export type VisitSortField = 'created_at' | 'start_date' | 'end_date'
+
+/** Arah urutan `GET /visits` (`?order=`) — default backend `desc`. */
+export type VisitOrder = 'asc' | 'desc'
+
+/**
+ * Query `GET /visits` — semua opsional sesuai kontrak openapi §/visits.
+ *
+ * Pemetaan ke query string (lihat `listVisits` pada `client.ts`):
+ * - `q` — pencarian bebas ILIKE nama vendor atau Visit ID.
+ * - `date_from` / `date_to` — jendela jadwal `start_date` (`YYYY-MM-DD`
+ *   atau RFC3339; rentang terbalik ditolak backend 400).
+ * - `page` / `limit` — default backend 1 / 10 (opsi 10/20/50/100).
+ * - `sort_by` / `order` — default backend `created_at` desc.
+ *
+ * Seluruh objek params ikut menjadi kunci TanStack Query
+ * (`queryKeys.visits.list`), sehingga setiap perubahan filter menghasilkan
+ * kunci baru dan memicu refetch otomatis.
+ */
 export interface VisitListParams {
-  status?: VisitStatus;
-  location_id?: string;
-  search?: string;
-  page?: number;
-  limit?: number;
+  status?: VisitStatus
+  location_id?: string
+  /** `?q=` — kosong/absen = tanpa filter pencarian. */
+  q?: string
+  /** `?date_from=` — batas bawah jadwal (inklusif). */
+  date_from?: string
+  /** `?date_to=` — batas atas jadwal (date-only inklusif sehari penuh). */
+  date_to?: string
+  page?: number
+  limit?: number
+  sort_by?: VisitSortField
+  order?: VisitOrder
 }
 
 export interface LoginRequest {
@@ -320,4 +356,91 @@ export interface CheckInRequest {
   photo_url?: string;
   badge_code?: string;
   notes?: string;
+}
+
+/**
+ * `GET /audit-logs` — baris jejak audit lintas cabang (super_admin saja).
+ * Kontrak mengikuti skema `AuditLog` pada `docs/4. openapi.yaml` §475.
+ */
+export interface AuditLog {
+  id: string;
+  /** Pelaku aksi; `null` untuk baris sistem (mis. login gagal tanpa sesi). */
+  user_id: string | null;
+  /** Kode aksi tertutup domain (`auth.login.success`, `user.create`, …). */
+  action: string;
+  entity: string;
+  entity_id: string | null;
+  timestamp: string;
+  ip: string;
+  user_agent: string;
+  metadata: Record<string, string>;
+}
+
+export interface AuditLogListResult {
+  items: AuditLog[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/** Query `GET /audit-logs`; semua opsional sesuai kontrak openapi. */
+export interface AuditLogListParams {
+  user_id?: string;
+  entity?: string;
+  action?: string;
+  /** `YYYY-MM-DD` atau RFC3339; backend memakai batas atas +24h untuk date-only. */
+  date_from?: string;
+  date_to?: string;
+  page?: number;
+  limit?: number;
+}
+
+/**
+ * `GET /notifications` — notifikasi per-pengguna (read/unread) untuk lonceng
+ * header. Tersedia untuk semua peran termasuk vendor; data di-scope ke auth.ID
+ * caller. `unread_count` = jumlah belum dibaca secara global untuk pengguna
+ * (tidak terpengaruh filter `location_id`); `total` = baris setelah filter.
+ */
+export type NotificationType =
+  | 'visit_requested'
+  | 'visit_rescheduled'
+  | 'visit_check_in'
+  | 'visit_check_out'
+  | 'visit_approved'
+  | 'visit_rejected'
+  | 'visit_reminder'
+  | 'visit_auto_cancelled';
+
+export interface NotificationItem {
+  id: string;
+  type: NotificationType;
+  /** Kunjungan terkait — dipakai untuk deep-link ke `/visits/{id}`. */
+  visit_request_id: string;
+  /** Kode tiket manusiawi (mis. `VST-…`). */
+  visit_id: string;
+  location_id: string;
+  location_name: string;
+  /** Judul notifikasi (dari template domain). */
+  title: string;
+  /** Isi pesan notifikasi (dari template domain). */
+  message: string;
+  /** Tandai telah dibaca. */
+  is_read: boolean;
+  /** RFC3339 waktu peristiwa. */
+  occurred_at: string;
+}
+
+export interface NotificationListResult {
+  items: NotificationItem[];
+  total: number;
+  unread_count: number;
+  page: number;
+  limit: number;
+}
+
+/** Query `GET /notifications`; `location_id` hanya bermakna untuk super_admin. */
+export interface NotificationListParams {
+  page?: number;
+  limit?: number;
+  location_id?: string;
 }

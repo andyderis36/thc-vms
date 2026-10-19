@@ -5,7 +5,7 @@
  * kunci query secara manual di tempat lain.
  */
 
-import type { ManagedUserListParams, VisitListParams } from '@/lib/api/types';
+import type { AuditLogListParams, ManagedUserListParams, NotificationListParams, VisitListParams } from '@/lib/api/types';
 
 export const queryKeys = {
   visits: {
@@ -19,5 +19,8 @@ export const queryKeys = {
   securityUsers: (locationId?: string) => ['security-users', locationId ?? null] as const,
   managedUsers: (params?: ManagedUserListParams) =>
     ['managed-users', params ?? null] as const,
+  auditLogs: (params: AuditLogListParams) => ['audit-logs', 'list', params] as const,
+  notifications: (params?: NotificationListParams) =>
+    ['notifications', params ?? null] as const,
   me: () => ['me'] as const,
 } as const;

@@ -30,6 +30,7 @@ import (
 	"thc-vms/backend/internal/repository"
 	"thc-vms/backend/internal/usecase/auth"
 	"thc-vms/backend/internal/usecase/gate"
+	"thc-vms/backend/internal/usecase/notification"
 	"thc-vms/backend/internal/usecase/visit"
 	"thc-vms/backend/internal/worker"
 )
@@ -97,6 +98,8 @@ func run(ctx context.Context) error {
 	master := repository.NewMasterDataRepository(pool)
 	checkins := repository.NewCheckInOutRepository(pool)
 	autorules := repository.NewVisitAutoRuleRepository(pool)
+	audit := repository.NewAuditRepository(pool)
+	notifications := repository.NewNotificationRepository(pool)
 
 	dir := directory.New(pool, master)
 	jwtSvc := infraJWT.NewService(cfg).WithDirectory(dir)
@@ -107,6 +110,7 @@ func run(ctx context.Context) error {
 	// private bucket (never the raw stored address); the TTL comes from
 	// S3_PRESIGN_TTL_MINUTES and is guaranteed positive by config. The object
 	// reader powers the scoped GET /visits/:id/file stream (bytes, not links).
+	notificationSvc := notification.NewService(notifications)
 	visitSvc := visit.NewService(visits, master, clock, checkins, repository.NewVendorRepository(pool)).
 		WithFileLinks(store, cfg.Storage.PresignTTL()).
 		WithObjectReader(store)
@@ -114,7 +118,7 @@ func run(ctx context.Context) error {
 		Visits: visits, CheckIns: checkins, Clock: clock, Logger: logger,
 	})
 	workerSvc := worker.NewService(worker.Dependencies{
-		Visits: visits, Rules: autorules, CheckIns: checkins, Clock: clock, Logger: logger,
+		Visits: visits, Rules: autorules, CheckIns: checkins, Notifications: notifications, Clock: clock, Logger: logger,
 	})
 
 	securityRoleID, err := dir.RoleIDByName(ctx, domain.RoleSecurity)
@@ -148,6 +152,8 @@ func run(ctx context.Context) error {
 	)
 	uploadHandler := handlers.NewUploadHandler(store, cfg.Upload.MaxSizeBytes)
 	fileHandler := handlers.NewFileHandler(visitSvc)
+	auditHandler := handlers.NewAuditHandler(audit)
+	notificationHandler := handlers.NewNotificationHandler(notificationSvc)
 	healthHandler := deliveryhttp.NewHealthHandler(pool)
 
 	// The anti-bruteforce limit is a deployment choice, not a spec constant: the
@@ -205,6 +211,12 @@ func run(ctx context.Context) error {
 		},
 		Upload: deliveryhttp.UploadRoutes{Upload: uploadHandler.Upload},
 		File:   deliveryhttp.FileRoutes{File: fileHandler.File},
+		Audit:  deliveryhttp.AuditRoutes{List: auditHandler.List},
+		Notifications: deliveryhttp.NotificationRoutes{
+			List:        notificationHandler.List,
+			MarkRead:    notificationHandler.MarkRead,
+			MarkAllRead: notificationHandler.MarkAllRead,
+		},
 		Health: deliveryhttp.HealthProbes{Health: healthHandler.Health, Ready: healthHandler.Ready},
 		Chain: deliveryhttp.Chain{
 			Recovery: middleware.Recovery(),
@@ -222,10 +234,16 @@ func run(ctx context.Context) error {
 				domain.RoleSuperAdmin, domain.RoleAdmin),
 			GateOnly: middleware.RequireRoles(
 				domain.RoleSecurity, domain.RoleAdmin, domain.RoleSuperAdmin),
+			NotifyOnly: middleware.RequireRoles(
+				domain.RoleSuperAdmin, domain.RoleAdmin, domain.RoleSecurity, domain.RoleVendor),
 		},
 	})
 
 	interval := worker.IntervalFromEnv()
+	if interval > worker.ReminderWindow {
+		slog.Warn("worker interval exceeds reminder window: some pre-visit reminders may be missed",
+			"interval", interval.String(), "reminder_window", worker.ReminderWindow.String())
+	}
 	runner := worker.NewRunner(workerSvc, interval, logger)
 	workerDone := make(chan struct{})
 	go func() {

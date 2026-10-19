@@ -84,6 +84,20 @@ type FileRoutes struct {
 	File gin.HandlerFunc
 }
 
+// AuditRoutes carries the bound audit-trail handler method (super_admin
+// only: the trail is the back-office's own history, never branch-scoped).
+type AuditRoutes struct {
+	List gin.HandlerFunc
+}
+
+// NotificationRoutes carries the bound notification handler methods (every
+// authenticated role: super_admin, admin, security and vendor).
+type NotificationRoutes struct {
+	List        gin.HandlerFunc
+	MarkRead    gin.HandlerFunc
+	MarkAllRead gin.HandlerFunc
+}
+
 // Chain is the pre-built middleware for each route group.
 type Chain struct {
 	Recovery       gin.HandlerFunc
@@ -94,6 +108,7 @@ type Chain struct {
 	ApproveOnly    gin.HandlerFunc
 	GateOnly       gin.HandlerFunc
 	SuperAdminOnly gin.HandlerFunc
+	NotifyOnly     gin.HandlerFunc
 }
 
 // HealthProbes carries the bound probe methods.
@@ -106,16 +121,18 @@ type HealthProbes struct {
 // so New keeps a single parameter. A nil handler or chain member degrades to
 // pass-through so hermetic tests can mount a subset.
 type Deps struct {
-	Auth       AuthRoutes
-	Users      UserRoutes
-	SuperAdmin SuperAdminRoutes
-	Master     MasterRoutes
-	Visits     VisitRoutes
-	Gate       GateRoutes
-	Upload     UploadRoutes
-	File       FileRoutes
-	Health     HealthProbes
-	Chain      Chain
+	Auth          AuthRoutes
+	Users         UserRoutes
+	SuperAdmin    SuperAdminRoutes
+	Master        MasterRoutes
+	Visits        VisitRoutes
+	Gate          GateRoutes
+	Upload        UploadRoutes
+	File          FileRoutes
+	Audit         AuditRoutes
+	Notifications NotificationRoutes
+	Health        HealthProbes
+	Chain         Chain
 }
 
 // passthrough is the nil-member fallback used only by tests mounting a
@@ -142,7 +159,7 @@ func withFallback(next gin.HandlerFunc) gin.HandlerFunc {
 // super_admin. GET /visits/:id/file streams a stored file slot inline (the
 // usecase scopes the branch/owner and answers 404 otherwise). EXPLICITLY NOT
 // ROUTED (they 404): POST /visits/:id/feedback, POST /visits/:id/incident,
-// SSO/OTP/2FA, audit-log viewer.
+// SSO/OTP/2FA.
 //
 // DELETE /locations/:id is the hard removal and is refused with 409 while
 // users.location_id or visit_request.location_id still reference the row, so
@@ -184,6 +201,13 @@ func New(d Deps) *gin.Engine {
 	super.PATCH("/users/:id", withFallback(d.SuperAdmin.UpdateUser))
 	super.DELETE("/users/:id", withFallback(d.SuperAdmin.DeleteUser))
 	super.DELETE("/visits/:id", withFallback(d.SuperAdmin.DeleteVisit))
+	super.GET("/audit-logs", withFallback(d.Audit.List))
+
+	notify := authed.Group("")
+	notify.Use(withFallback(d.Chain.NotifyOnly))
+	notify.GET("/notifications", withFallback(d.Notifications.List))
+	notify.PATCH("/notifications/:id", withFallback(d.Notifications.MarkRead))
+	notify.POST("/notifications/read-all", withFallback(d.Notifications.MarkAllRead))
 
 	authed.GET("/locations", withFallback(d.Master.Locations))
 	authed.GET("/purposes", withFallback(d.Master.Purposes))

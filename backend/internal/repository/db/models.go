@@ -11,6 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// Append-only audit trail - ERD L172-182; one row per auditable action, never updated or deleted by application code
+type AuditLog struct {
+	ID        uuid.UUID   `json:"id"`
+	UserID    pgtype.UUID `json:"user_id"`
+	Action    string      `json:"action"`
+	Entity    string      `json:"entity"`
+	EntityID  pgtype.UUID `json:"entity_id"`
+	Timestamp time.Time   `json:"timestamp"`
+	Ip        pgtype.Text `json:"ip"`
+	UserAgent pgtype.Text `json:"user_agent"`
+	Metadata  []byte      `json:"metadata"`
+}
+
 type CheckIn struct {
 	ID             uuid.UUID   `json:"id"`
 	VisitRequestID uuid.UUID   `json:"visit_request_id"`
@@ -35,6 +48,21 @@ type Location struct {
 	City     pgtype.Text `json:"city"`
 	Timezone string      `json:"timezone"`
 	IsActive bool        `json:"is_active"`
+}
+
+// Persisted per-user notification feed - ERD NOTIFICATION entity; written in the visit lifecycle transactions, read user-scoped
+type Notification struct {
+	ID             uuid.UUID `json:"id"`
+	UserID         uuid.UUID `json:"user_id"`
+	VisitRequestID uuid.UUID `json:"visit_request_id"`
+	Type           string    `json:"type"`
+	Title          string    `json:"title"`
+	Message        string    `json:"message"`
+	// Delivery channel; only in_app is used in the MVP (email/wa reserved by the ERD)
+	Channel string `json:"channel"`
+	// Per-user read flag; drives the unread badge and the read/unread styling
+	IsRead    bool      `json:"is_read"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Purpose struct {
@@ -99,7 +127,7 @@ type VisitPurpose struct {
 type VisitRequest struct {
 	ID                  uuid.UUID   `json:"id"`
 	VisitID             string      `json:"visit_id"`
-	PicUserID           uuid.UUID   `json:"pic_user_id"`
+	VendorUserID        uuid.UUID   `json:"vendor_user_id"`
 	VendorID            pgtype.UUID `json:"vendor_id"`
 	LocationID          uuid.UUID   `json:"location_id"`
 	StartDate           time.Time   `json:"start_date"`

@@ -12,7 +12,14 @@
  * jadi tidak ada plumbing token di lapisan ini.
  */
 
-import { type QueryClient, queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  type QueryClient,
+  queryOptions,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import {
   approveVisit,
   cancelVisit,
@@ -29,12 +36,16 @@ import {
   getMe,
   getVisit,
   getVisitQr,
+  listAuditLogs,
   listLocations,
   listManagedUsers,
+  listNotifications,
   listPurposes,
   listSecurityUsers,
   listVendors,
   listVisits,
+  markAllNotificationsRead,
+  markNotificationRead,
   rejectVisit,
   rescheduleVisit,
   updateLocation,
@@ -48,6 +59,7 @@ import { ApiError } from '@/lib/api/fetcher'
 import { queryKeys } from '@/lib/api/query-keys'
 import type {
   ApproveRequest,
+  AuditLogListParams,
   CancelRequest,
   CheckInRequest,
   CreateLocationRequest,
@@ -55,6 +67,8 @@ import type {
   CreateSecurityUserRequest,
   CreateVisitRequest,
   ManagedUserListParams,
+  NotificationListParams,
+  NotificationListResult,
   RejectRequest,
   RescheduleRequest,
   UpdateLocationRequest,
@@ -83,7 +97,7 @@ const VISIT_STALE_TIME = 30 * 1000
 /**
  * Pembaruan otomatis layar detail kunjungan (SCR-04 sisi vendor): QR &
  * "Riwayat Status" menyegarkan diri tanpa reload manual — misalnya saat admin
- * menyetujui, satpam check-in, atau satpam check-out dari klien lain. Diet
+ * menyetujui, pengawas check-in, atau pengawas check-out dari klien lain. Diet
  * baterai/data S5: hanya polling saat tab terlihat, dan hanya untuk status yang
  * masih bergerak — `approved` (menunggu datang) dan `visiting` (di dalam
  * gerbang, menunggu check-out). Status terminal (`completed`/`cancelled`/
@@ -125,6 +139,28 @@ const VISIT_LIST_PREFIX = queryKeys.visits.list({}).slice(0, 2)
 const SECURITY_USERS_PREFIX = queryKeys.securityUsers().slice(0, 1)
 const MANAGED_USERS_PREFIX = queryKeys.managedUsers().slice(0, 1)
 const LOCATIONS_PREFIX = queryKeys.locations().slice(0, 1)
+const NOTIFICATIONS_PREFIX = queryKeys.notifications().slice(0, 1)
+
+/**
+ * Lonceng header menyegarkan feed notifikasi setiap 30 detik SELAMA panel
+ * terbuka (`refetchIntervalInBackground: false`); saat tertutup, pemanggil
+ * mematikan query (`enabled: false`) sehingga tak ada polling latar.
+ */
+const NOTIFICATIONS_REFETCH_INTERVAL = 30_000
+
+/**
+ * Ukuran halaman feed lonceng — satu-satunya sumber angka baris per halaman
+ * (dipakai hook feed di bawah; komponen panel tidak mendefinisikannya ulang).
+ *
+ * Panel menampilkan halaman TERBARU lebih dulu (10 baris teratas) lalu memuat
+ * halaman berikutnya saat petugas menekan "Muat lebih banyak", sampai seluruh
+ * `total` habis. TIDAK ADA jendela tanggal / cap "2 hari" di mana pun pada
+ * feed ini — angka 10 semata-mata ukuran halaman hard-coded ini, bukan filter
+ * waktu. Backend mengklamp `limit > 100` kembali ke 20, jadi halaman kecil +
+ * muat lanjut progresif adalah satu-satunya cara menjangkau seluruh
+ * notifikasi (mis. 126 baris untuk super_admin).
+ */
+export const FEED_LIMIT = 10
 
 /**
  * 401/403/404 bersifat definitif — mengulanginya hanya menambah beban API.
@@ -137,11 +173,12 @@ function shouldRetry(failureCount: number, error: unknown): boolean {
   return !isDefinitive && failureCount < 2
 }
 
-/** Status kunjungan berubah → segarkan seluruh daftar + detail + QR kunjungan itu. */
+/** Status kunjungan berubah → segarkan daftar + detail + QR + feed notifikasi. */
 function invalidateVisitStatus(queryClient: QueryClient, visitId: string): void {
   void queryClient.invalidateQueries({ queryKey: VISIT_LIST_PREFIX })
   void queryClient.invalidateQueries({ queryKey: queryKeys.visits.detail(visitId) })
   void queryClient.invalidateQueries({ queryKey: queryKeys.visits.qr(visitId) })
+  void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_PREFIX })
 }
 
 /**
@@ -260,6 +297,31 @@ export function managedUsersQueryOptions(params: ManagedUserListParams) {
   })
 }
 
+/** Daftar jejak audit lintas cabang — super_admin saja (403 untuk role lain). */
+export function auditLogsQueryOptions(params: AuditLogListParams) {
+  return queryOptions({
+    queryKey: queryKeys.auditLogs(params),
+    queryFn: () => listAuditLogs(params),
+    staleTime: VISIT_STALE_TIME,
+    retry: shouldRetry,
+  })
+}
+
+/**
+ * Feed notifikasi lonceng header (SCR-02/approvals). Di-poll hanya saat panel
+ * lonceng terbuka — pemanggil mengoper `enabled` dari status buka/tutup panel.
+ */
+export function notificationsQueryOptions(params: NotificationListParams = {}) {
+  return queryOptions({
+    queryKey: queryKeys.notifications(params),
+    queryFn: () => listNotifications(params),
+    staleTime: VISIT_STALE_TIME,
+    retry: shouldRetry,
+    refetchInterval: NOTIFICATIONS_REFETCH_INTERVAL,
+    refetchIntervalInBackground: false,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Query hooks (sisi baca)
 // ---------------------------------------------------------------------------
@@ -317,6 +379,46 @@ export function useSecurityUsersQuery(locationId?: string, enabled = true) {
 
 export function useManagedUsersQuery(params: ManagedUserListParams, enabled = true) {
   return useQuery({ ...managedUsersQueryOptions(params), enabled })
+}
+
+export function useAuditLogsQuery(params: AuditLogListParams, enabled = true) {
+  return useQuery({ ...auditLogsQueryOptions(params), enabled })
+}
+
+/** `enabled` dari pemanggil: `false` saat panel lonceng tertutup → tanpa polling latar. */
+export function useNotificationsQuery(params: NotificationListParams = {}, enabled = true) {
+  return useQuery({ ...notificationsQueryOptions(params), enabled })
+}
+
+/**
+ * Feed lonceng progresif panel (`useInfiniteQuery` v5): halaman 1 dulu, lalu
+ * halaman berikutnya saat petugas menekan "Muat lebih banyak". Kunci diturunkan
+ * dari `NOTIFICATIONS_PREFIX`, sehingga invalidasi parsel `['notifications']`
+ * oleh mutasi tandai-baca (per baris maupun "semua") ikut menyegarkan feed.
+ * `enabled` datang dari status buka/tutup panel — feed hanya diambil selama
+ * panel terbuka (tanpa polling latar saat tertutup).
+ */
+const NOTIFICATIONS_FEED_KEY = [...NOTIFICATIONS_PREFIX, 'feed'] as const
+
+export function useNotificationsFeed(enabled = true) {
+  return useInfiniteQuery({
+    queryKey: NOTIFICATIONS_FEED_KEY,
+    queryFn: ({ pageParam }) => listNotifications({ limit: FEED_LIMIT, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage: NotificationListResult) =>
+      lastPage.page * lastPage.limit < lastPage.total ? lastPage.page + 1 : undefined,
+    staleTime: VISIT_STALE_TIME,
+    retry: shouldRetry,
+    refetchInterval: NOTIFICATIONS_REFETCH_INTERVAL,
+    refetchIntervalInBackground: false,
+    enabled,
+  })
+}
+
+/** Jumlah notifikasi belum dibaca untuk pemanggil — dipakai badge lonceng di shell. */
+export function useUnreadNotificationCount() {
+  const { data } = useNotificationsQuery({ limit: 1 })
+  return data?.unread_count ?? 0
 }
 
 // ---------------------------------------------------------------------------
@@ -416,7 +518,7 @@ export function useUpdateSecurityUserStatusMutation() {
   })
 }
 
-/** Hapus satpam cabang → segarkan daftar security-users (prefix ada). */
+/** Hapus pengawas cabang → segarkan daftar security-users (prefix ada). */
 export function useDeleteSecurityUserMutation() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -427,7 +529,7 @@ export function useDeleteSecurityUserMutation() {
   })
 }
 
-/** Ubah satpam cabang → segarkan daftar security-users (prefix ada). */
+/** Ubah pengawas cabang → segarkan daftar security-users (prefix ada). */
 export function useUpdateSecurityUserMutation() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -531,5 +633,27 @@ export function useDeleteLocationMutation() {
 export function useUploadFileMutation() {
   return useMutation({
     mutationFn: ({ file, category }: { file: File; category: UploadCategory }) => uploadFile(file, category),
-  })
+  });
+}
+
+/** Tandai satu notifikasi dibaca → segarkan cache notifikasi (prefix). */
+export function useMarkNotificationReadMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => markNotificationRead(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_PREFIX });
+    },
+  });
+}
+
+/** Tandai semua notifikasi dibaca → segarkan cache notifikasi (prefix). */
+export function useMarkAllNotificationsReadMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => markAllNotificationsRead(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_PREFIX });
+    },
+  });
 }

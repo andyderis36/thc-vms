@@ -231,7 +231,7 @@ type ListActiveLocationsRow struct {
 //	FKs), and the MVP has no restore flow, so deactivation via is_active is
 //	the only removal (YAGNI).
 //	The active filter matches the openapi summaries "fasilitas ... THC aktif"
-//	(openapi L196) and only active purposes are offered to a PIC.
+//	(openapi L196) and only active purposes are offered to a vendor user.
 //
 // =============================================================================
 // GET /locations (openapi L193-203) -> the Location schema (openapi L719-738).
@@ -309,7 +309,7 @@ type ListActiveVendorsRow struct {
 	Name string    `json:"name"`
 }
 
-// GET /vendors -> the [{id, name}] company dropdown the PIC/admin forms
+// GET /vendors -> the [{id, name}] company dropdown the vendor-user/admin forms
 // consume. Only non-blacklisted companies are offered, mirroring the
 // active-only purpose catalogue above.
 func (q *Queries) ListActiveVendors(ctx context.Context) ([]ListActiveVendorsRow, error) {

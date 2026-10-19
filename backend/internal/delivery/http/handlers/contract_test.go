@@ -30,7 +30,7 @@ var openapiKeys = map[string]map[string]bool{
 	},
 	"VisitDetail": {
 		"id": true, "visit_id": true, "status": true, "location": true,
-		"purposes": true, "pic_user": true, "vendor_name": true,
+		"purposes": true, "vendor_user": true, "pic_user": true, "vendor_name": true,
 		"start_date": true, "end_date": true, "assignment_letter_url": true,
 		"notes": true, "purpose_note": true, "visitors": true, "created_at": true,
 		"check_in_at": true, "check_out_at": true, "checked_in_by": true,
@@ -176,7 +176,18 @@ func checkVisitDetailNesting(t *testing.T, detail map[string]any) {
 			assertSubset(t, "VisitorItem", v.(map[string]any))
 		}
 	}
-	if user, ok := detail["pic_user"].(map[string]any); ok && user != nil {
-		assertSubset(t, "User", user)
+	user, ok := detail["vendor_user"].(map[string]any)
+	if !ok || user == nil {
+		t.Fatalf("vendor_user missing or not an object: %v", detail["vendor_user"])
+	}
+	assertSubset(t, "User", user)
+	if _, ok := user["id"]; !ok {
+		t.Fatalf("vendor_user.id missing: %v", user)
+	}
+	if name, ok := user["name"]; !ok || name == nil {
+		t.Fatalf("vendor_user.name missing: %v", user)
+	}
+	if email, ok := user["email"]; !ok || email == nil {
+		t.Fatalf("vendor_user.email missing: %v", user)
 	}
 }

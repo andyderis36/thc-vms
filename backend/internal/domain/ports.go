@@ -105,18 +105,68 @@ type UserRepository interface {
 	ListSecurity(ctx context.Context, locationID *UUID) ([]User, error)
 }
 
+// VisitSortBy is the whitelisted sort column for GET /visits. It is a closed
+// vocabulary (never a raw string) so no caller can smuggle SQL into ORDER BY:
+// the repository maps each value to a static CASE branch.
+type VisitSortBy string
+
+// Visit sort columns accepted via ?sort_by= (openapi GET /visits).
+const (
+	VisitSortCreatedAt VisitSortBy = "created_at"
+	VisitSortStartDate VisitSortBy = "start_date"
+	VisitSortEndDate   VisitSortBy = "end_date"
+)
+
+// Normalized returns the sort column, falling back to the legacy default
+// (created_at) for empty or unknown values so invalid input can never reach SQL.
+func (s VisitSortBy) Normalized() VisitSortBy {
+	switch s {
+	case VisitSortCreatedAt, VisitSortStartDate, VisitSortEndDate:
+		return s
+	default:
+		return VisitSortCreatedAt
+	}
+}
+
+// VisitSortOrder is the whitelisted sort direction for GET /visits.
+type VisitSortOrder string
+
+// Visit sort directions accepted via ?order= (openapi GET /visits).
+const (
+	VisitSortAsc  VisitSortOrder = "asc"
+	VisitSortDesc VisitSortOrder = "desc"
+)
+
+// Normalized returns the sort direction, falling back to the legacy default
+// (desc) for empty or unknown values.
+func (o VisitSortOrder) Normalized() VisitSortOrder {
+	switch o {
+	case VisitSortAsc, VisitSortDesc:
+		return o
+	default:
+		return VisitSortDesc
+	}
+}
+
 // VisitFilter scopes a visit listing to the caller's branch and role, which
 // is how the backend enforces multi-branch isolation: admins and security
 // pass their own location_id, super_admin passes nil, and vendor passes its own
-// user id. Page starts at 1; Limit caps the page size.
+// user id. Page starts at 1; Limit caps the page size. Search is the optional
+// free-text filter (ILIKE over vendor user name / visit_id in SQL); empty means
+// unfiltered, never a widened scope. SortBy/Order select the ORDER BY column
+// and direction; both are whitelisted vocabularies, never raw SQL, and the
+// zero value means the legacy default (created_at desc).
 type VisitFilter struct {
-	LocationID *UUID
-	PICUserID  *UUID
-	Status     *VisitStatus
-	From       *time.Time
-	To         *time.Time
-	Page       int
-	Limit      int
+	LocationID   *UUID
+	VendorUserID *UUID
+	Status       *VisitStatus
+	Search       string
+	From         *time.Time
+	To           *time.Time
+	Page         int
+	Limit        int
+	SortBy       VisitSortBy
+	Order        VisitSortOrder
 }
 
 // VisitRepository is the port the PostgreSQL adapter implements for the visit
@@ -160,12 +210,19 @@ type VisitRepository interface {
 // The three rules come from the PRD state machine:
 //
 //	R1 status=requested and created_at  < before            -> cancelled  (7 days)
-//	R2 status=approved  and end_date    < before and no check-in -> not_visit
+//	R2 status in (requested,approved,rescheduled) and end_date < before and no check-in -> not_visit
 //	R3 status=visiting  and end_date    < before            -> completed  (end_date + 24h)
+//
+// R4 (reminder) is the odd one out: it MUTATES NOTHING, so it takes an explicit
+// [now, windowEnd] window and is listed separately below.
 type VisitAutoRuleRepository interface {
 	FindStaleRequested(ctx context.Context, before time.Time) ([]VisitRequest, error)
-	FindNoShowApproved(ctx context.Context, before time.Time) ([]VisitRequest, error)
+	FindNoShow(ctx context.Context, before time.Time) ([]VisitRequest, error)
 	FindOverstayedVisiting(ctx context.Context, before time.Time) ([]VisitRequest, error)
+	// FindUpcomingApproved returns approved visits whose start_date falls inside
+	// (now, windowEnd]: the candidates for the pre-visit reminder (rule R4). The
+	// worker then emits a reminder notification through NotificationRepository.
+	FindUpcomingApproved(ctx context.Context, now, windowEnd time.Time) ([]VisitRequest, error)
 }
 
 // MasterDataRepository is the port serving the location and purpose
