@@ -158,7 +158,7 @@ if ($health.Status -ne 200) {
 $tokens = @{}
 foreach ($e in @(
         "superadmin@thc.net.id", "admin.sby@thc.net.id", "admin.mlg@thc.net.id",
-        "satpam.sby@thc.net.id", "satpam.sawojajar@thc.net.id",
+        "security.sby@thc.net.id", "security.sawojajar@thc.net.id",
         "vendor.splicing@mitra-fo.com", "vendor.genset@dayapower.co.id")) {
     $t = Login $e
     if ($t) { $tokens[$e] = $t } else { Write-Log "FATAL: cannot authenticate $e"; $script:Log | Set-Content -Path $OutFile; exit 1 }
@@ -166,8 +166,8 @@ foreach ($e in @(
 $sa = $tokens["superadmin@thc.net.id"]
 $adminSby = $tokens["admin.sby@thc.net.id"]
 $adminMlg = $tokens["admin.mlg@thc.net.id"]
-$secSby = $tokens["satpam.sby@thc.net.id"]
-$secSwj = $tokens["satpam.sawojajar@thc.net.id"]
+$secSby = $tokens["security.sby@thc.net.id"]
+$secSwj = $tokens["security.sawojajar@thc.net.id"]
 $vendor1 = $tokens["vendor.splicing@mitra-fo.com"]
 $vendor2 = $tokens["vendor.genset@dayapower.co.id"]
 
@@ -242,9 +242,9 @@ $vendorLeak = @($vendorA.items | Where-Object { $_.id -eq $mlgVisitId -or $_.id 
 Assert-True "AUTH-06" "vendor sees only its OWN visits, never another vendor's" `
     ($vendorLeak.Count -eq 0) "leaked=$($vendorLeak.Count)"
 
-$newSecEmail = "qa.satpam.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())@thc.net.id"
+$newSecEmail = "qa.security.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())@thc.net.id"
 $cs = Invoke-Api -Method POST -Path "/users/security" -Headers (Auth $adminSby) -Body @{
-    name = "Satpam QA"; email = $newSecEmail; password = "Password123!"; location_id = $locMlg
+    name = "Pengawas QA"; email = $newSecEmail; password = "Password123!"; location_id = $locMlg
 }
 Assert-True "AUTH-07" "admin-created security account is locked to the ADMIN's branch, ignoring the body" `
     ($cs.Status -eq 201 -and $cs.Body.data.location_id -eq $locSby) "HTTP $($cs.Status) body_loc=$($cs.Body.data.location_id) want=$locSby"

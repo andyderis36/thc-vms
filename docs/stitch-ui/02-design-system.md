@@ -1,3 +1,12 @@
+> ⛔ **ARSIP — BUKAN SUMBER KEBENARAN (NON-SSOT). JANGAN DIEDIT.**
+>
+> Dokumen ini adalah *starter kit* desain Google Stitch dari awal proyek dan **sudah basi**: isinya tidak lagi mencerminkan UI yang benar-benar berjalan. `radius`, warna, tipografi, dan spesifikasi layarnya **tidak boleh** dipakai sebagai acuan.
+>
+> - Otoritas desain visual yang berlaku: pola komponen **jokoui** (`https://www.jokoui.web.id/components/application`) + palet tetap THC `#422AD5` (primary) dan `#F43098` (secondary) — lihat `AGENTS.md` §3.1.
+> - Kebenaran bisnis, data, dan kontrak API: `docs/0. PRD - THC Visitor App.md`, `docs/1. Entity Relationship Diagram (ERD).mermaid`, `docs/4. openapi.yaml`.
+> - Alur kerja yang berlaku: perubahan dibuat **di codebase** lebih dulu, lalu docs/PRD disinkronkan menyusul — bukan sebaliknya.
+> - Perlu menyelaraskan sesuatu di sini? **Jangan** — perbarui SSOT yang disebut di atas.
+
 # Design System – THC Visitor Management System (VMS)
 
 ---
@@ -69,7 +78,7 @@
 - **Check-out / Danger**: `#DC2626` (tombol "CHECK-OUT KELUAR", aksi Reject/Cancel).
 - Kedua warna di atas **sengaja di luar palet brand**: keduanya sinyal operasional gerbang yang sudah dikenali petugas, bukan warna identitas.
 - **QR Code (SCR-04)**: selalu hitam `#000000` di atas putih `#FFFFFF` demi kontras pemindaian — dilarang di-rebrand.
-- Label peringatan fungsional (mis. `OVERSTAY`, ikon berkas PDF, toast error) mengikuti pasangan error/`#DC2626`, bukan warna brand.
+- Label peringatan fungsional (mis. badge status `Ditolak`, ikon berkas PDF, toast error) mengikuti pasangan error/`#DC2626`, bukan warna brand.
 
 ---
 
@@ -94,11 +103,11 @@
 - **Outline**: Border 1px `#422AD5`, Teks `#422AD5`, Background transparan, Hover: `#E0E7FF`.
 - **Danger**: Background `#DC2626`, Teks Putih (untuk aksi Reject/Cancel — pengecualian fungsional §2.7).
 - **Ghost**: Teks `#52525B`, Background transparan, Hover: `#F3F4F6`.
-- **Target Sentuh Tablet**: Tinggi minimal 44px – 48px pada antarmuka satpam.
+- **Target Sentuh Tablet**: Tinggi minimal 44px – 48px pada antarmuka pengawas.
 - *Pemetaan implementasi* (`frontend/src/components/ui/Button.tsx`): varian `primary` → Primary; varian `secondary` → Outline; `danger`/`success` → pengecualian fungsional §2.7.
 
 ### 4.2 Form Input & Dropdown
-- **Tinggi Elemen**: 40px (Desktop/Mobile), 48px (Tablet Satpam).
+- **Tinggi Elemen**: 40px (Desktop/Mobile), 48px (Tablet Pengawas).
 - **Border**: 1px solid `#EEEEEE`, Rounded **4px**.
 - **State Focus**: Border `#422AD5`, Focus Ring 2px `#E0E7FF` (tint primary); fokus keyboard global memakai outline `#422AD5`.
 - **Placeholder**: Warna `#71717A`.
@@ -129,20 +138,20 @@
 ## 5. Aturan Responsif & Ergonomi Mobile (Mobilitas Tinggi di Lapangan)
 
 ### 5.1 Breakpoints Standar Tailwind CSS
-- **Mobile Smartphone**: `< 768px` (Layar Vendor/Mitra di jalan & Satpam pos bergerak)
-- **Tablet / Kiosk**: `768px – 1023px` (Layar tablet gerbang satpam)
+- **Mobile Smartphone**: `< 768px` (Layar Vendor/Mitra di jalan & Pengawas pos bergerak)
+- **Tablet / Kiosk**: `768px – 1023px` (Layar tablet gerbang pengawas)
 - **Desktop / Laptop**: `>= 1024px` (Layar THC Admin di kantor)
 
 ### 5.2 Prinsip Ramah Jempol (Thumb-Zone Friendly)
 1. **Target Sentuh Minimum (Touch Targets)**:
-   - Seluruh tombol utama dan input di mobile wajib memiliki tinggi minimal **44px hingga 48px** (khusus tombol check-in satpam: **50px**).
+   - Seluruh tombol utama dan input di mobile wajib memiliki tinggi minimal **44px hingga 48px** (khusus tombol check-in pengawas: **50px**).
 2. **Transformasi Tabel Menjadi Kartu (Card Stack)**:
    - Pada layar mobile (< 768px), tabel data dilarang menggunakan horizontal scroll yang menyulitkan.
    - Tabel otomatis bertransformasi menjadi **tumpukan kartu vertikal (card stack)** mandiri yang memuat nomor Visit ID, status badge, data Vendor/Mitra, dan tombol aksi langsung.
 3. **Sticky Action Bar di Bawah Layar (Bottom Bar)**:
    - Tombol pengiriman form (*SCR-03*) dan tombol aksi ditempatkan menempel di bagian bawah layar (*sticky bottom*) agar dapat ditekan dengan satu jempol tanpa harus scroll ke ujung bawah.
 4. **Prioritas QR Code di Layar Tamu (SCR-04 Mobile)**:
-   - Saat tamu tiba di gerbang dan membuka HP, kartu QR Code wajib berada di **posisi paling atas (above-the-fold)** dengan kontras maksimal agar langsung bisa dipindai oleh scanner satpam.
+   - Saat tamu tiba di gerbang dan membuka HP, kartu QR Code wajib berada di **posisi paling atas (above-the-fold)** dengan kontras maksimal agar langsung bisa dipindai oleh scanner pengawas.
 
 ---
 
@@ -150,7 +159,7 @@
 
 Untuk memastikan konsistensi antarmuka (*UI consistency*) di seluruh layar, setiap peran pengguna memiliki arsitektur App Shell (Sidebar, Topbar, & Mobile Navigation) yang terstandarisasi:
 
-- **Sumber kebenaran label menu**: `frontend/src/lib/nav/labels.ts` (`NAV_LABELS`, dipakai SHELL-01 & SHELL-02 agar tujuan yang sama selalu bernama sama); SHELL-04 memakai `PIC_NAV` di `frontend/src/components/layouts/PicMobileShell.tsx`. Label di bawah wajib sama persis dengan implementasi.
+- **Sumber kebenaran label menu**: `frontend/src/lib/nav/labels.ts` (`NAV_LABELS`, dipakai SHELL-01 & SHELL-02 agar tujuan yang sama selalu bernama sama); SHELL-04 memakai `VENDOR_NAV` di `frontend/src/components/layouts/VendorMobileShell.tsx`. Label di bawah wajib sama persis dengan implementasi.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -196,7 +205,7 @@ Untuk memastikan konsistensi antarmuka (*UI consistency*) di seluruh layar, seti
     - Footer Sidebar: Label Lokasi Terkunci: `📍 Terkunci: Cabang Surabaya` + Avatar Admin + Logout.
   - **Topbar (Tinggi 64px, Putih, Sticky)**:
     - Badge Statis Terkunci: `📍 Kantor Cabang Surabaya` (Disabled / Non-clickable).
-    - Tombol Aksi Cepat: `[+ Tambah Satpam]` & `[+ Buat Kunjungan]`.
+    - Tombol Aksi Cepat: `[+ Tambah Pengawas]` & `[+ Buat Kunjungan]`.
     - Avatar Admin Cabang & Lonceng Notifikasi.
 - **Mobile (< 768px)**:
   - Topbar: Logo THC + Badge `📍 Surabaya` + Avatar Admin.
@@ -213,7 +222,7 @@ Untuk memastikan konsistensi antarmuka (*UI consistency*) di seluruh layar, seti
     - Kanan: Nama Petugas Jaga ("Budi S. - Security Shift Pagi") + Tombol Outline `[Ganti Shift / Logout]` (warna brand `#422AD5`).
   - **Navigasi Sub-Bar (Tab Sentuh Besar Tinggi 52px)**:
     - `[🕒 1. Akan Hadir Hari Ini (8)]` | `[🟢 2. Sedang di Lokasi (12)]` | `[✅ 3. Selesai Hari Ini (15)]`.
-- **Mobile (< 768px - Satpam Bergerak / Patroli)**:
+- **Mobile (< 768px - Pengawas Bergerak / Patroli)**:
   - Topbar Ringkas: Logo THC + Nama Pos + Jam Digital.
   - Bottom Navigation Bar (3 Tab Sentuh 52px): `[Akan Hadir]`, `[Di Lokasi]`, `[Selesai]`.
 

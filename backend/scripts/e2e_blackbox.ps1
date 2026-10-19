@@ -288,7 +288,7 @@ trap {
   } else {
     Write-Host '!! TIDAK bisa login superadmin. Hapus manual ID di bawah ini:' -ForegroundColor Red
     Write-Host ('   kunjungan: ' + ($script:CreatedVisits    -join ', '))
-    Write-Host ('   satpam   : ' + ($script:CreatedSecUsers  -join ', '))
+    Write-Host ('   pengawas : ' + ($script:CreatedSecUsers  -join ', '))
     Write-Host ('   user     : ' + ($script:CreatedUsers     -join ', '))
     Write-Host ('   lokasi   : ' + ($script:CreatedLocations -join ', '))
   }
@@ -354,9 +354,9 @@ $ACCOUNTS = [ordered]@{
   adm3 = 'admin3@thc.com'
   adm4 = 'admin4@thc.com'
   adm5 = 'admin5@thc.com'
-  sec1 = 'satpam1a@thc.com'
-  sec2 = 'satpam2a@thc.com'
-  pic1 = 'pic1a@thc.com'
+  sec1 = 'security1a@thc.com'
+  sec2 = 'security2a@thc.com'
+  vendor1 = 'vendor1a@thc.com'
 }
 foreach ($k in $ACCOUNTS.Keys) { [void](Login $k $ACCOUNTS[$k]) }
 Write-Host "  login OK untuk $($ACCOUNTS.Count) akun seed"
@@ -372,7 +372,7 @@ $meList | ForEach-Object { Write-Host ("  {0,-6} {1,-24} {2,-12} {3}" -f $_.Key,
 $LOC1 = (Me 'adm1').location_id
 $LOC2 = (Me 'adm2').location_id
 $SECID2 = [string](Me 'sec2').id
-$PICID1 = [string](Me 'pic1').id
+$VENDORID1 = [string](Me 'vendor1').id
 $UUID0 = '00000000-0000-0000-0000-000000000000'
 $UNKNOWN_UUID = '11111111-2222-3333-4444-555555555555'
 $UNIQ_LOCS = @($meList | Where-Object { $_.LocationId -ne '' } | Select-Object -ExpandProperty LocationId -Unique)
@@ -401,12 +401,12 @@ $ADM1 = $script:Tokens['adm1']
 $ADM2 = $script:Tokens['adm2']
 $SEC1 = $script:Tokens['sec1']
 $SEC2 = $script:Tokens['sec2']
-$PIC1 = $script:Tokens['pic1']
+$VENDOR1 = $script:Tokens['vendor1']
 
 function AdminFor { param([string]$Loc) if ($Loc -eq $LOC1) { return $ADM1 } else { return $ADM2 } }
 function New-Approvable {
   param([string]$Loc, [int]$S = 30, [int]$E = 180)
-  $r = Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body (New-VisitBody -LocationId $Loc -PurposeIds @($PURP) -StartOffsetMin $S -EndOffsetMin $E)
+  $r = Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $Loc -PurposeIds @($PURP) -StartOffsetMin $S -EndOffsetMin $E)
   if ($r.Status -ne 201 -or -not $r.Json.data.id) { return $null }
   Track-Visit ([string]$r.Json.data.id)
   return $r.Json.data
@@ -422,10 +422,10 @@ function New-Approved {
 
 # ═════════════════════════ A. AUTH (P0) ═════════════════════════
 Write-Host "`n=== A. AUTH ===" -ForegroundColor Cyan
-$roles = @((Me 'sa').role, (Me 'adm1').role, (Me 'sec1').role, (Me 'pic1').role) -join '/'
+$roles = @((Me 'sa').role, (Me 'adm1').role, (Me 'sec1').role, (Me 'vendor1').role) -join '/'
 Add-R 'A-01' 'P0' 'Login 4 role (super_admin/admin/security/vendor) -> 200, token dipakai ulang' `
   ($roles -eq 'super_admin/admin/security/vendor') 'super_admin/admin/security/vendor' $roles `
-  '9 akun seed login 200 (superadmin, admin1-5, satpam1a/2a, pic1a)'
+  '9 akun seed login 200 (superadmin, admin1-5, security1a/2a, vendor1a)'
 [void](Check 'A-02' 'P0' 'Login password salah -> 401 INVALID_CREDENTIALS (pesan ID)' 401 `
   (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = 'admin1@thc.com'; password = 'Password123!X' })) `
   'Kredensial tidak valid' -ExpectEnvelopeFail -Code 'INVALID_CREDENTIALS')
@@ -460,16 +460,16 @@ Add-R 'A-09' 'P0' 'admin1..admin5 semua role=admin & punya location_id' `
 
 # ═════════════════════════ B. CREATE VISIT (P0) ═════════════════════════
 Write-Host "`n=== B. CREATE VISIT ===" -ForegroundColor Cyan
-$r = Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP))
-$vPicOwn = $null
-if ($r.Status -eq 201 -and $r.Json.data.id) { Track-Visit ([string]$r.Json.data.id); $vPicOwn = $r.Json.data }
-[void](Check 'B-01' 'P0' 'PIC vendor membuat kunjungan -> 201' 201 $r)
-if ($vPicOwn) {
-  $vst = [string]$vPicOwn.visit_id
+$r = Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP))
+$vVendorOwn = $null
+if ($r.Status -eq 201 -and $r.Json.data.id) { Track-Visit ([string]$r.Json.data.id); $vVendorOwn = $r.Json.data }
+[void](Check 'B-01' 'P0' 'vendor membuat kunjungan -> 201' 201 $r)
+if ($vVendorOwn) {
+  $vst = [string]$vVendorOwn.visit_id
   Add-R 'B-02' 'P0' 'visit_id server-generated format VST-<10 digit>' ($vst -match '^VST-\d{10}$') '^VST-\d{10}$' $vst $vst
-  Add-R 'B-03' 'P0' 'status awal = requested' ([string]$vPicOwn.status -eq 'requested') 'requested' ([string]$vPicOwn.status) ([string]$vPicOwn.status)
+  Add-R 'B-03' 'P0' 'status awal = requested' ([string]$vVendorOwn.status -eq 'requested') 'requested' ([string]$vVendorOwn.status) ([string]$vVendorOwn.status)
   Add-R 'B-04' 'P0' 'id (UUID) != visit_id (VST-kode) keduanya ada' `
-    (([string]$vPicOwn.id -ne '') -and ($vst -ne '')) 'id & visit_id keduanya ada' "id=$($vPicOwn.id) visit_id=$vst" "id=$($vPicOwn.id)"
+    (([string]$vVendorOwn.id -ne '') -and ($vst -ne '')) 'id & visit_id keduanya ada' "id=$($vVendorOwn.id) visit_id=$vst" "id=$($vVendorOwn.id)"
 }
 $r = Invoke-Api -Method POST -Path '/visits' -Token $ADM1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP))
 if ($r.Status -eq 201) { Track-Visit ([string]$r.Json.data.id) }
@@ -482,7 +482,7 @@ if ($r.Status -eq 201) { Track-Visit ([string]$r.Json.data.id) }
   'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)
 
 # Freshness probe: echo visitors[].photo_url + vendor_id (indikator binary baru).
-$r = Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) `
+$r = Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) `
   -Visitors @((New-Visitor -N 1 -VendorId $VDA -VendorName "$TAG Manual Corp" `
     -Photo 'http://localhost:9000/thc-vms-bucket/id_card/pending/probe.jpg' `
     -IdCard 'http://localhost:9000/thc-vms-bucket/id_card/pending/probe_ktp.jpg')))
@@ -497,7 +497,7 @@ if ($okFresh) {
   Add-R 'B-09' 'P0' 'Echo visitors[] utuh: vendor_id katalog + photo_url + id_card_photo_url (FRESH binary)' `
     ($f.Count -eq 0) 'echo utuh' $(if ($f.Count) { 'gagal: ' + ($f -join '; ') } else { 'utuh' }) ($vv | ConvertTo-Json -Compress)
 }
-$r = Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) `
+$r = Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) `
   -Visitors @((New-Visitor -N 1 -VendorName "$TAG PT Manual Corp")))
 if ($r.Status -eq 201) { Track-Visit ([string]$r.Json.data.id) }
 $ok = Check 'B-10' 'P0' 'Per-tech vendor_name manual saja -> 201' 201 $r
@@ -506,7 +506,7 @@ if ($ok) {
   Add-R 'B-11' 'P0' 'vendor_name manual dihormati saat vendor_id absen' `
     ($vn -eq "$TAG PT Manual Corp") "$TAG PT Manual Corp" $vn $vn
 }
-$r = Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors @((New-Visitor -N 1)))
+$r = Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors @((New-Visitor -N 1)))
 if ($r.Status -eq 201) { Track-Visit ([string]$r.Json.data.id) }
 $ok = Check 'B-12' 'P0' 'Per-tech tanpa vendor_id & vendor_name -> 201 (absen = null)' 201 $r
 if ($ok) {
@@ -515,53 +515,53 @@ if ($ok) {
     (($null -eq $vv.vendor_id) -and ($null -eq $vv.vendor_name)) 'null/null' "$($vv.vendor_id)/$($vv.vendor_name)" ($vv | ConvertTo-Json -Compress)
 }
 [void](Check 'B-14' 'P0' 'Per-tech vendor_id UUID tak dikenal -> 422' 422 `
-  (Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors @((New-Visitor -N 1 -VendorId $UNKNOWN_UUID)))) `
+  (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors @((New-Visitor -N 1 -VendorId $UNKNOWN_UUID)))) `
   'Vendor tidak ditemukan atau tidak aktif.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
 [void](Check 'B-15' 'P0' 'Per-tech vendor_id malformed -> 400' 400 `
-  (Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors @((New-Visitor -N 1 -VendorId 'bukan-uuid')))) `
+  (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors @((New-Visitor -N 1 -VendorId 'bukan-uuid')))) `
   'vendor_id pengunjung ke-1 tidak valid.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
 $b = New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP); $b['visitors'] = @()
-[void](Check 'B-16' 'P0' 'visitors kosong -> 400' 400 (Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body $b) `
+[void](Check 'B-16' 'P0' 'visitors kosong -> 400' 400 (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body $b) `
   'Minimal satu pengunjung wajib didaftarkan.' -ExpectEnvelopeFail)
 $b = New-VisitBody -LocationId $LOC1 -PurposeIds @(); $b['purpose_ids'] = @()
-[void](Check 'B-17' 'P0' 'Tanpa purpose_ids -> 400' 400 (Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body $b) `
+[void](Check 'B-17' 'P0' 'Tanpa purpose_ids -> 400' 400 (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body $b) `
   'Minimal satu tujuan kunjungan wajib dipilih atau ditulis.' -ExpectEnvelopeFail)
 [void](Check 'B-18' 'P0' 'end_date <= start_date -> 422' 422 `
-  (Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -StartOffsetMin 180 -EndOffsetMin 60)) `
+  (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -StartOffsetMin 180 -EndOffsetMin 60)) `
   'Tanggal selesai harus setelah tanggal mulai.' -ExpectEnvelopeFail)
 [void](Check 'B-19' 'P0' 'is_nda_accepted=false -> 422' 422 `
-  (Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Nda $false)) `
+  (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Nda $false)) `
   'Persetujuan NDA wajib disetujui sebagai bentuk kepatuhan K3/SOP sebelum mengajukan kunjungan.' -ExpectEnvelopeFail)
 $b = New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP); $b['visitors'] = @((New-Visitor -N 1 -VendorName ('X' * 130)))
-[void](Check 'B-20' 'P1' 'vendor_name manual > 120 karakter -> 400' 400 (Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body $b) `
+[void](Check 'B-20' 'P1' 'vendor_name manual > 120 karakter -> 400' 400 (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body $b) `
   'Nama perusahaan vendor pengunjung ke-1 maksimal 120 karakter.' -ExpectEnvelopeFail)
 $b = New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP)
 $b['visitors'] = @(1..11 | ForEach-Object { New-Visitor -N $_ })
-[void](Check 'B-21' 'P0' 'visitors > 10 orang -> 400 batas maksimal' 400 (Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body $b) `
+[void](Check 'B-21' 'P0' 'visitors > 10 orang -> 400 batas maksimal' 400 (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body $b) `
   'Jumlah pengunjung maksimal 10 orang.' -ExpectEnvelopeFail)
 $b = New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP)
 $b['visitors'] = @((New-Visitor -N 1 -Photo 'javascript:alert(1)'))
-[void](Check 'B-22' 'P1' 'photo_url skema berbahaya (javascript:) -> 422' 422 (Invoke-Api -Method POST -Path '/visits' -Token $PIC1 -Body $b) `
+[void](Check 'B-22' 'P1' 'photo_url skema berbahaya (javascript:) -> 422' 422 (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body $b) `
   'Tautan berkas tidak valid.' -ExpectEnvelopeFail)
 
 # ═════════════════════════ C. SCOPING LIST/DETAIL (P0) ═════════════════════════
 Write-Host "`n=== C. SCOPING LIST/DETAIL ===" -ForegroundColor Cyan
 function Assert-Scope {
-  param([string]$Id, [string]$Token, [string]$Label, [string]$LocationId, [string]$PicId)
+  param([string]$Id, [string]$Token, [string]$Label, [string]$LocationId, [string]$VendorId)
   $r = Invoke-Api -Method GET -Path '/visits?limit=100' -Token $Token
   if ($r.Status -ne 200) { Add-R $Id 'P0' "List $Label -> 200" $false '200' "$($r.Status)" $r.Body; return }
   $items = @($r.Json.data.items); $bad = @()
   if ($LocationId) { $bad += @($items | Where-Object { [string]$_.location.id -ne $LocationId } | ForEach-Object { $_.visit_id }) }
-  if ($PicId)      { $bad += @($items | Where-Object { [string]$_.pic_user.id  -ne $PicId      } | ForEach-Object { $_.visit_id }) }
+  if ($VendorId)      { $bad += @($items | Where-Object { [string]$_.vendor_user.id  -ne $VendorId      } | ForEach-Object { $_.visit_id }) }
   Add-R $Id 'P0' "List $Label -> hanya cakupan sendiri ($($items.Count) baris)" ($bad.Count -eq 0) `
-    $(if ($LocationId) { "location=$LocationId" } else { "pic_user=$PicId" }) `
+    $(if ($LocationId) { "location=$LocationId" } else { "vendor_user=$VendorId" }) `
     $(if ($bad.Count) { "BOCOR $($bad.Count): $($bad -join ',')" } else { 'semua dalam cakupan' }) `
     "status=$($r.Status) total=$($r.Json.data.total) page=$($r.Json.data.page) limit=$($r.Json.data.limit)"
 }
 Assert-Scope 'C-01' $ADM1 'admin cabang1' $LOC1 ''
 Assert-Scope 'C-02' $SEC1 'security cabang1' $LOC1 ''
 Assert-Scope 'C-03' $ADM2 'admin cabang2' $LOC2 ''
-Assert-Scope 'C-04' $PIC1 'PIC vendor' $null $PICID1
+Assert-Scope 'C-04' $VENDOR1 'vendor' $null $VENDORID1
 $r = Invoke-Api -Method GET -Path "/visits?location_id=$LOC2&limit=100" -Token $SA
 $bad = @(@($r.Json.data.items) | Where-Object { [string]$_.location.id -ne $LOC2 })
 Add-R 'C-05' 'P0' 'Superadmin list ?location_id= -> lintas cabang tersaring' `
@@ -583,8 +583,8 @@ if (Check-Pre 'C-07' 'P0' 'Visit cabang2 untuk uji silang' $vCross) {
     'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)
   [void](Check 'C-10' 'P0' 'Detail kunjungan oleh superadmin -> 200' 200 `
     (Invoke-Api -Method GET -Path "/visits/$($vCross.id)" -Token $SA))
-  [void](Check 'C-11' 'P0' 'PIC vendor melihat detail miliknya -> 200' 200 `
-    (Invoke-Api -Method GET -Path "/visits/$($vCross.id)" -Token $PIC1))
+  [void](Check 'C-11' 'P0' 'vendor melihat detail miliknya -> 200' 200 `
+    (Invoke-Api -Method GET -Path "/visits/$($vCross.id)" -Token $VENDOR1))
   [void](Check 'C-12' 'P0' 'Detail juga menerima kode VST- (bukan hanya UUID) -> 200' 200 `
     (Invoke-Api -Method GET -Path "/visits/$($vCross.visit_id)" -Token $SA))
 }
@@ -631,8 +631,8 @@ if (Check-Pre 'D-10' 'P0' 'Visit cabang2 untuk uji cross-branch approve' $vXA) {
 }
 $vP = New-Approvable -Loc $LOC1
 if (Check-Pre 'D-13' 'P0' 'Visit untuk uji role non-approver' $vP) {
-  [void](Check 'D-14' 'P0' 'Approve oleh PIC vendor -> 403' 403 `
-    (Invoke-Api -Method POST -Path "/visits/$($vP.id)/approve" -Token $PIC1 -Body @{}) `
+  [void](Check 'D-14' 'P0' 'Approve oleh vendor -> 403' 403 `
+    (Invoke-Api -Method POST -Path "/visits/$($vP.id)/approve" -Token $VENDOR1 -Body @{}) `
     'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)
   [void](Check 'D-15' 'P0' 'Approve oleh security -> 403' 403 `
     (Invoke-Api -Method POST -Path "/visits/$($vP.id)/approve" -Token $SEC1 -Body @{}) `
@@ -646,8 +646,8 @@ $e1 = (Get-Date).ToUniversalTime().AddMinutes(360).ToString("yyyy-MM-ddTHH:mm:ss
 $vRs = New-Approved -Loc $LOC1
 if (Check-Pre 'E-01' 'P1' 'Visit untuk reschedule' $vRs) {
   Write-Host ("  E-01 visit = " + $vRs.visit_id)
-  [void](Check 'E-02' 'P1' 'Reschedule oleh PIC pemilik -> 200' 200 `
-    (Invoke-Api -Method POST -Path "/visits/$($vRs.id)/reschedule" -Token $PIC1 -Body @{ start_date = $s1; end_date = $e1; reason = "$TAG reschedule" }))
+  [void](Check 'E-02' 'P1' 'Reschedule oleh vendor pemilik -> 200' 200 `
+    (Invoke-Api -Method POST -Path "/visits/$($vRs.id)/reschedule" -Token $VENDOR1 -Body @{ start_date = $s1; end_date = $e1; reason = "$TAG reschedule" }))
   [void](Check 'E-03' 'P1' 'Reschedule kedua kali -> 409 INVALID_TRANSITION' 409 `
     (Invoke-Api -Method POST -Path "/visits/$($vRs.id)/reschedule" -Token $ADM1 -Body @{ start_date = $s1; end_date = $e1; reason = "$TAG kedua" }) `
     'Transisi status kunjungan tidak diizinkan.' -ExpectEnvelopeFail)
@@ -661,7 +661,7 @@ if (Check-Pre 'E-04' 'P1' 'Visit untuk reschedule oleh security' $vRs2) {
 $vRs3 = New-Approvable -Loc $LOC1
 if (Check-Pre 'E-06' 'P1' 'Visit untuk reschedule kosong' $vRs3) {
   [void](Check 'E-07' 'P1' 'Reschedule tanpa tanggal/alasan -> 400' 400 `
-    (Invoke-Api -Method POST -Path "/visits/$($vRs3.id)/reschedule" -Token $PIC1 -Body @{ start_date = ''; end_date = ''; reason = '' }) `
+    (Invoke-Api -Method POST -Path "/visits/$($vRs3.id)/reschedule" -Token $VENDOR1 -Body @{ start_date = ''; end_date = ''; reason = '' }) `
     'Tanggal mulai, tanggal selesai, dan alasan penjadwalan ulang wajib diisi.' -ExpectEnvelopeFail)
 }
 $vRs4 = New-Approved -Loc $LOC1
@@ -672,8 +672,8 @@ if (Check-Pre 'E-08' 'P1' 'Visit untuk reschedule oleh admin' $vRs4) {
 $vC = New-Approvable -Loc $LOC1
 if (Check-Pre 'E-10' 'P1' 'Visit untuk cancel' $vC) {
   Write-Host ("  E-10 visit = " + $vC.visit_id)
-  [void](Check 'E-11' 'P1' 'Cancel oleh PIC pemilik -> 200' 200 `
-    (Invoke-Api -Method POST -Path "/visits/$($vC.id)/cancel" -Token $PIC1 -Body @{ reason = "$TAG batal" }))
+  [void](Check 'E-11' 'P1' 'Cancel oleh vendor pemilik -> 200' 200 `
+    (Invoke-Api -Method POST -Path "/visits/$($vC.id)/cancel" -Token $VENDOR1 -Body @{ reason = "$TAG batal" }))
 }
 $vC2 = New-Approvable -Loc $LOC1
 if (Check-Pre 'E-12' 'P1' 'Visit untuk cancel oleh security' $vC2) {
@@ -700,7 +700,7 @@ if (Check-Pre 'F-01' 'P0' 'Visit untuk uji delete' $vDel) {
   Write-Host ("  F-01 visit = " + $vDel.visit_id)
   [void](Check 'F-02' 'P0' 'Delete oleh admin -> 403' 403 (Invoke-Api -Method DELETE -Path "/visits/$($vDel.id)" -Token $ADM1) `
     'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail -Code 'FORBIDDEN_BRANCH')
-  [void](Check 'F-03' 'P0' 'Delete oleh PIC vendor -> 403' 403 (Invoke-Api -Method DELETE -Path "/visits/$($vDel.id)" -Token $PIC1) `
+  [void](Check 'F-03' 'P0' 'Delete oleh vendor -> 403' 403 (Invoke-Api -Method DELETE -Path "/visits/$($vDel.id)" -Token $VENDOR1) `
     'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)
   [void](Check 'F-04' 'P0' 'Delete oleh security -> 403' 403 (Invoke-Api -Method DELETE -Path "/visits/$($vDel.id)" -Token $SEC1) `
     'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail -Code 'FORBIDDEN_BRANCH')
@@ -724,14 +724,14 @@ if (Check-Pre 'G-01' 'P0' 'Visit approved dalam jendela' $vIn1) {
   [void](Check 'G-03' 'P0' 'Double check-in -> 409 CONFLICT' 409 `
     (Invoke-Api -Method POST -Path "/visits/$($vIn1.id)/checkin" -Token $SEC1 -Body @{}) `
     'Kunjungan berstatus "visiting" tidak dapat di-check-in.' -ExpectEnvelopeFail -Code 'CONFLICT')
-  [void](Check 'G-04' 'P0' 'Check-in oleh PIC vendor -> 403' 403 `
-    (Invoke-Api -Method POST -Path "/visits/$($vIn1.id)/checkin" -Token $PIC1 -Body @{}) `
+  [void](Check 'G-04' 'P0' 'Check-in oleh vendor -> 403' 403 `
+    (Invoke-Api -Method POST -Path "/visits/$($vIn1.id)/checkin" -Token $VENDOR1 -Body @{}) `
     'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)
   [void](Check 'G-05' 'P0' 'Check-in oleh security cabang LAIN -> 403' 403 `
     (Invoke-Api -Method POST -Path "/visits/$($vIn1.id)/checkin" -Token $SEC2 -Body @{}) `
     'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)
   # QR == visit_id, tiket identik dengan yang dipakai check-in
-  $rq = Invoke-Api -Method GET -Path "/visits/$($vIn1.id)/qr" -Token $PIC1
+  $rq = Invoke-Api -Method GET -Path "/visits/$($vIn1.id)/qr" -Token $VENDOR1
   $qrOk = $false; $qrD = ''
   if ($rq.Status -eq 200 -and $rq.Json.data) {
     $payload = [string]$rq.Json.data.qr_code_payload
@@ -797,8 +797,8 @@ if (Check-Pre 'H-03' 'P0' 'Visit approved tanpa check-in' $vNoIn) {
   [void](Check 'H-04' 'P0' 'Check-out tanpa check-in -> 409 CONFLICT' 409 `
     (Invoke-Api -Method POST -Path "/visits/$($vNoIn.id)/checkout" -Token $SEC1 -Body @{}) `
     'Kunjungan berstatus "approved" tidak dapat di-check-out.' -ExpectEnvelopeFail)
-  [void](Check 'H-05' 'P0' 'Check-out oleh PIC vendor -> 403' 403 `
-    (Invoke-Api -Method POST -Path "/visits/$($vNoIn.id)/checkout" -Token $PIC1 -Body @{}) `
+  [void](Check 'H-05' 'P0' 'Check-out oleh vendor -> 403' 403 `
+    (Invoke-Api -Method POST -Path "/visits/$($vNoIn.id)/checkout" -Token $VENDOR1 -Body @{}) `
     'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)
 }
 if ($null -ne $vCx) {
@@ -822,7 +822,7 @@ if (Check-Pre 'H-09' 'P0' 'Visit approved untuk dual-role check-out' $vAin2) {
 
 # ═════════════════════════ I. UPLOADS (P1) ═════════════════════════
 Write-Host "`n=== I. UPLOADS ===" -ForegroundColor Cyan
-$r = Upload-File -Token $PIC1 -FilePath "$FixtureDir\spk.pdf" -Category 'assignment_letter' -OwnerId 'e2ebb-staging'
+$r = Upload-File -Token $VENDOR1 -FilePath "$FixtureDir\spk.pdf" -Category 'assignment_letter' -OwnerId 'e2ebb-staging'
 $okU = Check 'I-01' 'P1' 'Upload SPK PDF asli (assignment_letter) -> 201' 201 $r
 if ($okU) {
   $u = [string]$r.Json.data.file_url
@@ -831,17 +831,17 @@ if ($okU) {
     "file_name=$($r.Json.data.file_name) size=$($r.Json.data.file_size) mime=$($r.Json.data.mime_type)"
 }
 [void](Check 'I-03' 'P1' 'Upload foto KTP PNG asli (id_card) -> 201' 201 `
-  (Upload-File -Token $PIC1 -FilePath "$FixtureDir\ktp.png" -Category 'id_card' -OwnerId 'e2ebb-ktp'))
+  (Upload-File -Token $VENDOR1 -FilePath "$FixtureDir\ktp.png" -Category 'id_card' -OwnerId 'e2ebb-ktp'))
 [void](Check 'I-04' 'P1' 'Upload foto selfie JPEG (checkin_photo) -> 201' 201 `
-  (Upload-File -Token $PIC1 -FilePath "$FixtureDir\selfie.jpg" -Category 'checkin_photo' -OwnerId 'e2ebb-selfie'))
+  (Upload-File -Token $VENDOR1 -FilePath "$FixtureDir\selfie.jpg" -Category 'checkin_photo' -OwnerId 'e2ebb-selfie'))
 [void](Check 'I-05' 'P1' 'Upload file > 5MB -> 413 FILE_TOO_LARGE' 413 `
-  (Upload-File -Token $PIC1 -FilePath "$FixtureDir\big.png" -Category 'id_card' -OwnerId 'e2ebb-big') `
+  (Upload-File -Token $VENDOR1 -FilePath "$FixtureDir\big.png" -Category 'id_card' -OwnerId 'e2ebb-big') `
   'Ukuran berkas melebihi batas 5242880 byte.' -ExpectEnvelopeFail -Code 'FILE_TOO_LARGE')
 [void](Check 'I-06' 'P1' 'Upload .exe (MIME terlarang) -> 400 STORAGE_REJECTED' 400 `
-  (Upload-File -Token $PIC1 -FilePath "$FixtureDir\evil.exe" -Category 'assignment_letter' -OwnerId 'e2ebb-exe') `
+  (Upload-File -Token $VENDOR1 -FilePath "$FixtureDir\evil.exe" -Category 'assignment_letter' -OwnerId 'e2ebb-exe') `
   'berkas ditolak: ukuran atau tipe tidak diizinkan' -ExpectEnvelopeFail -Code 'STORAGE_REJECTED')
 [void](Check 'I-07' 'P1' 'Upload kategori tidak dikenal -> 400' 400 `
-  (Upload-File -Token $PIC1 -FilePath "$FixtureDir\ktp.png" -Category 'kategori_ngawur' -OwnerId 'e2ebb-cat') `
+  (Upload-File -Token $VENDOR1 -FilePath "$FixtureDir\ktp.png" -Category 'kategori_ngawur' -OwnerId 'e2ebb-cat') `
   'Kategori berkas tidak dikenal.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
 [void](Check 'I-08' 'P1' 'Upload tanpa token -> 401 UNAUTHORIZED' 401 `
   (Upload-File -Token '' -FilePath "$FixtureDir\ktp.png" -Category 'id_card' -OwnerId 'e2ebb-anon') `
@@ -858,17 +858,17 @@ Add-R 'J-01' 'P0' 'GET /users/security oleh admin -> hanya cabangnya' `
   (($r.Status -eq 200) -and ($bad.Count -eq 0)) "200 semua location=$LOC1" `
   $(if ($bad.Count) { "bocor $($bad.Count)" } else { 'OK' }) `
   "status=$($r.Status) akun=$($secItems.Count) lokasi_unik=$(@($secItems | ForEach-Object { $_.location_id } | Select-Object -Unique).Count)"
-[void](Check 'J-02' 'P0' 'GET /users/security oleh PIC vendor -> 403' 403 (Invoke-Api -Method GET -Path '/users/security' -Token $PIC1) `
+[void](Check 'J-02' 'P0' 'GET /users/security oleh vendor -> 403' 403 (Invoke-Api -Method GET -Path '/users/security' -Token $VENDOR1) `
   'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail -Code 'FORBIDDEN_BRANCH')
 [void](Check 'J-03' 'P0' 'GET /users/security oleh security -> 403' 403 (Invoke-Api -Method GET -Path '/users/security' -Token $SEC1) `
   'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)
-$r = Invoke-Api -Method POST -Path '/users/security' -Token $ADM1 -Body @{ name = "$TAG Satpam Uji 1"; email = $emailNew; password = 'E2eBb123!' }
+$r = Invoke-Api -Method POST -Path '/users/security' -Token $ADM1 -Body @{ name = "$TAG Pengawas Uji 1"; email = $emailNew; password = 'E2eBb123!' }
 $newSec = $null
 if ($r.Status -eq 201 -and $r.Json.data.id) { $newSec = $r.Json.data; Track-SecUser ([string]$newSec.id) }
 $okS = Check 'J-04' 'P0' 'POST /users/security admin cabang sendiri -> 201' 201 $r
 if ($okS) {
-  Write-Host ("  J-04 satpam baru = " + $newSec.id)
-  Add-R 'J-05' 'P0' 'Satpam baru terikat otomatis ke location_id adminnya' `
+  Write-Host ("  J-04 pengawas baru = " + $newSec.id)
+  Add-R 'J-05' 'P0' 'Pengawas baru terikat otomatis ke location_id adminnya' `
     ([string]$newSec.location_id -eq $LOC1) "location_id=$LOC1" "location_id=$($newSec.location_id)" `
     ($newSec | ConvertTo-Json -Compress)
   [void](Check 'J-06' 'P0' 'PATCH /users/security/{id}/status oleh admin cabangnya -> 200' 200 `
@@ -876,8 +876,8 @@ if ($okS) {
   [void](Check 'J-07' 'P0' 'Akun security hasil create nonaktif -> login 401' 401 `
     (Invoke-Api -Method POST -Path '/auth/login' -Body @{ email = $emailNew; password = 'E2eBb123!' }) `
     'Kredensial tidak valid' -ExpectEnvelopeFail -Code 'INVALID_CREDENTIALS')
-  [void](Check 'J-08' 'P0' 'PATCH /users/security/{id} oleh PIC vendor -> 403' 403 `
-    (Invoke-Api -Method PATCH -Path "/users/security/$($newSec.id)" -Token $PIC1 -Body @{ name = 'x' }) `
+  [void](Check 'J-08' 'P0' 'PATCH /users/security/{id} oleh vendor -> 403' 403 `
+    (Invoke-Api -Method PATCH -Path "/users/security/$($newSec.id)" -Token $VENDOR1 -Body @{ name = 'x' }) `
     'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)
 }
 # J-09: untuk peran admin, location_id di-body DIABAIKAN dan akun dipaku ke
@@ -885,12 +885,12 @@ if ($okS) {
 # super_admin only). Jadi 201 + pin ke LOC1 = perilaku benar: BUKAN eskalasi
 # lintas cabang. Akun yang tetap dibuat harus tetap DITRACK agar tidak bocor.
 $rJ9 = Invoke-Api -Method POST -Path '/users/security' -Token $ADM1 -Body @{
-  name = "$TAG Satpam X"; email = "e2ebbxx$stamp@thc.local"; password = 'E2eBb123!'; location_id = $LOC2
+  name = "$TAG Pengawas X"; email = "e2ebbxx$stamp@thc.local"; password = 'E2eBb123!'; location_id = $LOC2
 }
 $j9Sec = $null
 if ($rJ9.Status -eq 201 -and $rJ9.Json.data.id) { $j9Sec = $rJ9.Json.data; Track-SecUser ([string]$j9Sec.id) }
 [void](Check 'J-09' 'P0' 'POST /users/security dgn location_id cabang lain -> 201 (bukan 403, lihat J-09b)' 201 $rJ9)
-Add-R 'J-09b' 'P0' 'location_id cabang lain DIABAIKAN: satpam dipin ke cabang admin pemanggil (anti-eskalasi)' `
+Add-R 'J-09b' 'P0' 'location_id cabang lain DIABAIKAN: pengawas dipin ke cabang admin pemanggil (anti-eskalasi)' `
   ([string]$j9Sec.location_id -eq $LOC1) "location_id=$LOC1" "location_id=$($j9Sec.location_id)" `
   ($j9Sec | ConvertTo-Json -Compress)
 [void](Check 'J-10' 'P0' 'PATCH /users/security/{id}/status security cabang LAIN -> 403' 403 `
@@ -911,7 +911,7 @@ Add-R 'J-14' 'P0' 'GET /users oleh superadmin -> 200, lintas cabang' `
   (($r.Status -eq 200) -and ($allUsers.Count -gt 0)) '200 + >0 akun' "$($r.Status) akun=$($allUsers.Count)" `
   "lokasi_unik=$(@($allUsers | Where-Object { $_.location_id } | ForEach-Object { $_.location_id } | Select-Object -Unique).Count)"
 $r = Invoke-Api -Method POST -Path '/users' -Token $SA -Body @{
-  name = "$TAG PIC Vendor Uji"; email = "e2ebbpic$stamp@thc.local"; password = 'E2eBb123!'
+  name = "$TAG Vendor Uji"; email = "e2ebbvendor$stamp@thc.local"; password = 'E2eBb123!'
   role = 'vendor'; nik = '3578010200009999'; vendor_id = $VDA; vendor_name = "$TAG Manual Corp"
 }
 $newUser = $null
@@ -938,8 +938,8 @@ if ($okJU) {
     "vendor_name=$VDA_NAME" "status=$($ul.Status) baris=$($row.Count) vendor_name='$rowVendorName'" `
     ($row | ConvertTo-Json -Compress)
   $vl = Invoke-Api -Method GET -Path '/visits?limit=100' -Token $SA
-  $vendorRows = @(@($vl.Json.data.items) | Where-Object { [string]$_.pic_user.id -eq [string]$newUser.id })
-  Add-R 'J-17' 'P0' 'Akun vendor baru tidak melihat kunjungan orang lain (scope pic_user)' `
+  $vendorRows = @(@($vl.Json.data.items) | Where-Object { [string]$_.vendor_user.id -eq [string]$newUser.id })
+  Add-R 'J-17' 'P0' 'Akun vendor baru tidak melihat kunjungan orang lain (scope vendor_user)' `
     ($vendorRows.Count -eq 0) '0 baris milik vendor baru' "$($vendorRows.Count) baris" `
     "total_visit_sa=$($vl.Json.data.total)"
 }
@@ -952,8 +952,8 @@ if ($okJU) {
 [void](Check 'J-20' 'P0' 'POST /users NIK bukan 16 digit -> 400' 400 `
   (Invoke-Api -Method POST -Path '/users' -Token $SA -Body @{ name = 'x'; email = "e2ebbnik$stamp@thc.local"; password = 'E2eBb123!'; role = 'vendor'; nik = '12345'; vendor_id = $VDA }) `
   'NIK harus 16 digit numerik.' -ExpectEnvelopeFail)
-[void](Check 'J-21' 'P0' 'POST /users oleh PIC vendor -> 403' 403 `
-  (Invoke-Api -Method POST -Path '/users' -Token $PIC1 -Body @{ name = 'x'; email = "e2ebbv$stamp@thc.local"; password = 'E2eBb123!'; role = 'vendor' }) `
+[void](Check 'J-21' 'P0' 'POST /users oleh vendor -> 403' 403 `
+  (Invoke-Api -Method POST -Path '/users' -Token $VENDOR1 -Body @{ name = 'x'; email = "e2ebbv$stamp@thc.local"; password = 'E2eBb123!'; role = 'vendor' }) `
   'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)
 [void](Check 'J-22' 'P1' 'POST /locations oleh admin -> 403' 403 `
   (Invoke-Api -Method POST -Path '/locations' -Token $ADM1 -Body @{ name = "$TAG POP Uji"; code = 'E2E-TEST' }) `
@@ -982,8 +982,8 @@ Add-R 'J-28' 'P1' 'active_only=false tetap menampilkan seluruh lokasi katalog' `
   ($rlAll.Json | ConvertTo-Json -Compress -Depth 4)
 
 # /visits punya batas keras maxListLimit=100 (backend/internal/usecase/visit/list.go).
-# Nilai limit di atas 100 TIDAK divalidasi: ia di-DROP ke defaultListLimit=20.
-# Akibatnya `?limit=200` hanya mengembalikan 20 baris pertama dan verifikasi
+# Nilai limit di atas 100 TIDAK divalidasi: ia di-DROP ke defaultListLimit=10.
+# Akibatnya `?limit=200` hanya mengembalikan 10 baris pertama dan verifikasi
 # baris terlindungi dilaporkan "hilang" padahal masih ada -> false negative.
 # Karena itu semua pembacaan yang butuh SELURUH baris memakai helper ini.
 function Get-AllVisits {
@@ -1009,7 +1009,7 @@ $cleanup = [pscustomobject]@{
   Visits = 0; VisitFail = 0; SecUsers = 0; SecUserFail = 0
   Users = 0; UserFail = 0; Locations = 0; LocationFail = 0
 }
-Write-Host "  menghapus $($script:CreatedVisits.Count) kunjungan / $($script:CreatedSecUsers.Count) satpam / $($script:CreatedUsers.Count) user / $($script:CreatedLocations.Count) lokasi (ID PERSIS)"
+Write-Host "  menghapus $($script:CreatedVisits.Count) kunjungan / $($script:CreatedSecUsers.Count) pengawas / $($script:CreatedUsers.Count) user / $($script:CreatedLocations.Count) lokasi (ID PERSIS)"
 
 # 404 saat DELETE = baris sudah tidak ada (mis. dihapus oleh skenario delete
 # seperti F-05). Itu berarti BERSIH, bukan kegagalan - selama ID-nya persis
@@ -1034,8 +1034,8 @@ foreach ($id in @($script:CreatedLocations)) {
   if ($sc -eq 204) { $cleanup.Locations++ } elseif ($sc -eq 404) { $cleanup.Locations++ }
   else { $cleanup.LocationFail++; Write-Host "  ! location $id => $sc" -ForegroundColor Red }
 }
-Write-Host ("  terhapus: kunjungan=$($cleanup.Visits) satpam=$($cleanup.SecUsers) user=$($cleanup.Users) lokasi=$($cleanup.Locations)")
-Write-Host ("  gagal   : kunjungan=$($cleanup.VisitFail) satpam=$($cleanup.SecUserFail) user=$($cleanup.UserFail) lokasi=$($cleanup.LocationFail)")
+Write-Host ("  terhapus: kunjungan=$($cleanup.Visits) pengawas=$($cleanup.SecUsers) user=$($cleanup.Users) lokasi=$($cleanup.Locations)")
+Write-Host ("  gagal   : kunjungan=$($cleanup.VisitFail) pengawas=$($cleanup.SecUserFail) user=$($cleanup.UserFail) lokasi=$($cleanup.LocationFail)")
 
 # Verifikasi sisa per-ID (TIDAK pakai ?search= - API tidak mengimplementasikannya).
 $stillThere = New-Object System.Collections.ArrayList
@@ -1067,7 +1067,7 @@ $REMAIN_USER  = $stillUser.Count
 $REMAIN_LOC   = $stillLoc.Count
 Add-R 'CL-01' 'P0' 'Sisa kunjungan uji = 0 (verifikasi GET per-ID -> 404)' `
   ($REMAIN_VISIT -eq 0) '0' "$REMAIN_VISIT" ($stillThere -join ',')
-Add-R 'CL-02' 'P0' 'Sisa satpam uji = 0' ($REMAIN_SEC -eq 0) '0' "$REMAIN_SEC" ($stillSec -join ',')
+Add-R 'CL-02' 'P0' 'Sisa pengawas uji = 0' ($REMAIN_SEC -eq 0) '0' "$REMAIN_SEC" ($stillSec -join ',')
 Add-R 'CL-03' 'P0' 'Sisa user uji = 0' ($REMAIN_USER -eq 0) '0' "$REMAIN_USER" ($stillUser -join ',')
 Add-R 'CL-04' 'P0' 'Sisa lokasi uji = 0' ($REMAIN_LOC -eq 0) '0' "$REMAIN_LOC" ($stillLoc -join ',')
 
@@ -1103,7 +1103,7 @@ foreach ($r in $script:Results) {
   Write-Host ("{0,-4} {1,-6} {2,-2} {3,-52} | exp={4,-50} | act={5}" -f $mark, $r.Id, $r.Pri, $r.Desc, $r.Expect, $r.Actual) -ForegroundColor $col
 }
 Write-Host ('=' * 120)
-Write-Host ("CLEANUP  : dibuat(hapus)=($($script:CreatedVisits.Count))($($cleanup.Visits)) | satpam=($($script:CreatedSecUsers.Count))($($cleanup.SecUsers)) | user=($($script:CreatedUsers.Count))($($cleanup.Users)) | lokasi=($($script:CreatedLocations.Count))($($cleanup.Locations))")
-Write-Host ("SISA     : kunjungan=$REMAIN_VISIT satpam=$REMAIN_SEC user=$REMAIN_USER lokasi=$REMAIN_LOC")
+Write-Host ("CLEANUP  : dibuat(hapus)=($($script:CreatedVisits.Count))($($cleanup.Visits)) | pengawas=($($script:CreatedSecUsers.Count))($($cleanup.SecUsers)) | user=($($script:CreatedUsers.Count))($($cleanup.Users)) | lokasi=($($script:CreatedLocations.Count))($($cleanup.Locations))")
+Write-Host ("SISA     : kunjungan=$REMAIN_VISIT pengawas=$REMAIN_SEC user=$REMAIN_USER lokasi=$REMAIN_LOC")
 Write-Host ("BASELINE : total sebelum=$BASELINE total sesudah=$AFTER_TOTAL | baris manual terlindungi utuh=$($protFound.Count)/2")
 if ($fail -gt 0) { exit 1 } else { exit 0 }

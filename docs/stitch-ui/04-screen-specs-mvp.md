@@ -1,3 +1,12 @@
+> ⛔ **ARSIP — BUKAN SUMBER KEBENARAN (NON-SSOT). JANGAN DIEDIT.**
+>
+> Dokumen ini adalah *starter kit* desain Google Stitch dari awal proyek dan **sudah basi**: isinya tidak lagi mencerminkan UI yang benar-benar berjalan. `radius`, warna, tipografi, dan spesifikasi layarnya **tidak boleh** dipakai sebagai acuan.
+>
+> - Otoritas desain visual yang berlaku: pola komponen **jokoui** (`https://www.jokoui.web.id/components/application`) + palet tetap THC `#422AD5` (primary) dan `#F43098` (secondary) — lihat `AGENTS.md` §3.1.
+> - Kebenaran bisnis, data, dan kontrak API: `docs/0. PRD - THC Visitor App.md`, `docs/1. Entity Relationship Diagram (ERD).mermaid`, `docs/4. openapi.yaml`.
+> - Alur kerja yang berlaku: perubahan dibuat **di codebase** lebih dulu, lalu docs/PRD disinkronkan menyusul — bukan sebaliknya.
+> - Perlu menyelaraskan sesuatu di sini? **Jangan** — perbarui SSOT yang disebut di atas.
+
 # Spesifikasi Layar MVP (SCR-01 s/d SCR-05) – THC VMS (ISP Edition)
 
 Dokumen ini menjelaskan rancangan tata letak (*layout*), komponen, validasi, dan interaksi untuk **5 Layar Inti MVP** dalam operasional Internet Service Provider (ISP) THC.
@@ -31,8 +40,8 @@ Dokumen ini menjelaskan rancangan tata letak (*layout*), komponen, validasi, dan
   - **Header Navbar Terpadu**:
     - Logo THC & menu navigasi `[Dashboard Kunjungan]`.
     - **Indikator Konteks Cabang**:
-      - *Superadmin*: Badge `📍 Kantor Pusat THC` + dropdown filter `[Semua Cabang / POP ▼]` + tombol `[Kelola Satpam Cabang]`.
-      - *Admin Cabang*: Badge terkunci `📍 Kantor Cabang Surabaya` (read-only, tanpa dropdown) + tombol `[+ Satpam Cabang]`.
+      - *Superadmin*: Badge `📍 Kantor Pusat THC` + dropdown filter `[Semua Cabang / POP ▼]` + tombol `[Kelola Pengawas Cabang]`.
+      - *Admin Cabang*: Badge terkunci `📍 Kantor Cabang Surabaya` (read-only, tanpa dropdown) + tombol `[+ Pengawas Cabang]`.
       - *Vendor/Mitra*: Label profil `👤 PT Fiber Maju (Vendor/Mitra)`.
     - Tombol *Logout*.
   - **Baris Metrik (4 Kartu Ringkas)**: Total Kunjungan Cabang, Menunggu Approval, Sedang di Lokasi/POP (*visiting*), Selesai.
@@ -57,11 +66,11 @@ Dokumen ini menjelaskan rancangan tata letak (*layout*), komponen, validasi, dan
   - Klik baris kunjungan membuka **SCR-04: Detail & QR Kunjungan**.
   - Klik Approve memunculkan modal konfirmasi persetujuan.
   - Klik Reject memunculkan modal dengan textarea wajib isi alasan penolakan.
-  - **Modal Registrasi & Kelola Satpam Cabang**:
-    - Dibuka dari tombol `[Kelola Satpam Cabang]` atau `[+ Satpam Cabang]`.
-    - Form Pendaftaran Satpam: Nama Lengkap, Email, No. Telp, Password Awal, dan Cabang Penugasan (read-only sesuai cabang untuk Admin Cabang; dropdown untuk Superadmin).
-    - Tabel Satpam Aktif di Cabang: Nama, Email, Status Badge (Aktif / Nonaktif), dan Tombol Nonaktifkan/Aktifkan.
-    - Aturan Validasi: Admin cabang tidak bisa menambahkan satpam untuk cabang lain dan tidak bisa mengedit akun role lain.
+  - **Modal Registrasi & Kelola Pengawas Cabang**:
+    - Dibuka dari tombol `[Kelola Pengawas Cabang]` atau `[+ Pengawas Cabang]`.
+    - Form Pendaftaran Pengawas: Nama Lengkap, Email, No. Telp, Password Awal, dan Cabang Penugasan (read-only sesuai cabang untuk Admin Cabang; dropdown untuk Superadmin).
+    - Tabel Pengawas Aktif di Cabang: Nama, Email, Status Badge (Aktif / Nonaktif), dan Tombol Nonaktifkan/Aktifkan.
+    - Aturan Validasi: Admin cabang tidak bisa menambahkan pengawas untuk cabang lain dan tidak bisa mengedit akun role lain.
 
 ---
 

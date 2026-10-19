@@ -28,7 +28,7 @@ Dokumen ini adalah **pedoman wajib tertinggi (*supreme directive*)** bagi setiap
 - **Tujuan Sistem**: Mengelola izin akses teknisi, vendor mitra (splicing FO, maintenance genset, troubleshooting), dan internal staff yang berkunjung ke shelter atau kantor cabang THC.
 - **4 Peran Pengguna (RBAC Multi-Cabang)**:
   1. `super_admin`: Kantor Pusat (Akses global seluruh cabang, monitoring all, kelola master data & user).
-  2. `admin`: Admin Kantor Cabang / POP (Terisolasi per `location_id`, approve kunjungan cabangnya, kelola satpam cabangnya, eksekusi check-in/out backup).
+  2. `admin`: Admin Kantor Cabang / POP (Terisolasi per `location_id`, approve kunjungan cabangnya, kelola pengawas cabangnya, eksekusi check-in/out backup).
   3. `security`: Petugas Jaga Gerbang/POP (Terisolasi per `location_id`, operasional verifikasi tamu check-in & check-out).
   4. `vendor` (Vendor/Mitra): Customer / Teknisi Vendor Eksternal (Mengajukan izin, melihat status kunjungan miliknya, membawa kartu QR Code).
 
@@ -47,11 +47,18 @@ Sebelum menulis kode atau membuat perubahan, agent **WAJIB** membaca dan merujuk
 | **Kontrak REST API (OpenAPI 3.1)** | [`docs/4. openapi.yaml`](file:///D:/otak-atik/THC/thc-vms/docs/4.%20openapi.yaml) *(Validasi 0-Error)* |
 | **Panduan Dev & Seed Data** | [`docs/5. LOCAL_DEV.md`](file:///D:/otak-atik/THC/thc-vms/docs/5.%20LOCAL_DEV.md) |
 | **Skenario Uji & QA Checklist** | [`docs/6. QA_CHECKLIST.md`](file:///D:/otak-atik/THC/thc-vms/docs/6.%20QA_CHECKLIST.md) |
-| **Design System & Base Layouts** | [`docs/stitch-ui/02-design-system.md`](file:///D:/otak-atik/THC/thc-vms/docs/stitch-ui/02-design-system.md) |
-| **Spesifikasi 5 Layar Core UI** | [`docs/stitch-ui/04-screen-specs-mvp.md`](file:///D:/otak-atik/THC/thc-vms/docs/stitch-ui/04-screen-specs-mvp.md) |
-| **Master Prompts Google Stitch** | [`docs/stitch-ui/06-prompt-templates.md`](file:///D:/otak-atik/THC/thc-vms/docs/stitch-ui/06-prompt-templates.md) |
+| **Pipeline Deploy & Aturan VPS** | [`docs/7. DEPLOY_VPS.md`](file:///D:/otak-atik/THC/thc-vms/docs/7.%20DEPLOY_VPS.md) |
 
-> ⚠️ **PERINGATAN**: Dilarang mengarang field JSON baru atau query SQL yang bertentangan dengan `docs/4. openapi.yaml` dan `docs/1. Entity Relationship Diagram (ERD).mermaid`.
+> ⚠️ **PERINGATAN**: Dilarang mengarang field JSON baru atau query SQL yang bertentangan dengan `docs/4. openapi.yaml` dan `docs/1. Entity Relationship Diagram (ERD).mermaid`. Berkas di dalam folder `docs/stitch-ui/` **DILARANG DIEDIT**; koreksi apa pun wajib dilakukan pada codebase atau dokumen SSOT, bukan pada folder arsip tersebut.
+
+### 3.1 Otoritas Desain UI (REVISI — WAJIB DIBACA)
+
+- **`docs/stitch-ui/` SUDAH BASI (*STALE*) dan BUKAN SSOT.** Folder itu adalah *starter kit / boilerplate* awal (spesifikasi Google Stitch) yang hanya dipakai saat proyek baru dimulai. UI yang berjalan saat ini **TIDAK 100% mengikuti** dokumen tersebut.
+- Agent **DILARANG** menjadikan `docs/stitch-ui/02-design-system.md`, `04-screen-specs-mvp.md`, atau `06-prompt-templates.md` sebagai acuan radius, warna, tipografi, atau spesifikasi layar. Jangan mengoreksi UI yang sudah jalan agar "cocok" dengan folder itu.
+- **Otoritas desain visual yang berlaku adalah pola komponen *jokoui*** (`https://www.jokoui.web.id/components/application`): radius lega, permukaan ber-tint lembut, spasi bersih, elevasi tertahan. **Palet tetap biru THC `#422AD5` (primary) dan magenta `#F43098` (secondary).**
+- **Token radius proyek bersifat semantik** (resolusi saat ini): `--radius-control` = 8px (tombol/input/chip/tab/pagination), `--radius-card` = 8px (kartu/panel/menu), `--radius-modal` = 16px, `--radius-badge` = 9999px (pill). Gunakan **nama token** ini; **JANGAN** tulis nilai skala Tailwind mentah (`rounded-lg`/`rounded-md`/`rounded-xl`).
+- Badge/status chip memakai gaya **pill** (soft tint). Jangan mengubahnya kembali menjadi persegi 6px atau huruf kapital semua.
+- Pengecualian desain ini **hanya** untuk tampilan visual. Aturan bisnis, kontrak API, dan skema data tetap mengacu ke tabel SSOT di atas (`docs/0`, `docs/1`, `docs/4`, `docs/5`, `docs/6`).
 
 ---
 
@@ -123,7 +130,7 @@ thc-vms/
     `WHERE location_id = auth_user.location_id`.
   * Jika role = `super_admin`: Mengizinkan query lintas cabang atau filter opsional `?location_id=...`.
   * Jika role = `vendor`: **Wajib** di-filter ketat oleh backend:
-    `WHERE pic_user_id = auth_user.id`.
+    `WHERE vendor_user_id = auth_user.id`.
 
 ### 6.2 Validasi Jadwal Check-in (Toleransi 2 Jam)
 - Pada endpoint `POST /visits/{id}/checkin`:
@@ -160,3 +167,15 @@ thc-vms/
 4. **JANGAN** membocorkan data kunjungan cabang lain kepada Admin Cabang yang berbeda.
 5. **JANGAN** melakukan hardcode URL bucket atau database credentials; selalu gunakan `.env` dan `os.Getenv()`.
 6. **JANGAN** mengubah kontrak response JSON dari standar: `{ "success": true, "data": ... }` atau `{ "success": false, "error": { "code": "...", "message": "..." } }`.
+
+---
+
+## 8. ATURAN DEPLOY & CI/CD KE VPS (*DEPLOYMENT RULES*)
+
+1. **JANGAN** commit file `.env` nyata dalam kondisi apa pun (root `/.env` sudah di-ignore; hanya template `.env.prod.example` yang dikomit).
+2. **JANGAN** deploy production dengan `docker-compose.yml` (dev); SELALU `docker-compose.prod.yml`.
+3. **JANGAN** menambahkan trigger deploy kedua (webhook dilarang — port `9000` tabrakan dengan MinIO dan memicu deploy ganda). Satu-satunya trigger: `.gitea/workflows/deploy.yml` via Gitea Actions.
+4. **JANGAN** membuka bucket storage ke publik (`mc anonymous` dilarang); berkas selalu via presigned URL / endpoint backend.
+5. **JANGAN** menjalankan seed ke production; migrasi prod HANYA via service `migrate` (`backend/cmd/migrate`), karena server production tidak auto-migrate.
+6. `deploy.sh` WAJIB menolak deploy bila `.env` hilang atau masih mengandung placeholder `CHANGEME`.
+7. `NEXT_PUBLIC_*` frontend dibakar saat build (`--build-arg`); JANGAN mengandalkannya sebagai runtime `environment:`.

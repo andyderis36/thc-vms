@@ -45,7 +45,7 @@ Langkah siap uji lokal:
 
 Password semua akun: `Password123!`
 
-> Label di layar berbeda dari nama enum role: `security` tampil sebagai Pengawas, `admin` tampil sebagai Koordinator Wilayah. Email login dan path API tetap memakai pola lama (`satpam*@thc.com`, `/users/security`).
+> Label di layar berbeda dari nama enum role: `security` tampil sebagai Pengawas, `admin` tampil sebagai Koordinator Wilayah. Email login dan path API tetap memakai pola lama (`security*@thc.com`, `/users/security`).
 
 | Role | Akun | Cakupan |
 |---|---|---|
@@ -55,19 +55,19 @@ Password semua akun: `Password123!`
 | admin | admin3@thc.com | Mempawah |
 | admin | admin4@thc.com | Singkawang |
 | admin | admin5@thc.com | Aruk |
-| security | satpam1a, satpam1b | HQ (kios cabang sendiri) |
-| security | satpam2a, satpam2b | Sambas |
-| security | satpam3a, satpam3b | Mempawah |
-| security | satpam4a, satpam4b | Singkawang |
-| security | satpam5a, satpam5b | Aruk |
-| vendor/PIC | pic1a (Lintas Fiber), pic1b (Daya Power Mandiri), dst. | Hanya data milik sendiri, pegang QR pass |
+| security | security1a, security1b | HQ (kios cabang sendiri) |
+| security | security2a, security2b | Sambas |
+| security | security3a, security3b | Mempawah |
+| security | security4a, security4b | Singkawang |
+| security | security5a, security5b | Aruk |
+| vendor | vendor1a (Lintas Fiber), vendor1b (Daya Power Mandiri), dst. | Hanya data milik sendiri, pegang QR pass |
 
 Catatan RBAC untuk semua sesi:
 
 - `super_admin`: akses global.
-- `admin`: terisolasi cabang. Menyetujui cabang sendiri, mengelola satpam sendiri, boleh check-in cadangan (dual-role) di cabang sendiri.
+- `admin`: terisolasi cabang. Menyetujui cabang sendiri, mengelola pengawas sendiri, boleh check-in cadangan (dual-role) di cabang sendiri.
 - `security`: kios cabang sendiri. Check-in dan check-out cabang sendiri.
-- `vendor/PIC`: mengajukan kunjungan sendiri, melihat status milik sendiri, membawa QR.
+- `vendor`: mengajukan kunjungan sendiri, melihat status milik sendiri, membawa QR.
 - Akses lintas cabang oleh `admin`/`security` harus 403. Vendor hanya melihat baris miliknya.
 
 ## 4. Peta rute dan API (rujukan cepat penguji)
@@ -88,7 +88,7 @@ Tandai tiap kotak setelah lolos. Tulis ID bug di kolom kanan bila gagal.
 | S1-02 | Semua | Masuk dengan password salah | Tetap di login, pesan kredensial tidak valid | - [ ] |
 | S1-03 | Semua | Buka `/dashboard` langsung tanpa login | Dilempar ke `/login` | - [ ] |
 | S1-04 | Semua | Login benar, lalu logout lewat menu, lalu tekan Back dan buka `/dashboard` | Tetap diminta login, sesi lama tidak bisa dipakai | - [ ] |
-| S1-05 | vendor | Login sebagai pic1a, catat tampilan awal | Melihat ringkasan kunjungan miliknya saja | - [ ] |
+| S1-05 | vendor | Login sebagai vendor1a, catat tampilan awal | Melihat ringkasan kunjungan miliknya saja | - [ ] |
 
 ### Sesi 2. Pengajuan vendor (termasuk selfie, vendor per teknisi, dropdown purpose)
 
@@ -123,14 +123,14 @@ Triple-mode di `/gate`: (1) kamera langsung, (2) upload gambar QR dari galeri, (
 | S4-04 | security | Klik Visit ID pada kartu antrean gate tanpa scan | Popup detail terbuka sama seperti hasil pindaian, berisi foto KTP dan selfie, nama vendor, tombol aksi sesuai status | - [ ] |
 | S4-05 | security | Klik foto selfie atau KTP di popup gate | Preview besar terbuka, bisa ditutup dan tampilan kembali seperti semula | - [ ] |
 | S4-06 | security/admin | Eksekusi check-out dari popup pada kunjungan `visiting` | Status jadi `completed`, waktu selesai tercatat | - [ ] |
-| S4-07 | admin | Sebagai admin cabang yang sama, eksekusi check-in cadangan saat satpam patroli | Check-in sukses dan tercatat atas nama admin itu | - [ ] |
+| S4-07 | admin | Sebagai admin cabang yang sama, eksekusi check-in cadangan saat pengawas patroli | Check-in sukses dan tercatat atas nama admin itu | - [ ] |
 
 ### Sesi 5. Back-office: users, security, facilities (termasuk DELETE superadmin-only)
 
 | ID | Role | Langkah | Hasil yang diharapkan | Lolos |
 |---|---|---|---|---|
-| S5-01 | admin | Buka `/security`, daftarkan satpam baru di cabangnya | Akun tercipta dan terkunci di cabang admin itu | - [ ] |
-| S5-02 | admin | Nonaktifkan dan aktifkan kembali satu akun satpam (`/{id}/status`) | Status berubah dan tercermin di daftar | - [ ] |
+| S5-01 | admin | Buka `/security`, daftarkan pengawas baru di cabangnya | Akun tercipta dan terkunci di cabang admin itu | - [ ] |
+| S5-02 | admin | Nonaktifkan dan aktifkan kembali satu akun pengawas (`/{id}/status`) | Status berubah dan tercermin di daftar | - [ ] |
 | S5-03 | admin | Buka `/users`, kelola user dalam cabangnya | Hanya user cabang sendiri yang bisa dikelola | - [ ] |
 | S5-04 | super_admin | Buka `/facilities` dan `/users`, ubah data lalu hapus satu data uji lewat DELETE | Ubah dan hapus sukses lintas cabang | - [ ] |
 | S5-05 | admin | Coba akses fungsi DELETE yang sama di `/facilities` atau `/users` | Ditolak. Tidak ada tombol hapus atau request gagal 403 | - [ ] |
@@ -159,9 +159,9 @@ Gunakan dua cabang berbeda, mis. Pontianak HQ dan Sambas. Ulangi tiap baris untu
 |---|---|---|---|---|
 | S8-01 | admin | Admin Sambas membuka daftar kunjungan | Hanya baris Sambas. Tidak ada baris Pontianak HQ | - [ ] |
 | S8-02 | admin | Admin Sambas membuka detail atau approve kunjungan Pontianak HQ lewat URL langsung | Ditolak 403 | - [ ] |
-| S8-03 | security | Satpam Sambas memindai QR kunjungan Pontianak HQ di `/gate` | Ditolak dengan pesan lokasi tidak cocok | - [ ] |
-| S8-04 | security | Satpam Sambas membuka `/visits/[id]` milik Pontianak HQ lewat URL langsung | Ditolak 403 atau 404, tidak ada data bocor | - [ ] |
-| S8-05 | vendor | pic1a membuka daftar kunjungan | Hanya baris miliknya. Tidak ada baris vendor lain | - [ ] |
+| S8-03 | security | Pengawas Sambas memindai QR kunjungan Pontianak HQ di `/gate` | Ditolak dengan pesan lokasi tidak cocok | - [ ] |
+| S8-04 | security | Pengawas Sambas membuka `/visits/[id]` milik Pontianak HQ lewat URL langsung | Ditolak 403 atau 404, tidak ada data bocor | - [ ] |
+| S8-05 | vendor | vendor1a membuka daftar kunjungan | Hanya baris miliknya. Tidak ada baris vendor lain | - [ ] |
 | S8-06 | vendor | Coba panggil approve atau check-in lewat tombol atau URL (bila terlihat) | Tidak ada tombol itu. Akses langsung ditolak 403 | - [ ] |
 
 ### Sesi 9. Perilaku jaringan buruk
@@ -194,7 +194,7 @@ Salin blok ini per temuan:
 ```text
 Judul: [Role] ringkasan singkat, mis. [security] check-out gagal di /gate
 Lingkungan: lokal / tunnel (tulis pasangan URL FE+BE sesi itu)
-Akun: mis. satpam2a (Sambas)
+Akun: mis. security2a (Sambas)
 URL: halaman persis tempat bug muncul
 Langkah:
 1.

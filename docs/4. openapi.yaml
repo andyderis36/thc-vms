@@ -28,7 +28,7 @@ tags:
   - name: Visits
     description: Manajemen inti siklus hidup kunjungan
   - name: SecurityGate
-    description: Operasional gerbang satpam & check-in fasilitas POP (Check-in & Check-out)
+    description: Operasional gerbang pengawas & check-in fasilitas POP (Check-in & Check-out)
   - name: MasterData
     description: Data referensi lokasi cabang, POP, miniPOP dan tujuan kunjungan
   - name: Storage
@@ -281,6 +281,8 @@ paths:
           description: Format data tidak valid
         '403':
           description: Akses ditolak (hanya untuk Superadmin)
+        '409':
+          description: Kantor Pusat sudah terdaftar. Hanya boleh ada satu Kantor Pusat.
 
   /locations/{id}:
     patch:
@@ -312,6 +314,8 @@ paths:
           description: Akses ditolak (hanya untuk Superadmin)
         '404':
           description: Fasilitas lokasi tidak ditemukan
+        '409':
+          description: Kantor Pusat sudah terdaftar. Hanya boleh ada satu Kantor Pusat.
 
     delete:
       tags: [MasterData]
@@ -472,6 +476,135 @@ paths:
         '404':
           description: Akun pengguna tidak ditemukan
 
+  /audit-logs:
+    get:
+      tags: [UserManagement]
+      summary: Jejak audit lintas aksi (Superadmin; histori back-office, tanpa scoping cabang)
+      parameters:
+        - name: user_id
+          in: query
+          description: Filter pelaku (UUID pengguna); kosong = tanpa filter
+          schema:
+            type: string
+            format: uuid
+        - name: entity
+          in: query
+          description: Filter entitas (auth, user, location, visit); kosong = tanpa filter
+          schema:
+            type: string
+        - name: action
+          in: query
+          description: Filter aksi (mis. user.create, visit.delete); kosong = tanpa filter
+          schema:
+            type: string
+        - name: date_from
+          in: query
+          description: Batas bawah timestamp (inklusif). RFC3339 penuh atau date-only YYYY-MM-DD. Kosong = tanpa filter.
+          schema:
+            type: string
+            format: date-time
+        - name: date_to
+          in: query
+          description: Batas atas timestamp. RFC3339 diteruskan tepat; date-only YYYY-MM-DD mencakup sehari penuh. Kosong = tanpa filter.
+          schema:
+            type: string
+            format: date-time
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Halaman jejak audit berhasil diambil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogListResponse'
+        '400':
+          description: Format filter tidak valid
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+
+  /notifications:
+    get:
+      tags: [UserManagement]
+      summary: Daftar notifikasi milik pengguna yang login (staff & vendor) beserta jumlah belum dibaca
+      parameters:
+        - name: location_id
+          in: query
+          description: Filter cabang (UUID); hanya Superadmin. Admin/Security terkunci ke cabang sendiri; vendor selalu hanya melihat notifikasinya sendiri.
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Halaman notifikasi berhasil diambil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListResponse'
+        '400':
+          description: Format filter tidak valid
+        '403':
+          description: Akses ditolak (role di luar empat peran VMS)
+
+  /notifications/{id}:
+    patch:
+      tags: [UserManagement]
+      summary: Tandai satu notifikasi milik sendiri sebagai sudah dibaca
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationMarkReadRequest'
+      responses:
+        '200':
+          description: Notifikasi berhasil ditandai sudah dibaca
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationMarkReadResponse'
+        '400':
+          description: ID notifikasi atau body permintaan tidak valid
+        '404':
+          description: Notifikasi tidak ditemukan atau bukan milik pengguna
+
+  /notifications/read-all:
+    post:
+      tags: [UserManagement]
+      summary: Tandai semua notifikasi milik sendiri sebagai sudah dibaca
+      responses:
+        '200':
+          description: Jumlah notifikasi yang ditandai sudah dibaca
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationReadAllResponse'
+
   /purposes:
     get:
       tags: [MasterData]
@@ -521,7 +654,8 @@ paths:
                   description: Kategori berkas untuk isolasi folder bucket MinIO
                 owner_id:
                   type: string
-                  description: ID pemilik berkas (visit id / visitor id). Opsional — kosong berarti staging pre-create di folder pending/.
+                  deprecated: true
+                  description: DEPRECATED dan DIABAIKAN oleh server. Server menurunkan segmen pemilik storage dari user terautentikasi (pending-<user_id>), sehingga nilai owner_id dari klien tidak pernah menentukan path objek. Diterima hanya agar klien lama tetap berfungsi.
       responses:
         '201':
           description: Berkas berhasil diunggah ke MinIO/S3
@@ -551,11 +685,25 @@ paths:
           schema:
             type: string
             format: uuid
-        - name: search
+        - name: q
           in: query
-          description: Pencarian nama vendor atau Visit ID
+          description: Pencarian bebas (ILIKE, kosong = tanpa filter) atas nama vendor, nama lokasi, nama vendor, nama teknisi (visitor), nama tujuan (purpose), dan Visit ID
           schema:
             type: string
+        - name: date_from
+          in: query
+          description: Batas bawah window jadwal (inklusif, vr.start_date >= date_from). RFC3339 penuh (offset dipertahankan) atau date-only YYYY-MM-DD (midnight UTC). Kosong = tanpa filter.
+          schema:
+            type: string
+            format: date-time
+            example: '2026-10-01'
+        - name: date_to
+          in: query
+          description: Batas atas window jadwal. RFC3339 diteruskan tepat (eksklusif, vr.start_date < date_to); date-only YYYY-MM-DD mencakup sehari penuh (inklusif, digeser +24 jam di backend). Range terbalik (date_from > date_to) ditolak 400 VALIDATION_ERROR. Hanya mempersempit dalam scoping peran, tak pernah melebarkan visibilitas.
+          schema:
+            type: string
+            format: date-time
+            example: '2026-10-03'
         - name: page
           in: query
           schema:
@@ -565,7 +713,21 @@ paths:
           in: query
           schema:
             type: integer
-            default: 20
+            default: 10
+        - name: sort_by
+          in: query
+          description: Kolom urutan (created_at, start_date, end_date). Default created_at. Nilai di luar kosakata ditolak 400 VALIDATION_ERROR.
+          schema:
+            type: string
+            enum: [created_at, start_date, end_date]
+            default: created_at
+        - name: order
+          in: query
+          description: Arah urutan (asc, desc). Default desc. Nilai di luar kosakata ditolak 400 VALIDATION_ERROR.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
       responses:
         '200':
           description: Daftar kunjungan berhasil diambil
@@ -1262,6 +1424,139 @@ components:
           items:
             $ref: '#/components/schemas/User'
 
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: [string, "null"]
+          format: uuid
+          description: Pelaku; null untuk baris sistem/login-gagal
+        action:
+          type: string
+          example: user.create
+        entity:
+          type: string
+          example: user
+        entity_id:
+          type: [string, "null"]
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        ip:
+          type: string
+        user_agent:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Fakta bebas-rahasia (tanpa password, hash, atau token)
+
+    AuditLogListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/AuditLog'
+            total:
+              type: integer
+            page:
+              type: integer
+            limit:
+              type: integer
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [visit_requested, visit_rescheduled, visit_check_in, visit_check_out, visit_approved, visit_rejected, visit_reminder, visit_auto_cancelled]
+        visit_request_id:
+          type: string
+          format: uuid
+        visit_id:
+          type: string
+        location_id:
+          type: string
+          format: uuid
+        location_name:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        is_read:
+          type: boolean
+        occurred_at:
+          type: string
+          format: date-time
+
+    NotificationListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Notification'
+            total:
+              type: integer
+            unread_count:
+              type: integer
+            page:
+              type: integer
+            limit:
+              type: integer
+
+    NotificationMarkReadRequest:
+      type: object
+      properties:
+        is_read:
+          type: boolean
+          default: true
+
+    NotificationMarkReadResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            is_read:
+              type: boolean
+
+    NotificationReadAllResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            updated:
+              type: integer
+
     Purpose:
       type: object
       properties:
@@ -1397,6 +1692,11 @@ components:
             $ref: '#/components/schemas/Purpose'
         pic_user:
           $ref: '#/components/schemas/User'
+          deprecated: true
+          description: Alias lama (legacy) untuk `vendor_user`. Dipertahankan sementara pada fase transisi ini, digantikan oleh `vendor_user`, dan akan dihapus pada fase berikutnya.
+        vendor_user:
+          $ref: '#/components/schemas/User'
+          description: User vendor (mitra) yang mengajukan kunjungan ini.
         vendor_name:
           type: string
           description: Nama vendor tampilan kunjungan (override ketikan manual bila ada, kalau tidak nama katalog)

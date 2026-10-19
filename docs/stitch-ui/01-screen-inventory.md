@@ -1,3 +1,12 @@
+> ⛔ **ARSIP — BUKAN SUMBER KEBENARAN (NON-SSOT). JANGAN DIEDIT.**
+>
+> Dokumen ini adalah *starter kit* desain Google Stitch dari awal proyek dan **sudah basi**: isinya tidak lagi mencerminkan UI yang benar-benar berjalan. `radius`, warna, tipografi, dan spesifikasi layarnya **tidak boleh** dipakai sebagai acuan.
+>
+> - Otoritas desain visual yang berlaku: pola komponen **jokoui** (`https://www.jokoui.web.id/components/application`) + palet tetap THC `#422AD5` (primary) dan `#F43098` (secondary) — lihat `AGENTS.md` §3.1.
+> - Kebenaran bisnis, data, dan kontrak API: `docs/0. PRD - THC Visitor App.md`, `docs/1. Entity Relationship Diagram (ERD).mermaid`, `docs/4. openapi.yaml`.
+> - Alur kerja yang berlaku: perubahan dibuat **di codebase** lebih dulu, lalu docs/PRD disinkronkan menyusul — bukan sebaliknya.
+> - Perlu menyelaraskan sesuatu di sini? **Jangan** — perbarui SSOT yang disebut di atas.
+
 # Screen Inventory – THC Visitor Management System (VMS)
 
 Dokumentasi ini merampingkan antarmuka menjadi **5 Layar Inti MVP** yang disesuaikan secara presisi dengan kebutuhan operasional **Internet Service Provider (ISP) THC**: perizinan dan pencatatan akses teknisi/vendor ke **Kantor Cabang, POP (Point of Presence), dan miniPOP**.
@@ -21,7 +30,7 @@ Dokumentasi ini merampingkan antarmuka menjadi **5 Layar Inti MVP** yang disesua
 | Kode Shell | Nama Layout Shell | Target Pengguna | Karakteristik Utama |
 |---|---|---|---|
 | **SHELL-01** | Superadmin App Shell | Superadmin (Pusat) | Dark Sidebar 260px (5 menu) + Topbar dengan Branch Switcher dropdown |
-| **SHELL-02** | Admin Cabang App Shell | Admin Cabang / POP | White Clean Sidebar 250px + Topbar Locked Branch Badge & Quick Action Satpam |
+| **SHELL-02** | Admin Cabang App Shell | Admin Cabang / POP | White Clean Sidebar 250px + Topbar Locked Branch Badge & Quick Action Pengawas |
 | **SHELL-03** | Security Gate Kiosk Shell | Petugas Security | Kiosk Mode (Zero Sidebar) + Live Digital Clock + Tab Antrean Sentuh 52px |
 | **SHELL-04** | Vendor/Mitra Portal Shell | Vendor / Teknisi Eksternal | Mobile-First Topbar + Bottom Navigation Bar 3 Tab (Tombol Ajukan Menonjol di Tengah) |
 
@@ -32,7 +41,7 @@ Dokumentasi ini merampingkan antarmuka menjadi **5 Layar Inti MVP** yang disesua
 1. **Modal Approve Kunjungan**: Konfirmasi persetujuan kunjungan oleh Admin Cabang / Superadmin (di SCR-02 & SCR-04).
 2. **Modal Reject Kunjungan**: Konfirmasi penolakan dengan input textarea alasan wajib (di SCR-02 & SCR-04).
 3. **Modal Reschedule Kunjungan**: Pemilihan rentang tanggal baru & alasan pergeseran jadwal (di SCR-04).
-4. **Modal Registrasi & Kelola Satpam Cabang**: Pendaftaran akun security baru dan pengelolaan status aktif/nonaktif oleh Admin Cabang (cabang terkunci) atau Superadmin (pilih cabang) di SCR-02.
+4. **Modal Registrasi & Kelola Pengawas Cabang**: Pendaftaran akun security baru dan pengelolaan status aktif/nonaktif oleh Admin Cabang (cabang terkunci) atau Superadmin (pilih cabang) di SCR-02.
 5. **Modal Fullscreen QR Code**: Tampilan QR Code resolusi tinggi untuk ditunjukkan ke scanner gerbang (di SCR-04).
 6. **Toast Notifications (Sonner)**: Notifikasi respon cepat (hijau = sukses, merah = gagal) di atas layar.
 
@@ -53,7 +62,7 @@ ulang permukaan/komponen SCR-02 tanpa logika ganda — dijaga RBAC per peran:
 | Rute | Nama | Peran | Isi (reuse) |
 |---|---|---|---|
 | `/approvals` | Antrean Approval | Superadmin, Admin Cabang | Irisan `requested` + Setujui/Tolak (VisitTable/VisitCards + modal) |
-| `/security` | Kelola Satpam | Superadmin, Admin Cabang | Panel kelola satpam (form + daftar + toggle + hapus) |
+| `/security` | Kelola Pengawas | Superadmin, Admin Cabang | Panel kelola pengawas (form + daftar + toggle + hapus) |
 | `/facilities` | Fasilitas & Cabang | Superadmin | CRUD lokasi + toggle aktif |
 | `/users` | User & Vendor | Superadmin | CRUD admin/Vendor/Mitra + toggle/hapus status |
 | `/qr` | Tiket QR Aktif | Vendor/Mitra | Resolver ke SCR-04 (kartu QR above-the-fold) |

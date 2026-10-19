@@ -14,13 +14,14 @@ erDiagram
     VISIT_REQUEST ||--o{ STATUS_HISTORY : "logs"
     VISIT_REQUEST ||--o| CHECK_IN : "records"
     VISIT_REQUEST ||--o| CHECK_OUT : "records"
+    USER ||--o{ NOTIFICATION : "receives"
+    VISIT_REQUEST ||--o{ NOTIFICATION : "notifies (000008)"
 
     %% ============================================================
     %% PHASE 2 EXTENSION RELATIONSHIPS (Optional for future scale)
     %% ============================================================
     VISIT_REQUEST ||--o| FEEDBACK : "phase_2"
     VISIT_REQUEST ||--o{ INCIDENT_REPORT : "phase_2"
-    USER ||--o{ NOTIFICATION : "phase_2"
     USER ||--o{ AUDIT_LOG : "phase_2"
 
     %% ============================================================
@@ -80,7 +81,7 @@ erDiagram
     VISIT_REQUEST {
         uuid id PK
         string visit_id UK "Indexed: VST-XXXXXXXXXX"
-        uuid pic_user_id FK "Indexed for vendor history"
+        uuid vendor_user_id FK "Indexed for vendor history"
         uuid vendor_id FK
         uuid location_id FK "Indexed for site visits"
         timestamptz start_date "Indexed for schedule"
@@ -159,9 +160,13 @@ erDiagram
         timestamp created_at
     }
 
+    %% NOTIFICATION is IMPLEMENTED (migration 000008): persisted per-user feed,
+    %% one row per (user, type, visit_request); written in the visit lifecycle tx.
     NOTIFICATION {
         uuid id PK
-        uuid user_id FK
+        uuid user_id FK "Recipient; per-user row"
+        uuid visit_request_id FK "Triggering visit (000008)"
+        string type "visit_requested | visit_rescheduled | visit_check_in | visit_check_out | visit_approved | visit_rejected | visit_reminder | visit_auto_cancelled"
         string title
         text message
         string channel "in_app | email | wa"

@@ -23,7 +23,7 @@ Sistem ini dirancang khusus untuk mengelola izin masuk teknisi internal, vendor 
 2. **`admin` (Admin Kantor Cabang / POP)**:
    - Terisolasi penuh pada `location_id` cabangnya.
    - Menyetujui/menolak permohonan kunjungan (*approval workflow*).
-   - Mengelola akun satpam di cabangnya & eksekusi check-in cadangan (*dual-role*).
+   - Mengelola akun pengawas di cabangnya & eksekusi check-in cadangan (*dual-role*).
 3. **`security` (Petugas Jaga Pos / Shelter)**:
    - Terisolasi penuh pada `location_id` pos jaganya.
    - Operasional harian verifikasi tamu check-in & check-out via *Triple-Mode QR Scanner*.
@@ -69,13 +69,13 @@ Sistem ini dirancang khusus untuk mengelola izin masuk teknisi internal, vendor 
 | Kode Layar | Nama Layar | Pengguna Utama | Fokus Fungsionalitas |
 |---|---|---|---|
 | **SCR-01** | Layar Masuk (*Login Screen*) | Semua Role | Autentikasi email & password + pemisahan layout RBAC |
-| **SCR-02** | Dashboard Operasional & Antrean Izin | Admin Cabang & Superadmin | Filter perizinan (`requested`, `approved`, `visiting`) & modal satpam |
+| **SCR-02** | Dashboard Operasional & Antrean Izin | Admin Cabang & Superadmin | Filter perizinan (`requested`, `approved`, `visiting`) & modal pengawas |
 | **SCR-03** | Formulir Pengajuan Kunjungan | Vendor & Admin | Input form bertahap, multi-teknisi, & upload Surat Tugas SPK (PDF/Img <= 5MB) |
-| **SCR-04** | Status Kunjungan & Pas Masuk QR | Vendor | Kartu QR *above-the-fold* untuk disodorkan ke scanner satpam pos |
+| **SCR-04** | Status Kunjungan & Pas Masuk QR | Vendor | Kartu QR *above-the-fold* untuk disodorkan ke scanner pengawas pos |
 | **SCR-05** | Layar Gerbang Masuk & Scanner QR | Security & Admin | *Triple-Mode Scanner*: Kamera live, upload foto galeri/chat WA, dan input tiket manual |
 
 > **Halaman back-office (di luar 5 layar inti, memakai ulang permukaan SCR-02):**
-> `/approvals` (antrean approval, admin+superadmin), `/security` (kelola satpam, admin+superadmin),
+> `/approvals` (antrean approval, admin+superadmin), `/security` (kelola pengawas, admin+superadmin),
 > `/facilities` + `/users` (superadmin), `/qr` (resolver tiket QR vendor → SCR-04).
 
 ### Arsitektur Base Layout Shell
@@ -124,7 +124,8 @@ npm run dev
 | [`docs/4. openapi.yaml`](docs/4.%20openapi.yaml) | Kontrak REST API spesifikasi OpenAPI 3.1.0 (*Validasi 0-Error*) |
 | [`docs/5. LOCAL_DEV.md`](docs/5.%20LOCAL_DEV.md) | Panduan lokal Docker, env variables, master seed data, dan kredensial uji coba |
 | [`docs/6. QA_CHECKLIST.md`](docs/6.%20QA_CHECKLIST.md) | Matriks pengujian RBAC, isolasi cabang, toleransi 2 jam, dan batas file MinIO |
-| [`docs/stitch-ui/06-prompt-templates.md`](docs/stitch-ui/06-prompt-templates.md) | Master Prompt siap salin untuk Google Stitch UI generation |
+
+> ⚠️ **Otoritas desain UI**: pola komponen **jokoui** (`https://www.jokoui.web.id/components/application`) — radius lega, permukaan ber-tint lembut, spasi bersih, elevasi tertahan. Palet tetap biru THC `#422AD5` (primary) + magenta `#F43098` (secondary). Folder `docs/stitch-ui/` **sudah basi (*stale*)** dan hanya merupakan arsip *starter kit* awal — **bukan** acuan radius, warna, tipografi, atau spesifikasi layar (lihat `AGENTS.md` §3.1).
 
 ---
 

@@ -1,3 +1,12 @@
+> ⛔ **ARSIP — BUKAN SUMBER KEBENARAN (NON-SSOT). JANGAN DIEDIT.**
+>
+> Dokumen ini adalah *starter kit* desain Google Stitch dari awal proyek dan **sudah basi**: isinya tidak lagi mencerminkan UI yang benar-benar berjalan. `radius`, warna, tipografi, dan spesifikasi layarnya **tidak boleh** dipakai sebagai acuan.
+>
+> - Otoritas desain visual yang berlaku: pola komponen **jokoui** (`https://www.jokoui.web.id/components/application`) + palet tetap THC `#422AD5` (primary) dan `#F43098` (secondary) — lihat `AGENTS.md` §3.1.
+> - Kebenaran bisnis, data, dan kontrak API: `docs/0. PRD - THC Visitor App.md`, `docs/1. Entity Relationship Diagram (ERD).mermaid`, `docs/4. openapi.yaml`.
+> - Alur kerja yang berlaku: perubahan dibuat **di codebase** lebih dulu, lalu docs/PRD disinkronkan menyusul — bukan sebaliknya.
+> - Perlu menyelaraskan sesuatu di sini? **Jangan** — perbarui SSOT yang disebut di atas.
+
 # Master Prompt Templates untuk Google Stitch – THC VMS (5 Screen MVP ISP)
 
 Dokumen ini berisi **5 Master Prompt mandiri (*self-contained*)** yang **100% responsif (Mobile & Desktop)**, disesuaikan khusus untuk proses operasional **Internet Service Provider (ISP) THC**: pemantauan teknisi, vendor, dan tim operasional yang berkunjung ke **Kantor Cabang, POP (Point of Presence), dan miniPOP**.
@@ -29,7 +38,7 @@ Komponen Sidebar Kiri (Desktop >= 1024px, lebar 260px, sticky):
   1. [📊 Dashboard Global] (State Aktif: background #27272A dengan border kiri ungu-biru 3px)
   2. [⏳ Antrean Approval] (Dengan badge ungu-biru angka counter pending: "8")
   3. [📍 Fasilitas & Cabang] (Daftar Kantor Cabang, POP, dan miniPOP)
-  4. [🛡️ Manajemen Security] (Daftar akun satpam seluruh cabang)
+  4. [🛡️ Manajemen Security] (Daftar akun pengawas seluruh cabang)
   5. [👥 Manajemen User & Vendor] (Admin cabang & mitra teknisi eksternal)
 - Footer Sidebar:
   * Kartu info pengguna ringkas: Avatar Superadmin, Nama "Bambang Wijaya", Badge role abu-abu "SUPERADMIN".
@@ -67,7 +76,7 @@ Komponen Sidebar Kiri (Desktop >= 1024px, lebar 250px, sticky):
   1. [📊 Dashboard Kunjungan] (State Aktif)
   2. [⏳ Persetujuan Kunjungan] (Badge counter pending cabangnya — warna brand: "3")
   3. [🚪 Pos Check-in Gerbang] (Pintas langsung ke layar scan gerbang SCR-05)
-  4. [👮 Satpam Cabang] (Pintas kelola akun security cabangnya)
+  4. [👮 Pengawas Cabang] (Pintas kelola akun security cabangnya)
   5. [➕ Buat Kunjungan Baru] (Pintas pengajuan form SCR-03)
 - Footer Sidebar:
   * Badge informasi lokasi terkunci: "🔒 Penugasan: KC Surabaya (Read-Only)".
@@ -76,7 +85,7 @@ Komponen Sidebar Kiri (Desktop >= 1024px, lebar 250px, sticky):
 Komponen Topbar / Navbar (Desktop, tinggi 64px, background putih #FFFFFF, sticky top):
 - Kiri: Badge status lokasi tetap bertuliskan "📍 Kantor Cabang Surabaya (Terkunci)" - TIDAK BISA DIGANTI.
 - Kanan:
-  * Tombol Aksi Cepat Sekunder: [+ Tambah Satpam Cabang] (membuka modal manajemen satpam).
+  * Tombol Aksi Cepat Sekunder: [+ Tambah Pengawas Cabang] (membuka modal manajemen pengawas).
   * Tombol Aksi Primer: [+ Buat Kunjungan] (bg #422AD5).
   * Lonceng Notifikasi & Avatar Admin.
 
@@ -85,7 +94,7 @@ Komponen Konten Utama (Main Content Area):
 
 Adaptasi Mobile (< 768px):
 - Topbar Mobile: Logo THC + Badge "📍 Surabaya" + Avatar Admin.
-- Bottom Navigation Bar Menempel (4 Tab): [Dashboard], [Approval (3)], [Check-in], [Satpam].
+- Bottom Navigation Bar Menempel (4 Tab): [Dashboard], [Approval (3)], [Check-in], [Pengawas].
 ```
 
 ---
@@ -95,9 +104,9 @@ Adaptasi Mobile (< 768px):
 Buat Base Layout / App Shell khusus "Security Gate / Kiosk Mode" tanpa sidebar samping yang membingungkan untuk pos jaga gerbang kantor cabang / shelter POP pada "THC Visitor Management System (VMS)".
 
 Aturan Desain & Brand:
-- Desain Kiosk: ZERO SIDEBAR MENU (Satpam dilarang terdistraksi menu pengaturan/admin).
+- Desain Kiosk: ZERO SIDEBAR MENU (Pengawas dilarang terdistraksi menu pengaturan/admin).
 - Warna Topbar: #18181B (neutral gelap industrial kokoh), Warna Utama Aksi: #422AD5, Background: #FFFFFF
-- Karakter: Huruf besar, kontras ekstra tinggi, target sentuh minimal tinggi 48px - 52px untuk kenyamanan tablet dan smartphone satpam di lapangan.
+- Karakter: Huruf besar, kontras ekstra tinggi, target sentuh minimal tinggi 48px - 52px untuk kenyamanan tablet dan smartphone pengawas di lapangan.
 - Bahasa Antarmuka: Bahasa Indonesia tegas
 
 Komponen Topbar Kiosk Penuh (Tinggi 70px, Background #18181B, Teks Putih, Sticky Top):
@@ -106,7 +115,7 @@ Komponen Topbar Kiosk Penuh (Tinggi 70px, Background #18181B, Teks Putih, Sticky
   * Jam Digital Live Real-Time (Font monospaced bold 20px dengan detik berkedip: "14:35:22 WIB").
   * Badge Status Tamu Aktif (Background hijau #166534, teks putih bold: "🟢 15 Teknisi On-Site").
 - Kanan:
-  * Info Petugas: Avatar Satpam, Nama "Budi Santoso (Shift Pagi)".
+  * Info Petugas: Avatar Pengawas, Nama "Budi Santoso (Shift Pagi)".
   * Tombol Outline Tebal warna brand: [Ganti Shift / Logout].
 
 Komponen Sub-Bar Navigasi Antrean (Tepat di bawah topbar, tinggi 56px, background putih, shadow-sm):
@@ -118,7 +127,7 @@ Komponen Sub-Bar Navigasi Antrean (Tepat di bawah topbar, tinggi 56px, backgroun
 Komponen Konten Utama (Main Content Area):
 - Area placeholder luas bertuliskan "{Layar Pemindai QR & Daftar Tamu SCR-05}".
 
-Adaptasi Mobile (< 768px - Satpam Bergerak / Patroli):
+Adaptasi Mobile (< 768px - Pengawas Bergerak / Patroli):
 - Topbar: Logo THC + "Pos Gerbang Surabaya" + Jam Digital ringkas.
 - Floating / Sticky Bottom Bar: 3 Tombol Tab sentuh lebar jempol [Akan Hadir], [Di Lokasi], [Selesai].
 ```
@@ -205,8 +214,8 @@ Tata Letak Desktop (>= 1024px):
   * Tengah: Menu Tab [Dashboard Kunjungan (Aktif)], [+ Buat Kunjungan].
   * Kanan: 
     - Indikator Cabang:
-      * Jika Superadmin: Dropdown [📍 Semua Cabang / POP ▼] + Tombol Outline [Kelola Satpam Cabang].
-      * Jika Admin Cabang: Badge Terkunci [📍 Kantor Cabang Surabaya] + Tombol [ + Satpam Cabang].
+      * Jika Superadmin: Dropdown [📍 Semua Cabang / POP ▼] + Tombol Outline [Kelola Pengawas Cabang].
+      * Jika Admin Cabang: Badge Terkunci [📍 Kantor Cabang Surabaya] + Tombol [ + Pengawas Cabang].
       * Jika Vendor/Mitra: Badge [👤 PT Fiber Maju (Vendor/Mitra)].
     - Bell Notifikasi & Avatar Profil ("Ahmad - THC Admin").
 - Konten Utama: 
@@ -219,15 +228,15 @@ Tata Letak Desktop (>= 1024px):
     - Pada tab 'Menunggu Approval':
       * Untuk Admin Cabang & Superadmin: Tampilkan tombol aksi cepat: Tombol "Approve" (hijau) dan Tombol "Reject" (merah outline).
       * Untuk Vendor/Mitra: Tombol Approve/Reject disembunyikan.
-- Modal Kelola Satpam Cabang (Overlay):
+- Modal Kelola Pengawas Cabang (Overlay):
   * Header: "Manajemen Akun Security Cabang".
   * Sub-header: Menampilkan lokasi cabang yang dikelola.
-  * Form Registrasi Cepat: Input Nama Satpam, Input Email, Input No Telp, Input Password Awal, Tombol "Simpan Akun Satpam".
-  * Tabel Daftar Satpam Cabang: Nama, Email, Status Badge [Aktif / Nonaktif], Tombol Aksi [Nonaktifkan / Aktifkan].
+  * Form Registrasi Cepat: Input Nama Pengawas, Input Email, Input No Telp, Input Password Awal, Tombol "Simpan Akun Pengawas".
+  * Tabel Daftar Pengawas Cabang: Nama, Email, Status Badge [Aktif / Nonaktif], Tombol Aksi [Nonaktifkan / Aktifkan].
 
 Tata Letak Mobile (< 768px - Layar HP):
 - Header Mobile Compact: Logo THC, Badge Cabang [📍 Surabaya], dan Avatar Profil ringkas.
-- Tombol Baris Cepat: Tombol Ungu-Biru "+ Buat Kunjungan" & Tombol Outline "+ Akun Satpam" (untuk Admin).
+- Tombol Baris Cepat: Tombol Ungu-Biru "+ Buat Kunjungan" & Tombol Outline "+ Akun Pengawas" (untuk Admin).
 - Metrik Ringkas: Grid 2x2 kartu angka (Total, Pending, Di POP, Selesai).
 - Tab Antrean Mobile: Horizontal scrollable pills: [Semua] | [Menunggu Approval (8)] | [Di Lokasi (15)] | [Selesai].
 - **Tumpukan Kartu Kunjungan (Card Stack)**:

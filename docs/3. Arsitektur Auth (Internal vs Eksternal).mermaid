@@ -15,7 +15,7 @@ flowchart TD
             R1["Superadmin: Bypass Location Filter (Global Control)"]
             R2["Admin: Scoped to location_id (Approval, Security Mgmt & Check-in)"]
             R3["Security: Scoped to location_id (Gate Ops & Check-in Only)"]
-            R4["Vendor: Scoped to pic_user_id == user.id"]
+            R4["Vendor: Scoped to vendor_user_id == user.id"]
         end
 
         subgraph Adapters["Modular Auth Adapter (KISS & Extensible)"]
