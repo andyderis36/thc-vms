@@ -1,4 +1,6 @@
-.omo/run-continuation/
+# OpenCode agent tooling (session state + plan drafts) — lokal saja, bukan
+# source aplikasi. `plans/*.md` adalah catatan kerja agent, bukan SSOT produk.
+.omo/
 
 # Catatan & catatan QA pribadi — lokal saja, tidak pernah di-commit.
 # Sebagian pernah ikut ter-track di commit lama, lalu di-untrack dari index.
