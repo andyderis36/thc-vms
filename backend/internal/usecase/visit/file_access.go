@@ -52,7 +52,7 @@ func authorizeVisitRead(actor Actor, visit domain.VisitRequest) error {
 	case domain.RoleAdmin, domain.RoleSecurity:
 		return actor.requireBranch(visit.LocationID)
 	case domain.RoleVendor:
-		if visit.PICUserID != actor.ID {
+		if visit.VendorUserID != actor.ID {
 			return domain.NotFoundEntity("Kunjungan")
 		}
 		return nil

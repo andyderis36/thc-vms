@@ -43,15 +43,16 @@ func NewUploadHandler(storage domain.IStorageService, maxBytes int64) *UploadHan
 }
 
 // Upload serves POST /uploads (multipart/form-data with a file part and a
-// category part; owner_id is optional).
+// category part; owner_id is accepted for backward compatibility).
 //
-// Owner-id choice: assignment_letter and checkin_photo are visit-scoped while
-// id_card is visitor-scoped, so the caller passes the owning visit id (uuid
-// or VST- code) or visitor id as the optional owner_id form field. The
-// pre-create flow (/visits/new) has no visit id yet, so an empty owner_id
-// stages under "pending" (assignment_letters/pending/...). The handler joins
-// it into a "category/ownerID" HINT; the adapter re-expands the hint into
-// the mandated assignment_letters/{id}/... layout itself.
+// Owner segment: the storage owner path segment is derived SERVER-SIDE from the
+// authenticated actor, never from the client. A client-supplied owner_id is
+// accepted but its value is IGNORED, so an authenticated caller can never point
+// the object key at another branch's visit namespace. The segment is the single
+// path segment "pending-<actorUserID>"; when the actor cannot be resolved it
+// degrades to the bare literal "pending". The handler joins it into a
+// "category/ownerSegment" HINT; the adapter re-expands the hint into the
+// mandated assignment_letters/{id}/... layout itself.
 //
 // The 5 MB ceiling is enforced with http.MaxBytesReader BEFORE reading the
 // body, so an oversized upload is refused with 413 without ever being
@@ -76,14 +77,9 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Kategori berkas tidak dikenal.")
 		return
 	}
-	ownerID := strings.TrimSpace(firstFormValue(form.Value, "owner_id"))
-	if ownerID == "" {
-		ownerID = "pending"
-	}
-	if !validOwnerID(ownerID) {
-		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "ID pemilik berkas tidak valid.")
-		return
-	}
+	// owner_id is accepted but never read: the storage owner segment is derived
+	// from the authenticated actor so a caller cannot choose its own namespace.
+	ownerSegment := uploadOwnerSegment(c)
 	files := form.File["file"]
 	if len(files) == 0 {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Berkas wajib diunggah.")
@@ -110,7 +106,7 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 		return
 	}
 	result, uploadErr := h.storage.Upload(c.Request.Context(), domain.UploadRequest{
-		ObjectKey:   category + "/" + ownerID,
+		ObjectKey:   category + "/" + ownerSegment,
 		FileName:    header.Filename,
 		ContentType: mime,
 		Size:        header.Size,
@@ -128,36 +124,24 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 	response.Created(c, toUploadDTO(result))
 }
 
+// uploadOwnerSegment derives the storage owner path segment from the
+// authenticated actor. The server owns this segment, so it is always a single
+// path segment: "pending-<actorUserID>", or the bare literal "pending" when the
+// actor cannot be resolved. A client-supplied owner_id never influences it.
+func uploadOwnerSegment(c *gin.Context) string {
+	identity, err := identityFromContext(c)
+	if err != nil {
+		return "pending"
+	}
+	return "pending-" + string(identity.id)
+}
+
 // firstFormValue returns the first value for a multipart field, if any.
 func firstFormValue(values map[string][]string, key string) string {
 	if got, ok := values[key]; ok && len(got) > 0 {
 		return got[0]
 	}
 	return ""
-}
-
-// validOwnerID accepts the identifier shape the storage adapter accepts for
-// its hint segment: a uuid, or a VST- business code. Letters, digits, dash,
-// underscore and dot pass; anything else (separator, space, traversal) fails
-// so the hint can never smuggle a path segment.
-func validOwnerID(ownerID string) bool {
-	if ownerID == "" || len(ownerID) > 64 {
-		return false
-	}
-	if ownerID == ".." || strings.Contains(ownerID, "..") || strings.Contains(ownerID, "/") {
-		return false
-	}
-	for _, r := range ownerID {
-		switch {
-		case r >= 'a' && r <= 'z',
-			r >= 'A' && r <= 'Z',
-			r >= '0' && r <= '9',
-			r == '-', r == '_', r == '.':
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 // normaliseMIME lowercases the media type and drops RFC 2045 parameters.

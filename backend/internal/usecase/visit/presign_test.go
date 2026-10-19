@@ -60,7 +60,7 @@ func seedVisitWithFiles(repo *fakeVisitRepo) domain.VisitRequest {
 	visit := domain.VisitRequest{
 		ID:                  domain.UUID("visit-1"),
 		VisitID:             "VST-0000000001",
-		PICUserID:           domain.UUID("pic-1"),
+		VendorUserID:        domain.UUID("vendor-1"),
 		LocationID:          domain.UUID("loc-A"),
 		StartDate:           time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC),
 		EndDate:             time.Date(2026, time.October, 1, 17, 0, 0, 0, time.UTC),
@@ -89,7 +89,7 @@ func TestGetVisit_PresignsStoredFileURLs(t *testing.T) {
 	seedVisitWithFiles(repo)
 	files := &fakeFileStorage{}
 	svc := newTestService(repo, nil, testNow()).WithFileLinks(files, 15*time.Minute)
-	owner := testActor(domain.RoleVendor, "pic-1", "")
+	owner := testActor(domain.RoleVendor, "vendor-1", "")
 
 	got, err := svc.GetVisit(context.Background(), owner, "visit-1")
 	if err != nil {
@@ -124,7 +124,7 @@ func TestGetVisit_BlanksForeignFileURLs(t *testing.T) {
 	visit := domain.VisitRequest{
 		ID:                  domain.UUID("visit-1"),
 		VisitID:             "VST-0000000001",
-		PICUserID:           domain.UUID("pic-1"),
+		VendorUserID:        domain.UUID("vendor-1"),
 		LocationID:          domain.UUID("loc-A"),
 		StartDate:           time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC),
 		EndDate:             time.Date(2026, time.October, 1, 17, 0, 0, 0, time.UTC),
@@ -134,7 +134,7 @@ func TestGetVisit_BlanksForeignFileURLs(t *testing.T) {
 	}
 	seedVisit(repo, visit)
 	svc := newTestService(repo, nil, testNow()).WithFileLinks(&fakeFileStorage{}, 15*time.Minute)
-	owner := testActor(domain.RoleVendor, "pic-1", "")
+	owner := testActor(domain.RoleVendor, "vendor-1", "")
 
 	got, err := svc.GetVisit(context.Background(), owner, "visit-1")
 	if err != nil {
@@ -163,7 +163,7 @@ func TestGetVisit_ScopeRefusesFileURLsWithoutLeak(t *testing.T) {
 		t.Errorf("cross-branch read error = %v, want forbidden branch", err)
 	}
 
-	otherVendor := testActor(domain.RoleVendor, "pic-9", "")
+	otherVendor := testActor(domain.RoleVendor, "vendor-9", "")
 	if _, err := svc.GetVisit(context.Background(), otherVendor, "visit-1"); err == nil {
 		t.Error("other vendor read must be refused, got nil error")
 	} else if !errors.Is(err, domain.ErrNotFound) {
@@ -181,7 +181,7 @@ func TestListVisits_PresignsURLsAndBlanksForeign(t *testing.T) {
 	foreign := domain.VisitRequest{
 		ID:                  domain.UUID("visit-2"),
 		VisitID:             "VST-0000000002",
-		PICUserID:           domain.UUID("pic-1"),
+		VendorUserID:        domain.UUID("vendor-1"),
 		LocationID:          domain.UUID("loc-A"),
 		StartDate:           own.StartDate,
 		EndDate:             own.EndDate,
@@ -219,7 +219,7 @@ func TestWithFileLinks_ClampsNonPositiveTTL(t *testing.T) {
 	seedVisitWithFiles(repo)
 	files := &fakeFileStorage{}
 	svc := newTestService(repo, nil, testNow()).WithFileLinks(files, 0)
-	owner := testActor(domain.RoleVendor, "pic-1", "")
+	owner := testActor(domain.RoleVendor, "vendor-1", "")
 
 	if _, err := svc.GetVisit(context.Background(), owner, "visit-1"); err != nil {
 		t.Fatalf("GetVisit returned error: %v", err)

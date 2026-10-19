@@ -46,7 +46,7 @@ package visit
 //
 // Scope rules mirror (*Service).GetVisit exactly: super_admin passes everywhere;
 // admin/security must carry the visit's branch; vendor must own the visit
-// (PICUserID == actor.ID). A refused caller is rejected BEFORE any storage read
+// (VendorUserID == actor.ID). A refused caller is rejected BEFORE any storage read
 // (foreign light: openCalls must stay 0), and a tampered/foreign/empty stored URL
 // fails closed as ErrNotFound without fetching.
 
@@ -143,7 +143,7 @@ func newFileService(repo *fakeVisitRepo, store *fakeStreamStorage) *Service {
 		WithObjectReader(store)
 }
 
-// Given a visit in branch loc-A owned by pic-1, when an admin of a DIFFERENT
+// Given a visit in branch loc-A owned by vendor-1, when an admin of a DIFFERENT
 // branch asks for its file, then the read is refused with a branch/ownership
 // error and storage is never touched.
 func TestResolveFileStream_CrossBranchAdminDeniedWithoutStorageRead(t *testing.T) {
@@ -165,14 +165,14 @@ func TestResolveFileStream_CrossBranchAdminDeniedWithoutStorageRead(t *testing.T
 	}
 }
 
-// Given a visit owned by pic-1, when a DIFFERENT vendor asks for its file, then
+// Given a visit owned by vendor-1, when a DIFFERENT vendor asks for its file, then
 // the read is 404-shaped (existence is not disclosed) and storage is untouched.
 func TestResolveFileStream_OtherVendorDeniedWithoutStorageRead(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	seedVisitWithFiles(repo)
 	store := newFakeStreamStorage()
 	svc := newFileService(repo, store)
-	otherVendor := testActor(domain.RoleVendor, "pic-9", "")
+	otherVendor := testActor(domain.RoleVendor, "vendor-9", "")
 
 	_, err := svc.ResolveFileStream(context.Background(), otherVendor, "visit-1", FileKindAssignmentLetter, "")
 	if err == nil {

@@ -61,7 +61,7 @@ func TestValidatePhotoURL(t *testing.T) {
 func TestCreateVisit_RejectsMaliciousPhotoURL(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	evil := "javascript:alert(1)"
 	in := validCreateInput()

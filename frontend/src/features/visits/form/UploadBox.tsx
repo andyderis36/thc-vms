@@ -17,6 +17,8 @@ export interface UploadedFile {
 
 export interface UploadBoxProps {
   label: string
+  /** Id elemen wrapper; dipakai form untuk scroll + focus saat galat validasi. */
+  id?: string
   hint?: string
   error?: string
   value: UploadedFile | null
@@ -43,6 +45,7 @@ const ACCEPT_TYPES = ALLOWED_MIME_TYPES.join(',')
  */
 export function UploadBox({
   label,
+  id,
   hint,
   error,
   value,
@@ -134,7 +137,7 @@ export function UploadBox({
 
   const chip =
     value !== null ? (
-      <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-badge bg-neutral-bg px-2.5 py-1.5 text-badge text-ink-secondary">
+      <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-neutral-bg px-2.5 py-1.5 text-xs text-ink-secondary">
         <FileText aria-hidden="true" className="size-3.5 shrink-0" />
         <span className="truncate">{value.name}</span>
       </span>
@@ -169,8 +172,16 @@ export function UploadBox({
 
   if (compact) {
     return (
-      <div className="flex flex-col gap-1.5">
+      <div id={id} tabIndex={-1} className="flex flex-col gap-2">
         <p className="text-label font-semibold text-ink">{label}</p>
+        {/*
+         * Mode ringkas: TIDAK memakai cincin/outline galat. Baris ini melebar
+         * penuh satu sel grid, jadi ring merah melingkupi area kosong di kanan
+         * tombol dan terbaca "melebihi" tombol. Pesan galat merah di bawah
+         * (`role="alert"`) sudah cukup jelas. Outline merah tetap dipakai di
+         * dropzone mode penuh, karena di sana area itu sendiri adalah target
+         * unggahan.
+         */}
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -192,15 +203,21 @@ export function UploadBox({
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       <p className="text-label font-semibold text-ink">{label}</p>
       <div
+        id={id}
+        tabIndex={-1}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={[
-          'flex flex-col items-center justify-center gap-3 rounded-control border-2 border-dashed px-4 py-6 text-center',
-          dragging ? 'border-brand bg-brand-soft' : 'border-border-mid bg-page',
+          'flex flex-col items-center justify-center gap-3 rounded-control border-2 border-dashed px-6 py-8 text-center transition-colors',
+          hasError
+            ? 'border-danger-text bg-danger-bg/30'
+            : dragging
+              ? 'border-brand bg-brand-soft'
+              : 'border-border-mid bg-page hover:border-brand hover:bg-brand-soft/60',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -212,7 +229,9 @@ export function UploadBox({
           </span>
         ) : (
           <>
-            <Upload aria-hidden="true" className="size-6 text-ink-muted" />
+            <span className="inline-flex size-11 items-center justify-center rounded-full bg-brand-soft text-brand">
+              <Upload aria-hidden="true" className="size-5" />
+            </span>
             <p className="max-w-sm text-sm text-ink-secondary">
               {value === null
                 ? 'Seret berkas ke sini, atau pilih dari galeri, kamera, maupun berkas perangkat Anda.'
@@ -222,7 +241,7 @@ export function UploadBox({
               <Button
                 type="button"
                 variant="secondary"
-                className="min-h-touch"
+                className="min-h-touch px-4"
                 onClick={pickFile}
               >
                 <Upload aria-hidden="true" className="size-4 shrink-0" />

@@ -89,9 +89,13 @@ func TestUpload_RejectsDisallowedMIME(t *testing.T) {
 	}
 }
 
-func TestUpload_PassesCategoryOwnerHintToStorage(t *testing.T) {
+// TestUpload_PassesCategoryHintAndServerDerivedOwnerToStorage pins the storage
+// hint contract: the category passes through verbatim and the owner segment is
+// derived from the authenticated actor (withActor sets user id "actor-1"), NOT
+// from the client-supplied owner_id.
+func TestUpload_PassesCategoryHintAndServerDerivedOwnerToStorage(t *testing.T) {
 	storage := &fakeStorage{result: domain.UploadResult{
-		FileURL:  "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
+		FileURL:  "http://localhost:9000/thc-vms-bucket/assignment_letters/pending-actor-1/spk.pdf",
 		FileName: "spk.pdf",
 		FileSize: 5,
 		MimeType: "application/pdf",
@@ -114,28 +118,31 @@ func TestUpload_PassesCategoryOwnerHintToStorage(t *testing.T) {
 		}
 	}
 
-	// The adapter must receive a "category/ownerID" HINT, never a full path.
+	// The adapter must receive a "category/ownerSegment" HINT, never a full
+	// path. The category passes through; the owner segment is server-derived
+	// (withActor sets user id "actor-1"), not taken from the client owner_id.
 	if storage.uploadCalls != 1 {
 		t.Fatalf("upload calls = %d, want 1", storage.uploadCalls)
 	}
-	if storage.lastReq.ObjectKey != "assignment_letter/visit-1" {
-		t.Fatalf("ObjectKey = %q, want hint %q", storage.lastReq.ObjectKey, "assignment_letter/visit-1")
+	if storage.lastReq.ObjectKey != "assignment_letter/pending-actor-1" {
+		t.Fatalf("ObjectKey = %q, want hint %q", storage.lastReq.ObjectKey, "assignment_letter/pending-actor-1")
 	}
 	if strings.Count(storage.lastReq.ObjectKey, "/") != 1 {
-		t.Fatalf("ObjectKey must be exactly category/ownerID: %q", storage.lastReq.ObjectKey)
+		t.Fatalf("ObjectKey must be exactly category/ownerSegment: %q", storage.lastReq.ObjectKey)
 	}
 }
 
-func TestUpload_MissingOwnerIDStagesUnderPending(t *testing.T) {
+func TestUpload_MissingOwnerIDUsesServerDerivedOwner(t *testing.T) {
 	storage := &fakeStorage{result: domain.UploadResult{
-		FileURL:  "http://localhost:9000/thc-vms-bucket/assignment_letters/pending/spk.pdf",
+		FileURL:  "http://localhost:9000/thc-vms-bucket/assignment_letters/pending-actor-1/spk.pdf",
 		FileName: "spk.pdf",
 		FileSize: 5,
 		MimeType: "application/pdf",
 	}}
 	engine := newUploadEngine(storage, 5*1024*1024)
 
-	// Pre-create flow (/visits/new): belum ada visit id, hanya file + category.
+	// Pre-create flow (/visits/new): no visit id yet, only file + category. The
+	// owner segment still comes from the actor, never from a missing field.
 	body, ctype := multipartUpload(t, "spk.pdf", "application/pdf", []byte("hello"),
 		map[string]string{"category": "assignment_letter"})
 	rec := serve(engine, "POST", "/uploads", body, ctype)
@@ -143,7 +150,59 @@ func TestUpload_MissingOwnerIDStagesUnderPending(t *testing.T) {
 	if storage.uploadCalls != 1 {
 		t.Fatalf("upload calls = %d, want 1", storage.uploadCalls)
 	}
+	if storage.lastReq.ObjectKey != "assignment_letter/pending-actor-1" {
+		t.Fatalf("ObjectKey = %q, want hint %q", storage.lastReq.ObjectKey, "assignment_letter/pending-actor-1")
+	}
+}
+
+// TestUpload_IgnoresClientOwnerID is the regression guard for the storage
+// namespace vulnerability: a client-supplied owner_id must never reach the
+// object key, so an authenticated caller cannot write into another branch's
+// visit namespace. The owner segment is always server-derived from the actor.
+func TestUpload_IgnoresClientOwnerID(t *testing.T) {
+	storage := &fakeStorage{result: domain.UploadResult{
+		FileURL:  "http://localhost:9000/thc-vms-bucket/assignment_letters/pending-actor-1/spk.pdf",
+		FileName: "spk.pdf",
+		FileSize: 5,
+		MimeType: "application/pdf",
+	}}
+	engine := newUploadEngine(storage, 5*1024*1024)
+
+	const foreignOwnerID = "VST-8837710235"
+	body, ctype := multipartUpload(t, "spk.pdf", "application/pdf", []byte("hello"),
+		map[string]string{"category": "assignment_letter", "owner_id": foreignOwnerID})
+	rec := serve(engine, "POST", "/uploads", body, ctype)
+	mustStatus(t, rec, 201)
+	if storage.uploadCalls != 1 {
+		t.Fatalf("upload calls = %d, want 1", storage.uploadCalls)
+	}
+	if strings.Contains(storage.lastReq.ObjectKey, foreignOwnerID) {
+		t.Fatalf("client owner_id %q leaked into ObjectKey %q", foreignOwnerID, storage.lastReq.ObjectKey)
+	}
+	if storage.lastReq.ObjectKey != "assignment_letter/pending-actor-1" {
+		t.Fatalf("ObjectKey = %q, want server-derived hint %q", storage.lastReq.ObjectKey, "assignment_letter/pending-actor-1")
+	}
+}
+
+// TestUpload_UnresolvedActorFallsBackToBarePending locks the defensive branch:
+// when no actor is in the context the owner segment is the bare "pending"
+// literal, never a client-supplied value.
+func TestUpload_UnresolvedActorFallsBackToBarePending(t *testing.T) {
+	storage := &fakeStorage{result: domain.UploadResult{
+		FileURL:  "http://localhost:9000/thc-vms-bucket/assignment_letters/pending/spk.pdf",
+		FileName: "spk.pdf",
+		FileSize: 5,
+		MimeType: "application/pdf",
+	}}
+	engine := gin.New() // no auth middleware: identity resolution fails closed
+	h := handlers.NewUploadHandler(storage, 5*1024*1024)
+	engine.POST("/uploads", h.Upload)
+
+	body, ctype := multipartUpload(t, "spk.pdf", "application/pdf", []byte("hello"),
+		map[string]string{"category": "assignment_letter", "owner_id": "VST-0000000009"})
+	rec := serve(engine, "POST", "/uploads", body, ctype)
+	mustStatus(t, rec, 201)
 	if storage.lastReq.ObjectKey != "assignment_letter/pending" {
-		t.Fatalf("ObjectKey = %q, want hint %q", storage.lastReq.ObjectKey, "assignment_letter/pending")
+		t.Fatalf("ObjectKey = %q, want bare pending hint %q", storage.lastReq.ObjectKey, "assignment_letter/pending")
 	}
 }
