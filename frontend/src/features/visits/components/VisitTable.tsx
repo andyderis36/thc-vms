@@ -9,6 +9,13 @@ import { can } from '@/lib/auth/capabilities'
 import { primaryVendorDisplay } from '@/lib/visits/vendor-display'
 import { visitVendorUser } from '@/lib/visits/vendor-user'
 import { isApprovableStatus, isRejectableStatus } from '@/lib/visits/visit-status'
+import {
+  TABLE_CLASS,
+  TABLE_NO_ACTION_CLASS,
+  TABLE_TD_CLASS,
+  TABLE_TH_CLASS,
+  TABLE_WRAPPER_CLASS,
+} from '@/lib/table-styles'
 import { SpkFileLink } from './SpkFileLink'
 
 export interface VisitTableProps {
@@ -30,19 +37,23 @@ export interface VisitSchedule {
 /**
  * Kolom tabel SCR-02. Lebar dipaksa proporsional via `table-fixed`.
  *
+ * Aturan lebar: jumlah `w-[n%]` WAJIB tepat 100%. Saat satu kolom butuh
+ * ruang tambahan, pindahkan poinnya dari kolom lain — jangan pernah
+ * membiarkan total melenceng dari 100% (kolom akan melebar/menyusut).
+ *
  * Tier responsif (design system §5.1): tabel hanya tampil di desktop
  * (>= 1024px); tablet 768px - 1023px memakai grid 2 kolom dan ponsel
  * (< 768px) memakai tumpukan kartu — keduanya dari `VisitCards`.
  */
 const HEADERS: Array<{ label: string; width: string; sortField?: VisitSortField }> = [
   { label: 'Visit ID', width: 'w-[11%]' },
-  { label: 'Vendor/Mitra', width: 'w-[15%]' },
+  { label: 'Vendor/Mitra', width: 'w-[13%]' },
   { label: 'Fasilitas', width: 'w-[12%]' },
   { label: 'Teknisi', width: 'w-[16%]' },
   { label: 'SPK', width: 'w-[9%]' },
   { label: 'Tanggal & Jam', width: 'w-[14%]', sortField: 'start_date' },
   { label: 'Status', width: 'w-[11%]' },
-  { label: 'Aksi', width: 'w-[12%]' },
+  { label: 'Aksi', width: 'w-[14%]' },
 ]
 
 /** Label tipe fasilitas dalam Bahasa Indonesia (bukan mentah `pusat`, `pop`, dst). */
@@ -131,8 +142,8 @@ export function VisitTable({
   }
 
   return (
-    <div className="card hidden overflow-hidden lg:block">
-      <table className="w-full table-fixed border-collapse text-left">
+    <div className={TABLE_WRAPPER_CLASS}>
+      <table className={TABLE_CLASS}>
         <thead>
           <tr>
             {HEADERS.map((header) => {
@@ -148,7 +159,7 @@ export function VisitTable({
                   key={header.label}
                   scope="col"
                   aria-sort={ariaSort}
-                  className={`${header.width} border-b border-border-light bg-brand/5 px-2 sm:px-3 lg:px-4 py-3 text-xs sm:text-sm font-semibold text-ink-secondary`}
+                  className={`${header.width} ${TABLE_TH_CLASS}`}
                 >
                   {sortField !== undefined && onSortChange !== undefined ? (
                     <button
@@ -188,7 +199,7 @@ export function VisitTable({
                 key={visit.id}
                 className="transition-colors hover:bg-brand/5"
               >
-                <td className="truncate px-2 sm:px-3 lg:px-4 py-3 font-mono text-xs sm:text-sm" title={visit.visit_id}>
+                <td className={`truncate ${TABLE_TD_CLASS} font-mono text-xs sm:text-sm`} title={visit.visit_id}>
                   <Link
                     href={`/visits/${visit.id}`}
                     aria-label={`Lihat detail kunjungan ${visit.visit_id}`}
@@ -197,7 +208,7 @@ export function VisitTable({
                     {visit.visit_id}
                   </Link>
                 </td>
-                <td className="px-2 sm:px-3 lg:px-4 py-3">
+                  <td className={TABLE_TD_CLASS}>
                   <div className="min-w-0">
                     <p className="truncate text-xs sm:text-sm font-medium text-ink" title={vendorUser?.name}>
                       {vendorUser?.name}
@@ -207,7 +218,7 @@ export function VisitTable({
                     </p>
                   </div>
                 </td>
-                <td className="px-2 sm:px-3 lg:px-4 py-3">
+                  <td className={TABLE_TD_CLASS}>
                   <div className="min-w-0">
                     <p className="truncate text-xs sm:text-sm text-ink" title={visit.location.name}>
                       {visit.location.name}
@@ -217,7 +228,7 @@ export function VisitTable({
                     </p>
                   </div>
                 </td>
-                <td className="px-2 sm:px-3 lg:px-4 py-3">
+                  <td className={TABLE_TD_CLASS}>
                   {technicians.count === 0 ? (
                     <span className="text-xs sm:text-sm text-ink-muted">—</span>
                   ) : (
@@ -233,7 +244,7 @@ export function VisitTable({
                     </div>
                   )}
                 </td>
-                <td className="px-2 sm:px-3 lg:px-4 py-3">
+                  <td className={TABLE_TD_CLASS}>
                   {spkUrl ? (
                     <SpkFileLink
                       visitId={visit.id}
@@ -247,7 +258,7 @@ export function VisitTable({
                     <span className="text-xs sm:text-sm text-ink-muted">—</span>
                   )}
                 </td>
-                <td className="px-2 sm:px-3 lg:px-4 py-3">
+                  <td className={TABLE_TD_CLASS}>
                   <div className="min-w-0">
                     <p className="truncate text-xs sm:text-sm text-ink" title={schedule.dateLabel}>
                       {schedule.dateLabel}
@@ -257,21 +268,10 @@ export function VisitTable({
                     </p>
                   </div>
                 </td>
-                <td className="px-2 sm:px-3 lg:px-4 py-3">
+                  <td className={TABLE_TD_CLASS}>
                   <StatusBadge status={visit.status} className="max-w-full" />
                 </td>
-                <td className="px-2 sm:px-3 lg:px-4 py-3">
-                  {/*
-                    Sel Aksi 12% (~86px di 1024px, ~117px di 1280px) tak muat
-                    menampung ikon + label sekaligus (Setujui+ikon ~110px).
-                    Pola: ikon-saja di lg–xl (48px, muat di sel sempit),
-                    label teks kembali di xl+ tanpa ikon; nama aksi tetap
-                    terbaca screen reader lewat aria-label di kedua mode.
-                    Tanpa hak approval / status di luar `requested`+`rescheduled`:
-                    sel diisi strip "—" (bukan sel kosong). Tolak hanya untuk
-                    `requested` — `rescheduled→rejected` ilegal di backend.
-                    Navigasi detail lewat link Visit ID.
-                  */}
+                <td className={TABLE_TD_CLASS}>
                   {allowApproval && isApprovableStatus(visit.status) ? (
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Button
@@ -281,8 +281,8 @@ export function VisitTable({
                         aria-label={`Setujui kunjungan ${visit.visit_id}`}
                         onClick={() => onApprove(visit)}
                       >
-                        <Check className="size-4 xl:hidden" aria-hidden="true" />
-                        <span className="hidden xl:inline">Setujui</span>
+                        <Check className="size-4 shrink-0" aria-hidden="true" />
+                        Setujui
                       </Button>
                       {isRejectableStatus(visit.status) ? (
                         <Button
@@ -292,13 +292,13 @@ export function VisitTable({
                           aria-label={`Tolak kunjungan ${visit.visit_id}`}
                           onClick={() => onReject(visit)}
                         >
-                          <X className="size-4 xl:hidden" aria-hidden="true" />
-                          <span className="hidden xl:inline">Tolak</span>
+                          <X className="size-4 shrink-0" aria-hidden="true" />
+                          Tolak
                         </Button>
                       ) : null}
                     </div>
                   ) : (
-                    <span className="text-xs sm:text-sm text-ink-muted">—</span>
+                    <span className={TABLE_NO_ACTION_CLASS}>—</span>
                   )}
                 </td>
               </tr>

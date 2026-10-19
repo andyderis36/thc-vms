@@ -143,10 +143,15 @@ function ApprovalsScreen() {
   }, [searchInput])
 
   // Filter/urutan berubah → kembali ke halaman 1 (baris halaman N tidak
-  // relevan untuk kombinasi filter baru).
-  useEffect(() => {
+  // relevan untuk kombinasi filter baru). Penyesuaian dilakukan saat render
+  // mengikuti pola "adjusting state when a prop changes" React, bukan di dalam
+  // effect, agar tidak memicu render berantai.
+  const filterSignature = JSON.stringify([search, locationId, dateFrom, dateTo, sortBy, order])
+  const [lastFilterSignature, setLastFilterSignature] = useState(filterSignature)
+  if (lastFilterSignature !== filterSignature) {
+    setLastFilterSignature(filterSignature)
     setPage(1)
-  }, [search, locationId, dateFrom, dateTo, sortBy, order])
+  }
 
   const locationsQuery = useLocationsQuery()
   // Badge antrean shell + subtitle: total requested + rescheduled TANPA filter
@@ -353,6 +358,7 @@ function ApprovalsScreen() {
           pageSize={pageSize}
           onPageSizeChange={handlePageSizeChange}
           onPageChange={setPage}
+          ariaLabel="Paginasi antrean approval"
           className="mt-4"
         />
       ) : null}

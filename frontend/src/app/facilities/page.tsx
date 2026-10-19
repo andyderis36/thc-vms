@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { AlertTriangle, Building2, Inbox, MapPin, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, Building2, Inbox, MapPin, Pencil, Plus, Power, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
+import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
@@ -11,6 +12,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { Pagination } from '@/components/ui/Pagination'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
@@ -25,6 +27,14 @@ import type { Location } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
 import { RequireRole } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import { DEFAULT_PAGE_SIZE, paginate } from '@/lib/pagination'
+import {
+  TABLE_CARD_LIST_CLASS,
+  TABLE_CLASS,
+  TABLE_TD_CLASS,
+  TABLE_TH_CLASS,
+  TABLE_WRAPPER_CLASS,
+} from '@/lib/table-styles'
 
 // ---------------------------------------------------------------------------
 // Helper murni (diekspor agar dapat diuji unit — lihat tests/superadmin-filters.test.ts)
@@ -158,6 +168,8 @@ function FacilitiesScreen() {
   const [branchId, setBranchId] = useState('all')
   const [typeFilter, setTypeFilter] = useState<Location['type'] | ''>('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<Location | null>(null)
   const [deleting, setDeleting] = useState<Location | null>(null)
@@ -184,6 +196,27 @@ function FacilitiesScreen() {
     () => applyFacilityFilters(locations, { search, branchId, type: typeFilter, status: statusFilter }),
     [locations, search, branchId, typeFilter, statusFilter],
   )
+
+  // Pagination client-side: potong `rows` (sudah terfilter) per halaman. `page`
+  // hasil clamp WAJIB dirender sebagai `safePage`, bukan state mentah, agar
+  // halaman basi pasca-refetch tak pernah menampilkan halaman kosong.
+  const { items: pageRows, page: safePage, totalPages } = paginate(rows, page, pageSize)
+
+  // Setiap filter atau ukuran halaman berubah ⇒ kembali ke halaman 1. Pola
+  // "sesuaikan state saat render" (React: You Might Not Need an Effect) dipakai
+  // karena `react-hooks/set-state-in-effect` melarang setState di dalam effect.
+  const filterSnapshot = { search, branchId, typeFilter, statusFilter, pageSize }
+  const [prevFilterSnapshot, setPrevFilterSnapshot] = useState(filterSnapshot)
+  if (
+    prevFilterSnapshot.search !== filterSnapshot.search ||
+    prevFilterSnapshot.branchId !== filterSnapshot.branchId ||
+    prevFilterSnapshot.typeFilter !== filterSnapshot.typeFilter ||
+    prevFilterSnapshot.statusFilter !== filterSnapshot.statusFilter ||
+    prevFilterSnapshot.pageSize !== filterSnapshot.pageSize
+  ) {
+    setPrevFilterSnapshot(filterSnapshot)
+    if (page !== 1) setPage(1)
+  }
 
   // Reset SEMUA state filter sekaligus — termasuk debounce `search` yang belum
   // tentu sinkron dengan `searchInput`, plus sentinel filter ke default-nya,
@@ -295,8 +328,19 @@ function FacilitiesScreen() {
           </div>
         ) : (
           <>
-            <FacilityTable locations={rows} onEdit={setEditing} onDelete={showDelete ? setDeleting : undefined} />
-            <FacilityCards locations={rows} onEdit={setEditing} onDelete={showDelete ? setDeleting : undefined} />
+            <FacilityTable locations={pageRows} onEdit={setEditing} onDelete={showDelete ? setDeleting : undefined} />
+            <FacilityCards locations={pageRows} onEdit={setEditing} onDelete={showDelete ? setDeleting : undefined} />
+            {rows.length > 0 ? (
+              <Pagination
+                ariaLabel="Paginasi daftar fasilitas"
+                page={safePage}
+                totalPages={totalPages}
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
+                onPageChange={setPage}
+                className="mt-4"
+              />
+            ) : null}
           </>
         )}
       </div>
@@ -384,22 +428,23 @@ function FacilityTable({ locations, onEdit, onDelete }: FacilityListProps) {
   const { toggle, isPending, activeId } = useToggleLocation()
 
   return (
-    <div className="card hidden overflow-hidden lg:block">
-      <table className="w-full table-fixed border-collapse text-left">
+    <div className={TABLE_WRAPPER_CLASS}>
+      <table className={TABLE_CLASS}>
         <thead>
           <tr>
             {[
-              { label: 'Nama Fasilitas', width: 'w-[24%]' },
-              { label: 'Tipe', width: 'w-[14%]' },
-              { label: 'Kota', width: 'w-[14%]' },
-              { label: 'Zona', width: 'w-[10%]' },
-              { label: 'Status', width: 'w-[13%]' },
-              { label: 'Aksi', width: 'w-[25%]' },
+              // Lebar kolom mengikuti jumlah kontrol: satu trigger ikon → 7%.
+              { label: 'Nama Fasilitas', width: 'w-[28%]' },
+              { label: 'Tipe', width: 'w-[16%]' },
+              { label: 'Kota', width: 'w-[18%]' },
+              { label: 'Zona', width: 'w-[12%]' },
+              { label: 'Status', width: 'w-[19%]' },
+              { label: 'Aksi', width: 'w-[7%]' },
             ].map((header) => (
               <th
                 key={header.label}
                 scope="col"
-                className={`${header.width} border-b border-border-light bg-brand/5 px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm font-semibold text-ink-secondary`}
+                className={`${header.width} ${TABLE_TH_CLASS}`}
               >
                 {header.label}
               </th>
@@ -409,64 +454,71 @@ function FacilityTable({ locations, onEdit, onDelete }: FacilityListProps) {
         <tbody className="divide-y divide-border-light">
           {locations.map((location) => {
             const active = isLocationActive(location)
+            const actions: ActionMenuItem[] = [
+              {
+                id: 'edit',
+                label: 'Ubah',
+                icon: <Pencil aria-hidden="true" className="size-4" />,
+                onSelect: () => onEdit(location),
+                tone: 'default',
+              },
+            ]
+            if (active) {
+              actions.push({
+                id: 'toggle',
+                label: 'Nonaktifkan',
+                icon: <Power aria-hidden="true" className="size-4" />,
+                onSelect: () => toggle(location),
+                tone: 'default',
+              })
+            } else {
+              actions.push({
+                id: 'toggle',
+                label: 'Aktifkan',
+                icon: <Power aria-hidden="true" className="size-4" />,
+                onSelect: () => toggle(location),
+                tone: 'default',
+              })
+            }
+            if (onDelete !== undefined) {
+              actions.push({
+                id: 'delete',
+                label: 'Hapus',
+                icon: <Trash2 aria-hidden="true" className="size-4" />,
+                onSelect: () => onDelete(location),
+                tone: 'danger',
+              })
+            }
             return (
               <tr
                 key={location.id}
                 className="transition-colors hover:bg-brand/5"
               >
-                <td className="px-2 sm:px-3 lg:px-6 py-3">
-<p className="truncate text-xs sm:text-sm font-semibold text-ink" title={location.name}>
+                <td className={TABLE_TD_CLASS}>
+                  <p className="truncate text-xs sm:text-sm font-semibold text-ink" title={location.name}>
                     {location.name}
                   </p>
                 </td>
-                <td className="px-2 sm:px-3 lg:px-6 py-3">
+                <td className={TABLE_TD_CLASS}>
                   <Badge tone="info">{LOCATION_TYPE_LABEL[location.type]}</Badge>
                 </td>
-                <td className="truncate px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm text-ink-secondary" title={location.city}>
+                <td className={`truncate ${TABLE_TD_CLASS} text-xs sm:text-sm text-ink-secondary`} title={location.city}>
                   {location.city !== '' ? location.city : '—'}
                 </td>
-                <td className="px-2 sm:px-3 lg:px-6 py-3">
+                <td className={TABLE_TD_CLASS}>
                   <Badge tone="neutral">{location.timezone}</Badge>
                 </td>
-                <td className="px-2 sm:px-3 lg:px-6 py-3">
+                <td className={TABLE_TD_CLASS}>
                   <Badge tone={active ? 'success' : 'neutral'}>
                     {active ? 'Aktif' : 'Nonaktif'}
                   </Badge>
                 </td>
-                <td className="px-2 sm:px-3 lg:px-6 py-3">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="min-h-touch px-3"
-                      aria-label={`Ubah ${location.name}`}
-                      onClick={() => onEdit(location)}
-                    >
-                      <Pencil aria-hidden="true" className="size-4 shrink-0" />
-                      Ubah
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={active ? 'secondary' : 'primary'}
-                      className="min-h-touch px-3"
-                      loading={isPending && activeId === location.id}
-                      onClick={() => toggle(location)}
-                    >
-                      {active ? 'Nonaktifkan' : 'Aktifkan'}
-                    </Button>
-                    {onDelete !== undefined ? (
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        className="min-h-touch px-3"
-                        aria-label={`Hapus ${location.name}`}
-                        onClick={() => onDelete(location)}
-                      >
-                        <Trash2 aria-hidden="true" className="size-4 shrink-0" />
-                        Hapus
-                      </Button>
-                    ) : null}
-                  </div>
+                <td className={`${TABLE_TD_CLASS} text-right`}>
+                  <ActionMenu
+                    label={`Aksi untuk ${location.name}`}
+                    busy={isPending && activeId === location.id}
+                    items={actions}
+                  />
                 </td>
               </tr>
             )
@@ -481,9 +533,44 @@ function FacilityCards({ locations, onEdit, onDelete }: FacilityListProps) {
   const { toggle, isPending, activeId } = useToggleLocation()
 
   return (
-    <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:hidden">
+    <ul className={TABLE_CARD_LIST_CLASS}>
       {locations.map((location) => {
         const active = isLocationActive(location)
+        const actions: ActionMenuItem[] = [
+          {
+            id: 'edit',
+            label: 'Ubah',
+            icon: <Pencil aria-hidden="true" className="size-4" />,
+            onSelect: () => onEdit(location),
+            tone: 'default',
+          },
+        ]
+        if (active) {
+          actions.push({
+            id: 'toggle',
+            label: 'Nonaktifkan',
+            icon: <Power aria-hidden="true" className="size-4" />,
+            onSelect: () => toggle(location),
+            tone: 'default',
+          })
+        } else {
+          actions.push({
+            id: 'toggle',
+            label: 'Aktifkan',
+            icon: <Power aria-hidden="true" className="size-4" />,
+            onSelect: () => toggle(location),
+            tone: 'default',
+          })
+        }
+        if (onDelete !== undefined) {
+          actions.push({
+            id: 'delete',
+            label: 'Hapus',
+            icon: <Trash2 aria-hidden="true" className="size-4" />,
+            onSelect: () => onDelete(location),
+            tone: 'danger',
+          })
+        }
         return (
           <li key={location.id} className="card flex flex-col p-4">
             <div className="flex items-start justify-between gap-3">
@@ -495,9 +582,16 @@ function FacilityCards({ locations, onEdit, onDelete }: FacilityListProps) {
                   {location.city !== '' ? location.city : '—'} · {location.timezone}
                 </p>
               </div>
-              <Badge tone={active ? 'success' : 'neutral'} className="shrink-0">
-                {active ? 'Aktif' : 'Nonaktif'}
-              </Badge>
+              <div className="flex shrink-0 items-center gap-2">
+                <Badge tone={active ? 'success' : 'neutral'}>
+                  {active ? 'Aktif' : 'Nonaktif'}
+                </Badge>
+                <ActionMenu
+                  label={`Aksi untuk ${location.name}`}
+                  busy={isPending && activeId === location.id}
+                  items={actions}
+                />
+              </div>
             </div>
             <div className="mt-3 flex flex-1 flex-col gap-2 text-sm text-ink-secondary">
               <p className="flex items-start gap-2">
@@ -510,38 +604,6 @@ function FacilityCards({ locations, onEdit, onDelete }: FacilityListProps) {
                   {location.address !== '' ? location.address : 'Alamat belum diisi.'}
                 </span>
               </p>
-            </div>
-            {/* Cluster aksi WRAP:3 tombol (Ubah/Nonaktifkan/Hapus) harus muat
-                di 375px tanpa scroll horizontal (design system §5.2). */}
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button
-                variant="secondary"
-                className="min-h-touch flex-1"
-                aria-label={`Ubah ${location.name}`}
-                onClick={() => onEdit(location)}
-              >
-                <Pencil aria-hidden="true" className="size-4 shrink-0" />
-                Ubah
-              </Button>
-              <Button
-                variant={active ? 'secondary' : 'primary'}
-                className="min-h-touch flex-1"
-                loading={isPending && activeId === location.id}
-                onClick={() => toggle(location)}
-              >
-                {active ? 'Nonaktifkan' : 'Aktifkan'}
-              </Button>
-              {onDelete !== undefined ? (
-                <Button
-                  variant="danger"
-                  className="min-h-touch flex-1"
-                  aria-label={`Hapus ${location.name}`}
-                  onClick={() => onDelete(location)}
-                >
-                  <Trash2 aria-hidden="true" className="size-4 shrink-0" />
-                  Hapus
-                </Button>
-              ) : null}
             </div>
           </li>
         )
@@ -588,11 +650,16 @@ function LocationFormModal({ title, submitLabel, locations, initial, onClose }: 
   // Invariant: nilai select wajib selalu terkandung di daftar opsi — bila opsi
   // berubah saat modal terbuka (refetch), kosongkan pilihan agar user memilih
   // tipe yang valid secara sadar; server tetap otoritas (tanpa toast blokir).
-  useEffect(() => {
+  // Penyesuaian saat render (bukan di dalam effect) mengikuti pola resmi React
+  // "adjusting state when a prop changes" — menghindari render berantai tanpa
+  // perlu mematikan aturan lint.
+  const [typeOptionsSeen, setTypeOptionsSeen] = useState(typeOptions)
+  if (typeOptionsSeen !== typeOptions) {
+    setTypeOptionsSeen(typeOptions)
     if (form.type !== '' && !typeOptions.some((option) => option.value === form.type)) {
       setForm((prev) => ({ ...prev, type: '' }))
     }
-  }, [form.type, typeOptions])
+  }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()

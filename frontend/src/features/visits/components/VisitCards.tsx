@@ -4,11 +4,12 @@ import Link from 'next/link'
 import { CalendarDays, FileText, MapPin, Users, Wrench } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import type { Role, VisitDetail } from '@/lib/api/types'
+import type { VisitDetail } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
 import { primaryVendorDisplay } from '@/lib/visits/vendor-display'
 import { visitVendorUser } from '@/lib/visits/vendor-user'
 import { isApprovableStatus, isRejectableStatus } from '@/lib/visits/visit-status'
+import { TABLE_CARD_LIST_CLASS } from '@/lib/table-styles'
 import { technicianDisplay, visitSchedule, type VisitTableProps } from './VisitTable'
 import { SpkFileLink } from './SpkFileLink'
 
@@ -45,7 +46,7 @@ export function VisitCards({ visits, role, onApprove, onReject }: VisitCardsProp
   const allowApproval = can(role, 'approveVisit')
 
   return (
-    <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:hidden">
+    <ul className={TABLE_CARD_LIST_CLASS}>
       {visits.map((visit) => {
         const schedule = visitSchedule(visit)
         const purposes = visit.purposes.map((purpose) => purpose.name).join(', ')

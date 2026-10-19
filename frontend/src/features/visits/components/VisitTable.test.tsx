@@ -5,6 +5,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { VisitTable, type VisitTableProps } from './VisitTable'
+import { TABLE_TH_CLASS } from '@/lib/table-styles'
 import type { Role, VisitDetail } from '@/lib/api/types'
 
 function buildVisit(overrides: Partial<VisitDetail> = {}): VisitDetail {
@@ -92,5 +93,34 @@ describe('VisitTable (desktop)', () => {
     const total = headers.reduce((sum, th) => sum + headerWidthPercent(th), 0)
 
     expect(total).toBe(100)
+  })
+
+  it('selalu merender ikon + label Setujui, label tak lagi bersyarat lebar layar', () => {
+    renderVisitTable()
+
+    const approveButton = screen.getByRole('button', {
+      name: 'Setujui kunjungan VISIT-2026-0001',
+    })
+
+    // Label selalu tampil: tidak lagi dibungkus `span.hidden xl:inline`.
+    expect(screen.getByText('Setujui')).toBeVisible()
+    expect(approveButton.querySelector('.hidden')).toBeNull()
+
+    // Ikon selalu tampil: tidak lagi `size-4 xl:hidden`.
+    const icon = approveButton.querySelector('svg')
+    expect(icon).not.toBeNull()
+    expect(icon?.getAttribute('class') ?? '').toContain('shrink-0')
+    expect(icon?.getAttribute('class') ?? '').not.toContain('xl:hidden')
+  })
+
+  it('memakai token TABLE_TH_CLASS pada tiap sel header (lg:px-6)', () => {
+    renderVisitTable()
+
+    const headers = screen.getAllByRole('columnheader')
+    for (const th of headers) {
+      // Sel header memakai token bersama, bukan salinan string mentah.
+      expect(th.className).toContain(TABLE_TH_CLASS)
+      expect(th.className).toContain('lg:px-6')
+    }
   })
 })
