@@ -14,7 +14,7 @@ function securityStub(overrides: Partial<User> = {}): User {
   return {
     id: 'c9b8a7d6-5e4f-4a3b-8c2d-1e0f9a8b7c04',
     name: 'Joko Susilo',
-    email: 'satpam.sby@thc.net.id',
+    email: 'security.sby@thc.net.id',
     phone: '0811-3000-004',
     nik: null,
     role: 'security',
@@ -67,9 +67,9 @@ describe('canShowDeleteSecurityUser', () => {
 })
 
 describe('deleteSecurityUserConfirmMessage', () => {
-  it('menyebut nama dan email satpam', () => {
+  it('menyebut nama dan email pengawas', () => {
     const message = deleteSecurityUserConfirmMessage(securityStub())
     expect(message).toContain('Joko Susilo')
-    expect(message).toContain('satpam.sby@thc.net.id')
+    expect(message).toContain('security.sby@thc.net.id')
   })
 })

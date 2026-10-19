@@ -91,9 +91,9 @@ func (s *stubSecurityDeleteStore) ListSecurity(_ context.Context, locationID *do
 	return out, nil
 }
 
-// CountVisitsByPIC answers the vendor-ownership pre-check, mirroring the
+// CountVisitsByVendorUser answers the vendor-ownership pre-check, mirroring the
 // super_admin fake: a non-zero count blocks the delete with 409.
-func (s *stubSecurityDeleteStore) CountVisitsByPIC(_ context.Context, id domain.UUID) (int64, error) {
+func (s *stubSecurityDeleteStore) CountVisitsByVendorUser(_ context.Context, id domain.UUID) (int64, error) {
 	if s.countErr != nil {
 		return 0, s.countErr
 	}

@@ -1,0 +1,12 @@
+-- =============================================================================
+-- THC Visitor Management System (VMS) - ISP Edition
+-- Migration 000011 DOWN : drop the single-Kantor-Pusat guard
+--
+-- SSOT            : docs/1. Entity Relationship Diagram (ERD).mermaid (LOCATION)
+-- Business rules  : docs/0. PRD - THC Visitor App.md
+-- Target engine   : PostgreSQL 18.6
+--
+-- Data changes are NOT reversed: any duplicate 'pusat' rows created while the
+-- guard was absent remain as-is. Only the index is dropped.
+-- =============================================================================
+DROP INDEX IF EXISTS uq_location_single_pusat;

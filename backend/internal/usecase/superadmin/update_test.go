@@ -24,7 +24,7 @@ func TestValidateManagedUserUpdate(t *testing.T) {
 		{Role: domain.RoleAdmin, Name: strPtr("Baru")},
 		{Role: domain.RoleAdmin, Email: strPtr("b@thc.local"), Phone: strPtr("0800")},
 		{Role: domain.RoleVendor, Phone: strPtr("0801")},
-		{Role: domain.RoleSecurity, Name: strPtr("Satpam Baru")},
+		{Role: domain.RoleSecurity, Name: strPtr("Pengawas Baru")},
 		{Role: domain.RoleSuperAdmin, Name: strPtr("Pusat Baru")},
 		{Role: domain.RoleAdmin, LocationID: uuidPtr(locID)},
 		{Role: domain.RoleVendor, Password: strPtr("Baru1234!")},

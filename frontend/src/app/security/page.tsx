@@ -2,7 +2,6 @@
 
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
-import { Card, CardBody } from '@/components/ui/Card'
 import { Spinner } from '@/components/ui/Spinner'
 import { SecurityUserPanel } from '@/features/security/components/SecurityUserModal'
 import { usePendingApprovalCount } from '@/lib/api/hooks'
@@ -12,7 +11,7 @@ import { getRoleLabel } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 
 /**
- * Halaman mandiri Kelola Satpam — versi halaman dari `SecurityUserPanel`
+ * Halaman mandiri Kelola Pengawas — versi halaman dari `SecurityUserPanel`
  * (satu komponen, dipakai juga modal dashboard: DRY). `super_admin`
  * memilih cabang; `admin` terkunci ke cabangnya. Guard rute +
  * guard kapabilitas ganda menolak Vendor/Mitra/security.
@@ -58,17 +57,30 @@ function SecurityScreen() {
 
   return (
     <RoleShell role={role} pendingCount={pendingCount}>
-      <div className="mb-5 min-w-0">
-        <h1 className="text-xl font-bold text-ink">Kelola {getRoleLabel('security')}</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
-          Daftarkan akun {getRoleLabel('security').toLowerCase()} baru dan kelola status aktif/nonaktif.
-        </p>
+      {/*
+        Kepala halaman memakai skala & ritme yang SAMA dengan dashboard &
+        approvals (h1 `text-2xl tracking-tight`, subjudul `mt-1.5`) supaya
+        berpindah antar halaman back-office tidak terasa melompat.
+      */}
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-ink">
+            {`Kelola ${getRoleLabel('security')}`}
+          </h1>
+          <p className="mt-1.5 text-sm text-ink-secondary">
+            {`Daftarkan akun ${getRoleLabel('security').toLowerCase()} baru dan kelola status aktif/nonaktif.`}
+          </p>
+        </div>
       </div>
-      <Card>
-        <CardBody>
-          <SecurityUserPanel enabled onCreated={() => undefined} />
-        </CardBody>
-      </Card>
+
+      {/*
+        TIDAK ada pembungkus `.card` di sini: `SecurityUserPanel` sudah
+        memancarkan kartunya sendiri (tumpukan < 768px, 2 kolom >= 768px).
+        Membungkusnya kartu lagi menghasilkan kotak berborder di dalam
+        kotak berbordered. Pola yang sama dipakai dashboard/approvals —
+        kartu hasil berada langsung di atas latar halaman.
+      */}
+      <SecurityUserPanel enabled onCreated={() => undefined} />
     </RoleShell>
   )
 }

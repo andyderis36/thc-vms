@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Select, type SelectOption } from '@/components/ui/Select'
@@ -78,6 +79,47 @@ export function toManagedUserListParams(filter: ManagedListFilter): ManagedUserL
   return params
 }
 
+/** Filter status pada layar users; 'all' = semua status. */
+export type ManagedStatusFilter = 'all' | 'active' | 'inactive' | 'blacklisted'
+
+/** Sentinel "semua" untuk filter Vendor (selaras dengan filter Cabang). */
+export const VENDOR_FILTER_ALL = 'all'
+
+/**
+ * Opsi dropdown Vendor = nama vendor unik dari user vendor yang SUDAH dimuat,
+ * bukan dari katalog: user dengan vendor_name manual (di luar katalog) tetap
+ * bisa difilter. Kolom yang dicocokkan persis kolom yang ditampilkan tabel.
+ */
+export function managedVendorOptions(users: User[]): SelectOption[] {
+  const names = new Set<string>()
+  for (const user of users) {
+    if (user.role !== 'vendor') continue
+    const name = (user.vendor_name ?? '').trim()
+    if (name !== '') names.add(name)
+  }
+  const sorted = [...names].sort((a, b) => a.localeCompare(b, 'id'))
+  return [
+    { value: VENDOR_FILTER_ALL, label: 'Semua Vendor' },
+    ...sorted.map((name) => ({ value: name, label: name })),
+  ]
+}
+
+/**
+ * Filter client-side daftar user: buang security, lalu terapkan status
+ * ('all' = tanpa filter) dan vendor exact-match ('all' = tanpa filter).
+ */
+export function applyManagedUserFilters(
+  users: User[],
+  filter: { status: ManagedStatusFilter; vendor: string },
+): User[] {
+  return users.filter((user) => {
+    if (user.role === 'security') return false
+    if (filter.status !== 'all' && user.status !== filter.status) return false
+    if (filter.vendor !== VENDOR_FILTER_ALL && (user.vendor_name ?? '') !== filter.vendor) return false
+    return true
+  })
+}
+
 /**
  * Baris user boleh menampilkan tombol hapus: bukan akun sendiri dan bukan
  * akun `super_admin` (kontrak DELETE /users/{id} → 403 untuk keduanya).
@@ -109,6 +151,13 @@ const ROLE_FILTER_OPTIONS: SelectOption[] = [
   { value: 'vendor', label: getRoleLabel('vendor') },
 ]
 
+const STATUS_FILTER_OPTIONS: SelectOption[] = [
+  { value: 'all', label: 'Semua Status' },
+  { value: 'active', label: 'Aktif' },
+  { value: 'inactive', label: 'Nonaktif' },
+  { value: 'blacklisted', label: 'Diblokir' },
+]
+
 const CREATE_ROLE_OPTIONS: SelectOption[] = [
   { value: 'admin', label: getRoleLabel('admin') },
   { value: 'vendor', label: getRoleLabel('vendor') },
@@ -131,6 +180,9 @@ function UsersScreen() {
   const [locationId, setLocationId] = useState('all')
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<ManagedStatusFilter>('all')
+  // Filter vendor (client-side, exact-match atas `vendor_name`).
+  const [vendorFilter, setVendorFilter] = useState(VENDOR_FILTER_ALL)
   const [createOpen, setCreateOpen] = useState(false)
   const [deleting, setDeleting] = useState<User | null>(null)
   const [editing, setEditing] = useState<User | null>(null)
@@ -158,12 +210,28 @@ function UsersScreen() {
   const usersQuery = useManagedUsersQuery(params)
 
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data])
-  // Satpam tidak pernah tampil di sini walau API mengembalikannya (filter
-  // '' berarti semua peran): rumah kanonisnya `/security`. Satu tempat,
-  // satu aturan — anti-bingung.
+
+  // Opsi vendor dari data yang sudah dimuat; nilai terpilih di-union agar
+  // <select> tidak kosong bila hasil server (ikut tersaring `search`) tak lagi
+  // memuat vendor tersebut.
+  const vendorOptions: SelectOption[] = useMemo(() => {
+    const options = managedVendorOptions(usersQuery.data ?? [])
+    if (vendorFilter !== VENDOR_FILTER_ALL && !options.some((option) => option.value === vendorFilter)) {
+      return [...options, { value: vendorFilter, label: vendorFilter }]
+    }
+    return options
+  }, [usersQuery.data, vendorFilter])
+
+  // Pengawas tak pernah tampil (rumahnya `/security`); status & vendor
+  // difilter di KLIEN karena `GET /users` hanya mendukung role/search/
+  // location_id. Vendor hanya aktif di mode vendor — lihat handler Peran.
   const rows: User[] = useMemo(
-    () => (usersQuery.data ?? []).filter((user) => user.role !== 'security'),
-    [usersQuery.data],
+    () =>
+      applyManagedUserFilters(usersQuery.data ?? [], {
+        status: statusFilter,
+        vendor: roleFilter === 'vendor' ? vendorFilter : VENDOR_FILTER_ALL,
+      }),
+    [usersQuery.data, statusFilter, roleFilter, vendorFilter],
   )
 
   const locationOptions: SelectOption[] = useMemo(
@@ -174,7 +242,24 @@ function UsersScreen() {
     [locations],
   )
 
-  const isFiltered = roleFilter !== '' || locationId !== 'all' || search !== ''
+  // `vendorFilter` hanya bisa non-'all' saat Peran = Vendor/Mitra (di-reset
+  // otomatis saat keluar dari vendor), jadi cukup memeriksa nilainya saja.
+  const isFiltered =
+    roleFilter !== '' ||
+    locationId !== 'all' ||
+    search !== '' ||
+    statusFilter !== 'all' ||
+    vendorFilter !== VENDOR_FILTER_ALL
+
+  /** Reset semua filter bar ke kondisi awal — dipakai tombol Reset Filter. */
+  const handleResetFilters = (): void => {
+    setRoleFilter('')
+    setLocationId('all')
+    setSearchInput('')
+    setSearch('')
+    setStatusFilter('all')
+    setVendorFilter(VENDOR_FILTER_ALL)
+  }
 
   return (
     <SuperadminShell
@@ -182,6 +267,11 @@ function UsersScreen() {
       allLocations={locations}
       activeHref="/users"
       onBranchChange={setLocationId}
+      // Switcher shell mengikuti filter Cabang baris: nilainya DIKENDALIKAN
+      // halaman (satu sumber kebenaran `locationId`) dan hanya tampil untuk
+      // Peran = Koordinator Wilayah — peran lain tidak punya makna cabang.
+      branchId={locationId}
+      hideBranchSwitcher={roleFilter !== 'admin'}
     >
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
@@ -202,17 +292,51 @@ function UsersScreen() {
             label="Peran"
             options={ROLE_FILTER_OPTIONS}
             value={roleFilter}
-            onChange={(event) => setRoleFilter(event.target.value as ManagedRoleFilter)}
+            onChange={(event) => {
+              const next = event.target.value as ManagedRoleFilter
+              setRoleFilter(next)
+              // Cabang hanya bermakna untuk Koor. Wilayah; reset saat keluar.
+              if (next !== 'admin') setLocationId('all')
+              // Vendor hanya bermakna di mode vendor; reset saat keluar agar
+              // tidak menyaring daftar peran lain secara senyap.
+              if (next !== 'vendor') setVendorFilter(VENDOR_FILTER_ALL)
+              // `search` & `status` sengaja tetap: keduanya tampil di semua peran.
+            }}
           />
         </div>
-        <div className="min-w-40 flex-1 sm:w-56 sm:flex-none">
+        {/* Cabang tampil IFF Peran = Koordinator Wilayah — vendor tak punya
+            penugasan cabang (kontrak `requiresManagedLocation`). */}
+        {roleFilter === 'admin' ? (
+          <div className="min-w-40 flex-1 sm:w-56 sm:flex-none">
+            <Select
+              label="Cabang"
+              options={locationOptions}
+              value={locationId}
+              onChange={(event) => setLocationId(event.target.value)}
+            />
+          </div>
+        ) : null}
+        {/* Vendor: dropdown (exact-match) — opsi dari data vendor termuat. */}
+        {roleFilter === 'vendor' ? (
+          <div className="min-w-48 flex-1 sm:w-56 sm:flex-none">
+            <Select
+              label="Vendor/Nama Perusahaan"
+              options={vendorOptions}
+              value={vendorFilter}
+              onChange={(event) => setVendorFilter(event.target.value)}
+            />
+          </div>
+        ) : null}
+        {/* Status tampil di SEMUA mode peran. */}
+        <div className="min-w-40 flex-1 sm:w-48 sm:flex-none">
           <Select
-            label="Cabang"
-            options={locationOptions}
-            value={locationId}
-            onChange={(event) => setLocationId(event.target.value)}
+            label="Status"
+            options={STATUS_FILTER_OPTIONS}
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as ManagedStatusFilter)}
           />
         </div>
+        {/* Searchbox nama/email tampil di SEMUA mode peran. */}
         <div className="relative min-w-48 flex-1">
           <Input
             aria-label="Cari user"
@@ -221,6 +345,8 @@ function UsersScreen() {
             onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
+        {/* Selalu anak TERAKHIR: satu-satunya reset untuk semua kontrol di atas. */}
+        <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
       </div>
 
       <div className="mt-4">
@@ -345,9 +471,9 @@ function useToggleManagedStatus() {
 }
 
 function StatusCell({ status, className }: { status: User['status']; className?: string }) {
-  if (status === 'active') return <Badge tone="success" className={className}>AKTIF</Badge>
-  if (status === 'blacklisted') return <Badge tone="danger" className={className}>DIBLOKIR</Badge>
-  return <Badge tone="neutral" className={className}>NONAKTIF</Badge>
+  if (status === 'active') return <Badge tone="success" className={className}>Aktif</Badge>
+  if (status === 'blacklisted') return <Badge tone="danger" className={className}>Diblokir</Badge>
+  return <Badge tone="neutral" className={className}>Nonaktif</Badge>
 }
 
 function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { users: User[]; currentUserId: string | null; viewerRole: Role | null; onDelete: (user: User) => void; onEdit: (user: User) => void }) {
@@ -369,23 +495,23 @@ function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
               <th
                 key={header.label}
                 scope="col"
-                className={`${header.width} border-b border-border-light bg-neutral-bg px-4 py-3 text-label font-semibold text-ink-secondary`}
+                className={`${header.width} border-b border-border-light bg-brand/5 px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm font-semibold text-ink-secondary`}
               >
                 {header.label}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-border-light">
           {users.map((user) => {
             const toggleable = user.status === 'active' || user.status === 'inactive'
             return (
               <tr
                 key={user.id}
-                className="border-b border-border-light transition-colors last:border-b-0 hover:bg-page"
+                className="transition-colors hover:bg-brand/5"
               >
-                <td className="px-4 py-3">
-                  <p className="truncate text-sm font-semibold text-ink" title={user.name}>
+                <td className="px-2 sm:px-3 lg:px-6 py-3">
+                  <p className="truncate text-xs sm:text-sm font-semibold text-ink" title={user.name}>
                     {user.name}
                   </p>
                   <p
@@ -395,19 +521,19 @@ function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
                     {user.nik !== null ? `NIK ${user.nik}` : 'NIK —'}
                   </p>
                 </td>
-                <td className="truncate px-4 py-3 text-sm text-ink-secondary" title={user.email}>
+                <td className="truncate px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm text-ink-secondary" title={user.email}>
                   {user.email}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-2 sm:px-3 lg:px-6 py-3">
                   <Badge tone={managedRoleTone(user.role)}>{getRoleLabel(user.role)}</Badge>
                 </td>
-                <td className="truncate px-4 py-3 text-sm text-ink-secondary" title={userAffiliationLabel(user)}>
+                <td className="truncate px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm text-ink-secondary" title={userAffiliationLabel(user)}>
                   {userAffiliationLabel(user)}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-2 sm:px-3 lg:px-6 py-3">
                   <StatusCell status={user.status} />
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-2 sm:px-3 lg:px-6 py-3">
                   {/*
                     Sel Aksi 15% (~105px di 1024px) lebih sempit dari label
                     "Nonaktifkan" (~114px) sehingga tombol meluber ke kolom

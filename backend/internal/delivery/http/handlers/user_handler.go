@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -29,6 +30,26 @@ type UserHandler struct {
 	users          domain.UserRepository
 	locations      domain.MasterDataRepository
 	securityRoleID domain.UUID
+	audit          domain.AuditRepository
+}
+
+// WithAudit attaches the trail writer and returns the handler for chaining.
+// A nil writer disables emission; the production adapters serve the audited
+// same-transaction mutations through a type assertion with best-effort
+// fallback for narrow fakes (the SuperAdminHandler precedent).
+func (h *UserHandler) WithAudit(audit domain.AuditRepository) *UserHandler {
+	h.audit = audit
+	return h
+}
+
+// appendAuditFallback records one trail row outside any mutation transaction.
+func (h *UserHandler) appendAuditFallback(ctx context.Context, entry domain.AuditEntry) {
+	if h.audit == nil {
+		return
+	}
+	if _, err := h.audit.Append(ctx, entry); err != nil {
+		slog.Warn("users: audit append failed", "action", entry.Action, "entity", entry.Entity, "error", err)
+	}
 }
 
 // NewUserHandler wires the handler to the user and master-data ports.
@@ -170,7 +191,7 @@ func (h *UserHandler) CreateSecurity(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	created, err := h.users.Create(c.Request.Context(), domain.User{
+	pending := domain.User{
 		Name:         strings.TrimSpace(body.Name),
 		Email:        strings.TrimSpace(body.Email),
 		Phone:        strings.TrimSpace(body.Phone),
@@ -179,10 +200,26 @@ func (h *UserHandler) CreateSecurity(c *gin.Context) {
 		LocationID:   locationID,
 		Type:         domain.UserTypeInternal,
 		Status:       domain.UserStatusActive,
-	})
+	}
+	ctx := c.Request.Context()
+	var created domain.User
+	audited := false
+	if store, ok := h.users.(domain.AuditedUserRepository); ok {
+		created, err = store.CreateUserAudited(ctx, pending, auditEntry(c, id.UserID,
+			domain.AuditActionUserCreate, domain.AuditEntityUser, nil,
+			map[string]string{"email": pending.Email, "role": string(domain.RoleSecurity)}))
+		audited = true
+	} else {
+		created, err = h.users.Create(ctx, pending)
+	}
 	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, auditEntry(c, id.UserID,
+			domain.AuditActionUserCreate, domain.AuditEntityUser, &created.ID,
+			map[string]string{"email": created.Email, "role": string(domain.RoleSecurity)}))
 	}
 	response.Created(c, userToAccount(created, h.branchName(c, created.LocationID)))
 }
@@ -244,9 +281,23 @@ func (h *UserHandler) UpdateSecurityStatus(c *gin.Context) {
 		response.Fail(c, domain.ErrForbiddenBranch)
 		return
 	}
-	if err := h.users.UpdateStatus(c.Request.Context(), targetID, status); err != nil {
+	ctx := c.Request.Context()
+	entry := auditEntry(c, id.UserID, domain.AuditActionUserStatus,
+		domain.AuditEntityUser, &targetID,
+		map[string]string{"from": string(target.Status), "to": string(status)})
+	audited := false
+	if store, ok := h.users.(domain.AuditedUserRepository); ok {
+		err = store.UpdateUserStatusAudited(ctx, targetID, status, entry)
+		audited = true
+	} else {
+		err = h.users.UpdateStatus(ctx, targetID, status)
+	}
+	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, entry)
 	}
 	updated, err := h.users.FindByID(c.Request.Context(), targetID)
 	if err != nil {
@@ -264,7 +315,7 @@ func (h *UserHandler) UpdateSecurityStatus(c *gin.Context) {
 // resolves it with a type assertion so the UserRepository-only fakes of the
 // older security tests keep compiling unchanged.
 type securityDeleteStore interface {
-	CountVisitsByPIC(ctx context.Context, userID domain.UUID) (int64, error)
+	CountVisitsByVendorUser(ctx context.Context, userID domain.UUID) (int64, error)
 	CountStaffReferences(ctx context.Context, userID domain.UUID) (int64, error)
 	DeleteUser(ctx context.Context, id domain.UUID) error
 	// UpdateManagedUser carries the partial edit (PATCH
@@ -322,7 +373,7 @@ func (h *UserHandler) DeleteSecurity(c *gin.Context) {
 		response.Fail(c, domain.ErrDatabase)
 		return
 	}
-	vendorCount, err := store.CountVisitsByPIC(ctx, targetID)
+	vendorCount, err := store.CountVisitsByVendorUser(ctx, targetID)
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -336,13 +387,26 @@ func (h *UserHandler) DeleteSecurity(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	if err := store.DeleteUser(ctx, targetID); err != nil {
+	entry := auditEntry(c, id.UserID, domain.AuditActionUserDelete,
+		domain.AuditEntityUser, &targetID,
+		map[string]string{"email": target.Email, "role": string(domain.RoleSecurity)})
+	audited := false
+	if auditedStore, ok := h.users.(domain.AuditedUserRepository); ok {
+		err = auditedStore.DeleteUserAudited(ctx, targetID, entry)
+		audited = true
+	} else {
+		err = store.DeleteUser(ctx, targetID)
+	}
+	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Fail(c, domain.NotFoundEntity("Akun security"))
 			return
 		}
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, entry)
 	}
 	c.Status(http.StatusNoContent)
 }
@@ -361,7 +425,7 @@ type updateSecurityBody struct {
 }
 
 // UpdateSecurity serves PATCH /users/security/:id with 200 for the branch
-// admin's own satpam (and any satpam for super_admin). Guards mirror
+// admin's own security officer (and any for super_admin). Guards mirror
 // DeleteSecurity: non-security targets 404, cross-branch admins 403, blank
 // name/email 400, duplicate email 409. A non-empty password resets the hash.
 func (h *UserHandler) UpdateSecurity(c *gin.Context) {
@@ -445,10 +509,24 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 		response.Fail(c, domain.ErrDatabase)
 		return
 	}
-	updated, err := store.UpdateManagedUser(ctx, targetID, patch)
+	var updated domain.User
+	audited := false
+	if auditedStore, ok := h.users.(domain.AuditedUserRepository); ok {
+		updated, err = auditedStore.UpdateManagedUserAudited(ctx, targetID, patch, auditEntry(c, id.UserID,
+			domain.AuditActionUserUpdate, domain.AuditEntityUser, &targetID,
+			map[string]string{"fields": managedUserChangedFields(patch)}))
+		audited = true
+	} else {
+		updated, err = store.UpdateManagedUser(ctx, targetID, patch)
+	}
 	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, auditEntry(c, id.UserID,
+			domain.AuditActionUserUpdate, domain.AuditEntityUser, &targetID,
+			map[string]string{"fields": managedUserChangedFields(patch)}))
 	}
 	response.OK(c, userToAccount(updated, h.branchName(c, updated.LocationID)))
 }

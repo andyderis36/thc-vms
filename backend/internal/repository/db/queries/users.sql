@@ -196,12 +196,12 @@ WHERE u.id = $1;
 -- via MapError). There is no status transition here: the row is removed.
 -- =============================================================================
 
--- name: CountVisitsByPIC :one
--- DELETE /users/:id pre-check 1: visits owned by the account as PIC
--- (visit_request.pic_user_id, no cascade, so a remaining row blocks the delete).
+-- name: CountVisitsByVendorUser :one
+-- DELETE /users/:id pre-check 1: visits owned by the account as vendor user
+-- (visit_request.vendor_user_id, no cascade, so a remaining row blocks the delete).
 SELECT count(*)
 FROM visit_request
-WHERE pic_user_id = $1;
+WHERE vendor_user_id = $1;
 
 -- name: CountStaffReferences :one
 -- DELETE /users/:id pre-check 2: gate and audit rows written BY the account

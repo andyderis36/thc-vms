@@ -31,10 +31,10 @@ func CheckUserDelete(actorID domain.UUID, found bool, target domain.ManagedUser)
 // come from the repository pre-checks; the database FK (23503 -> 409 via
 // MapError) is the second line of defence for a reference that races the
 // check.
-func CheckUserReferences(visitsByPIC, staffReferences int64) error {
-	if visitsByPIC > 0 {
+func CheckUserReferences(visitsByVendorUser, staffReferences int64) error {
+	if visitsByVendorUser > 0 {
 		return domain.Conflict(fmt.Sprintf(
-			"Akun masih memiliki %d kunjungan sebagai vendor dan tidak dapat dihapus. Hapus atau alihkan kunjungan tersebut terlebih dahulu.", visitsByPIC))
+			"Akun masih memiliki %d kunjungan sebagai vendor dan tidak dapat dihapus. Hapus atau alihkan kunjungan tersebut terlebih dahulu.", visitsByVendorUser))
 	}
 	if staffReferences > 0 {
 		return domain.Conflict(fmt.Sprintf(

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -30,6 +31,101 @@ type SuperAdminHandler struct {
 	visits       domain.VisitRepository
 	adminRoleID  domain.UUID
 	vendorRoleID domain.UUID
+	// audit is the optional trail writer: nil disables emission so hermetic
+	// tests and unwired callers behave exactly as before.
+	audit domain.AuditRepository
+}
+
+// WithAudit attaches the trail writer and returns the handler for chaining.
+// Production passes repository.NewAuditRepository(pool); tests pass a fake.
+func (h *SuperAdminHandler) WithAudit(audit domain.AuditRepository) *SuperAdminHandler {
+	h.audit = audit
+	return h
+}
+
+// auditEntry builds one trail entry with the request provenance (IP +
+// User-Agent) attached. Metadata must stay secret-free: no password, hash or
+// token values, only identifiers and labels.
+func auditEntry(c *gin.Context, actor domain.UUID, action, entity string, entityID *domain.UUID, meta map[string]string) domain.AuditEntry {
+	provenance := deliveryhttp.RequestMetaFromGin(c)
+	return domain.AuditEntry{
+		ActorID:   &actor,
+		Action:    action,
+		Entity:    entity,
+		EntityID:  entityID,
+		IP:        provenance.IP,
+		UserAgent: provenance.UserAgent,
+		Metadata:  meta,
+	}
+}
+
+// appendAuditFallback records one trail row outside any mutation transaction:
+// the fallback when the mounted store predates the Audited* ports (narrow
+// test fakes). It never fails the request; the production path writes the row
+// inside the mutation transaction instead, so this runs only for fakes.
+func (h *SuperAdminHandler) appendAuditFallback(ctx context.Context, entry domain.AuditEntry) {
+	if h.audit == nil {
+		return
+	}
+	if _, err := h.audit.Append(ctx, entry); err != nil {
+		slog.Warn("superadmin: audit append failed", "action", entry.Action, "entity", entry.Entity, "error", err)
+	}
+}
+
+// locationChangedFields names the PATCH /locations/:id members being changed,
+// for the location.update metadata. Nil members keep the stored columns.
+func locationChangedFields(patch domain.LocationPatch) string {
+	var fields []string
+	if patch.Name != nil {
+		fields = append(fields, "name")
+	}
+	if patch.Type != nil {
+		fields = append(fields, "type")
+	}
+	if patch.Address != nil {
+		fields = append(fields, "address")
+	}
+	if patch.City != nil {
+		fields = append(fields, "city")
+	}
+	if patch.Timezone != nil {
+		fields = append(fields, "timezone")
+	}
+	if patch.IsActive != nil {
+		fields = append(fields, "is_active")
+	}
+	return strings.Join(fields, ",")
+}
+
+// managedUserChangedFields names the PATCH /users/:id members being changed.
+// A password member renders as the label "password", never the secret itself.
+func managedUserChangedFields(patch domain.ManagedUserPatch) string {
+	var fields []string
+	if patch.Name != nil {
+		fields = append(fields, "name")
+	}
+	if patch.Email != nil {
+		fields = append(fields, "email")
+	}
+	if patch.Phone != nil {
+		fields = append(fields, "phone")
+	}
+	if patch.NIK != nil {
+		fields = append(fields, "nik")
+	}
+	if patch.LocationID != nil {
+		fields = append(fields, "location_id")
+	}
+	if patch.VendorID != nil {
+		fields = append(fields, "vendor_id")
+	}
+	if patch.VendorName != nil {
+		fields = append(fields, "vendor_name")
+	}
+	if patch.PasswordHash != nil {
+		fields = append(fields, "password")
+	}
+	return strings.Join(fields, ",")
 }
 
 // NewSuperAdminHandler wires the handler to the managed-account, facility
@@ -117,8 +213,11 @@ type createLocationBody struct {
 
 // CreateLocation serves POST /locations with 201. Validation rejects a blank
 // name, an unknown type or an unknown timezone with 400 before any write.
+// The success feeds location.create: same-transaction via the audited port,
+// best-effort fallback otherwise.
 func (h *SuperAdminHandler) CreateLocation(c *gin.Context) {
-	if _, ok := requireSuperAdmin(c); !ok {
+	actor, ok := requireSuperAdmin(c)
+	if !ok {
 		return
 	}
 	var body createLocationBody
@@ -136,17 +235,33 @@ func (h *SuperAdminHandler) CreateLocation(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	created, err := h.locations.CreateLocation(c.Request.Context(), domain.Location{
+	pending := domain.Location{
 		Name:     strings.TrimSpace(body.Name),
 		Type:     locType,
 		Address:  strings.TrimSpace(body.Address),
 		City:     strings.TrimSpace(body.City),
 		Timezone: tz,
 		IsActive: true,
-	})
+	}
+	ctx := c.Request.Context()
+	var created domain.Location
+	audited := false
+	if store, ok := h.locations.(domain.AuditedLocationRepository); ok {
+		created, err = store.CreateLocationAudited(ctx, pending, auditEntry(c, actor.UserID,
+			domain.AuditActionLocationCreate, domain.AuditEntityLocation, nil,
+			map[string]string{"name": pending.Name, "type": string(pending.Type)}))
+		audited = true
+	} else {
+		created, err = h.locations.CreateLocation(ctx, pending)
+	}
 	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, auditEntry(c, actor.UserID,
+			domain.AuditActionLocationCreate, domain.AuditEntityLocation, &created.ID,
+			map[string]string{"name": created.Name, "type": string(created.Type)}))
 	}
 	response.Created(c, toMasterLocation(created))
 }
@@ -167,7 +282,8 @@ type updateLocationBody struct {
 // is_active:false is the supported soft removal; the hard removal lives on
 // DELETE /locations/:id (refused with 409 while users or visits reference it).
 func (h *SuperAdminHandler) UpdateLocation(c *gin.Context) {
-	if _, ok := requireSuperAdmin(c); !ok {
+	actor, ok := requireSuperAdmin(c)
+	if !ok {
 		return
 	}
 	var body updateLocationBody
@@ -197,7 +313,8 @@ func (h *SuperAdminHandler) UpdateLocation(c *gin.Context) {
 		return
 	}
 	targetID := domain.UUID(strings.TrimSpace(c.Param("id")))
-	if _, err := h.locations.FindLocationByID(c.Request.Context(), targetID); err != nil {
+	ctx := c.Request.Context()
+	if _, err := h.locations.FindLocationByID(ctx, targetID); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Fail(c, domain.NotFoundEntity("Fasilitas"))
 			return
@@ -205,10 +322,24 @@ func (h *SuperAdminHandler) UpdateLocation(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	updated, err := h.locations.UpdateLocation(c.Request.Context(), targetID, patch)
+	entry := auditEntry(c, actor.UserID, domain.AuditActionLocationUpdate,
+		domain.AuditEntityLocation, &targetID,
+		map[string]string{"fields": locationChangedFields(patch)})
+	var updated domain.Location
+	var err error
+	audited := false
+	if store, ok := h.locations.(domain.AuditedLocationRepository); ok {
+		updated, err = store.UpdateLocationAudited(ctx, targetID, patch, entry)
+		audited = true
+	} else {
+		updated, err = h.locations.UpdateLocation(ctx, targetID, patch)
+	}
 	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, entry)
 	}
 	response.OK(c, toMasterLocation(updated))
 }
@@ -344,7 +475,7 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 	if vendorID == nil && vendorName != "" {
 		vendorOverride = &vendorName
 	}
-	created, err := h.users.CreateManagedUser(c.Request.Context(), domain.User{
+	pending := domain.User{
 		Name:               strings.TrimSpace(body.Name),
 		Email:              strings.TrimSpace(body.Email),
 		Phone:              strings.TrimSpace(body.Phone),
@@ -356,10 +487,26 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 		Status:             domain.UserStatusActive,
 		VendorID:           vendorID,
 		VendorNameOverride: vendorOverride,
-	})
+	}
+	ctx := c.Request.Context()
+	var created domain.User
+	audited := false
+	if store, ok := h.users.(domain.AuditedUserRepository); ok {
+		created, err = store.CreateManagedUserAudited(ctx, pending, auditEntry(c, actor.UserID,
+			domain.AuditActionUserCreate, domain.AuditEntityUser, nil,
+			map[string]string{"email": pending.Email, "role": string(role)}))
+		audited = true
+	} else {
+		created, err = h.users.CreateManagedUser(ctx, pending)
+	}
 	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, auditEntry(c, actor.UserID,
+			domain.AuditActionUserCreate, domain.AuditEntityUser, &created.ID,
+			map[string]string{"email": created.Email, "role": string(role)}))
 	}
 	// The create projection carries no catalogue join (unlike the detail
 	// read), so only a just-typed manual name can render here; a catalogue
@@ -404,7 +551,8 @@ func (h *SuperAdminHandler) UpdateUserStatus(c *gin.Context) {
 	}
 	status := domain.UserStatus(strings.TrimSpace(body.Status))
 	targetID := domain.UUID(strings.TrimSpace(c.Param("id")))
-	target, err := h.users.FindManagedByID(c.Request.Context(), targetID)
+	ctx := c.Request.Context()
+	target, err := h.users.FindManagedByID(ctx, targetID)
 	switch {
 	case err == nil:
 		if err := superadmin.CheckUserStatusChange(id.UserID, true, target, status); err != nil {
@@ -418,9 +566,22 @@ func (h *SuperAdminHandler) UpdateUserStatus(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	if err := h.users.UpdateStatus(c.Request.Context(), targetID, status); err != nil {
+	entry := auditEntry(c, id.UserID, domain.AuditActionUserStatus,
+		domain.AuditEntityUser, &targetID,
+		map[string]string{"from": string(target.User.Status), "to": string(status)})
+	audited := false
+	if store, ok := h.users.(domain.AuditedUserRepository); ok {
+		err = store.UpdateUserStatusAudited(ctx, targetID, status, entry)
+		audited = true
+	} else {
+		err = h.users.UpdateStatus(ctx, targetID, status)
+	}
+	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, entry)
 	}
 	updated, err := h.users.FindManagedByID(c.Request.Context(), targetID)
 	if err != nil {
@@ -548,9 +709,22 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 	if !h.checkPasswordReset(c, id.UserID, target, body, patch) {
 		return
 	}
-	if _, err := h.users.UpdateManagedUser(ctx, targetID, patch); err != nil {
+	entry := auditEntry(c, id.UserID, domain.AuditActionUserUpdate,
+		domain.AuditEntityUser, &targetID,
+		map[string]string{"fields": managedUserChangedFields(patch)})
+	audited := false
+	if store, ok := h.users.(domain.AuditedUserRepository); ok {
+		_, err = store.UpdateManagedUserAudited(ctx, targetID, patch, entry)
+		audited = true
+	} else {
+		_, err = h.users.UpdateManagedUser(ctx, targetID, patch)
+	}
+	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, entry)
 	}
 	updated, err := h.users.FindManagedByID(ctx, targetID)
 	if err != nil {
@@ -598,7 +772,7 @@ func (h *SuperAdminHandler) checkPasswordReset(c *gin.Context, actorID domain.UU
 
 // DeleteUser serves DELETE /users/:id with 204 and no body. Unknown ids are
 // 404, deleting the caller's own account or any super_admin row is 403, and
-// a PIC that still owns visits (or staff still named on gate/audit rows) is
+// a vendor user that still owns visits (or staff still named on gate/audit rows) is
 // 409. The database FK (23503 -> 409 via MapError) is the second line of
 // defence for a reference that races the pre-checks.
 func (h *SuperAdminHandler) DeleteUser(c *gin.Context) {
@@ -622,7 +796,7 @@ func (h *SuperAdminHandler) DeleteUser(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	vendorCount, err := h.users.CountVisitsByPIC(ctx, targetID)
+	vendorCount, err := h.users.CountVisitsByVendorUser(ctx, targetID)
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -636,13 +810,26 @@ func (h *SuperAdminHandler) DeleteUser(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	if err := h.users.DeleteUser(ctx, targetID); err != nil {
+	entry := auditEntry(c, id.UserID, domain.AuditActionUserDelete,
+		domain.AuditEntityUser, &targetID,
+		map[string]string{"email": target.User.Email, "role": string(target.Role)})
+	audited := false
+	if store, ok := h.users.(domain.AuditedUserRepository); ok {
+		err = store.DeleteUserAudited(ctx, targetID, entry)
+		audited = true
+	} else {
+		err = h.users.DeleteUser(ctx, targetID)
+	}
+	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Fail(c, domain.NotFoundEntity("Akun"))
 			return
 		}
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, entry)
 	}
 	c.Status(http.StatusNoContent)
 }
@@ -652,12 +839,14 @@ func (h *SuperAdminHandler) DeleteUser(c *gin.Context) {
 // The database FKs (23503 -> 409 via MapError) are the second line of defence
 // for a reference that races the pre-checks.
 func (h *SuperAdminHandler) DeleteLocation(c *gin.Context) {
-	if _, ok := requireSuperAdmin(c); !ok {
+	actor, ok := requireSuperAdmin(c)
+	if !ok {
 		return
 	}
 	ctx := c.Request.Context()
 	targetID := domain.UUID(strings.TrimSpace(c.Param("id")))
-	if _, err := h.locations.FindLocationByID(ctx, targetID); err != nil {
+	stored, err := h.locations.FindLocationByID(ctx, targetID)
+	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Fail(c, domain.NotFoundEntity("Fasilitas"))
 			return
@@ -679,13 +868,26 @@ func (h *SuperAdminHandler) DeleteLocation(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	if err := h.locations.DeleteLocation(ctx, targetID); err != nil {
+	entry := auditEntry(c, actor.UserID, domain.AuditActionLocationDelete,
+		domain.AuditEntityLocation, &targetID,
+		map[string]string{"name": stored.Name, "type": string(stored.Type)})
+	audited := false
+	if store, ok := h.locations.(domain.AuditedLocationRepository); ok {
+		err = store.DeleteLocationAudited(ctx, targetID, entry)
+		audited = true
+	} else {
+		err = h.locations.DeleteLocation(ctx, targetID)
+	}
+	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Fail(c, domain.NotFoundEntity("Fasilitas"))
 			return
 		}
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, entry)
 	}
 	c.Status(http.StatusNoContent)
 }
@@ -696,17 +898,38 @@ func (h *SuperAdminHandler) DeleteLocation(c *gin.Context) {
 // CASCADE, so the single-row delete cleans the roster, purposes, history and
 // gate records atomically; there is no 409 on this path.
 func (h *SuperAdminHandler) DeleteVisit(c *gin.Context) {
-	if _, ok := requireSuperAdmin(c); !ok {
+	actor, ok := requireSuperAdmin(c)
+	if !ok {
 		return
 	}
+	ctx := c.Request.Context()
 	targetID := domain.UUID(strings.TrimSpace(c.Param("id")))
-	if err := h.visits.DeleteVisit(c.Request.Context(), targetID); err != nil {
+	// Best-effort visit code for the metadata: the delete below stays the
+	// 404 authority, so a read failure only leaves the code out.
+	meta := map[string]string{}
+	if visit, err := h.visits.FindByID(ctx, targetID); err == nil && visit.VisitID != "" {
+		meta["visit_code"] = visit.VisitID
+	}
+	entry := auditEntry(c, actor.UserID, domain.AuditActionVisitDelete,
+		domain.AuditEntityVisit, &targetID, meta)
+	var err error
+	audited := false
+	if store, ok := h.visits.(domain.AuditedVisitRepository); ok {
+		err = store.DeleteVisitAudited(ctx, targetID, entry)
+		audited = true
+	} else {
+		err = h.visits.DeleteVisit(ctx, targetID)
+	}
+	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Fail(c, domain.NotFoundEntity("Kunjungan"))
 			return
 		}
 		response.Fail(c, err)
 		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, entry)
 	}
 	c.Status(http.StatusNoContent)
 }

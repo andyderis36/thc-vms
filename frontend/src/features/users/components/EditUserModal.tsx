@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type FormEvent } from 'react'
+import { Lock } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -23,7 +24,7 @@ export interface EditUserModalProps {
   saving: boolean
   /**
    * select = dropdown cabang (konsol superadmin); locked = label terkunci
-   * (panel satpam — pindah cabang lewat konsol); hidden = tanpa cabang
+   * (panel pengawas — pindah cabang lewat konsol); hidden = tanpa cabang
    * (Vendor/Mitra/superadmin tanpa lokasi).
    */
   locationMode: 'select' | 'locked' | 'hidden'
@@ -36,7 +37,7 @@ export interface EditUserModalProps {
 
 /**
  * Modal ubah user terkelola — dipakai ulang halaman `/users` (endpoint
- * PATCH /users/:id, superadmin) dan panel satpam (endpoint
+ * PATCH /users/:id, superadmin) dan panel pengawas (endpoint
  * PATCH /users/security/:id, admin cabang terkunci + superadmin).
  * Prefill dari baris; peran read-only; kata sandi opsional (kosong =
  * biarkan, terisi = reset hash — pesan BE tampil apa adanya di pemilik).
@@ -212,9 +213,10 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
           />
         ) : null}
         {locationMode === 'locked' ? (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <span className="text-label font-semibold text-ink">Cabang Penugasan</span>
-            <p className="inline-flex w-fit items-center gap-1.5 rounded-control border border-border-light bg-neutral-bg px-3 py-2 text-label text-ink-secondary">
+            <p className="inline-flex w-fit min-h-touch items-center gap-2 rounded-control border border-border-light bg-neutral-bg px-3 py-2 text-label text-ink-secondary">
+              <Lock aria-hidden="true" className="size-3.5 shrink-0 text-ink-muted" />
               {lockedLocationName}
               <span className="text-ink-muted">(terkunci)</span>
             </p>

@@ -148,11 +148,11 @@ func TestSuperAdmin_DeleteUser(t *testing.T) {
 	})
 
 	t.Run("409 when the vendor still owns visits", func(t *testing.T) {
-		users := newStubManagedUsers(managedAccount("pic-1", "tek@vendor.local", domain.RoleVendor, nil))
-		users.visitsByVendor["pic-1"] = 2
+		users := newStubManagedUsers(managedAccount("vendor-1", "tek@vendor.local", domain.RoleVendor, nil))
+		users.visitsByVendor["vendor-1"] = 2
 		engine := newDeleteEngine(users, newStubLocationAdmin(), newStubVisitRepos(), domain.RoleSuperAdmin)
 
-		rec := serve(engine, "DELETE", "/users/pic-1", nil, "")
+		rec := serve(engine, "DELETE", "/users/vendor-1", nil, "")
 		mustStatus(t, rec, http.StatusConflict)
 		env := decodeEnvelope(t, rec)
 		if env.Error == nil || env.Error.Code != "CONFLICT" || env.Error.Message == "" {
@@ -164,7 +164,7 @@ func TestSuperAdmin_DeleteUser(t *testing.T) {
 	})
 
 	t.Run("409 when staff is still named on gate or audit rows", func(t *testing.T) {
-		users := newStubManagedUsers(managedAccount("sec-1", "satpam@thc.local", domain.RoleSecurity, nil))
+		users := newStubManagedUsers(managedAccount("sec-1", "security@thc.local", domain.RoleSecurity, nil))
 		users.staffRefs["sec-1"] = 3
 		engine := newDeleteEngine(users, newStubLocationAdmin(), newStubVisitRepos(), domain.RoleSuperAdmin)
 

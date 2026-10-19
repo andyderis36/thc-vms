@@ -34,10 +34,10 @@ func TestSuperAdmin_UpdateUser(t *testing.T) {
 	})
 
 	t.Run("200 vendor email-only edit", func(t *testing.T) {
-		users := newStubManagedUsers(managedAccount("pic-1", "lama@vendor.local", domain.RoleVendor, nil))
+		users := newStubManagedUsers(managedAccount("vendor-1", "lama@vendor.local", domain.RoleVendor, nil))
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
-		rec := serveJSON(engine, "PATCH", "/users/pic-1", `{"email":"baru@vendor.local"}`)
+		rec := serveJSON(engine, "PATCH", "/users/vendor-1", `{"email":"baru@vendor.local"}`)
 		mustStatus(t, rec, http.StatusOK)
 		data := decodeData[map[string]any](t, mustSuccess(t, rec))
 		if data["email"] != "baru@vendor.local" || data["location_id"] != nil {
@@ -63,7 +63,7 @@ func TestSuperAdmin_UpdateUser(t *testing.T) {
 	t.Run("400 matrix", func(t *testing.T) {
 		users := newStubManagedUsers(
 			managedAccount("adm-1", "a@thc.local", domain.RoleAdmin, &locID),
-			managedAccount("pic-1", "p@vendor.local", domain.RoleVendor, nil),
+			managedAccount("vendor-1", "p@vendor.local", domain.RoleVendor, nil),
 		)
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
@@ -74,7 +74,7 @@ func TestSuperAdmin_UpdateUser(t *testing.T) {
 			{"/users/adm-1", `{"password":""}`},
 			{"/users/adm-1", `{"location_id":"not-a-uuid"}`},
 			{"/users/adm-1", `{"vendor_id":"` + locID + `"}`},
-			{"/users/pic-1", `{"location_id":"` + locID + `"}`},
+			{"/users/vendor-1", `{"location_id":"` + locID + `"}`},
 		}
 		for _, tc := range bad {
 			if rec := serveJSON(engine, "PATCH", tc.path, tc.body); rec.Code != http.StatusBadRequest {

@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Select, type SelectOption } from '@/components/ui/Select'
@@ -101,6 +102,25 @@ const TYPE_OPTIONS: SelectOption[] = [
   { value: 'minipop', label: 'miniPOP' },
 ]
 
+/**
+ * Opsi tipe untuk modal create/edit fasilitas (diekspor agar diuji unit).
+ * `pusat` hanya ditawarkan bila BELUM ada kantor pusat ATAU saat baris yang
+ * diedit memang kantor pusat tersebut. Semua baris dihitung apa adanya —
+ * termasuk yang nonaktif (query memuat aktif + nonaktif) — supaya opsi tidak
+ * muncul kembali dan server tetap jadi otoritas penolakan (409).
+ */
+export function locationTypeFormOptions(
+  locations: Location[],
+  editing?: Location,
+): SelectOption[] {
+  const pusatExists = locations.some((location) => location.type === 'pusat')
+  const editingIsPusat = editing?.type === 'pusat'
+  if (pusatExists && !editingIsPusat) {
+    return TYPE_OPTIONS.filter((option) => option.value !== 'pusat')
+  }
+  return TYPE_OPTIONS
+}
+
 const TIMEZONE_OPTIONS: SelectOption[] = [
   { value: 'WIB', label: 'WIB' },
   { value: 'WITA', label: 'WITA' },
@@ -165,6 +185,28 @@ function FacilitiesScreen() {
     [locations, search, branchId, typeFilter, statusFilter],
   )
 
+  // Reset SEMUA state filter sekaligus — termasuk debounce `search` yang belum
+  // tentu sinkron dengan `searchInput`, plus sentinel filter ke default-nya,
+  // DAN `branchId` supaya dropdown switcher cabang di SuperadminShell ikut
+  // kembali ke "Semua Cabang" (state-nya terkontrol dari halaman ini).
+  const handleResetFilters = (): void => {
+    setSearchInput('')
+    setSearch('')
+    setBranchId('all')
+    setTypeFilter('')
+    setStatusFilter('all')
+  }
+
+  // Halaman ini tidak punya boolean `isFiltered` bawaan — hitung sendiri dari
+  // nilai filter aktif: tombol Reset Filter hanya aktif bila ADA yang disaring
+  // (input kosong + semua sentinel default = tidak ada yang perlu di-reset).
+  const isFiltered =
+    searchInput.trim() !== '' ||
+    search !== '' ||
+    branchId !== 'all' ||
+    typeFilter !== '' ||
+    statusFilter !== 'all'
+
   const emptyTitle =
     locations.length === 0 ? 'Belum ada fasilitas' : 'Tidak ada fasilitas yang cocok'
   const emptyDescription =
@@ -177,6 +219,7 @@ function FacilitiesScreen() {
       pendingCount={pendingCount}
       allLocations={locations}
       activeHref="/facilities"
+      branchId={branchId}
       onBranchChange={setBranchId}
     >
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -219,6 +262,8 @@ function FacilitiesScreen() {
             onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
+        {/* Anak TERAKHIR toolbar: reset semua filter (termasuk switcher cabang). */}
+        <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
       </div>
 
       <div className="mt-4">
@@ -285,6 +330,7 @@ function FacilitiesScreen() {
         <LocationFormModal
           title="Tambah Fasilitas"
           submitLabel="Tambah Fasilitas"
+          locations={locations}
           onClose={() => setCreateOpen(false)}
         />
       ) : null}
@@ -292,6 +338,7 @@ function FacilitiesScreen() {
         <LocationFormModal
           title={`Ubah ${editing.name}`}
           submitLabel="Simpan Perubahan"
+          locations={locations}
           initial={editing}
           onClose={() => setEditing(null)}
         />
@@ -352,41 +399,41 @@ function FacilityTable({ locations, onEdit, onDelete }: FacilityListProps) {
               <th
                 key={header.label}
                 scope="col"
-                className={`${header.width} border-b border-border-light bg-neutral-bg px-4 py-3 text-label font-semibold text-ink-secondary`}
+                className={`${header.width} border-b border-border-light bg-brand/5 px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm font-semibold text-ink-secondary`}
               >
                 {header.label}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-border-light">
           {locations.map((location) => {
             const active = isLocationActive(location)
             return (
               <tr
                 key={location.id}
-                className="border-b border-border-light transition-colors last:border-b-0 hover:bg-page"
+                className="transition-colors hover:bg-brand/5"
               >
-                <td className="px-4 py-3">
-                  <p className="truncate text-sm font-semibold text-ink" title={location.name}>
+                <td className="px-2 sm:px-3 lg:px-6 py-3">
+<p className="truncate text-xs sm:text-sm font-semibold text-ink" title={location.name}>
                     {location.name}
                   </p>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-2 sm:px-3 lg:px-6 py-3">
                   <Badge tone="info">{LOCATION_TYPE_LABEL[location.type]}</Badge>
                 </td>
-                <td className="truncate px-4 py-3 text-sm text-ink-secondary" title={location.city}>
+                <td className="truncate px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm text-ink-secondary" title={location.city}>
                   {location.city !== '' ? location.city : '—'}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-2 sm:px-3 lg:px-6 py-3">
                   <Badge tone="neutral">{location.timezone}</Badge>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-2 sm:px-3 lg:px-6 py-3">
                   <Badge tone={active ? 'success' : 'neutral'}>
-                    {active ? 'AKTIF' : 'NONAKTIF'}
+                    {active ? 'Aktif' : 'Nonaktif'}
                   </Badge>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-2 sm:px-3 lg:px-6 py-3">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <Button
                       size="sm"
@@ -449,7 +496,7 @@ function FacilityCards({ locations, onEdit, onDelete }: FacilityListProps) {
                 </p>
               </div>
               <Badge tone={active ? 'success' : 'neutral'} className="shrink-0">
-                {active ? 'AKTIF' : 'NONAKTIF'}
+                {active ? 'Aktif' : 'Nonaktif'}
               </Badge>
             </div>
             <div className="mt-3 flex flex-1 flex-col gap-2 text-sm text-ink-secondary">
@@ -510,11 +557,12 @@ function FacilityCards({ locations, onEdit, onDelete }: FacilityListProps) {
 interface LocationFormModalProps {
   title: string
   submitLabel: string
+  locations: Location[]
   initial?: Location
   onClose: () => void
 }
 
-function LocationFormModal({ title, submitLabel, initial, onClose }: LocationFormModalProps) {
+function LocationFormModal({ title, submitLabel, locations, initial, onClose }: LocationFormModalProps) {
   const [form, setForm] = useState<LocationFormValues>(
     initial !== undefined
       ? {
@@ -530,6 +578,21 @@ function LocationFormModal({ title, submitLabel, initial, onClose }: LocationFor
   const update = useUpdateLocationMutation()
   const pending = create.isPending || update.isPending
   const formId = initial !== undefined ? 'location-edit-form' : 'location-create-form'
+
+  // Aturan penyembunyian `pusat` per modal ada di locationTypeFormOptions.
+  const typeOptions = useMemo(
+    () => locationTypeFormOptions(locations, initial),
+    [locations, initial],
+  )
+
+  // Invariant: nilai select wajib selalu terkandung di daftar opsi — bila opsi
+  // berubah saat modal terbuka (refetch), kosongkan pilihan agar user memilih
+  // tipe yang valid secara sadar; server tetap otoritas (tanpa toast blokir).
+  useEffect(() => {
+    if (form.type !== '' && !typeOptions.some((option) => option.value === form.type)) {
+      setForm((prev) => ({ ...prev, type: '' }))
+    }
+  }, [form.type, typeOptions])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
@@ -609,7 +672,7 @@ function LocationFormModal({ title, submitLabel, initial, onClose }: LocationFor
           <Select
             label="Tipe Fasilitas"
             placeholder="Pilih tipe"
-            options={TYPE_OPTIONS}
+            options={typeOptions}
             value={form.type}
             onChange={(event) =>
               setForm((prev) => ({ ...prev, type: event.target.value as LocationTypeOption }))

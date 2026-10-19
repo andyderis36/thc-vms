@@ -13,15 +13,15 @@ var (
 	_ domain.ManagedUserRepository = (*userRepository)(nil)
 )
 
-// CountVisitsByPIC reports how many visits the account still owns as PIC.
+// CountVisitsByVendorUser reports how many visits the account still owns as vendor.
 // It is the first DELETE /users/:id pre-check: a non-zero count refuses
 // with 409 before any write is attempted.
-func (r *userRepository) CountVisitsByPIC(ctx context.Context, userID domain.UUID) (int64, error) {
+func (r *userRepository) CountVisitsByVendorUser(ctx context.Context, userID domain.UUID) (int64, error) {
 	parsed, err := fromDomainUUID(userID)
 	if err != nil {
 		return 0, err
 	}
-	n, err := r.queries().CountVisitsByPIC(ctx, db.CountVisitsByPICParams{PicUserID: parsed})
+	n, err := r.queries().CountVisitsByVendorUser(ctx, db.CountVisitsByVendorUserParams{VendorUserID: parsed})
 	if err != nil {
 		return 0, MapError(err)
 	}

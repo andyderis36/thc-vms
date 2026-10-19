@@ -168,8 +168,8 @@ func (s *stubManagedUsers) UpdateManagedUser(_ context.Context, id domain.UUID, 
 	return m.User, nil
 }
 
-// CountVisitsByPIC answers the DELETE /users/:id vendor-ownership pre-check.
-func (s *stubManagedUsers) CountVisitsByPIC(_ context.Context, id domain.UUID) (int64, error) {
+// CountVisitsByVendorUser answers the DELETE /users/:id vendor-ownership pre-check.
+func (s *stubManagedUsers) CountVisitsByVendorUser(_ context.Context, id domain.UUID) (int64, error) {
 	if s.countErr != nil {
 		return 0, s.countErr
 	}
@@ -391,6 +391,19 @@ func TestSuperAdmin_CreateLocation(t *testing.T) {
 		}
 		if len(locations.created) != 0 {
 			t.Fatal("rejected creates must not touch the store")
+		}
+	})
+
+	t.Run("409 on duplicate Kantor Pusat", func(t *testing.T) {
+		locations := newStubLocationAdmin()
+		locations.createErr = domain.Conflict("Kantor Pusat sudah terdaftar. Hanya boleh ada satu Kantor Pusat.")
+		engine := newSuperAdminEngine(newStubManagedUsers(), locations, domain.RoleSuperAdmin)
+
+		rec := serveJSON(engine, "POST", "/locations", `{"name":"Kantor Pusat Kedua","type":"pusat"}`)
+		mustStatus(t, rec, http.StatusConflict)
+		env := decodeEnvelope(t, rec)
+		if env.Error == nil || env.Error.Code != "CONFLICT" {
+			t.Fatalf("duplicate pusat must be 409 CONFLICT, got %q", rec.Body.String())
 		}
 	})
 }

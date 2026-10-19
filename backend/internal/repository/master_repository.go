@@ -2,8 +2,10 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -166,7 +168,7 @@ func (r *masterRepository) CreateLocation(ctx context.Context, loc domain.Locati
 		Timezone: string(loc.Timezone),
 	})
 	if err != nil {
-		return domain.Location{}, MapError(err)
+		return domain.Location{}, mapLocationWriteError(err)
 	}
 	return locationModelToDomain(row), nil
 }
@@ -190,7 +192,7 @@ func (r *masterRepository) UpdateLocation(ctx context.Context, id domain.UUID, p
 		IsActive: patchBool(patch.IsActive),
 	})
 	if err != nil {
-		return domain.Location{}, MapError(err)
+		return domain.Location{}, mapLocationWriteError(err)
 	}
 	return locationModelToDomain(row), nil
 }
@@ -244,6 +246,18 @@ func patchTimezoneText(t *domain.Timezone) pgtype.Text {
 		return pgtype.Text{Valid: false}
 	}
 	return pgtype.Text{String: string(*t), Valid: true}
+}
+
+// mapLocationWriteError translates a location write failure. A duplicate
+// Kantor Pusat (partial unique index uq_location_single_pusat) surfaces a
+// specific Indonesian conflict message; every other failure falls through to
+// the generic MapError behaviour unchanged.
+func mapLocationWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "uq_location_single_pusat" {
+		return domain.Conflict("Kantor Pusat sudah terdaftar. Hanya boleh ada satu Kantor Pusat.")
+	}
+	return MapError(err)
 }
 
 // patchBool maps the optional is_active member: nil keeps the stored flag.

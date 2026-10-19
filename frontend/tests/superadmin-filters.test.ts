@@ -5,8 +5,11 @@ import {
   LOCATION_TYPE_LABEL,
   applyFacilityFilters,
   isLocationActive,
+  locationTypeFormOptions,
 } from '@/app/facilities/page'
 import {
+  applyManagedUserFilters,
+  managedVendorOptions,
   requiresManagedLocation,
   toManagedUserListParams,
   userAffiliationLabel,
@@ -114,6 +117,43 @@ describe('applyFacilityFilters', () => {
   })
 })
 
+describe('locationTypeFormOptions', () => {
+  const pusatRow = locationStub({ id: 'loc-pusat', name: 'Kantor Pusat THC', type: 'pusat' })
+
+  it('create: menyembunyikan pusat saat kantor pusat sudah ada', () => {
+    const options = locationTypeFormOptions([pusatRow, locationStub({ id: 'loc-1' })])
+    expect(options.map((option) => option.value)).toEqual(['cabang', 'pop', 'minipop'])
+  })
+
+  it('create: kantor pusat NONAKTIF tetap dihitung (query aktif + nonaktif)', () => {
+    const options = locationTypeFormOptions([
+      locationStub({ id: 'loc-pusat', type: 'pusat', is_active: false }),
+    ])
+    expect(options.map((option) => option.value)).toEqual(['cabang', 'pop', 'minipop'])
+  })
+
+  it('create: menawarkan pusat bila belum ada kantor pusat', () => {
+    expect(
+      locationTypeFormOptions([locationStub({ id: 'loc-1' })]).map((option) => option.value),
+    ).toEqual(['pusat', 'cabang', 'pop', 'minipop'])
+    expect(locationTypeFormOptions([]).map((option) => option.value)).toContain('pusat')
+  })
+
+  it('edit: baris non-pusat tetap tanpa opsi pusat saat kantor pusat ada', () => {
+    const options = locationTypeFormOptions(
+      [pusatRow, locationStub({ id: 'loc-1' })],
+      locationStub({ id: 'loc-1' }),
+    )
+    expect(options.map((option) => option.value)).toEqual(['cabang', 'pop', 'minipop'])
+  })
+
+  it('edit: baris kantor pusat itu sendiri tetap menawarkan pusat', () => {
+    const options = locationTypeFormOptions([pusatRow], pusatRow)
+    expect(options.map((option) => option.value)).toContain('pusat')
+    expect(options.find((option) => option.value === 'pusat')?.label).toBe('Kantor Pusat')
+  })
+})
+
 describe('requiresManagedLocation', () => {
   it('wajib iff admin, sembunyi iff vendor', () => {
     expect(requiresManagedLocation('admin')).toBe(true)
@@ -150,5 +190,63 @@ describe('toManagedUserListParams', () => {
     expect(
       toManagedUserListParams({ role: 'admin', search: ' bayu ', locationId: 'loc-1' }),
     ).toEqual({ role: 'admin', search: 'bayu', location_id: 'loc-1' })
+  })
+})
+
+describe('managedVendorOptions', () => {
+  it('nama vendor unik non-kosong dari peran vendor, terurut, diawali sentinel', () => {
+    const rows = [
+      userStub({ role: 'vendor', vendor_name: 'PT Lintas Fiber' }),
+      userStub({ role: 'vendor', vendor_name: 'PT Lintas Fiber' }),
+      userStub({ role: 'vendor', vendor_name: 'CV Andalan' }),
+      userStub({ role: 'vendor', vendor_name: null }),
+      userStub({ role: 'admin', vendor_name: 'PT Admin Co' }),
+    ]
+    expect(managedVendorOptions(rows)).toEqual([
+      { value: 'all', label: 'Semua Vendor' },
+      { value: 'CV Andalan', label: 'CV Andalan' },
+      { value: 'PT Lintas Fiber', label: 'PT Lintas Fiber' },
+    ])
+  })
+
+  it('input kosong hanya mengembalikan sentinel', () => {
+    expect(managedVendorOptions([])).toEqual([{ value: 'all', label: 'Semua Vendor' }])
+  })
+})
+
+describe('applyManagedUserFilters', () => {
+  const rows = [
+    userStub({ id: 'u1', role: 'admin', status: 'active', vendor_name: null }),
+    userStub({ id: 'u2', role: 'vendor', status: 'inactive', vendor_name: 'PT Lintas Fiber' }),
+    userStub({ id: 'u3', role: 'vendor', status: 'blacklisted', vendor_name: 'CV Andalan' }),
+    userStub({ id: 'u4', role: 'security', status: 'active', vendor_name: null }),
+  ]
+
+  it('membuang security; tanpa filter mengembalikan sisanya (urutan tetap)', () => {
+    expect(applyManagedUserFilters(rows, { status: 'all', vendor: 'all' }).map((u) => u.id)).toEqual([
+      'u1',
+      'u2',
+      'u3',
+    ])
+  })
+
+  it('memfilter per status', () => {
+    expect(applyManagedUserFilters(rows, { status: 'inactive', vendor: 'all' }).map((u) => u.id)).toEqual(['u2'])
+    expect(applyManagedUserFilters(rows, { status: 'blacklisted', vendor: 'all' }).map((u) => u.id)).toEqual(['u3'])
+    expect(applyManagedUserFilters(rows, { status: 'active', vendor: 'all' }).map((u) => u.id)).toEqual(['u1'])
+  })
+
+  it('memfilter per vendor exact-match (bukan substring)', () => {
+    expect(
+      applyManagedUserFilters(rows, { status: 'all', vendor: 'PT Lintas Fiber' }).map((u) => u.id),
+    ).toEqual(['u2'])
+    expect(applyManagedUserFilters(rows, { status: 'all', vendor: 'Lintas' })).toEqual([])
+  })
+
+  it('menggabungkan status dan vendor', () => {
+    expect(
+      applyManagedUserFilters(rows, { status: 'inactive', vendor: 'PT Lintas Fiber' }).map((u) => u.id),
+    ).toEqual(['u2'])
+    expect(applyManagedUserFilters(rows, { status: 'blacklisted', vendor: 'PT Lintas Fiber' })).toEqual([])
   })
 })

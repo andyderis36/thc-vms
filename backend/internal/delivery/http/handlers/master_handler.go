@@ -48,7 +48,7 @@ type masterPurposeDTO struct {
 	Name string `json:"name"`
 }
 
-// masterVendorDTO is the [{id, name}] company dropdown the PIC/admin forms
+// masterVendorDTO is the [{id, name}] company dropdown the vendor/admin forms
 // consume: the vendor identity plus its display name, nothing else.
 type masterVendorDTO struct {
 	ID   string `json:"id"`
@@ -122,7 +122,7 @@ type vendorCatalogue interface {
 
 // ListVendors serves GET /vendors with the active company catalogue. Every
 // authenticated role may read it (the FE company dropdown is shared by the
-// PIC application form and the admin consoles); blacklisted companies are
+// vendor application form and the admin consoles); blacklisted companies are
 // never offered.
 func (h *MasterHandler) ListVendors(c *gin.Context) {
 	if _, ok := deliveryhttp.IdentityFrom(c); !ok {

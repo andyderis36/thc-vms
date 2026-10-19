@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Lock, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { EditUserModal } from '@/features/users/components/EditUserModal'
+import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Select, type SelectOption } from '@/components/ui/Select'
@@ -31,7 +32,7 @@ function apiErrorMessage(error: unknown): string {
   return 'Terjadi kesalahan. Silakan coba lagi.'
 }
 
-/** Pesan konfirmasi hapus satpam — menyebut nama agar tidak salah sasaran. */
+/** Pesan konfirmasi hapus pengawas — menyebut nama agar tidak salah sasaran. */
 export function deleteSecurityUserConfirmMessage(target: User): string {
   return `Hapus permanen akun ${getRoleLabel('security').toLowerCase()} "${target.name}" (${target.email})? Tindakan ini tidak dapat dibatalkan.`
 }
@@ -51,7 +52,7 @@ export function canShowDeleteSecurityUser(
   return ownLocationId !== null && target.location_id === ownLocationId
 }
 
-/** Opsi filter status pada toolbar daftar satpam (sentinel 'all' = semua). */
+/** Opsi filter status pada toolbar daftar pengawas (sentinel 'all' = semua). */
 const STATUS_FILTER_OPTIONS: SelectOption[] = [
   { value: 'all', label: 'Semua Status' },
   { value: 'active', label: 'Aktif' },
@@ -65,12 +66,12 @@ export interface SecurityUserPanelProps {
    * Form di-reset setiap `enabled` berubah false -> true.
    */
   enabled: boolean
-  /** Dipanggil setelah satpam berhasil ditambahkan (modal: tutup diri). */
+  /** Dipanggil setelah pengawas berhasil ditambahkan (modal: tutup diri). */
   onCreated?: () => void
 }
 
 /**
- * Isi manajemen satpam: tombol tambah (membuka modal) + daftar kartu
+ * Isi manajemen pengawas: tombol tambah (membuka modal) + daftar kartu
  * responsif (ponsel 1 kolom / tablet & desktop 2 kolom) + toggle status.
  *
  * Dipakai ulang DUA permukaan (DRY): `SecurityUserModal` (SCR-02) dan halaman
@@ -145,6 +146,21 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
   }))
   const canPickLocation = role === 'super_admin'
 
+  // Reset SEMUA filter bar ke default: pencarian (state mentah + state debounced)
+  // dan status. Tidak ada state pagination di panel ini (daftar memuat seluruh
+  // anggota cabang dalam satu query), jadi tidak ada halaman yang dikembalikan.
+  // Kedua state pencarian dibersihkan sekaligus supaya debounce 300ms tidak
+  // "menghidupkan kembali" query lama dari searchInput yang tertinggal.
+  const handleResetFilters = (): void => {
+    setSearchInput('')
+    setSearch('')
+    setStatusFilter('all')
+  }
+
+  // Tombol reset hanya aktif bila benar-benar ada filter yang menyimpang dari
+  // default (sentinel status 'all' + pencarian kosong) — hindari klik percuma.
+  const isFiltered = searchInput.trim() !== '' || search !== '' || statusFilter !== 'all'
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -174,6 +190,7 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
             onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
+        <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
       </div>
 
       <CreateSecurityModal
@@ -239,7 +256,7 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
                       }
                       className="shrink-0"
                     >
-                      {isActive ? 'AKTIF' : member.status === 'blacklisted' ? 'DIBLOKIR' : 'NONAKTIF'}
+                      {isActive ? 'Aktif' : member.status === 'blacklisted' ? 'Diblokir' : 'Nonaktif'}
                     </Badge>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -353,12 +370,12 @@ interface CreateSecurityModalProps {
   locationOptions: Array<{ value: string; label: string }>
   lockedLocationId: string
   lockedLocationLabel: string
-  /** Dipanggil setelah satpam berhasil ditambahkan (panel: tutup + teruskan). */
+  /** Dipanggil setelah pengawas berhasil ditambahkan (panel: tutup + teruskan). */
   onCreated?: () => void
 }
 
 /**
- * Modal Tambah Satpam — form yang dulu inline di panel.
+ * Modal Tambah Pengawas — form yang dulu inline di panel.
  * Pesan toast identik dengan versi inline sebelumnya. Tanpa field NIK
  * (BE menolak NIK untuk security).
  */
@@ -491,9 +508,10 @@ function CreateSecurityModal({
             required
           />
         ) : (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <span className="text-label font-semibold text-ink">Cabang Penugasan</span>
-            <p className="inline-flex w-fit items-center gap-1.5 rounded-control border border-border-light bg-neutral-bg px-3 py-2 text-label text-ink-secondary">
+            <p className="inline-flex w-fit min-h-touch items-center gap-2 rounded-control border border-border-light bg-neutral-bg px-3 py-2 text-label text-ink-secondary">
+              <Lock aria-hidden="true" className="size-3.5 shrink-0 text-ink-muted" />
               {lockedLocationLabel}
               <span className="text-ink-muted">(terkunci)</span>
             </p>
@@ -510,11 +528,11 @@ export interface SecurityUserModalProps {
 }
 
 /**
- * Modal Kelola Satpam Cabang (bagian dari SCR-02).
+ * Modal Kelola Pengawas Cabang (bagian dari SCR-02).
  *
  * Cangkang tipis di atas `SecurityUserPanel`: panel me-refresh daftar
  * setiap modal dibuka (`enabled=open`); form tambah hidup di modal
- * `Tambah Satpam` tersendiri yang dibuka dari tombol panel.
+ * `Tambah Pengawas` tersendiri yang dibuka dari tombol panel.
  */
 export function SecurityUserModal({ open, onClose }: SecurityUserModalProps) {
   return (

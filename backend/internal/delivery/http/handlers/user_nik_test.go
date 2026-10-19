@@ -94,7 +94,7 @@ func TestSuperAdmin_UpdateUserNIK(t *testing.T) {
 	t.Run("400 matrix for provided values", func(t *testing.T) {
 		users := newStubManagedUsers(
 			managedAccount("adm-1", "a@thc.local", domain.RoleAdmin, &locID),
-			managedAccount("pic-1", "p@vendor.local", domain.RoleVendor, nil),
+			managedAccount("vendor-1", "p@vendor.local", domain.RoleVendor, nil),
 		)
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
@@ -102,7 +102,7 @@ func TestSuperAdmin_UpdateUserNIK(t *testing.T) {
 			{"/users/adm-1", `{"nik":""}`},
 			{"/users/adm-1", `{"nik":"123"}`},
 			{"/users/adm-1", `{"nik":"35780101000000AB"}`},
-			{"/users/pic-1", `{"nik":"12345678901234567"}`},
+			{"/users/vendor-1", `{"nik":"12345678901234567"}`},
 		}
 		for _, tc := range bad {
 			if rec := serveJSON(engine, "PATCH", tc.path, tc.body); rec.Code != http.StatusBadRequest {
@@ -121,7 +121,7 @@ func TestSecurityAccountNIKRejected(t *testing.T) {
 		master := &stubMasterStore{locations: []domain.Location{{ID: "loc-own", Name: "Cabang Sendiri"}}}
 		engine := newUserEngine(users, master, domain.RoleAdmin, "loc-own")
 
-		body := `{"name":"Satpam Baru","email":"baru@thc.local","password":"Secret123!","nik":"` + testAdminNIK + `"}`
+		body := `{"name":"Pengawas Baru","email":"baru@thc.local","password":"Secret123!","nik":"` + testAdminNIK + `"}`
 		rec := serveJSON(engine, "POST", "/users/security", body)
 		mustStatus(t, rec, http.StatusBadRequest)
 		if len(users.created) != 0 {

@@ -35,15 +35,15 @@ func (q *Queries) CountStaffReferences(ctx context.Context, arg CountStaffRefere
 	return column_1, err
 }
 
-const countVisitsByPIC = `-- name: CountVisitsByPIC :one
+const countVisitsByVendorUser = `-- name: CountVisitsByVendorUser :one
 
 SELECT count(*)
 FROM visit_request
-WHERE pic_user_id = $1
+WHERE vendor_user_id = $1
 `
 
-type CountVisitsByPICParams struct {
-	PicUserID uuid.UUID `json:"pic_user_id"`
+type CountVisitsByVendorUserParams struct {
+	VendorUserID uuid.UUID `json:"vendor_user_id"`
 }
 
 // =============================================================================
@@ -53,10 +53,10 @@ type CountVisitsByPICParams struct {
 // is the second line of defence (a raced reference surfaces as 23503 -> 409
 // via MapError). There is no status transition here: the row is removed.
 // =============================================================================
-// DELETE /users/:id pre-check 1: visits owned by the account as PIC
-// (visit_request.pic_user_id, no cascade, so a remaining row blocks the delete).
-func (q *Queries) CountVisitsByPIC(ctx context.Context, arg CountVisitsByPICParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countVisitsByPIC, arg.PicUserID)
+// DELETE /users/:id pre-check 1: visits owned by the account as vendor user
+// (visit_request.vendor_user_id, no cascade, so a remaining row blocks the delete).
+func (q *Queries) CountVisitsByVendorUser(ctx context.Context, arg CountVisitsByVendorUserParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countVisitsByVendorUser, arg.VendorUserID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

@@ -122,7 +122,7 @@ func securityUser(id, email, loc string) domain.User {
 	locationID := domain.UUID(loc)
 	return domain.User{
 		ID:         domain.UUID(id),
-		Name:       "Satpam " + id,
+		Name:       "Pengawas " + id,
 		Email:      email,
 		Phone:      "0811",
 		RoleID:     "role-security",
@@ -191,7 +191,7 @@ func TestCreateSecurity_AdminLocationIsForcedToOwnBranch(t *testing.T) {
 	master := &stubMasterStore{locations: []domain.Location{{ID: "loc-own", Name: "Cabang Sendiri"}}}
 	engine := newUserEngine(users, master, domain.RoleAdmin, "loc-own")
 
-	body := `{"name":"Satpam Baru","email":"baru@thc.local","password":"Secret123!","location_id":"loc-foreign"}`
+	body := `{"name":"Pengawas Baru","email":"baru@thc.local","password":"Secret123!","location_id":"loc-foreign"}`
 	rec := serveJSON(engine, "POST", "/users/security", body)
 	mustStatus(t, rec, http.StatusCreated)
 	if len(users.created) != 1 {
@@ -214,7 +214,7 @@ func TestCreateSecurity_PasswordIsHashedNotStored(t *testing.T) {
 	engine := newUserEngine(users, master, domain.RoleAdmin, "loc-own")
 
 	const plaintext = "Secret123!"
-	rec := serveJSON(engine, "POST", "/users/security", `{"name":"Satpam Hash","email":"hash@thc.local","password":"`+plaintext+`"}`)
+	rec := serveJSON(engine, "POST", "/users/security", `{"name":"Pengawas Hash","email":"hash@thc.local","password":"`+plaintext+`"}`)
 	mustStatus(t, rec, http.StatusCreated)
 	if len(users.created) != 1 {
 		t.Fatalf("expected 1 created account, got %d", len(users.created))

@@ -16,10 +16,10 @@ func TestUpdateSecurity_PartialEdit(t *testing.T) {
 	store := newStubSecurityDeleteStore(securityUser("sec-1", "s1@thc.local", "loc-own"))
 	engine := newSecurityDeleteEngine(store, domain.RoleAdmin, "loc-own")
 
-	rec := serve(engine, "PATCH", "/users/security/sec-1", []byte(`{"name":"Satpam Baru","phone":"0801"}`), "application/json")
+	rec := serve(engine, "PATCH", "/users/security/sec-1", []byte(`{"name":"Pengawas Baru","phone":"0801"}`), "application/json")
 	mustStatus(t, rec, http.StatusOK)
 	updated := store.users["sec-1"]
-	if updated.Name != "Satpam Baru" || updated.Phone != "0801" || updated.Email != "s1@thc.local" {
+	if updated.Name != "Pengawas Baru" || updated.Phone != "0801" || updated.Email != "s1@thc.local" {
 		t.Fatalf("partial edit wrong: %+v", updated)
 	}
 

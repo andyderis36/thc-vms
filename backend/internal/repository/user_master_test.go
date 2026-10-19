@@ -25,7 +25,7 @@ func TestUserRepository_Lifecycle(t *testing.T) {
 	roleID := roleIDOf(t, pool, "security")
 
 	created, err := users.Create(ctx, domain.User{
-		Name: "Satpam Baru", Email: "baru@thc.test", PasswordHash: "hash-baru",
+		Name: "Pengawas Baru", Email: "baru@thc.test", PasswordHash: "hash-baru",
 		Phone: "0812", RoleID: roleID, LocationID: &locA,
 		Type: domain.UserTypeInternal, Status: domain.UserStatusActive,
 	})
@@ -43,7 +43,7 @@ func TestUserRepository_Lifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindByEmail: %v", err)
 	}
-	if found.Name != "Satpam Baru" || found.Status != domain.UserStatusActive {
+	if found.Name != "Pengawas Baru" || found.Status != domain.UserStatusActive {
 		t.Fatalf("found = %+v, want the created account", found)
 	}
 	if _, err := users.FindByEmail(ctx, "tidak-ada@thc.test"); err == nil {
@@ -75,7 +75,7 @@ func TestUserRepository_Lifecycle(t *testing.T) {
 		t.Fatalf("UpdateLastLogin: %v", err)
 	}
 
-	other := seedUser(t, pool, seedUserParams{Name: "Satpam B", Email: "b@thc.test", Role: "security", Location: locB, Type: "internal"})
+	other := seedUser(t, pool, seedUserParams{Name: "Pengawas B", Email: "b@thc.test", Role: "security", Location: locB, Type: "internal"})
 	_ = other
 	branch, err := users.ListSecurity(ctx, &locA)
 	if err != nil {
