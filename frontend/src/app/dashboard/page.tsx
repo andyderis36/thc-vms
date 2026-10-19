@@ -170,11 +170,17 @@ function DashboardScreen() {
   // tidak me-remount halaman. URL tanpa focus tidak mereset pilihan
   // pengguna yang sedang aktif.
   const focus = useSearchParams().get('focus')
-  useEffect(() => {
+  // `lastFocus` sengaja diinisialisasi `null`, bukan `focus`: dengan begitu
+  // blok tetap berjalan saat mount (menutup `?focus=approvals`) sekaligus tiap
+  // kali focus berubah. Penyesuaian saat render mengikuti pola "adjusting state
+  // when a prop changes" React, bukan effect, agar tak memicu render berantai.
+  const [lastFocus, setLastFocus] = useState<string | null>(null)
+  if (lastFocus !== focus) {
+    setLastFocus(focus)
     if (focus === 'approvals') {
       setStatusFilter('requested')
     }
-  }, [focus])
+  }
 
   // Debounce pencarian 300ms supaya setiap ketikan tidak memicu request.
   useEffect(() => {
@@ -183,10 +189,23 @@ function DashboardScreen() {
   }, [searchInput])
 
   // Filter/urutan berubah → kembali ke halaman 1 (baris halaman N tidak
-  // relevan untuk kombinasi filter baru).
-  useEffect(() => {
+  // relevan untuk kombinasi filter baru). Penyesuaian saat render mengikuti
+  // pola "adjusting state when a prop changes" React, bukan effect, agar tak
+  // memicu render berantai.
+  const filterSignature = JSON.stringify([
+    facilityFilter,
+    statusFilter,
+    search,
+    dateFrom,
+    dateTo,
+    sortBy,
+    order,
+  ])
+  const [lastFilterSignature, setLastFilterSignature] = useState(filterSignature)
+  if (lastFilterSignature !== filterSignature) {
+    setLastFilterSignature(filterSignature)
     setPage(1)
-  }, [facilityFilter, statusFilter, search, dateFrom, dateTo, sortBy, order])
+  }
 
   // Status "ada filter aktif" untuk `disabled` tombol Reset Filter — HANYA
   // kontrol bar filter yang dihitung; paginasi (page/pageSize) bukan filter

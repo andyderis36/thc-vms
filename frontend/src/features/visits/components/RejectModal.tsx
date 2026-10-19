@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/Button'
@@ -22,17 +22,14 @@ export interface RejectModalProps {
 
 /**
  * Modal penolakan kunjungan (SCR-02). Alasan WAJIB dan minimal 5 karakter
- * (PRD §4); reset state alasan setiap kali modal dibuka agar alasan
- * kunjungan sebelumnya tidak bocor ke kunjungan berikutnya.
+ * (PRD §4). Alasan antar-kunjungan tidak bocor karena setiap call site
+ * me-mount modal secara KONDISIONAL (`target !== null ? … : null`), sehingga
+ * `reason` ter-reset oleh unmount/remount — bukan oleh efek.
  */
 export function RejectModal({ open, visit, onClose }: RejectModalProps) {
   const [reason, setReason] = useState('')
   const reject = useRejectVisitMutation()
   const queryClient = useQueryClient()
-
-  useEffect(() => {
-    if (open) setReason('')
-  }, [open])
 
   const trimmed = reason.trim()
   const reasonValid = trimmed.length >= MIN_REASON

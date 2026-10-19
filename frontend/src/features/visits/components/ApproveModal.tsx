@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { StatusBadge } from '@/components/ui/Badge'
@@ -70,17 +70,14 @@ export interface ApproveModalProps {
 
 /**
  * Modal persetujuan kunjungan (SCR-02). Catatan persetujuan bersifat opsional.
- * Reset state catatan setiap kali modal dibuka agar catatan kunjungan sebelumnya
- * tidak bocor ke kunjungan berikutnya.
+ * Catatan antar-kunjungan tidak bocor karena setiap call site me-mount modal
+ * secara KONDISIONAL (`target !== null ? … : null`), sehingga `notes` ter-reset
+ * oleh unmount/remount — bukan oleh efek.
  */
 export function ApproveModal({ open, visit, onClose }: ApproveModalProps) {
   const [notes, setNotes] = useState('')
   const approve = useApproveVisitMutation()
   const queryClient = useQueryClient()
-
-  useEffect(() => {
-    if (open) setNotes('')
-  }, [open])
 
   const handleApprove = (): void => {
     if (visit === null) return

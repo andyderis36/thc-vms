@@ -142,11 +142,17 @@ function GateContent() {
 
   const isUpcoming = tab === 'upcoming'
 
-  // Filter/urutan/tab/pencarian berubah → kembali ke halaman 1 (baris halaman N tidak
-  // relevan untuk kombinasi filter baru).
-  useEffect(() => {
+  // Filter/urutan/tab/pencarian berubah → kembali ke halaman 1 (baris halaman N
+  // tidak relevan untuk kombinasi filter baru). Penyesuaian dilakukan saat
+  // render mengikuti pola "adjusting state when a prop changes" React — sama
+  // seperti halaman users & facilities — agar tidak memicu render berantai dan
+  // `useVisitsQuery` tak pernah terpanggil dengan `page` basi.
+  const filterSignature = JSON.stringify([tab, dateFrom, dateTo, sortBy, order, search])
+  const [lastFilterSignature, setLastFilterSignature] = useState(filterSignature)
+  if (lastFilterSignature !== filterSignature) {
+    setLastFilterSignature(filterSignature)
     setPage(1)
-  }, [tab, dateFrom, dateTo, sortBy, order, search])
+  }
 
   // Debounce pencarian 300ms supaya setiap ketikan tidak memicu request —
   // pola identik halaman dashboard dan approvals.
