@@ -15,7 +15,7 @@ import (
 func TestCreateVisit_ManualVendorNameStoredAndEchoed(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestServiceWithVendors(repo, nil, testNow(), activeVendors())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	manual := "PT Subkon Mandiri"
 	in := validCreateInput()
@@ -52,7 +52,7 @@ func TestCreateVisit_ManualVendorNameStoredAndEchoed(t *testing.T) {
 func TestCreateVisit_VendorIDWinsOverManualName(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestServiceWithVendors(repo, nil, testNow(), activeVendors())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	vendorID := domain.UUID("vendor-1")
 	manual := "PT Tidak Terdaftar"
@@ -81,7 +81,7 @@ func TestCreateVisit_VendorIDWinsOverManualName(t *testing.T) {
 func TestCreateVisit_RejectsOverlongManualVendorName(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestServiceWithVendors(repo, nil, testNow(), activeVendors())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	tooLong := strings.Repeat("A", 121)
 	in := validCreateInput()
@@ -109,7 +109,7 @@ func TestCreateVisit_RejectsOverlongManualVendorName(t *testing.T) {
 func TestCreateVisit_PurposeNoteOnlyAccepted(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	in := validCreateInput()
 	in.PurposeIDs = nil
@@ -135,7 +135,7 @@ func TestCreateVisit_PurposeNoteOnlyAccepted(t *testing.T) {
 func TestCreateVisit_RejectsMissingPurposeAndNote(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	in := validCreateInput()
 	in.PurposeIDs = nil
@@ -155,7 +155,7 @@ func TestCreateVisit_RejectsMissingPurposeAndNote(t *testing.T) {
 func TestCreateVisit_RejectsOverlongPurposeNote(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	in := validCreateInput()
 	in.PurposeIDs = nil

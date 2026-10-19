@@ -19,12 +19,12 @@ func TestReschedule_SecondRescheduleNeedsNoReapproval(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	seedApprovedVisit(repo)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	firstStart := time.Date(2026, time.October, 7, 9, 0, 0, 0, time.UTC)
 	firstEnd := time.Date(2026, time.October, 7, 17, 0, 0, 0, time.UTC)
 	// Given: an approved visit moved once — no admin approve call anywhere.
-	// When:  the PIC moves the schedule, then moves it again.
+	// When:  the vendor moves the schedule, then moves it again.
 	if err := svc.Reschedule(context.Background(), actor, domain.UUID("visit-10"), firstStart, firstEnd, "jadwal teknisi berubah"); err != nil {
 		t.Fatalf("first Reschedule returned error: %v", err)
 	}

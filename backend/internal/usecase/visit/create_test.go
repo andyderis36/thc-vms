@@ -13,7 +13,7 @@ import (
 func TestCreateVisit_ValidRequestCreatesRequestedVisit(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	got, err := svc.CreateVisit(context.Background(), actor, validCreateInput())
 	if err != nil {
@@ -34,15 +34,15 @@ func TestCreateVisit_ValidRequestCreatesRequestedVisit(t *testing.T) {
 	if !repo.createdVisit.IsNDAAccepted {
 		t.Error("IsNDAAccepted = false, want true")
 	}
-	if repo.createdVisit.PICUserID != actor.ID {
-		t.Errorf("PICUserID = %q, want %q", repo.createdVisit.PICUserID, actor.ID)
+	if repo.createdVisit.VendorUserID != actor.ID {
+		t.Errorf("VendorUserID = %q, want %q", repo.createdVisit.VendorUserID, actor.ID)
 	}
 }
 
 func TestCreateVisit_RejectsMoreThanTenVisitors(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	ten := validCreateInput()
 	ten.Visitors = make([]VisitorInput, 10)
@@ -69,7 +69,7 @@ func TestCreateVisit_RejectsMoreThanTenVisitors(t *testing.T) {
 func TestCreateVisit_RejectsReversedDates(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	in := validCreateInput()
 	in.StartDate, in.EndDate = in.EndDate, in.StartDate
@@ -91,7 +91,7 @@ func TestCreateVisit_RejectsReversedDates(t *testing.T) {
 func TestCreateVisit_RejectsMissingNDA(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	in := validCreateInput()
 	in.IsNDAAccepted = false
@@ -110,7 +110,7 @@ func TestCreateVisit_RejectsMissingNDA(t *testing.T) {
 func TestCreateVisit_RejectsEmptyPurposeList(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	in := validCreateInput()
 	in.PurposeIDs = nil
@@ -124,7 +124,7 @@ func TestCreateVisit_RejectsEmptyPurposeList(t *testing.T) {
 func TestCreateVisit_RejectsVisitorMissingIDNumber(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	in := validCreateInput()
 	in.Visitors[1].IDNumber = ""
@@ -145,7 +145,7 @@ func activeVendors() []domain.Vendor {
 func TestCreateVisit_MapsPhotoURLAndPerVisitorVendor(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestServiceWithVendors(repo, nil, testNow(), activeVendors())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	vendorID := domain.UUID("vendor-1")
 	selfie := "http://localhost:9000/thc-vms-bucket/id_card/visit-1/selfie.jpg"
@@ -192,7 +192,7 @@ func TestCreateVisit_MapsPhotoURLAndPerVisitorVendor(t *testing.T) {
 func TestCreateVisit_RejectsUnknownPerVisitorVendor(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestServiceWithVendors(repo, nil, testNow(), activeVendors())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	unknown := domain.UUID("vendor-asing")
 	in := validCreateInput()
@@ -210,7 +210,7 @@ func TestCreateVisit_RejectsUnknownPerVisitorVendor(t *testing.T) {
 func TestCreateVisit_AcceptsVisitWithoutVendor(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestServiceWithVendors(repo, nil, testNow(), activeVendors())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	got, err := svc.CreateVisit(context.Background(), actor, validCreateInput())
 	if err != nil {

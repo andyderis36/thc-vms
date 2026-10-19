@@ -8,17 +8,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// TestVisitFieldsToDomain_MapsPICNameAndEmail pins the vendor enrichment: the
+// TestVisitFieldsToDomain_MapsVendorUserNameAndEmail pins the vendor enrichment: the
 // users join columns ride along into the domain so the FE Informasi Kunjungan
-// card renders pic_user.name without an extra query.
-func TestVisitFieldsToDomain_MapsPICNameAndEmail(t *testing.T) {
+// card renders vendor_user.name without an extra query.
+func TestVisitFieldsToDomain_MapsVendorUserNameAndEmail(t *testing.T) {
 	id := uuid.New()
-	pic := uuid.New()
+	vendorUserID := uuid.New()
 	loc := uuid.New()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	got, err := visitFieldsToDomain(
-		id, "VST-0000000001", pic, pgtype.UUID{Valid: false}, loc,
+		id, "VST-0000000001", vendorUserID, pgtype.UUID{Valid: false}, loc,
 		now, now.Add(4*time.Hour), false, "approved",
 		pgtype.Text{Valid: false}, true, pgtype.Text{Valid: false},
 		pgtype.Text{Valid: false},
@@ -29,11 +29,11 @@ func TestVisitFieldsToDomain_MapsPICNameAndEmail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("visitFieldsToDomain: %v", err)
 	}
-	if got.PICUserName != "Dimas Prasetyo" {
-		t.Fatalf("PICUserName = %q, want Dimas Prasetyo", got.PICUserName)
+	if got.VendorUserName != "Dimas Prasetyo" {
+		t.Fatalf("VendorUserName = %q, want Dimas Prasetyo", got.VendorUserName)
 	}
-	if got.PICUserEmail != "dimas@vendor.example" {
-		t.Fatalf("PICUserEmail = %q, want dimas@vendor.example", got.PICUserEmail)
+	if got.VendorUserEmail != "dimas@vendor.example" {
+		t.Fatalf("VendorUserEmail = %q, want dimas@vendor.example", got.VendorUserEmail)
 	}
 	if got.LocationName != "POP Tebet" {
 		t.Fatalf("LocationName = %q, want POP Tebet", got.LocationName)

@@ -14,7 +14,7 @@ import (
 func TestCreateVisit_ConcurrentOverlappingVisitsBothAccepted(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	first := validCreateInput()
 	second := validCreateInput()

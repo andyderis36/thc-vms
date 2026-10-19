@@ -23,18 +23,18 @@ func checkInService(visits *fakeVisitRepo, checks *fakeCheckInOutRepo) *gate.Ser
 
 func TestCheckIn_VendorIsForbidden(t *testing.T) {
 	t.Parallel()
-	// Given: an approved in-window visit and a PIC actor.
+	// Given: an approved in-window visit and a vendor actor.
 	start, end := openWindow()
-	visit := visitFixture("visit-pic", domain.VisitStatusApproved, start, end)
+	visit := visitFixture("visit-vendor", domain.VisitStatusApproved, start, end)
 	visits := newFakeVisitRepo(visit)
 	checks := newFakeCheckInOutRepo()
 	svc := checkInService(visits, checks)
-	actor := gate.Actor{ID: "pic-1", Role: domain.RoleVendor}
-	// When: the external PIC tries to check in.
+	actor := gate.Actor{ID: "vendor-1", Role: domain.RoleVendor}
+	// When: the external vendor tries to check in.
 	_, err := svc.CheckIn(t.Context(), actor, string(visit.ID), gate.CheckInInput{})
 	// Then: refused as a branch violation with zero writes.
 	if err == nil {
-		t.Fatal("expected PIC check-in to be forbidden, got nil")
+		t.Fatal("expected vendor check-in to be forbidden, got nil")
 	}
 	if !errors.Is(err, domain.ErrForbiddenBranch) {
 		t.Fatalf("expected ErrForbiddenBranch, got %v", err)

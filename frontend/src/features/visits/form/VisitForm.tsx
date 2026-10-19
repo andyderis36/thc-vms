@@ -3,7 +3,12 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { Controller, useForm, useWatch } from 'react-hook-form'
+import {
+  Controller,
+  useForm,
+  useWatch,
+  type FieldErrors,
+} from 'react-hook-form'
 import { toast } from 'sonner'
 import {
   ArrowLeft,
@@ -47,6 +52,11 @@ import { resolveVendorInput } from '@/lib/visits/vendor-input'
 import { PurposeDropdown } from './PurposeDropdown'
 import { TechnicianList } from './TechnicianList'
 import { UploadBox } from './UploadBox'
+import {
+  collectInvalidFields,
+  formatInvalidMessage,
+  revealInvalidField,
+} from './invalid-fields'
 import { visitFormSchema, type VisitFormValues } from './visit-schema'
 
 /** Pernyataan wajib SOP keselamatan — teks persis dari spesifikasi SCR-03. */
@@ -76,6 +86,10 @@ export function VisitForm() {
     formState: { errors, isSubmitting, isDirty },
   } = useForm<VisitFormValues>({
     resolver: zodResolver(visitFormSchema),
+    // Kita mengambil alih seluruh perilaku fokus (lihat `onInvalidSubmit`),
+    // agar fokus bawaan react-hook-form tidak bertarung dengan scroll ke
+    // field invalid pertama milik kita sendiri.
+    shouldFocusError: false,
     defaultValues: {
       location_id: '',
       purpose_ids: [],
@@ -307,12 +321,30 @@ export function VisitForm() {
     }
   }
 
+  /*
+   * Dipanggil HANYA saat zod menolak submit. Kita memegang kendali penuh atas
+   * perilaku fokus (lihat `shouldFocusError: false` di atas): toast menyebut
+   * nama field wajib yang galat secara berurutan, lalu layar digulirkan dan
+   * difokuskan ke field invalid PERTAMA sesuai urutan visual DOM.
+   *
+   * `revealInvalidField` menyimpan timer-nya sendiri (melepas cincin
+   * `field-attention` setelah 1600ms), sehingga tidak perlu state timer
+   * tambahan di sini — satu panggilan per submit, dan pengiriman cepat
+   * beruntun tidak menumpuk timeout.
+   */
+  function onInvalidSubmit(formErrors: FieldErrors<VisitFormValues>): void {
+    const fields = collectInvalidFields(formErrors)
+    toast.warning(formatInvalidMessage(fields))
+    const first = fields[0]
+    if (first === undefined) return
+    const el = document.getElementById(first.anchorId)
+    if (el !== null) revealInvalidField(el)
+  }
+
   return (
     <form
       noValidate
-      onSubmit={handleSubmit(onSubmit, () =>
-        toast.warning('Lengkapi field wajib sebelum mengirim permohonan.'),
-      )}
+      onSubmit={handleSubmit(onSubmit, onInvalidSubmit)}
       className="flex flex-col gap-4 pb-28"
     >
       <div className="flex flex-col gap-1">
@@ -361,6 +393,7 @@ export function VisitForm() {
           {/* 1 kolom di ponsel, 2 kolom >= sm: Fasilitas | Tujuan Kunjungan */}
           <div className="grid gap-4 sm:grid-cols-2">
             <Select
+              id="visit-location"
               label="Fasilitas Tujuan"
               required
               fieldSize="gate"
@@ -384,8 +417,9 @@ export function VisitForm() {
               {...register('location_id')}
             />
 
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <PurposeDropdown
+                id="visit-purpose"
                 label="Tujuan Kunjungan"
                 required
                 placeholder="Pilih tujuan kunjungan"
@@ -400,6 +434,7 @@ export function VisitForm() {
               {/* Tujuan bebas-teks — memetakan ke `purpose_note`. Teks di sini
                   TIDAK pernah menjadi saran/salinan tujuan dari katalog. */}
               <Input
+                id="visit-purpose-note"
                 label="Tujuan lain (opsional)"
                 placeholder="Tulis tujuan bila tidak ada di daftar"
                 hint="Opsional — maksimal 200 karakter. Cukup isi ini bila tidak memilih tujuan dari daftar."
@@ -428,6 +463,7 @@ export function VisitForm() {
         <CardBody className="flex flex-col gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
+              id="visit-start-date"
               label="Waktu Mulai"
               type="datetime-local"
               required
@@ -436,6 +472,7 @@ export function VisitForm() {
               {...register('start_date')}
             />
             <Input
+              id="visit-end-date"
               label="Waktu Selesai"
               type="datetime-local"
               required
@@ -498,13 +535,15 @@ export function VisitForm() {
           <Controller
             control={control}
             name="assignment_letter"
-            render={({ field }) => (
+            render={({ field, fieldState }) => (
               <UploadBox
+                id="visit-assignment-letter"
                 label="Unggah Surat Tugas / Surat Perintah Kerja"
                 hint="Format PDF, JPG, atau PNG — maksimal 5 MB. Bisa dipilih dari galeri, kamera, atau berkas perangkat."
                 idleButtonLabel="Pilih dari Galeri / Berkas"
                 changeButtonLabel="Ganti Berkas"
                 category="assignment_letter"
+                error={fieldState.error?.message}
                 value={field.value ?? null}
                 onChange={field.onChange}
               />
@@ -526,6 +565,7 @@ export function VisitForm() {
         </CardHeader>
         <CardBody>
           <Textarea
+            id="visit-notes"
             label="Catatan Tambahan"
             placeholder="Rincian pekerjaan atau daftar peralatan yang dibawa (mis. splicer, OTDR, genset portable)."
             hint="Opsional — tuliskan rincian yang membantu petugas pos jaga."
@@ -552,6 +592,7 @@ export function VisitForm() {
             name="is_nda_accepted"
             render={({ field, fieldState }) => (
               <Checkbox
+                id="visit-nda"
                 label={SOP_STATEMENT}
                 name={field.name}
                 required
@@ -567,7 +608,7 @@ export function VisitForm() {
       {/*
         Bilah kirim menempel di bawah viewport (sticky, BUKAN fixed): tetap
         terlihat saat mengisi form panjang tanpa menimpa sidebar shell mana
-        pun (admin 250px / superadmin 260px / PIC tanpa sidebar). Di ponsel
+        pun (admin 250px / superadmin 260px / vendor tanpa sidebar). Di ponsel
         menempel di atas bottom nav; di desktop di tepi bawah viewport.
       */}
       <div className="sticky bottom-bottomnav z-30 mt-6 border-t border-border-light bg-surface px-4 py-4 lg:bottom-0">

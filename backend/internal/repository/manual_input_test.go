@@ -40,11 +40,11 @@ func TestManualInput_RoundTripsThroughPostgreSQL(t *testing.T) {
 	company := "PT Subkon Mandiri"
 	freeNote := "Splicing FO sisi servers, koordinator belum ada"
 	created, err := visits.Create(ctx, domain.VisitRequest{
-		PICUserID:   vendor,
-		LocationID:  loc,
-		StartDate:   start,
-		EndDate:     start.Add(4 * time.Hour),
-		PurposeNote: &freeNote,
+		VendorUserID: vendor,
+		LocationID:   loc,
+		StartDate:    start,
+		EndDate:      start.Add(4 * time.Hour),
+		PurposeNote:  &freeNote,
 	}, []domain.Visitor{
 		{Name: "Budi Manual", IDNumber: "ID-M1", Phone: "0811", VendorNameOverride: &company},
 		{Name: "Sari Katalog", IDNumber: "ID-M2", Phone: "0812", VendorID: catalogue},
@@ -147,10 +147,10 @@ func TestManualInput_NullColumnsRoundTripAsNil(t *testing.T) {
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	created, err := visits.Create(ctx, domain.VisitRequest{
-		PICUserID:  vendor,
-		LocationID: loc,
-		StartDate:  start,
-		EndDate:    start.Add(2 * time.Hour),
+		VendorUserID: vendor,
+		LocationID:   loc,
+		StartDate:    start,
+		EndDate:      start.Add(2 * time.Hour),
 		// PurposeNote deliberately absent: the catalogue path only.
 	}, []domain.Visitor{{Name: "Tanpa Vendor", IDNumber: "ID-N1", Phone: "0813"}},
 		[]domain.UUID{purpose})

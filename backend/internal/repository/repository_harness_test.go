@@ -117,12 +117,34 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 // yields no error, because a re-applied file raises only "already there"
 // SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL} {
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationSinglePusatSQL} {
 		if err := applyOne(ctx, pool, sql); err != nil {
 			return err
 		}
 	}
-	return nil
+	return applyVendorUserRename(ctx, pool)
+}
+
+// applyVendorUserRename applies migration 000009 (visit_request.pic_user_id ->
+// vendor_user_id) exactly once. That migration is deliberately NOT re-runnable
+// (a RENAME fails loudly on a missing source object), so the harness gates it
+// on the legacy column still being present instead of swallowing the rename's
+// SQLSTATEs through applyOne.
+func applyVendorUserRename(ctx context.Context, pool *pgxpool.Pool) error {
+	var pending bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema()
+			  AND table_name = 'visit_request'
+			  AND column_name = 'pic_user_id'
+		)`).Scan(&pending); err != nil {
+		return fmt.Errorf("probe visit_request.pic_user_id: %w", err)
+	}
+	if !pending {
+		return nil
+	}
+	return applyOne(ctx, pool, migrationVendorUserRenameSQL)
 }
 
 // applyOne executes one migration file, tolerating the SQLSTATEs a re-run
@@ -206,6 +228,57 @@ var migrationRenameVendorSQL = func() string {
 	return string(raw)
 }()
 
+// migrationAuditSQL is the audit_log follow-up (migration 000007), loaded the
+// same way so the scratch schema tracks the trail the audit writer feeds.
+var migrationAuditSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000007_audit_log.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationNotificationSQL is the persisted notification store (migration
+// 000008), loaded the same way so the scratch schema tracks the store the
+// notification adapter writes and reads.
+var migrationNotificationSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000008_create_notification.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationVendorUserRenameSQL is the visit_request.pic_user_id -> vendor_user_id
+// rename (migration 000009), loaded the same way so the scratch schema tracks
+// the embedded migrations the application runs.
+var migrationVendorUserRenameSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000009_rename_pic_user_to_vendor_user.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationSinglePusatSQL is the single-Kantor-Pusat guard (migration 000011),
+// loaded the same way so the scratch schema tracks the partial unique index
+// the repository write paths depend on.
+var migrationSinglePusatSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000011_single_head_office_location.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
 // scratchDatabaseName is the database name embedded in the DSN.
 func scratchDatabaseName() string {
 	name := os.Getenv("THC_VMS_TEST_DBNAME")
@@ -276,7 +349,7 @@ func resetTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := testContext(t)
 	_, err := pool.Exec(ctx, `TRUNCATE visit_request, users, status_history,
-		check_in, check_out, visitor, visit_purpose, vendor, location, purpose RESTART IDENTITY CASCADE`)
+		check_in, check_out, visitor, visit_purpose, vendor, location, purpose, audit_log, notification RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate scratch tables: %v", err)
 	}
@@ -377,14 +450,14 @@ func seedUser(t *testing.T, pool *pgxpool.Pool, p seedUserParams) domain.UUID {
 
 // seedVisitParams stages one visit row with an explicit status and code.
 type seedVisitParams struct {
-	Code      string
-	PIC       domain.UUID
-	Vendor    domain.UUID
-	Location  domain.UUID
-	Start     time.Time
-	End       time.Time
-	Status    domain.VisitStatus
-	CreatedAt *time.Time
+	Code       string
+	VendorUser domain.UUID
+	Vendor     domain.UUID
+	Location   domain.UUID
+	Start      time.Time
+	End        time.Time
+	Status     domain.VisitStatus
+	CreatedAt  *time.Time
 }
 
 // seedVisit inserts one visit_request row; tests that need a status other
@@ -400,9 +473,9 @@ func seedVisit(t *testing.T, pool *pgxpool.Pool, p seedVisitParams) domain.UUID 
 	}
 	err := pool.QueryRow(testContext(t),
 		`INSERT INTO visit_request
-			(visit_id, pic_user_id, vendor_id, location_id, start_date, end_date, status, created_at)
+			(visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, status, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-		p.Code, uuidArg(p.PIC), uuidArg(p.Vendor), uuidArg(p.Location),
+		p.Code, uuidArg(p.VendorUser), uuidArg(p.Vendor), uuidArg(p.Location),
 		p.Start.UTC(), p.End.UTC(), string(p.Status), created).Scan(&id)
 	if err != nil {
 		t.Fatalf("seed visit %s: %v", p.Code, err)

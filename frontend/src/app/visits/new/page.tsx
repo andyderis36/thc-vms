@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
-import { PicMobileShell } from '@/components/layouts/PicMobileShell'
+import { VendorMobileShell } from '@/components/layouts/VendorMobileShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { VisitForm } from '@/features/visits/form/VisitForm'
 import { RequireRole } from '@/lib/auth/guards'
@@ -12,7 +12,7 @@ import { usePendingApprovalCount } from '@/lib/api/hooks'
 /**
  * Pemilih shell berdasar peran sesi — SETIAP peran memakai shellnya sendiri
  * (superadmin = gelap + switcher, admin = putih terkunci, vendor = mobile):
- * `vendor` -> SHELL-04 (PicMobileShell), `super_admin` -> SHELL-01
+ * `vendor` -> SHELL-04 (VendorMobileShell), `super_admin` -> SHELL-01
  * (SuperadminShell), `admin` -> SHELL-02 (AdminBranchShell). Guard
  * `RequireRole` di bawah sudah menahan `security`.
  */
@@ -24,7 +24,7 @@ function RoleShell({ children }: { children: ReactNode }) {
   const { pendingCount } = usePendingApprovalCount()
 
   if (role === 'vendor') {
-    return <PicMobileShell activeHref="/visits/new">{children}</PicMobileShell>
+    return <VendorMobileShell activeHref="/visits/new">{children}</VendorMobileShell>
   }
   if (role === 'super_admin') {
     return (
@@ -50,7 +50,11 @@ export default function NewVisitPage() {
   return (
     <RequireRole allow={['vendor', 'admin', 'super_admin']}>
       <RoleShell>
-        <VisitForm />
+        {/* Kolom baca 4xl: grid 2 kolom menumpuk di < sm, sementara di
+            layar lebar/kios baris isian tidak melar tanpa batas. */}
+        <div className="mx-auto w-full max-w-4xl">
+          <VisitForm />
+        </div>
       </RoleShell>
     </RequireRole>
   )

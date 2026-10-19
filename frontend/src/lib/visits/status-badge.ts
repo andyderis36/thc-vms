@@ -16,7 +16,7 @@ export const VISIT_STATUS_META: Record<
   approved: { label: 'Disetujui', tone: 'success' },
   visiting: { label: 'Sedang di Lokasi', tone: 'info' },
   completed: { label: 'Selesai', tone: 'success' },
-  not_visit: { label: 'Tidak Hadir', tone: 'danger' },
+  not_visit: { label: 'Tidak Hadir', tone: 'warning' },
   rejected: { label: 'Ditolak', tone: 'danger' },
   cancelled: { label: 'Dibatalkan', tone: 'neutral' },
   rescheduled: { label: 'Jadwal Digeser', tone: 'warning' },

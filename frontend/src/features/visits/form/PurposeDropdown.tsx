@@ -8,6 +8,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import type { Purpose } from '@/lib/api/types'
 
 export interface PurposeDropdownProps {
+  id?: string
   label: string
   purposes: Purpose[]
   selectedIds: readonly string[]
@@ -38,6 +39,7 @@ export interface PurposeDropdownProps {
  * pola `components/ui/Modal.tsx`.
  */
 export function PurposeDropdown({
+  id,
   label,
   purposes,
   selectedIds,
@@ -52,7 +54,7 @@ export function PurposeDropdown({
   const containerRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const generatedId = useId()
-  const buttonId = `${generatedId}-button`
+  const buttonId = id ?? `${generatedId}-button`
   const panelId = `${generatedId}-panel`
   const errorId = `${generatedId}-error`
 
@@ -90,7 +92,7 @@ export function PurposeDropdown({
   }, [open])
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       <label htmlFor={buttonId} className="text-label font-semibold text-ink">
         {label}
         {required ? <span className="text-brand"> *</span> : null}
@@ -136,14 +138,14 @@ export function PurposeDropdown({
             role="listbox"
             aria-multiselectable="true"
             aria-labelledby={buttonId}
-            className="absolute inset-x-0 top-full z-40 mt-1 flex max-h-64 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-control border border-border-mid bg-surface p-1 shadow-dropdown"
+            className="absolute inset-x-0 top-full z-40 mt-1 flex max-h-64 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-card border border-border-mid bg-surface p-1.5 shadow-dropdown"
           >
             {purposes.map((purpose) => (
               <div
                 key={purpose.id}
                 role="option"
                 aria-selected={selectedIds.includes(purpose.id)}
-                className="rounded-control px-2 py-0.5 hover:bg-neutral-bg"
+                className="rounded-control hover:bg-neutral-bg"
               >
                 <Checkbox
                   label={purpose.name}

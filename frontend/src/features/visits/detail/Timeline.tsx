@@ -80,7 +80,7 @@ export interface TimelineProps {
 
 /**
  * Satu baris teks tahap gerbang dalam Bahasa Indonesia: stempel aktual
- * (`Masuk 26 Sep 2026, 14.30`) bila gerbang sudah dilewati, иначе teks
+ * (`Masuk 26 Sep 2026, 14.30`) bila gerbang sudah dilewati, jika tidak teks
  * jadwal (`Jadwal mulai …`). Murni (pure) agar terkunci oleh unit test.
  */
 export function gateDetail(
@@ -99,9 +99,9 @@ export function gateDetail(
  * Panel Riwayat Status (timeline vertikal) untuk SCR-04.
  *
  * Tahap kedatangan/selesai memakai stempel gerbang aktual (`check_in_at` /
- * `check_out_at` dari VisitDetail) bila ada, иначе mundur ke teks jadwal —
+ * `check_out_at` dari VisitDetail) bila ada, jika tidak mundur ke teks jadwal —
  * sehingga teknisi melihat "Masuk 26 Sep 2026, 14.30" persis seperti yang
- * dicatat satpam di gerbang (QA GATE-01/02/09).
+ * dicatat pengawas di gerbang (QA GATE-01/02/09).
  */
 export function Timeline({ status, createdAt, startDate, endDate, checkInAt, checkOutAt }: TimelineProps) {
   const activeIndex = ACTIVE_INDEX_BY_STATUS[status]

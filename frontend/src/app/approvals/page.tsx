@@ -5,8 +5,12 @@ import { AlertTriangle, Inbox } from 'lucide-react'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
+import { Pagination } from '@/components/ui/Pagination'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { ApproveModal, apiErrorMessage } from '@/features/visits/components/ApproveModal'
@@ -14,10 +18,54 @@ import { RejectModal } from '@/features/visits/components/RejectModal'
 import { VisitCards } from '@/features/visits/components/VisitCards'
 import { VisitTable } from '@/features/visits/components/VisitTable'
 import { useLocationsQuery, usePendingApprovalCount, useVisitsQuery } from '@/lib/api/hooks'
-import type { Role, VisitDetail, VisitListParams } from '@/lib/api/types'
+import type { Role, VisitDetail, VisitListParams, VisitOrder, VisitSortField } from '@/lib/api/types'
 import { RequireRole } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import { DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
+
+/** Kombinasi filter antrean approval yang dipetakan ke query params `GET /visits`. */
+export interface ApprovalListFilter {
+  q: string
+  locationId: string
+  dateFrom: string
+  dateTo: string
+  page: number
+  pageSize: number
+  sortBy: VisitSortField
+  order: VisitOrder
+}
+
+export function toApprovalListParams(filter: ApprovalListFilter): VisitListParams {
+  const params: VisitListParams = {
+    page: filter.page,
+    limit: filter.pageSize,
+    sort_by: filter.sortBy,
+    order: filter.order,
+    ...(filter.q !== '' ? { q: filter.q } : {}),
+    ...(filter.locationId !== 'all' ? { location_id: filter.locationId } : {}),
+    ...(filter.dateFrom !== '' ? { date_from: filter.dateFrom } : {}),
+    ...(filter.dateTo !== '' ? { date_to: filter.dateTo } : {}),
+  }
+  return params
+}
+
+export const VISIT_SORT_OPTIONS: SelectOption[] = [
+  { value: 'created_at:desc', label: 'Terbaru dibuat' },
+  { value: 'created_at:asc', label: 'Terlama dibuat' },
+  { value: 'start_date:asc', label: 'Jadwal mulai (terdekat)' },
+  { value: 'start_date:desc', label: 'Jadwal mulai (terjauh)' },
+  { value: 'end_date:desc', label: 'Jadwal selesai (terbaru)' },
+  { value: 'end_date:asc', label: 'Jadwal selesai (terlama)' },
+]
+
+export function parseVisitSort(value: string): { sortBy: VisitSortField; order: VisitOrder } {
+  const [field, direction] = value.split(':')
+  return {
+    sortBy: field === 'start_date' || field === 'end_date' ? field : 'created_at',
+    order: direction === 'asc' ? 'asc' : 'desc',
+  }
+}
 
 /**
  * Halaman mandiri Antrean Approval — irisan fokus SCR-02 untuk
@@ -60,6 +108,32 @@ function ApprovalsScreen() {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [locationId, setLocationId] = useState('all')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [sortBy, setSortBy] = useState<VisitSortField>('created_at')
+  const [order, setSortOrder] = useState<VisitOrder>('desc')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
+
+  const handlePageSizeChange = (next: number): void => {
+    setPageSize(next)
+    setPage(1)
+  }
+
+  // Kembalikan SEMUA state filter ke default (termasuk `search` hasil debounce,
+  // bukan hanya input teksnya — kalau `search` tidak direset, query lama tetap
+  // terkirim sampai ketikan berikutnya). Halaman ikut ke 1 karena baris halaman
+  // N tidak relevan untuk kombinasi filter bersih.
+  const handleResetFilters = (): void => {
+    setSearchInput('')
+    setSearch('')
+    setLocationId('all')
+    setDateFrom('')
+    setDateTo('')
+    setSortBy('created_at')
+    setSortOrder('desc')
+    setPage(1)
+  }
 
   // Debounce pencarian 300ms supaya setiap ketikan tidak memicu request
   // (pola identik halaman users benchmark).
@@ -68,24 +142,33 @@ function ApprovalsScreen() {
     return () => clearTimeout(timer)
   }, [searchInput])
 
+  // Filter/urutan berubah → kembali ke halaman 1 (baris halaman N tidak
+  // relevan untuk kombinasi filter baru).
+  useEffect(() => {
+    setPage(1)
+  }, [search, locationId, dateFrom, dateTo, sortBy, order])
+
   const locationsQuery = useLocationsQuery()
   // Badge antrean shell + subtitle: total requested + rescheduled TANPA filter
   // pencarian (server-total, limit 1 — hanya total yang dipakai), persis pola
   // halaman users — lihat usePendingApprovalCount.
   const { pendingCount } = usePendingApprovalCount()
 
-  // `search` & `location_id` adalah query param kontrak GET /visits
+  // `q` & `location_id` adalah query param kontrak GET /visits
   // (openapi §/visits) — tersambung langsung ke server, bukan filter mati.
   // Params yang SAMA dipakai oleh kedua query status agar filter pencarian/
   // cabang berlaku identik pada sisi `requested` dan `rescheduled`.
-  const baseListParams: VisitListParams = useMemo(
-    () => ({
-      limit: 100,
-      ...(search !== '' ? { search } : {}),
-      ...(isSuperAdmin && locationId !== 'all' ? { location_id: locationId } : {}),
-    }),
-    [search, locationId, isSuperAdmin],
-  )
+  const filter: ApprovalListFilter = {
+    q: search,
+    locationId: isSuperAdmin ? locationId : 'all',
+    dateFrom,
+    dateTo,
+    page,
+    pageSize,
+    sortBy,
+    order,
+  }
+  const baseListParams = toApprovalListParams(filter)
   const listQuery = useVisitsQuery({ ...baseListParams, status: 'requested' })
   const rescheduledQuery = useVisitsQuery({ ...baseListParams, status: 'rescheduled' })
   // Gabung client-side: dedupe by id + urut kronologis `start_date` ASC —
@@ -94,6 +177,12 @@ function ApprovalsScreen() {
     () => mergeUpcomingQueue(listQuery.data?.items ?? [], rescheduledQuery.data?.items ?? []),
     [listQuery.data, rescheduledQuery.data],
   )
+  const listTotal = listQuery.data?.total ?? 0
+  const rescheduledTotal = rescheduledQuery.data?.total ?? 0
+  const total = listTotal + rescheduledTotal
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const rangeStart = total > 0 ? (page - 1) * pageSize + 1 : 0
+  const rangeEnd = rows.length > 0 ? rangeStart + rows.length - 1 : 0
 
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data])
   const locationOptions: SelectOption[] = useMemo(
@@ -112,14 +201,18 @@ function ApprovalsScreen() {
     )
   }
 
-  const isFiltered = search !== '' || locationId !== 'all'
+  const isFiltered =
+    search !== '' || locationId !== 'all' || dateFrom !== '' || dateTo !== ''
 
   return (
     <RoleShell role={role} pendingCount={pendingCount}>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-ink">Antrean Approval</h1>
-          <p className="mt-1 text-sm text-ink-secondary">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight text-ink">Antrean Approval</h1>
+            {pendingCount > 0 ? <Badge tone="warning">{pendingCount} menunggu</Badge> : null}
+          </div>
+          <p className="mt-1.5 text-sm text-ink-secondary">
             {pendingCount} permohonan menunggu keputusan.
           </p>
         </div>
@@ -127,7 +220,7 @@ function ApprovalsScreen() {
 
       {/* Toolbar filter irisan SCR-02 — pola users benchmark: select berlabel
           + search ber-aria-label, wrap rapi di 375/768/1280 tanpa scroll. */}
-      <div className="card flex flex-wrap items-end gap-3 p-4">
+      <div className="card flex flex-wrap items-end gap-3 border-brand/20 bg-brand-soft/40 p-4">
         {isSuperAdmin ? (
           <div className="min-w-40 flex-1 sm:w-56 sm:flex-none">
             <Select
@@ -138,19 +231,57 @@ function ApprovalsScreen() {
             />
           </div>
         ) : null}
-        <div className="relative min-w-48 flex-1">
-          <Input
+        <div className="min-w-48 flex-1">
+          <SearchInput
             aria-label="Cari permohonan"
             placeholder="Cari nama Vendor/Mitra atau Visit ID…"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
+        <div className="min-w-36 flex-1 sm:w-44 sm:flex-none">
+          <Input
+            label="Dari Tanggal"
+            type="date"
+            value={dateFrom}
+            max={dateTo === '' ? undefined : dateTo}
+            onChange={(event) => setDateFrom(event.target.value)}
+          />
+        </div>
+        <div className="min-w-36 flex-1 sm:w-44 sm:flex-none">
+          <Input
+            label="Sampai Tanggal"
+            type="date"
+            value={dateTo}
+            min={dateFrom === '' ? undefined : dateFrom}
+            onChange={(event) => setDateTo(event.target.value)}
+          />
+        </div>
+        <div className="min-w-44 flex-1 sm:w-52 sm:flex-none">
+          <Select
+            label="Urutkan"
+            options={VISIT_SORT_OPTIONS}
+            value={`${sortBy}:${order}`}
+            onChange={(event) => {
+              const next = parseVisitSort(event.target.value)
+              setSortBy(next.sortBy)
+              setSortOrder(next.order)
+            }}
+          />
+        </div>
+        {/* Tombol reset selalu tampil (independen dari select Cabang superadmin);
+            nonaktif saat tidak ada filter aktif — pola halaman users. */}
+        <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
       </div>
 
       {/* Galat HANYA dari query utama — kegagalan query rescheduled tidak
           boleh mengosongkan daftar requested yang valid (pola gerbang). */}
       <div className="mt-4">
+        {rows.length > 0 ? (
+          <p className="mb-3 text-label tabular-nums text-ink-secondary">
+            Menampilkan {rangeStart}–{rangeEnd} dari {total} permohonan
+          </p>
+        ) : null}
         {listQuery.isPending || rescheduledQuery.isPending ? (
           <div className="card flex items-center justify-center gap-3 py-12 text-sm text-ink-secondary">
             <Spinner size="sm" />
@@ -158,8 +289,13 @@ function ApprovalsScreen() {
           </div>
         ) : listQuery.isError ? (
           <div className="card p-6">
-            <p className="flex items-center gap-2 text-sm font-semibold text-danger-text">
-              <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+            <p className="flex items-center gap-2.5 text-sm font-semibold text-danger-text">
+              <span
+                aria-hidden="true"
+                className="flex size-7 shrink-0 items-center justify-center rounded-control bg-danger-bg"
+              >
+                <AlertTriangle className="size-4 shrink-0" />
+              </span>
               Gagal memuat antrean approval
             </p>
             <p className="mt-2 text-sm text-ink-secondary">{apiErrorMessage(listQuery.error)}</p>
@@ -193,6 +329,12 @@ function ApprovalsScreen() {
               role={role}
               onApprove={setApproveTarget}
               onReject={setRejectTarget}
+              sortBy={sortBy}
+              order={order}
+              onSortChange={(field, nextOrder) => {
+                setSortBy(field)
+                setSortOrder(nextOrder)
+              }}
             />
             <VisitCards
               visits={rows}
@@ -203,6 +345,17 @@ function ApprovalsScreen() {
           </>
         )}
       </div>
+
+      {rows.length > 0 ? (
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageSizeChange={handlePageSizeChange}
+          onPageChange={setPage}
+          className="mt-4"
+        />
+      ) : null}
 
       {approveTarget !== null ? (
         <ApproveModal open visit={approveTarget} onClose={() => setApproveTarget(null)} />

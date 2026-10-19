@@ -24,7 +24,7 @@ function makeVisit(overrides: Partial<VisitDetail> = {}): VisitDetail {
       { id: 'pur-splicing', name: 'Splicing FO' },
       { id: 'pur-genset', name: 'Maintenance Genset' },
     ],
-    pic_user: {
+    vendor_user: {
       id: 'usr-vendor-1',
       name: 'Andi Vendor',
       email: 'andi@vendor.id',

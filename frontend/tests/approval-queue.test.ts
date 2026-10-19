@@ -23,7 +23,7 @@ function makeVisit(
     status,
     location: {} as VisitDetail['location'],
     purposes: [],
-    pic_user: {} as VisitDetail['pic_user'],
+    vendor_user: {} as VisitDetail['vendor_user'],
     vendor_name: 'PT Maju Jaya',
     start_date,
     end_date: start_date,

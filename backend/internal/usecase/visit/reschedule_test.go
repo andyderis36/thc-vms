@@ -13,7 +13,7 @@ func seedApprovedVisit(repo *fakeVisitRepo) domain.VisitRequest {
 	visit := domain.VisitRequest{
 		ID:            domain.UUID("visit-10"),
 		VisitID:       "VST-0000000010",
-		PICUserID:     domain.UUID("pic-1"),
+		VendorUserID:  domain.UUID("vendor-1"),
 		LocationID:    domain.UUID("loc-A"),
 		StartDate:     time.Date(2026, time.October, 5, 9, 0, 0, 0, time.UTC),
 		EndDate:       time.Date(2026, time.October, 5, 17, 0, 0, 0, time.UTC),
@@ -78,7 +78,7 @@ func TestReschedule_AllowsOnlyRequestedApprovedRescheduledSources(t *testing.T) 
 			visit := domain.VisitRequest{
 				ID:            domain.UUID("visit-src"),
 				VisitID:       "VST-0000000099",
-				PICUserID:     domain.UUID("pic-1"),
+				VendorUserID:  domain.UUID("vendor-1"),
 				LocationID:    domain.UUID("loc-A"),
 				StartDate:     start,
 				EndDate:       end,

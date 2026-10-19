@@ -32,7 +32,7 @@ func TestUpdateStatus_WritesHistoryAtomically(t *testing.T) {
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	end := start.Add(4 * time.Hour)
 	visitID := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000101", PIC: vendor, Location: loc,
+		Code: "VST-0000000101", VendorUser: vendor, Location: loc,
 		Start: start, End: end, Status: domain.VisitStatusRequested,
 	})
 
@@ -91,7 +91,7 @@ func TestUpdateStatus_ConcurrentApproveOnlyOneWins(t *testing.T) {
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	visitID := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000102", PIC: vendor, Location: loc,
+		Code: "VST-0000000102", VendorUser: vendor, Location: loc,
 		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusRequested,
 	})
 
@@ -144,7 +144,7 @@ func TestUpdateStatus_EmptyActorPersistsNull(t *testing.T) {
 
 	start := time.Now().UTC().Add(-30 * 24 * time.Hour).Truncate(time.Second)
 	visitID := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000103", PIC: vendor, Location: loc,
+		Code: "VST-0000000103", VendorUser: vendor, Location: loc,
 		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusRequested,
 	})
 
@@ -176,7 +176,7 @@ func TestReschedule_UpdatesWindowAndHistoryAtomically(t *testing.T) {
 	purpose := seedPurpose(t, pool, "Maintenance Genset")
 
 	created, err := repos.Create(ctx, domain.VisitRequest{
-		PICUserID:     vendorUser,
+		VendorUserID:  vendorUser,
 		VendorID:      vendor,
 		LocationID:    loc,
 		StartDate:     time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second),

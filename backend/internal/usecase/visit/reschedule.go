@@ -32,7 +32,7 @@ func (s *Service) Reschedule(ctx context.Context, actor Actor, visitID domain.UU
 	}
 	switch actor.Role {
 	case domain.RoleVendor:
-		if visit.PICUserID != actor.ID {
+		if visit.VendorUserID != actor.ID {
 			return domain.NotFoundEntity("Kunjungan")
 		}
 	case domain.RoleAdmin:

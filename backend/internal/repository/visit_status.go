@@ -62,7 +62,7 @@ func (r *visitRepository) UpdateStatus(
 		}); err != nil {
 			return MapError(err)
 		}
-		return nil
+		return emit(ctx, q, domain.TransitionNotification(status, !actor.Valid, locked.VisitID), locked.ID, locked.LocationID, locked.VendorUserID, time.Now())
 	})
 }
 
@@ -88,7 +88,8 @@ func (r *visitRepository) Reschedule(
 	}
 	return WithTx(ctx, r.pool, func(tx pgx.Tx) error {
 		q := db.New(r.pool).WithTx(tx)
-		if _, err := q.GetVisitByIDForUpdate(ctx, db.GetVisitByIDForUpdateParams{ID: parsed}); err != nil {
+		locked, err := q.GetVisitByIDForUpdate(ctx, db.GetVisitByIDForUpdateParams{ID: parsed})
+		if err != nil {
 			return MapError(err)
 		}
 		if _, err := q.UpdateVisitSchedule(ctx, db.UpdateVisitScheduleParams{
@@ -107,7 +108,7 @@ func (r *visitRepository) Reschedule(
 		}); err != nil {
 			return MapError(err)
 		}
-		return nil
+		return emit(ctx, q, domain.TransitionNotification(domain.VisitStatusRescheduled, false, locked.VisitID), locked.ID, locked.LocationID, locked.VendorUserID, time.Now())
 	})
 }
 

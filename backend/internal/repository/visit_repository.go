@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -45,7 +46,7 @@ func (r *visitRepository) Create(
 	visitors []domain.Visitor,
 	purposeIDs []domain.UUID,
 ) (domain.VisitRequest, error) {
-	picID, err := fromDomainUUID(visit.PICUserID)
+	vendorUserID, err := fromDomainUUID(visit.VendorUserID)
 	if err != nil {
 		return domain.VisitRequest{}, err
 	}
@@ -77,7 +78,7 @@ func (r *visitRepository) Create(
 			q := db.New(r.pool).WithTx(tx)
 			row, err := q.CreateVisit(ctx, db.CreateVisitParams{
 				VisitID:             code,
-				PicUserID:           picID,
+				VendorUserID:        vendorUserID,
 				VendorID:            vendorID,
 				LocationID:          locationID,
 				StartDate:           visit.StartDate,
@@ -116,6 +117,9 @@ func (r *visitRepository) Create(
 				}); err != nil {
 					return MapError(err)
 				}
+			}
+			if err := emit(ctx, q, domain.CreatedNotification(row.VisitID), row.ID, row.LocationID, row.VendorUserID, time.Now()); err != nil {
+				return err
 			}
 			created = row
 			return nil

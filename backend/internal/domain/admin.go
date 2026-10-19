@@ -77,10 +77,10 @@ type ManagedUserRepository interface {
 	// stored columns). A missing id is ErrNotFound; a duplicate email is
 	// ErrConflict via MapError's 23505 mapping.
 	UpdateManagedUser(ctx context.Context, id UUID, patch ManagedUserPatch) (User, error)
-	// CountVisitsByPIC reports how many visits the account still owns as vendor
-	// (visit_request.pic_user_id, no cascade): a non-zero count blocks the
+	// CountVisitsByVendorUser reports how many visits the account still owns as vendor
+	// (visit_request.vendor_user_id, no cascade): a non-zero count blocks the
 	// delete with 409.
-	CountVisitsByPIC(ctx context.Context, userID UUID) (int64, error)
+	CountVisitsByVendorUser(ctx context.Context, userID UUID) (int64, error)
 	// CountStaffReferences reports how many gate/audit rows the account
 	// wrote as staff (check_in.checked_in_by + check_out.checked_out_by +
 	// status_history.changed_by, all without cascade): non-zero blocks it.

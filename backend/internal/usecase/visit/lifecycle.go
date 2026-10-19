@@ -62,7 +62,7 @@ func (s *Service) Cancel(ctx context.Context, actor Actor, visitID domain.UUID, 
 	}
 	switch actor.Role {
 	case domain.RoleVendor:
-		if visit.PICUserID != actor.ID {
+		if visit.VendorUserID != actor.ID {
 			return domain.NotFoundEntity("Kunjungan")
 		}
 	case domain.RoleAdmin:

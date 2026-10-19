@@ -103,7 +103,7 @@ func TestCancel_AllowsOwningVendorAndBranchAdmin(t *testing.T) {
 	seedRequestedVisit(repo)
 	svc := newTestService(repo, nil, testNow())
 
-	owner := testActor(domain.RoleVendor, "pic-1", "")
+	owner := testActor(domain.RoleVendor, "vendor-1", "")
 	if err := svc.Cancel(context.Background(), owner, domain.UUID("visit-1"), "batal oleh vendor"); err != nil {
 		t.Fatalf("owning vendor cancel returned error: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestTransitionGuards_AlwaysRunBeforeTheRepository(t *testing.T) {
 		call func() error
 	}{
 		{"vendor approves", func() error {
-			return svc.Approve(context.Background(), testActor(domain.RoleVendor, "pic-1", ""), domain.UUID("visit-1"), "x")
+			return svc.Approve(context.Background(), testActor(domain.RoleVendor, "vendor-1", ""), domain.UUID("visit-1"), "x")
 		}},
 		{"security approves", func() error {
 			return svc.Approve(context.Background(), testActor(domain.RoleSecurity, "sec-1", "loc-A"), domain.UUID("visit-1"), "x")

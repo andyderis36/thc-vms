@@ -165,15 +165,15 @@ func (f *fakeCheckInOutRepo) FindCheckOutByVisit(_ context.Context, visitID doma
 // visitFixture builds an approved visit on loc-A with a window around fixedNow.
 func visitFixture(id domain.UUID, status domain.VisitStatus, start, end time.Time) domain.VisitRequest {
 	return domain.VisitRequest{
-		ID:         id,
-		VisitID:    "VST-" + string(id),
-		PICUserID:  "pic-1",
-		LocationID: "loc-A",
-		StartDate:  start,
-		EndDate:    end,
-		Status:     status,
-		CreatedAt:  fixedNow.Add(-time.Hour),
-		UpdatedAt:  fixedNow.Add(-time.Hour),
+		ID:           id,
+		VisitID:      "VST-" + string(id),
+		VendorUserID: "vendor-1",
+		LocationID:   "loc-A",
+		StartDate:    start,
+		EndDate:      end,
+		Status:       status,
+		CreatedAt:    fixedNow.Add(-time.Hour),
+		UpdatedAt:    fixedNow.Add(-time.Hour),
 	}
 }
 

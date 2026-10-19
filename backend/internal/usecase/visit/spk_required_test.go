@@ -15,7 +15,7 @@ import (
 func TestCreateVisit_RequiresAssignmentLetter(t *testing.T) {
 	repo := newFakeVisitRepo(t)
 	svc := newTestService(repo, nil, testNow())
-	actor := testActor(domain.RoleVendor, "pic-1", "")
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
 
 	cases := map[string]func(in *CreateVisitInput){
 		"nil SPK":        func(in *CreateVisitInput) { in.AssignmentLetterURL = nil },

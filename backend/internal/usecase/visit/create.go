@@ -149,7 +149,7 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 	}
 
 	visit := domain.VisitRequest{
-		PICUserID:     actor.ID,
+		VendorUserID:  actor.ID,
 		LocationID:    in.LocationID,
 		StartDate:     in.StartDate,
 		EndDate:       in.EndDate,

@@ -7,21 +7,21 @@ import "time"
 // VisitID is the VST-XXXXXXXXXX business code printed on the QR pass; Status
 // moves only through the edges in status.go.
 type VisitRequest struct {
-	ID         UUID
-	VisitID    string
-	PICUserID  UUID
-	VendorID   UUID
-	LocationID UUID
+	ID           UUID
+	VisitID      string
+	VendorUserID UUID
+	VendorID     UUID
+	LocationID   UUID
 	// LocationName/LocationType adalah display name + tipe dari join
 	// location (sudah diseleksi query list/detail, tanpa query tambahan).
 	// Kosong berarti "lokasi tak dikenal" dan dirender "" di wire.
 	LocationName string
 	LocationType LocationType
-	// PICUserName/PICUserEmail adalah display name + email dari join users
+	// VendorUserName/VendorUserEmail adalah display name + email dari join users
 	// (sudah diseleksi query list/detail, tanpa query tambahan).
-	// Kosong berarti "PIC tak dikenal" dan dirender nil/omit di wire.
-	PICUserName         string
-	PICUserEmail        string
+	// Kosong berarti "vendor user tak dikenal" dan dirender nil/omit di wire.
+	VendorUserName      string
+	VendorUserEmail     string
 	StartDate           time.Time
 	EndDate             time.Time
 	IsMultiDay          bool

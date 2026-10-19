@@ -135,4 +135,12 @@ describe('PurposeDropdown', () => {
       'Minimal pilih 1 tujuan kunjungan.',
     )
   })
+
+  it('memakai id yang diberikan pada tombol pemicu bila prop id diisi', () => {
+    renderDropdown({ id: 'visit-purpose' })
+    expect(screen.getByRole('button', { name: /Tujuan Kunjungan/ })).toHaveAttribute(
+      'id',
+      'visit-purpose',
+    )
+  })
 })

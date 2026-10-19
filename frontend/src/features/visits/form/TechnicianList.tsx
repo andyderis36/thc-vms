@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { UploadBox } from './UploadBox'
+import { technicianAnchorId } from './invalid-fields'
 import { useVendorsQuery } from '@/lib/api/hooks'
 import { VENDOR_NAME_MAX_LENGTH } from '@/lib/visits/vendor-input'
 import {
@@ -86,16 +87,18 @@ function TechnicianRow({
 
   return (
     <div className="card p-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex min-h-touch items-center justify-between gap-3">
         <span className="inline-flex items-center gap-2 text-label font-bold text-ink">
-          <Users aria-hidden="true" className="size-4 shrink-0 text-brand" />
+          <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-bold text-brand-dark">
+            {index + 1}
+          </span>
           Teknisi {index + 1}
         </span>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="min-h-touch"
+          className="min-h-touch min-w-touch px-2"
           onClick={onRemove}
           disabled={!canRemove}
           aria-label={removeLabel}
@@ -115,6 +118,7 @@ function TechnicianRow({
           autoComplete="off"
           placeholder="Sesuai KTP/SIM"
           error={rowError?.name?.message}
+          id={technicianAnchorId(index, 'name')}
           {...register(`technicians.${index}.name`)}
         />
         <Input
@@ -125,6 +129,7 @@ function TechnicianRow({
           autoComplete="off"
           placeholder="Nomor identitas yang masih berlaku"
           error={rowError?.id_number?.message}
+          id={technicianAnchorId(index, 'id_number')}
           {...register(`technicians.${index}.id_number`)}
         />
         <Input
@@ -136,6 +141,7 @@ function TechnicianRow({
           autoComplete="off"
           placeholder="08xxxxxxxxxx"
           error={rowError?.phone?.message}
+          id={technicianAnchorId(index, 'phone')}
           {...register(`technicians.${index}.phone`)}
         />
         <UploadBox
@@ -157,6 +163,7 @@ function TechnicianRow({
           idleButtonLabel="Unggah Foto Selfie"
           changeButtonLabel="Ganti Foto Selfie"
           category="id_card"
+          id={technicianAnchorId(index, 'selfie')}
           value={selfie.url === '' ? null : selfie}
           error={rowError?.selfie?.message}
           onChange={(next) =>
@@ -249,7 +256,7 @@ export function TechnicianList({
           ))}
         </datalist>
 
-        <div className="flex flex-col gap-4">
+        <div id="visit-technicians" tabIndex={-1} className="flex flex-col gap-4">
           {fields.map((field, index) => (
             <TechnicianRow
               key={field.id}
@@ -271,7 +278,7 @@ export function TechnicianList({
             type="button"
             variant="secondary"
             fullWidth
-            className="min-h-touch"
+            className="min-h-touch-lg"
             disabled={atLimit}
             onClick={() => append(emptyTechnician(defaultVendorName))}
           >

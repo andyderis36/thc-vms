@@ -39,7 +39,7 @@ func TestFindByID_AttachesPurposes(t *testing.T) {
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	created, err := repos.Create(ctx, domain.VisitRequest{
-		PICUserID:     vendor,
+		VendorUserID:  vendor,
 		LocationID:    loc,
 		StartDate:     start,
 		EndDate:       start.Add(4 * time.Hour),
@@ -99,11 +99,11 @@ func TestList_AttachesPurposesPerPage(t *testing.T) {
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	end := start.Add(4 * time.Hour)
 	withPurpose := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000241", PIC: vendor, Location: loc,
+		Code: "VST-0000000241", VendorUser: vendor, Location: loc,
 		Start: start, End: end, Status: domain.VisitStatusRequested,
 	})
 	withoutPurpose := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000242", PIC: vendor, Location: loc,
+		Code: "VST-0000000242", VendorUser: vendor, Location: loc,
 		Start: start, End: end, Status: domain.VisitStatusRequested,
 	})
 	linkPurpose(t, pool, withPurpose, purpose)

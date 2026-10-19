@@ -23,22 +23,22 @@ func TestGetVisit_SecurityOpensAnyBranchVisit(t *testing.T) {
 	}}
 
 	today := domain.VisitRequest{
-		ID:         domain.UUID("visit-today"),
-		VisitID:    "VST-TODAY00001",
-		PICUserID:  domain.UUID("pic-1"),
-		LocationID: domain.UUID("loc-A"),
-		StartDate:  time.Date(2026, time.September, 25, 9, 0, 0, 0, wibZone()),
-		EndDate:    time.Date(2026, time.September, 25, 18, 0, 0, 0, wibZone()),
-		Status:     domain.VisitStatusApproved,
+		ID:           domain.UUID("visit-today"),
+		VisitID:      "VST-TODAY00001",
+		VendorUserID: domain.UUID("vendor-1"),
+		LocationID:   domain.UUID("loc-A"),
+		StartDate:    time.Date(2026, time.September, 25, 9, 0, 0, 0, wibZone()),
+		EndDate:      time.Date(2026, time.September, 25, 18, 0, 0, 0, wibZone()),
+		Status:       domain.VisitStatusApproved,
 	}
 	stale := domain.VisitRequest{
-		ID:         domain.UUID("visit-stale"),
-		VisitID:    "VST-STALE00001",
-		PICUserID:  domain.UUID("pic-1"),
-		LocationID: domain.UUID("loc-A"),
-		StartDate:  time.Date(2026, time.September, 20, 9, 0, 0, 0, wibZone()),
-		EndDate:    time.Date(2026, time.September, 20, 18, 0, 0, 0, wibZone()),
-		Status:     domain.VisitStatusCompleted,
+		ID:           domain.UUID("visit-stale"),
+		VisitID:      "VST-STALE00001",
+		VendorUserID: domain.UUID("vendor-1"),
+		LocationID:   domain.UUID("loc-A"),
+		StartDate:    time.Date(2026, time.September, 20, 9, 0, 0, 0, wibZone()),
+		EndDate:      time.Date(2026, time.September, 20, 18, 0, 0, 0, wibZone()),
+		Status:       domain.VisitStatusCompleted,
 	}
 
 	repo := newFakeVisitRepo(t)
@@ -84,7 +84,7 @@ func TestGetVisit_SecurityOpensFutureApprovedVisit(t *testing.T) {
 	future := domain.VisitRequest{
 		ID:                  domain.UUID("visit-future"),
 		VisitID:             "VST-3523808258",
-		PICUserID:           domain.UUID("pic-1"),
+		VendorUserID:        domain.UUID("vendor-1"),
 		LocationID:          domain.UUID("loc-A"),
 		StartDate:           time.Date(2026, time.October, 5, 9, 0, 0, 0, wibZone()),
 		EndDate:             time.Date(2026, time.October, 5, 18, 0, 0, 0, wibZone()),
@@ -137,14 +137,14 @@ func TestGetVisit_ReadScope(t *testing.T) {
 		t.Errorf("cross-branch read error = %v, want forbidden branch", err)
 	}
 
-	otherVendor := testActor(domain.RoleVendor, "pic-9", "")
+	otherVendor := testActor(domain.RoleVendor, "vendor-9", "")
 	if _, err := svc.GetVisit(context.Background(), otherVendor, "visit-1"); err == nil {
 		t.Error("other vendor read must be refused, got nil error")
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("other vendor read error = %v, want not found", err)
 	}
 
-	owner := testActor(domain.RoleVendor, "pic-1", "")
+	owner := testActor(domain.RoleVendor, "vendor-1", "")
 	if _, err := svc.GetVisit(context.Background(), owner, "visit-1"); err != nil {
 		t.Errorf("owning vendor read returned error: %v", err)
 	}

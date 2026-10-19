@@ -62,7 +62,7 @@ const visitFixture: VisitDetail = {
     timezone: 'WIB',
   },
   purposes: [],
-  pic_user: {
+  vendor_user: {
     id: 'vendor-1',
     name: 'Vendor Uji',
     email: 'vendor@uji.test',
