@@ -91,13 +91,13 @@ func TestCreateUser_VendorIDWinsOverManualName(t *testing.T) {
 // on both the stored row and the echoed response.
 func TestUpdateUser_ManualVendorNameSetKeepClear(t *testing.T) {
 	t.Run("keep: absent member preserves the stored company", func(t *testing.T) {
-		users := newStubManagedUsers(vendorWithCompany("pic-1", "tek@vendor.local", "PT Lama"))
+		users := newStubManagedUsers(vendorWithCompany("vendor-1", "tek@vendor.local", "PT Lama"))
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
-		rec := serveJSON(engine, "PATCH", "/users/pic-1", `{"phone":"0899"}`)
+		rec := serveJSON(engine, "PATCH", "/users/vendor-1", `{"phone":"0899"}`)
 		mustStatus(t, rec, http.StatusOK)
 
-		stored := users.byID["pic-1"].User.VendorNameOverride
+		stored := users.byID["vendor-1"].User.VendorNameOverride
 		if stored == nil || *stored != "PT Lama" {
 			t.Fatalf("stored VendorNameOverride = %v, want the untouched company", stored)
 		}
@@ -108,13 +108,13 @@ func TestUpdateUser_ManualVendorNameSetKeepClear(t *testing.T) {
 	})
 
 	t.Run("set: filled member replaces the stored company", func(t *testing.T) {
-		users := newStubManagedUsers(vendorWithCompany("pic-1", "tek@vendor.local", "PT Lama"))
+		users := newStubManagedUsers(vendorWithCompany("vendor-1", "tek@vendor.local", "PT Lama"))
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
-		rec := serveJSON(engine, "PATCH", "/users/pic-1", `{"vendor_name":"  PT Baru  "}`)
+		rec := serveJSON(engine, "PATCH", "/users/vendor-1", `{"vendor_name":"  PT Baru  "}`)
 		mustStatus(t, rec, http.StatusOK)
 
-		stored := users.byID["pic-1"].User.VendorNameOverride
+		stored := users.byID["vendor-1"].User.VendorNameOverride
 		if stored == nil || *stored != "PT Baru" {
 			t.Fatalf("stored VendorNameOverride = %v, want the trimmed replacement", stored)
 		}
@@ -125,13 +125,13 @@ func TestUpdateUser_ManualVendorNameSetKeepClear(t *testing.T) {
 	})
 
 	t.Run("clear: empty member nulls the stored company", func(t *testing.T) {
-		users := newStubManagedUsers(vendorWithCompany("pic-1", "tek@vendor.local", "PT Lama"))
+		users := newStubManagedUsers(vendorWithCompany("vendor-1", "tek@vendor.local", "PT Lama"))
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
-		rec := serveJSON(engine, "PATCH", "/users/pic-1", `{"vendor_name":"   "}`)
+		rec := serveJSON(engine, "PATCH", "/users/vendor-1", `{"vendor_name":"   "}`)
 		mustStatus(t, rec, http.StatusOK)
 
-		if stored := users.byID["pic-1"].User.VendorNameOverride; stored != nil {
+		if stored := users.byID["vendor-1"].User.VendorNameOverride; stored != nil {
 			t.Fatalf("stored VendorNameOverride = %q, want nil after a clear", *stored)
 		}
 		data := decodeData[map[string]any](t, mustSuccess(t, rec))
@@ -142,19 +142,19 @@ func TestUpdateUser_ManualVendorNameSetKeepClear(t *testing.T) {
 
 	t.Run("catalogue link wins and clears a stored company", func(t *testing.T) {
 		vendorID := "22222222-2222-2222-2222-222222222222"
-		users := newStubManagedUsers(vendorWithCompany("pic-1", "tek@vendor.local", "PT Lama"))
+		users := newStubManagedUsers(vendorWithCompany("vendor-1", "tek@vendor.local", "PT Lama"))
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
-		rec := serveJSON(engine, "PATCH", "/users/pic-1",
+		rec := serveJSON(engine, "PATCH", "/users/vendor-1",
 			`{"vendor_id":"`+vendorID+`","vendor_name":"PT Abai"}`)
 		mustStatus(t, rec, http.StatusOK)
 
-		if stored := users.byID["pic-1"].User.VendorNameOverride; stored != nil {
+		if stored := users.byID["vendor-1"].User.VendorNameOverride; stored != nil {
 			t.Errorf("stored VendorNameOverride = %q, want nil when vendor_id wins", *stored)
 		}
-		if users.byID["pic-1"].User.VendorID == nil ||
-			*users.byID["pic-1"].User.VendorID != domain.UUID(vendorID) {
-			t.Errorf("stored VendorID = %v, want the catalogue link", users.byID["pic-1"].User.VendorID)
+		if users.byID["vendor-1"].User.VendorID == nil ||
+			*users.byID["vendor-1"].User.VendorID != domain.UUID(vendorID) {
+			t.Errorf("stored VendorID = %v, want the catalogue link", users.byID["vendor-1"].User.VendorID)
 		}
 	})
 }
@@ -163,36 +163,36 @@ func TestUpdateUser_ManualVendorNameSetKeepClear(t *testing.T) {
 // confirms an overlong value never reaches the repository.
 func TestUpdateUser_ManualVendorNameLength(t *testing.T) {
 	t.Run("120 runes accepted", func(t *testing.T) {
-		users := newStubManagedUsers(vendorWithCompany("pic-1", "tek@vendor.local", ""))
+		users := newStubManagedUsers(vendorWithCompany("vendor-1", "tek@vendor.local", ""))
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
-		rec := serveJSON(engine, "PATCH", "/users/pic-1",
+		rec := serveJSON(engine, "PATCH", "/users/vendor-1",
 			`{"vendor_name":`+mustJSON(t, strings.Repeat("A", 120))+`}`)
 		mustStatus(t, rec, http.StatusOK)
 
-		stored := users.byID["pic-1"].User.VendorNameOverride
+		stored := users.byID["vendor-1"].User.VendorNameOverride
 		if stored == nil || len([]rune(*stored)) != 120 {
 			t.Errorf("stored company = %v, want 120 runes", stored)
 		}
 	})
 
 	t.Run("121 runes refused", func(t *testing.T) {
-		users := newStubManagedUsers(vendorWithCompany("pic-1", "tek@vendor.local", ""))
+		users := newStubManagedUsers(vendorWithCompany("vendor-1", "tek@vendor.local", ""))
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
-		rec := serveJSON(engine, "PATCH", "/users/pic-1",
+		rec := serveJSON(engine, "PATCH", "/users/vendor-1",
 			`{"vendor_name":`+mustJSON(t, strings.Repeat("A", 121))+`}`)
 		msg := mustErrorCode(t, rec, http.StatusBadRequest, "VALIDATION_ERROR")
 		if !strings.Contains(msg, "120 karakter") {
 			t.Errorf("message = %q, want it to name the 120-rune bound", msg)
 		}
-		if stored := users.byID["pic-1"].User.VendorNameOverride; stored != nil {
+		if stored := users.byID["vendor-1"].User.VendorNameOverride; stored != nil {
 			t.Error("an overlong company must never reach the repository")
 		}
 	})
 }
 
-// TestUpdateUser_ManualVendorNameIsPICOnly pins the role gate on the patch for
+// TestUpdateUser_ManualVendorNameIsVendorOnly pins the role gate on the patch for
 // every internal role, at the HTTP edge this time.
 func TestUpdateUser_ManualVendorNameIsVendorOnly(t *testing.T) {
 	locID := "11111111-1111-1111-1111-111111111111"
@@ -229,13 +229,13 @@ func TestUpdateUser_ManualVendorNameIsVendorOnly(t *testing.T) {
 // tri-state work: an empty vendor_name means CLEAR, so it must not silently
 // behave like "keep" and leave a stale company on screen.
 func TestUpdateUser_BlankVendorNameIsNotKeep(t *testing.T) {
-	users := newStubManagedUsers(vendorWithCompany("pic-1", "tek@vendor.local", "PT Lama"))
+	users := newStubManagedUsers(vendorWithCompany("vendor-1", "tek@vendor.local", "PT Lama"))
 	engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
-	rec := serveJSON(engine, "PATCH", "/users/pic-1", `{"vendor_name":""}`)
+	rec := serveJSON(engine, "PATCH", "/users/vendor-1", `{"vendor_name":""}`)
 	mustStatus(t, rec, http.StatusOK)
 
-	if stored := users.byID["pic-1"].User.VendorNameOverride; stored != nil {
+	if stored := users.byID["vendor-1"].User.VendorNameOverride; stored != nil {
 		t.Fatalf("an explicitly empty vendor_name must clear, stored = %q", *stored)
 	}
 }

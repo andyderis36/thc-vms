@@ -11,6 +11,7 @@ import { useApproveVisitMutation } from '@/lib/api/hooks'
 import { queryKeys } from '@/lib/api/query-keys'
 import type { VisitDetail } from '@/lib/api/types'
 import { primaryVendorDisplay } from '@/lib/visits/vendor-display'
+import { visitVendorUser } from '@/lib/visits/vendor-user'
 import { formatVisitSchedule } from './VisitTable'
 
 /**
@@ -45,7 +46,7 @@ export function VisitSummary({ visit, hideVendor = false }: VisitSummaryProps) {
         <StatusBadge status={visit.status} />
       </div>
       <p className="text-ink-secondary">
-        <span className="text-ink">{visit.pic_user.name}</span>
+        <span className="text-ink">{visitVendorUser(visit)?.name}</span>
         {showVendor ? ` · ${vendorDisplay}` : ''}
       </p>
       <p className="text-ink-secondary">{visit.location.name}</p>

@@ -61,17 +61,23 @@ type userDTO struct {
 // list items leave them nil so the keys are omitted, and requested/approved
 // visits render no gate keys at all.
 type visitDetailDTO struct {
-	ID                  string       `json:"id"`
-	VisitID             string       `json:"visit_id"`
-	Status              string       `json:"status"`
-	Location            locationDTO  `json:"location"`
-	Purposes            []purposeDTO `json:"purposes"`
-	PICUser             userDTO      `json:"pic_user"`
-	VendorName          string       `json:"vendor_name"`
-	StartDate           string       `json:"start_date"`
-	EndDate             string       `json:"end_date"`
-	AssignmentLetterURL *string      `json:"assignment_letter_url"`
-	Notes               string       `json:"notes"`
+	ID         string       `json:"id"`
+	VisitID    string       `json:"visit_id"`
+	Status     string       `json:"status"`
+	Location   locationDTO  `json:"location"`
+	Purposes   []purposeDTO `json:"purposes"`
+	VendorUser userDTO      `json:"vendor_user"`
+	// LegacyPICUser adalah alias USANG dari VendorUser yang dipertahankan
+	// HANYA selama fase transisi rename PIC -> VendorUser ini, agar tab browser
+	// dengan bundle frontend lama yang masih membaca `pic_user` tetap berfungsi.
+	// Nilainya SELALU identik dengan VendorUser dan field ini dihapus pada fase
+	// berikutnya; jangan pakai untuk logika baru.
+	LegacyPICUser       userDTO `json:"pic_user"`
+	VendorName          string  `json:"vendor_name"`
+	StartDate           string  `json:"start_date"`
+	EndDate             string  `json:"end_date"`
+	AssignmentLetterURL *string `json:"assignment_letter_url"`
+	Notes               string  `json:"notes"`
 	// PurposeNote mirrors VisitDetail.purpose_note (migration 000005): no
 	// omitempty so the key is always present, null when the visit carries no
 	// free-typed purpose.
@@ -117,10 +123,10 @@ type createVisitBody struct {
 	PurposeIDs []string `json:"purpose_ids"`
 	// PurposeNote is the free-typed "tujuan lain" (migration 000005): either
 	// a non-empty purpose_ids or a non-empty purpose_note is required.
-	PurposeNote         string  `json:"purpose_note"`
-	StartDate           string  `json:"start_date"`
-	EndDate             string  `json:"end_date"`
-	IsMultiDay          bool    `json:"is_multi_day"`
+	PurposeNote string `json:"purpose_note"`
+	StartDate   string `json:"start_date"`
+	EndDate     string `json:"end_date"`
+	IsMultiDay  bool   `json:"is_multi_day"`
 	// AssignmentLetterURL is mandatory on CREATE (binding required); the
 	// exact FE-aligned wording comes from checkCreateBody, which also
 	// rejects the empty/whitespace case this tag cannot see.
@@ -163,21 +169,24 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 		Status:     string(v.Status),
 		Location:   loc,
 		Purposes:   []purposeDTO{},
-		PICUser:    userDTO{ID: string(v.PICUserID)},
+		VendorUser: userDTO{ID: string(v.VendorUserID)},
 		VendorName: v.VendorName,
 		StartDate:  v.StartDate.Format(time.RFC3339),
 		EndDate:    v.EndDate.Format(time.RFC3339),
 		Visitors:   []visitorDTO{},
 		CreatedAt:  v.CreatedAt.Format(time.RFC3339),
 	}
-	if v.PICUserName != "" {
-		name := v.PICUserName
-		detail.PICUser.Name = &name
+	if v.VendorUserName != "" {
+		name := v.VendorUserName
+		detail.VendorUser.Name = &name
 	}
-	if v.PICUserEmail != "" {
-		email := v.PICUserEmail
-		detail.PICUser.Email = &email
+	if v.VendorUserEmail != "" {
+		email := v.VendorUserEmail
+		detail.VendorUser.Email = &email
 	}
+	// The deprecated pic_user alias always mirrors vendor_user byte for byte so
+	// a stale frontend bundle keeps rendering the visitor card unchanged.
+	detail.LegacyPICUser = detail.VendorUser
 	for _, p := range v.Purposes {
 		dto := purposeDTO{ID: string(p.ID)}
 		if p.Name != "" {

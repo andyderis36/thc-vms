@@ -1,12 +1,14 @@
 'use client'
 
-import { Users } from 'lucide-react'
+import { FileText, Users } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { VisitSummary } from '@/features/visits/components/ApproveModal'
+import { SpkFileLink } from '@/features/visits/components/SpkFileLink'
 import { VisitorPhoto } from '@/features/visits/detail/VisitorPhoto'
 import { VisitFilePhoto } from '@/features/visits/detail/VisitFilePhoto'
 import type { VisitDetail } from '@/lib/api/types'
+import { visitVendorUser } from '@/lib/visits/vendor-user'
 
 export interface ScanResultModalProps {
   visit: VisitDetail | null
@@ -87,8 +89,27 @@ export function ScanResultModal({
 
       <VisitSummary visit={visit} hideVendor />
 
+      {/*
+        CTA "Lihat SPK" — hanya bila berkas Surat Tugas tersedia
+        (guard sama dengan VisitTable/VisitCards). Selama berkas dimuat,
+        SpkFileLink menampilkan fallback netral "—".
+      */}
+      {visit.assignment_letter_url ? (
+        <p className="mb-4 flex items-center gap-2">
+          <FileText aria-hidden="true" className="size-4 shrink-0 text-ink-muted" />
+          <SpkFileLink
+            visitId={visit.id}
+            className="inline-flex min-h-touch items-center text-sm font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+            ariaLabel={`Lihat surat tugas SPK kunjungan ${visit.visit_id}`}
+            fallback={<span className="text-xs sm:text-sm text-ink-muted">—</span>}
+          >
+            Lihat SPK
+          </SpkFileLink>
+        </p>
+      ) : null}
+
       <p className="text-label font-semibold text-ink">
-        Vendor/Mitra: {visit.pic_user.name}
+        Vendor/Mitra: {visitVendorUser(visit)?.name}
       </p>
 
       <h3 className="mt-4 flex items-center gap-2 text-label font-semibold text-ink">

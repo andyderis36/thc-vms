@@ -179,9 +179,9 @@ foreach ($l in $locations) { Write-Log ("  branch: {0} [{1}]" -f $l.name, $l.typ
 
 # ------------------------------------------- logins: admins/security/vendors
 # Login ONCE per account, reuse tokens; ~3s between logins (strict limiter).
-$vendorEmails = @("pic1a@thc.com", "pic1b@thc.com", "pic2a@thc.com", "pic2b@thc.com",
-    "pic3a@thc.com", "pic3b@thc.com", "pic4a@thc.com", "pic4b@thc.com",
-    "pic5a@thc.com", "pic5b@thc.com")
+$vendorEmails = @("vendor1a@thc.com", "vendor1b@thc.com", "vendor2a@thc.com", "vendor2b@thc.com",
+    "vendor3a@thc.com", "vendor3b@thc.com", "vendor4a@thc.com", "vendor4b@thc.com",
+    "vendor5a@thc.com", "vendor5b@thc.com")
 $adminTokens = @{}   # location_id -> token (branch koordinator)
 $adminEmails = @{}   # location_id -> email (for the report)
 $secTokens = @{}     # location_id -> token (branch pengawas)
@@ -200,7 +200,7 @@ for ($i = 1; $i -le 5; $i++) {
     Start-Sleep -Seconds 3
 }
 for ($i = 1; $i -le 5; $i++) {
-    $email = "satpam$($i)a@thc.com"
+    $email = "security$($i)a@thc.com"
     $tok = Login $email
     if (-not $tok) { Write-Log "FATAL: cannot login $email."; exit 1 }
     $me = Get-Me $tok

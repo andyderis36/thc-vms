@@ -147,7 +147,7 @@ function buildSeed(): MockDb {
   /**
    * 26 akun demo skema baru (cermin kontrak BE paralel):
    * 1 superadmin + 5 admin (`admin1..5@thc.com`) + 10 security
-   * (`satpam{N}A/B@thc.com`, N=1..5) + 10 Vendor/Mitra (`pic{N}A/B@thc.com`).
+   * (`security{N}A/B@thc.com`, N=1..5) + 10 Vendor/Mitra (`vendor{N}A/B@thc.com`).
    * NIK 16 digit wajib untuk admin/vendor, `null` untuk security/superadmin
    * (BE menolak NIK untuk keduanya). Password semua = DEMO_PASSWORD.
    */
@@ -190,16 +190,16 @@ function buildSeed(): MockDb {
       },
     ),
     ...[
-      'Joko Susilo (Satpam Kantor Pusat Pontianak)',
-      'Sutrisno Hadi (Satpam Kantor Pusat Pontianak)',
-      'Rahmat Hidayat (Satpam Cabang Sambas)',
-      'Wahyu Saputra (Satpam Cabang Sambas)',
-      'Slamet Riyadi (Satpam POP Mempawah)',
-      'Andi Wijaya (Satpam POP Mempawah)',
-      'Herman Yusuf (Satpam POP Singkawang)',
-      'Tono Prasetyo (Satpam POP Singkawang)',
-      'Mulyadi Santoso (Satpam miniPOP Aruk)',
-      'Dadang Firmansyah (Satpam miniPOP Aruk)',
+      'Joko Susilo (Pengawas Kantor Pusat Pontianak)',
+      'Sutrisno Hadi (Pengawas Kantor Pusat Pontianak)',
+      'Rahmat Hidayat (Pengawas Cabang Sambas)',
+      'Wahyu Saputra (Pengawas Cabang Sambas)',
+      'Slamet Riyadi (Pengawas POP Mempawah)',
+      'Andi Wijaya (Pengawas POP Mempawah)',
+      'Herman Yusuf (Pengawas POP Singkawang)',
+      'Tono Prasetyo (Pengawas POP Singkawang)',
+      'Mulyadi Santoso (Pengawas miniPOP Aruk)',
+      'Dadang Firmansyah (Pengawas miniPOP Aruk)',
     ].map((name, index): User => {
       // Pasangan A/B per cabang: N=1..5 → SBY/MLG/SWJ/RKT/LWG.
       const branch = Math.floor(index / 2);
@@ -208,7 +208,7 @@ function buildSeed(): MockDb {
       return {
         id: demoUserId(7 + index),
         name,
-        email: `satpam${branch + 1}${variant}@thc.com`,
+        email: `security${branch + 1}${variant}@thc.com`,
         phone: `0811-3000-0${String(20 + index)}`,
         nik: null,
         role: 'security',
@@ -238,7 +238,7 @@ function buildSeed(): MockDb {
       return {
         id: demoUserId(17 + index),
         name,
-          email: `pic${branch + 1}${variant}@thc.com`,
+          email: `vendor${branch + 1}${variant}@thc.com`,
           phone: `0812-4100-0${String(30 + index)}`,
           nik: demoNik(branch + 1, 2, index + 1),
         role: 'vendor',
@@ -275,8 +275,8 @@ function buildSeed(): MockDb {
     return found;
   };
 
-  const picSplicing = userByEmail('pic1a@thc.com');
-  const picGenset = userByEmail('pic2a@thc.com');
+  const vendorSplicing = userByEmail('vendor1a@thc.com');
+  const vendorGenset = userByEmail('vendor2a@thc.com');
 
   const visits: VisitDetail[] = [
     {
@@ -286,7 +286,7 @@ function buildSeed(): MockDb {
       status: 'approved',
       location: locationById(LOC_SBY),
       purposes: [purposeById(PRP_SPLICING)],
-      pic_user: picSplicing,
+      vendor_user: vendorSplicing,
       vendor_name: 'PT Lintas Fiber',
       start_date: isoHoursFromNow(1.5),
       end_date: isoHoursFromNow(9.5),
@@ -320,7 +320,7 @@ function buildSeed(): MockDb {
       status: 'approved',
       location: locationById(LOC_MLG),
       purposes: [purposeById(PRP_GENSET)],
-      pic_user: picGenset,
+      vendor_user: vendorGenset,
       vendor_name: 'PT Daya Power Mandiri',
       start_date: isoHoursFromNow(3),
       end_date: isoHoursFromNow(11),
@@ -343,7 +343,7 @@ function buildSeed(): MockDb {
       status: 'approved',
       location: locationById(LOC_SBY),
       purposes: [purposeById(PRP_SERVER), purposeById(PRP_PREVENTIVE)],
-      pic_user: picSplicing,
+      vendor_user: vendorSplicing,
       vendor_name: 'PT Lintas Fiber',
       start_date: isoHoursFromNow(-2),
       end_date: isoHoursFromNow(6),
@@ -378,7 +378,7 @@ function buildSeed(): MockDb {
       status: 'visiting',
       location: locationById(LOC_SBY),
       purposes: [purposeById(PRP_LOGISTICS)],
-      pic_user: picSplicing,
+      vendor_user: vendorSplicing,
       vendor_name: 'PT Lintas Fiber',
       start_date: isoHoursFromNow(-3),
       end_date: isoHoursFromNow(5),
@@ -400,7 +400,7 @@ function buildSeed(): MockDb {
       status: 'completed',
       location: locationById(LOC_SBY),
       purposes: [purposeById(PRP_PREVENTIVE)],
-      pic_user: picGenset,
+      vendor_user: vendorGenset,
       vendor_name: 'PT Daya Power Mandiri',
       start_date: isoHoursFromNow(-26),
       end_date: isoHoursFromNow(-18),
@@ -428,7 +428,7 @@ function buildSeed(): MockDb {
       status: 'requested',
       location: locationById(LOC_SWJ),
       purposes: [purposeById(PRP_SPLICING)],
-      pic_user: picGenset,
+      vendor_user: vendorGenset,
       vendor_name: 'PT Daya Power Mandiri',
       start_date: isoHoursFromNow(26),
       end_date: isoHoursFromNow(34),
@@ -450,7 +450,7 @@ function buildSeed(): MockDb {
       status: 'rejected',
       location: locationById(LOC_MLG),
       purposes: [purposeById(PRP_AUDIT)],
-      pic_user: picSplicing,
+      vendor_user: vendorSplicing,
       vendor_name: 'PT Lintas Fiber',
       start_date: isoHoursFromNow(30),
       end_date: isoHoursFromNow(38),
@@ -473,7 +473,7 @@ function buildSeed(): MockDb {
       status: 'cancelled',
       location: locationById(LOC_SBY),
       purposes: [purposeById(PRP_LOGISTICS)],
-      pic_user: picGenset,
+      vendor_user: vendorGenset,
       vendor_name: 'PT Daya Power Mandiri',
       start_date: isoHoursFromNow(-50),
       end_date: isoHoursFromNow(-42),
@@ -495,7 +495,7 @@ function buildSeed(): MockDb {
       status: 'rescheduled',
       location: locationById(LOC_RKT),
       purposes: [purposeById(PRP_SERVER)],
-      pic_user: picSplicing,
+      vendor_user: vendorSplicing,
       vendor_name: 'PT Lintas Fiber',
       start_date: isoHoursFromNow(50),
       end_date: isoHoursFromNow(58),
@@ -523,7 +523,7 @@ function buildSeed(): MockDb {
       status: 'not_visit',
       location: locationById(LOC_LWG),
       purposes: [purposeById(PRP_AUDIT)],
-      pic_user: picGenset,
+      vendor_user: vendorGenset,
       vendor_name: 'PT Daya Power Mandiri',
       start_date: isoHoursFromNow(-72),
       end_date: isoHoursFromNow(-64),

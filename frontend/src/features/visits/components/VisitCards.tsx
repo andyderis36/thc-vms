@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import type { Role, VisitDetail } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
 import { primaryVendorDisplay } from '@/lib/visits/vendor-display'
+import { visitVendorUser } from '@/lib/visits/vendor-user'
 import { isApprovableStatus, isRejectableStatus } from '@/lib/visits/visit-status'
 import { technicianDisplay, visitSchedule, type VisitTableProps } from './VisitTable'
 import { SpkFileLink } from './SpkFileLink'
@@ -50,6 +51,7 @@ export function VisitCards({ visits, role, onApprove, onReject }: VisitCardsProp
         const purposes = visit.purposes.map((purpose) => purpose.name).join(', ')
         const vendorDisplay = primaryVendorDisplay(visit.visitors)
         const hasVendor = vendorDisplay !== '—'
+        const vendorUser = visitVendorUser(visit)
         const technicians = technicianDisplay(visit)
         const spkUrl = visit.assignment_letter_url
 
@@ -61,26 +63,26 @@ export function VisitCards({ visits, role, onApprove, onReject }: VisitCardsProp
                   href={`/visits/${visit.id}`}
                   aria-label={`Lihat detail kunjungan ${visit.visit_id}`}
                   title={visit.visit_id}
-                  className="inline-flex min-h-touch max-w-full items-center font-mono text-sm font-semibold text-brand underline underline-offset-2 hover:text-brand-strong"
+                  className="inline-flex min-h-touch max-w-full items-center font-mono text-sm font-semibold text-brand underline underline-offset-2 hover:text-brand-dark"
                 >
                   <span className="min-w-0 truncate">{visit.visit_id}</span>
                 </Link>
                 <p
-                  className="truncate text-sm text-ink-secondary"
+                  className="truncate text-xs sm:text-sm text-ink-secondary"
                   title={
                     hasVendor
-                      ? `${visit.pic_user.name} · ${vendorDisplay}`
-                      : visit.pic_user.name
+                      ? `${vendorUser?.name} · ${vendorDisplay}`
+                      : vendorUser?.name
                   }
                 >
-                  {visit.pic_user.name}
+                  {vendorUser?.name}
                   {hasVendor ? ` · ${vendorDisplay}` : ''}
                 </p>
               </div>
               <StatusBadge status={visit.status} className="shrink-0" />
             </div>
 
-            <div className="mt-3 flex flex-1 flex-col gap-2 text-sm text-ink-secondary">
+            <div className="mt-3 flex flex-1 flex-col gap-2 text-xs sm:text-sm text-ink-secondary">
               <p className="flex items-start gap-2">
                 <MapPin className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                 <span className="min-w-0">

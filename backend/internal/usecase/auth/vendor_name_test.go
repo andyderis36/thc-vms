@@ -31,9 +31,9 @@ func (f fakeVendors) FindVendorName(_ context.Context, id domain.UUID) (string, 
 func vendorWithVendor(hash string) domain.User {
 	vendor := domain.UUID("vendor-lintas")
 	return domain.User{
-		ID:           "user-pic-1",
+		ID:           "user-vendor-1",
 		Name:         "Teknisi Vendor",
-		Email:        "pic@vendor.local",
+		Email:        "vendor@vendor.local",
 		PasswordHash: hash,
 		Phone:        "0812",
 		RoleID:       "role-vendor",
@@ -49,13 +49,13 @@ func vendorWithVendor(hash string) domain.User {
 func TestMe_ResolvesVendorName(t *testing.T) {
 	users := &fakeUsers{byEmail: map[string]domain.User{}, byID: map[domain.UUID]domain.User{}}
 	vendor := vendorWithVendor(hashPassword(t, "Password123!"))
-	users.byEmail["pic@vendor.local"] = vendor
+	users.byEmail["vendor@vendor.local"] = vendor
 	users.byID[vendor.ID] = vendor
 	deps := loginDeps(users)
 	deps.Vendors = fakeVendors{names: map[domain.UUID]string{"vendor-lintas": "PT Lintas Fiber"}}
 	svc := NewService(deps)
 
-	got, err := svc.Me(context.Background(), "user-pic-1")
+	got, err := svc.Me(context.Background(), "user-vendor-1")
 	if err != nil {
 		t.Fatalf("Me: %v", err)
 	}
@@ -70,11 +70,11 @@ func TestMe_ResolvesVendorName(t *testing.T) {
 func TestMe_VendorNameStaysNil(t *testing.T) {
 	users := &fakeUsers{byEmail: map[string]domain.User{}, byID: map[domain.UUID]domain.User{}}
 	vendor := vendorWithVendor(hashPassword(t, "Password123!"))
-	users.byEmail["pic@vendor.local"] = vendor
+	users.byEmail["vendor@vendor.local"] = vendor
 	users.byID[vendor.ID] = vendor
 
 	svc := NewService(loginDeps(users))
-	got, err := svc.Me(context.Background(), "user-pic-1")
+	got, err := svc.Me(context.Background(), "user-vendor-1")
 	if err != nil {
 		t.Fatalf("Me without catalogue: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestMe_VendorNameStaysNil(t *testing.T) {
 	deps := loginDeps(users)
 	deps.Vendors = fakeVendors{names: map[domain.UUID]string{}}
 	svc = NewService(deps)
-	got, err = svc.Me(context.Background(), "user-pic-1")
+	got, err = svc.Me(context.Background(), "user-vendor-1")
 	if err != nil {
 		t.Fatalf("Me with unknown vendor: %v", err)
 	}

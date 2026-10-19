@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import {
   CalendarClock,
   CheckCircle2,
-  ExternalLink,
   FileText,
   History,
   MapPin,
@@ -14,6 +13,7 @@ import {
   Trash2,
   Users,
   XCircle,
+  type LucideIcon,
 } from 'lucide-react'
 import { Badge, StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -22,18 +22,18 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Spinner } from '@/components/ui/Spinner'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
-import { PicMobileShell, isQrVisible } from '@/components/layouts/PicMobileShell'
+import { VendorMobileShell, isQrVisible } from '@/components/layouts/VendorMobileShell'
 import { SecurityKioskShell } from '@/components/layouts/SecurityKioskShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { ApproveModal } from '@/features/visits/components/ApproveModal'
 import { RejectModal } from '@/features/visits/components/RejectModal'
+import { SpkFileLink } from '@/features/visits/components/SpkFileLink'
 import { CancelModal } from '@/features/visits/detail/CancelModal'
 import { QrCard } from '@/features/visits/detail/QrCard'
 import { RescheduleModal } from '@/features/visits/detail/RescheduleModal'
 import { Timeline, formatTanggalWaktu } from '@/features/visits/detail/Timeline'
 import { VisitorPhoto } from '@/features/visits/detail/VisitorPhoto'
 import { VisitFilePhoto } from '@/features/visits/detail/VisitFilePhoto'
-import { useVisitFile } from '@/features/visits/hooks/useVisitFile'
 import { ApiError } from '@/lib/api/fetcher'
 import { useDeleteVisitMutation, useVisitQuery } from '@/lib/api/hooks'
 import type { Role, VisitDetail, VisitStatus } from '@/lib/api/types'
@@ -41,6 +41,7 @@ import { can } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
 import { isApprovableStatus, isRejectableStatus } from '@/lib/visits/visit-status'
+import { visitVendorUser } from '@/lib/visits/vendor-user'
 import { toast } from 'sonner'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 
@@ -138,37 +139,28 @@ function ErrorBlock({ error, onRetry }: ErrorBlockProps) {
 }
 
 /**
- * Panel "Dokumen Surat Tugas" — berkas dimuat lewat endpoint berkas
- * kunjungan sebagai object URL (tahan lintas host; bukan presigned MinIO).
- * Selama memuat / bila gagal, tampilkan paragraf netral yang sama persis
- * dengan kondisi tanpa dokumen (galat berbahasa Indonesia bila ada).
+ * Panel "Dokumen Surat Tugas" — berkas diambil lewat komponen bersama
+ * `SpkFileLink` (object URL dari endpoint berkas kunjungan, bukan presigned
+ * MinIO), sehingga perlakuan memuat/gagal & gaya tautan identik dengan
+ * dashboard & approvals. Selama berkas dimuat atau gagal dimuat, komponen
+ * tersebut mengembalikan `fallback` netral yang sama persis dengan kondisi
+ * tanpa dokumen — sehingga tidak ada kedipan layout di panel ini.
  */
 function SuratTugasPanel({ visit }: { visit: VisitDetail }) {
-  const { objectUrl, error } = useVisitFile({
-    visitId: visit.id,
-    kind: 'assignment_letter',
-  })
-
-  if (objectUrl === null) {
-    return (
-      <p className="mt-4 rounded-control bg-neutral-bg px-4 py-3 text-sm text-neutral-text">
-        {error ?? 'Belum ada dokumen surat tugas yang dilampirkan.'}
-      </p>
-    )
-  }
-
   return (
     <div className="mt-4 flex flex-col items-start gap-2">
-      <a
-        href={objectUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label={`Lihat dokumen surat tugas ${visit.visit_id}`}
-        className="inline-flex min-h-touch items-center justify-center gap-2 rounded-control border border-brand px-4 text-label font-semibold uppercase tracking-wide text-brand transition duration-150 hover:bg-brand-soft"
+      <SpkFileLink
+        visitId={visit.id}
+        className="inline-flex min-h-touch items-center gap-2 font-medium text-brand underline underline-offset-2 transition-colors hover:text-brand-dark"
+        ariaLabel={`Lihat dokumen surat tugas ${visit.visit_id}`}
+        fallback={
+          <p className="rounded-control bg-neutral-bg px-4 py-3 text-sm text-neutral-text">
+            Surat tugas sedang dimuat. Bila tidak muncul, muat ulang halaman.
+          </p>
+        }
       >
-        <ExternalLink aria-hidden="true" className="size-4 shrink-0" />
         Lihat Dokumen
-      </a>
+      </SpkFileLink>
       <p className="text-label text-ink-muted">
         Berkas dibuka di tab baru langsung dari penyimpanan MinIO / S3.
       </p>
@@ -196,9 +188,9 @@ function RoleShell({ role, visitId, visitStatus, children }: RoleShellProps) {
   switch (role) {
     case 'vendor':
       return (
-        <PicMobileShell activeHref={activeHref} visitStatus={visitStatus}>
+        <VendorMobileShell activeHref={activeHref} visitStatus={visitStatus}>
           {children}
-        </PicMobileShell>
+        </VendorMobileShell>
       )
     case 'admin':
       return <AdminBranchShell activeHref={activeHref}>{children}</AdminBranchShell>
@@ -246,9 +238,36 @@ interface InfoRowProps {
 
 function InfoRow({ label, value }: InfoRowProps) {
   return (
-    <div className="flex flex-col gap-1 py-3 sm:flex-row sm:gap-4">
+    <div className="flex flex-col gap-1 py-3 sm:flex-row sm:items-baseline sm:gap-4">
       <dt className="shrink-0 text-label font-semibold text-ink-secondary sm:w-44">{label}</dt>
       <dd className="min-w-0 flex-1 break-words text-sm text-ink">{value}</dd>
+    </div>
+  )
+}
+
+interface PanelTitleProps {
+  icon: LucideIcon
+  tone?: 'brand' | 'danger'
+  /** Sisipan kanan (badge jumlah, dsb.) — opsional. */
+  trailing?: ReactNode
+  children: ReactNode
+}
+
+/** Judul panel dengan chip ikon tint (token `rounded-control` + warna soft proyek). */
+function PanelTitle({ icon: Icon, tone = 'brand', trailing, children }: PanelTitleProps) {
+  const chip = tone === 'danger' ? 'bg-danger-bg text-danger-text' : 'bg-brand-soft text-brand'
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <h2 className="flex min-w-0 items-center gap-3 text-base font-semibold text-ink">
+        <span
+          aria-hidden="true"
+          className={`flex size-9 shrink-0 items-center justify-center rounded-control ${chip}`}
+        >
+          <Icon className="size-4 shrink-0" />
+        </span>
+        <span className={tone === 'danger' ? 'text-danger-text' : undefined}>{children}</span>
+      </h2>
+      {trailing !== undefined ? <div className="shrink-0">{trailing}</div> : null}
     </div>
   )
 }
@@ -270,8 +289,10 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
   const showDelete = can(role, 'deleteRecords')
 
   const isTerminal = TERMINAL_STATUSES.has(visit.status)
+  // Pengaju Vendor/Mitra via helper transisi Fase 1 (fallback `pic_user`).
+  const vendorUser = visitVendorUser(visit)
   // Kontrol aksi mengikuti matriks kapabilitas — Vendor/Mitra tidak pernah melihat
-  // kontrol approval, dan satpam tidak bisa mengubah jadwal/membatalkan.
+  // kontrol approval, dan pengawas tidak bisa mengubah jadwal/membatalkan.
   const canReschedule = !isTerminal && can(role, 'rescheduleVisit')
   const canCancel = !isTerminal && can(role, 'cancelVisit')
   // Persetujuan di SCR-04 (inventaris §3: modal approve/reject ada di SCR-02
@@ -311,9 +332,13 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
         GRID DUA KOLOM DESKTOP (>= 1024px): detail kiri ~65% (8/12),
         QR kanan ~35% (4/12) dan sticky. Kartu QR sengaja PALING AWAL pada
         urutan sumber — di ponsel ia menjadi elemen pertama di alur dokumen
-        (above-the-fold) tanpa pengurutan CSS.
+        (above-the-fold) tanpa pengurutan CSS. Ikatan `lg:*` hanya berlaku
+        >= 1024px, jadi di ponsel urutan sumber = urutan visual dan tidak
+        ada header/banner yang bisa mendorong kartu QR ke bawah lipatan.
+        Jangan pakai `items-start`: sel grid harus setinggi dua barisnya
+        agar `lg:sticky` pada kartu QR punya ruang untuk menempel.
       */}
-      <div className="grid gap-6 lg:grid-cols-12">
+      <div className="grid gap-4 sm:gap-5 lg:grid-cols-12 lg:gap-6">
         <div className="min-w-0 lg:col-span-4 lg:col-start-9 lg:row-span-2 lg:row-start-1">
           <div className="lg:sticky lg:top-24">
             <QrCard
@@ -325,20 +350,21 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
         </div>
 
         <div className="min-w-0 lg:col-span-8 lg:col-start-1 lg:row-start-1">
-          <Card>
-            <CardBody>
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="flex min-w-0 flex-wrap items-center gap-3">
-                  <h1 className="text-2xl font-bold text-ink">{visit.visit_id}</h1>
+          <Card className="border-brand/20 bg-brand-soft/40">
+            <CardBody className="p-4 sm:p-5">
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <h1 className="inline-flex min-w-0 items-center rounded-control bg-surface px-3 py-2 font-mono text-lg font-bold tracking-tight text-ink sm:text-xl">
+                    <span className="wrap-anywhere">{visit.visit_id}</span>
+                  </h1>
                   <StatusBadge status={visit.status} />
                 </div>
                 {showActions && (
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 border-t border-brand/20 pt-4">
                     {canApprove && (
                       <Button
                         size="sm"
                         variant="success"
-                        className="min-h-touch px-3"
                         aria-label={`Setujui kunjungan ${visit.visit_id}`}
                         onClick={() => setApproveOpen(true)}
                       >
@@ -350,7 +376,6 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                       <Button
                         size="sm"
                         variant="danger"
-                        className="min-h-touch px-3"
                         aria-label={`Tolak kunjungan ${visit.visit_id}`}
                         onClick={() => setRejectOpen(true)}
                       >
@@ -359,23 +384,13 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                       </Button>
                     )}
                     {canReschedule && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="min-h-touch"
-                        onClick={() => setRescheduleOpen(true)}
-                      >
+                      <Button variant="secondary" size="sm" onClick={() => setRescheduleOpen(true)}>
                         <CalendarClock aria-hidden="true" className="size-4 shrink-0" />
                         Ubah Jadwal
                       </Button>
                     )}
                     {canCancel && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        className="min-h-touch"
-                        onClick={() => setCancelOpen(true)}
-                      >
+                      <Button variant="danger" size="sm" onClick={() => setCancelOpen(true)}>
                         <XCircle aria-hidden="true" className="size-4 shrink-0" />
                         Batalkan Kunjungan
                       </Button>
@@ -387,22 +402,39 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
           </Card>
         </div>
 
-        <div className="flex min-w-0 flex-col gap-6 lg:col-span-8 lg:col-start-1 lg:row-start-2">
+        <div className="flex min-w-0 flex-col gap-4 sm:gap-5 lg:col-span-8 lg:col-start-1 lg:row-start-2 lg:gap-6">
+          {/* Riwayat Status diletakkan kedua (tepat setelah kartu identitas):
+              status adalah hal pertama yang dicari teknisi setelah QR, jadi
+              timeline vertikal harus terbaca tanpa menggulir melewati panel
+              lain. Tetap satu kolom, urutan kronologis dari atas. */}
+          <Card>
+            <CardBody>
+              <PanelTitle icon={History}>Riwayat Status</PanelTitle>
+              <div className="mt-4">
+                <Timeline
+                  status={visit.status}
+                  createdAt={visit.created_at}
+                  startDate={visit.start_date}
+                  endDate={visit.end_date}
+                  checkInAt={visit.check_in_at ?? null}
+                  checkOutAt={visit.check_out_at ?? null}
+                />
+              </div>
+            </CardBody>
+          </Card>
+
           {/* Panel Informasi Lengkap */}
           <Card>
             <CardBody>
-              <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
-                <MapPin aria-hidden="true" className="size-4 shrink-0 text-ink-secondary" />
-                Informasi Kunjungan
-              </h2>
-              <dl className="mt-3 divide-y divide-border-light">
+              <PanelTitle icon={MapPin}>Informasi Kunjungan</PanelTitle>
+              <dl className="mt-4 divide-y divide-border-light">
                 <InfoRow
                   label="Vendor/Mitra"
                   value={
                     <>
-                      {visit.pic_user.name}
+                      {vendorUser?.name}
                       <span className="block text-label text-ink-muted">
-                        {visit.pic_user.email}
+                        {vendorUser?.email}
                       </span>
                     </>
                   }
@@ -416,7 +448,11 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                 ) : null}
                 <InfoRow
                   label="Rentang Waktu"
-                  value={`${formatTanggalWaktu(visit.start_date)} – ${formatTanggalWaktu(visit.end_date)}`}
+                  value={
+                    <span className="tabular-nums">
+                      {`${formatTanggalWaktu(visit.start_date)} – ${formatTanggalWaktu(visit.end_date)}`}
+                    </span>
+                  }
                 />
                 <InfoRow
                   label="Catatan"
@@ -433,13 +469,10 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
           {/* Panel Dokumen Surat Tugas */}
           <Card>
             <CardBody>
-              <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
-                <FileText aria-hidden="true" className="size-4 shrink-0 text-ink-secondary" />
-                Dokumen Surat Tugas
-              </h2>
+              <PanelTitle icon={FileText}>Dokumen Surat Tugas</PanelTitle>
               {/*
                 Cek truthy (bukan `!== null`): string kosong sama saja tidak
-                ada dokumen — jika tetap dirender, href="" membuka tab kosong.
+                ada dokumen — jika tetap dirender, tautan akan membuka tab kosong.
               */}
               {visit.assignment_letter_url ? (
                 <SuratTugasPanel visit={visit} />
@@ -451,22 +484,23 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
             </CardBody>
           </Card>
 
-          {/* Daftar Tim Teknisi */}
+          {/* Daftar Tim Teknisi — permukaan ber-tint lembut (bukan kotak
+              berborder) supaya deretan teknisi terbaca sebagai kartu data,
+              bukan tabel bersel. */}
           <Card>
             <CardBody>
-              <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
-                <Users aria-hidden="true" className="size-4 shrink-0 text-ink-secondary" />
-                {`Tim Teknisi (${visit.visitors.length} orang)`}
-              </h2>
+              <PanelTitle icon={Users} trailing={<Badge tone="neutral">{visit.visitors.length}</Badge>}>
+                Tim Teknisi
+              </PanelTitle>
               {visit.visitors.length > 0 ? (
-                <ul className="mt-3 divide-y divide-border-light">
+                <ul className="mt-4 flex flex-col gap-3">
                   {visit.visitors.map((visitor, index) => {
                     const selfieUrl = visitor.photo_url ?? null
                     const ktpUrl = visitor.id_card_photo_url ?? null
                     return (
                       <li
                         key={`${index}-${visitor.id_number}`}
-                        className="flex items-start gap-3 py-3"
+                        className="flex items-start gap-3 rounded-control bg-neutral-bg/70 p-3"
                       >
                         {selfieUrl !== null && selfieUrl !== '' ? (
                           <VisitFilePhoto
@@ -526,39 +560,18 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
             </CardBody>
           </Card>
 
-          {/* Panel Riwayat Status */}
-          <Card>
-            <CardBody>
-              <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
-                <History aria-hidden="true" className="size-4 shrink-0 text-ink-secondary" />
-                Riwayat Status
-              </h2>
-              <div className="mt-4">
-                <Timeline
-                  status={visit.status}
-                  createdAt={visit.created_at}
-                  startDate={visit.start_date}
-                  endDate={visit.end_date}
-                  checkInAt={visit.check_in_at ?? null}
-                  checkOutAt={visit.check_out_at ?? null}
-                />
-              </div>
-            </CardBody>
-          </Card>
-
           {showDelete ? (
-            <Card>
+            <Card className="border-danger-text/20 bg-danger-bg/50">
               <CardBody>
-                <h2 className="flex items-center gap-2 text-base font-semibold text-danger-text">
-                  <Trash2 aria-hidden="true" className="size-4 shrink-0" />
+                <PanelTitle icon={Trash2} tone="danger">
                   Zona Berbahaya
-                </h2>
-                <p className="mt-2 text-sm text-ink-secondary">
+                </PanelTitle>
+                <p className="mt-3 text-sm text-ink-secondary">
                   Hapus permanen kunjungan ini beserta seluruh datanya. Berlaku untuk status apa pun dan tidak dapat dibatalkan.
                 </p>
                 <Button
                   variant="danger"
-                  className="mt-4 min-h-touch"
+                  className="mt-4"
                   aria-label={`Hapus permanen kunjungan ${visit.visit_id}`}
                   onClick={() => setDeleteOpen(true)}
                 >

@@ -1,7 +1,9 @@
 'use client'
 
 import { zodResolver } from '@hookform/resolvers/zod'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
+import { ChevronDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
@@ -77,31 +79,31 @@ const DEMO_GROUPS: readonly DemoGroup[] = [
   {
     role: getRoleLabel('security'),
     accounts: [
-      { label: 'Kantor Pusat Pontianak — Joko Susilo', email: 'satpam1a@thc.com' },
-      { label: 'Kantor Pusat Pontianak — Sutrisno Hadi', email: 'satpam1b@thc.com' },
-      { label: 'Cabang Sambas — Rahmat Hidayat', email: 'satpam2a@thc.com' },
-      { label: 'Cabang Sambas — Wahyu Saputra', email: 'satpam2b@thc.com' },
-      { label: 'POP Mempawah — Slamet Riyadi', email: 'satpam3a@thc.com' },
-      { label: 'POP Mempawah — Andi Wijaya', email: 'satpam3b@thc.com' },
-      { label: 'POP Singkawang — Herman Yusuf', email: 'satpam4a@thc.com' },
-      { label: 'POP Singkawang — Tono Prasetyo', email: 'satpam4b@thc.com' },
-      { label: 'miniPOP Aruk — Mulyadi Santoso', email: 'satpam5a@thc.com' },
-      { label: 'miniPOP Aruk — Dadang Firmansyah', email: 'satpam5b@thc.com' },
+      { label: 'Kantor Pusat Pontianak — Joko Susilo', email: 'security1a@thc.com' },
+      { label: 'Kantor Pusat Pontianak — Sutrisno Hadi', email: 'security1b@thc.com' },
+      { label: 'Cabang Sambas — Rahmat Hidayat', email: 'security2a@thc.com' },
+      { label: 'Cabang Sambas — Wahyu Saputra', email: 'security2b@thc.com' },
+      { label: 'POP Mempawah — Slamet Riyadi', email: 'security3a@thc.com' },
+      { label: 'POP Mempawah — Andi Wijaya', email: 'security3b@thc.com' },
+      { label: 'POP Singkawang — Herman Yusuf', email: 'security4a@thc.com' },
+      { label: 'POP Singkawang — Tono Prasetyo', email: 'security4b@thc.com' },
+      { label: 'miniPOP Aruk — Mulyadi Santoso', email: 'security5a@thc.com' },
+      { label: 'miniPOP Aruk — Dadang Firmansyah', email: 'security5b@thc.com' },
     ],
   },
   {
     role: getRoleLabel('vendor'),
     accounts: [
-      { label: 'PT Lintas Fiber — Dimas Prasetyo', email: 'pic1a@thc.com' },
-      { label: 'PT Daya Power Mandiri — Eko Gunawan', email: 'pic1b@thc.com' },
-      { label: 'PT Lintas Fiber — Fajar Nugroho', email: 'pic2a@thc.com' },
-      { label: 'PT Daya Power Mandiri — Yoga Pratama', email: 'pic2b@thc.com' },
-      { label: 'PT Lintas Fiber — Rudi Hartono', email: 'pic3a@thc.com' },
-      { label: 'PT Daya Power Mandiri — Asep Saepudin', email: 'pic3b@thc.com' },
-      { label: 'PT Lintas Fiber — Budi Santoso', email: 'pic4a@thc.com' },
-      { label: 'PT Daya Power Mandiri — Irfan Maulana', email: 'pic4b@thc.com' },
-      { label: 'PT Lintas Fiber — Hendra Saputra', email: 'pic5a@thc.com' },
-      { label: 'PT Daya Power Mandiri — Teguh Laksmana', email: 'pic5b@thc.com' },
+      { label: 'PT Lintas Fiber — Dimas Prasetyo', email: 'vendor1a@thc.com' },
+      { label: 'PT Daya Power Mandiri — Eko Gunawan', email: 'vendor1b@thc.com' },
+      { label: 'PT Lintas Fiber — Fajar Nugroho', email: 'vendor2a@thc.com' },
+      { label: 'PT Daya Power Mandiri — Yoga Pratama', email: 'vendor2b@thc.com' },
+      { label: 'PT Lintas Fiber — Rudi Hartono', email: 'vendor3a@thc.com' },
+      { label: 'PT Daya Power Mandiri — Asep Saepudin', email: 'vendor3b@thc.com' },
+      { label: 'PT Lintas Fiber — Budi Santoso', email: 'vendor4a@thc.com' },
+      { label: 'PT Daya Power Mandiri — Irfan Maulana', email: 'vendor4b@thc.com' },
+      { label: 'PT Lintas Fiber — Hendra Saputra', email: 'vendor5a@thc.com' },
+      { label: 'PT Daya Power Mandiri — Teguh Laksmana', email: 'vendor5b@thc.com' },
     ],
   },
 ]
@@ -180,42 +182,70 @@ function LoginScreen() {
 
   return (
     <main className="flex min-h-dvh flex-col bg-page lg:flex-row">
-      {/* Panel kiri (desktop >=1024px): gradien gelap -> merah THC */}
-      <section className="hidden bg-sidebar-dark bg-linear-to-br from-sidebar-dark via-sidebar-dark-active to-brand px-12 py-16 lg:flex lg:w-3/5 lg:flex-col lg:items-center lg:justify-center lg:gap-7">
-        <div className="flex h-20 w-20 items-center justify-center rounded-modal bg-brand-contrast shadow-modal">
-          <span className="text-2xl font-extrabold tracking-widest text-brand">
-            THC
-          </span>
-        </div>
-        <div className="max-w-md text-center">
+      {/* Panel kiri (desktop >=1024px): foto rak data center THC sebagai latar,
+          dengan scrim gelap agar teks tetap kontras (menggantikan gradasi lama). */}
+      <section className="relative isolate hidden overflow-hidden bg-sidebar-dark px-12 py-16 lg:flex lg:w-3/5 lg:flex-col lg:items-center lg:justify-center lg:gap-7">
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 -z-10 bg-[url('/login-hero.webp')] bg-cover bg-center"
+        />
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 -z-10 bg-linear-to-br from-sidebar-dark/90 via-sidebar-dark/70 to-brand/60"
+        />
+        <Image
+          src="/thcw.png"
+          alt="THC"
+          width={500}
+          height={235}
+          priority
+          className="relative z-10 h-auto w-52"
+        />
+        <div className="relative z-10 max-w-md text-center">
           <p className="text-3xl font-bold text-brand-contrast">
-            THC Visitor Management System
+            Visitor Management System
           </p>
-          <p className="mt-4 text-base text-ink-muted">
-            Sistem Pengelolaan Kunjungan Kantor Cabang, POP &amp; miniPOP THC
+          <p className="mt-4 text-base text-brand-contrast/85">
+            THC Kalbar Data Center &amp; PoP Access Governance Portal
           </p>
         </div>
       </section>
 
-      {/* Panel kanan (desktop 40%) / kolom tunggal (ponsel): kartu masuk */}
-      <section className="flex flex-1 flex-col items-center justify-center px-4 py-8 lg:w-2/5 lg:px-8">
-        <div className="card w-full max-w-[420px] rounded-modal p-5 lg:p-8">
-          {/* Mark ringkas hanya di layar kecil (panel kiri tersembunyi) */}
-          <div className="mb-6 flex items-center gap-3 lg:hidden">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-control bg-brand text-brand-contrast">
-              <span className="text-sm font-extrabold tracking-wider">THC</span>
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-ink">
-                THC Visitor Management System
-              </p>
-              <p className="text-xs text-ink-secondary">
-                Kantor Cabang, POP &amp; miniPOP THC
-              </p>
-            </div>
+      {/* Panel kanan (desktop 40%) / kolom tunggal (ponsel). */}
+      <section className="flex flex-1 flex-col items-center justify-start px-4 py-0 min-[400px]:py-5 max-[359px]:py-0 lg:w-2/5 lg:justify-center lg:px-8 lg:py-8">
+        {/* Hero khusus ponsel: container TERPISAH dari kartu form (pola
+            transhybrid.net.id) — full-bleed ke tepi atas/kiri/kanan dengan
+            padding section dinegasikan, hanya sudut bawah yang membulat. */}
+        <div className="relative isolate -mx-4 mt-0 mb-5 flex min-h-[184px] shrink-0 self-stretch flex-col items-center justify-center overflow-hidden rounded-b-hero bg-sidebar-dark px-4 py-6 max-[359px]:min-h-[150px] max-[359px]:py-4 min-[400px]:-mt-5 min-[400px]:py-7 text-center lg:hidden">
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 -z-10 bg-[url('/login-hero.webp')] bg-cover bg-center"
+          />
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 -z-10 bg-linear-to-br from-sidebar-dark/85 via-sidebar-dark/65 to-brand/55"
+          />
+          <div className="relative z-10 flex w-full flex-col items-center px-2">
+            <Image
+              src="/thcw.png"
+              alt="THC"
+              width={500}
+              height={235}
+              priority
+              className="h-15 w-auto shrink-0"
+            />
+            <p className="mt-4 w-full text-center text-sm font-bold leading-snug text-brand-contrast">
+              Visitor Management System
+            </p>
+            <p className="mt-1.5 w-full text-center text-xs leading-snug text-brand-contrast/85">
+              THC Kalbar Data Center &amp; PoP Access Governance Portal
+            </p>
           </div>
+        </div>
 
-          <header className="mb-6">
+        {/* Kartu form: container terpisah di bawah hero. */}
+        <div className="card w-full max-w-[420px] rounded-modal p-4 max-[359px]:p-3 lg:p-8">
+          <header className="mb-4 max-[399px]:mb-2 min-[380px]:mb-3 min-[400px]:mb-5 lg:mb-6">
             <h1 className="text-xl font-bold text-ink">Masuk</h1>
             <p className="mt-1 text-sm text-ink-secondary">
               Gunakan akun resmi Anda untuk mengakses sistem.
@@ -225,7 +255,7 @@ function LoginScreen() {
           <form
             onSubmit={handleSubmit(onSubmit)}
             noValidate
-            className="flex flex-col gap-4"
+            className="flex flex-col gap-3 max-[399px]:gap-2 min-[380px]:gap-3 min-[400px]:gap-4"
           >
             <Input
               label="Email"
@@ -249,11 +279,21 @@ function LoginScreen() {
               {...register('password')}
             />
 
-            <div>
-              <p className="text-label font-semibold text-ink-secondary">
-                Akun demo (uji coba)
-              </p>
-              <div className="mt-2 flex flex-col gap-2">
+            <details className="group overflow-hidden rounded-card border border-brand/30 bg-brand-soft/60 transition-colors open:border-brand/50 open:bg-brand-soft">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-card px-3 py-3 text-sm font-semibold text-brand-dark marker:hidden hover:bg-brand-soft">
+                <span className="flex flex-col text-left">
+                  <span>Akun demo (uji coba)</span>
+                  <span className="text-xs font-normal text-ink-secondary">
+                    <span className="group-open:hidden">Ketuk untuk isi email &amp; sandi otomatis</span>
+                    <span className="hidden group-open:inline">Ketuk lagi untuk sembunyikan</span>
+                  </span>
+                </span>
+                <ChevronDown
+                  aria-hidden="true"
+                  className="h-5 w-5 shrink-0 text-brand transition-transform duration-200 group-open:rotate-180"
+                />
+              </summary>
+              <div className="flex flex-col gap-2 bg-surface px-3 pb-3">
                 {DEMO_GROUPS.map((group) => (
                   <Select
                     key={group.role}
@@ -272,14 +312,14 @@ function LoginScreen() {
                   />
                 ))}
               </div>
-            </div>
+            </details>
 
             <Button type="submit" size="lg" fullWidth loading={isSubmitting}>
               Masuk
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-xs leading-relaxed text-ink-muted">
+          <p className="mt-3 max-[399px]:mt-2 text-center text-xs leading-snug max-[399px]:leading-tight text-ink-muted">
             Dengan masuk, Anda menyetujui Syarat Layanan dan Kebijakan Privasi
             THC. Data kunjungan hanya digunakan untuk keperluan verifikasi akses
             fasilitas.

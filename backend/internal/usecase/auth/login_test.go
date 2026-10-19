@@ -330,8 +330,8 @@ func TestLogin_LocationIDIsJSONNullForSuperAdminAndVendor(t *testing.T) {
 	}
 
 	vendor := domain.User{
-		ID:           "user-pic-1",
-		Email:        "pic@vendor.example",
+		ID:           "user-vendor-1",
+		Email:        "vendor@vendor.example",
 		PasswordHash: hashPassword(t, "Password123!"),
 		RoleID:       "role-vendor",
 		LocationID:   nil,
@@ -339,7 +339,7 @@ func TestLogin_LocationIDIsJSONNullForSuperAdminAndVendor(t *testing.T) {
 		Status:       domain.UserStatusActive,
 	}
 	svc = makeSvc(vendor)
-	got, err = svc.Login(context.Background(), "pic@vendor.example", "Password123!")
+	got, err = svc.Login(context.Background(), "vendor@vendor.example", "Password123!")
 	if err != nil {
 		t.Fatalf("vendor Login: %v", err)
 	}

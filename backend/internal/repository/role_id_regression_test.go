@@ -54,7 +54,7 @@ func TestFindByID_PopulatesRoleID(t *testing.T) {
 	locationID := seedLocation(t, pool, "HQ-SBY-01", "pusat")
 	userID := seedUser(t, pool, seedUserParams{
 		Name:     "Joko Susilo",
-		Email:    "satpam.sby@thc.net.id",
+		Email:    "security.sby@thc.net.id",
 		Role:     "security",
 		Location: locationID,
 		Type:     "internal",

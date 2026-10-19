@@ -11,8 +11,8 @@ var demoNIKShape = regexp.MustCompile(`^3578[0-9]{12}$`)
 
 // TestPlanNIKsFollowTheDemoShape pins the 26-account identity contract: the
 // superadmin plus five admins carry the documented population (admins with a
-// NIK), the ten satpam carry none, and the ten vendors carry one each — every
-// populated value 16 digits and unique across the plan.
+// NIK), the ten security (Pengawas) accounts carry none, and the ten vendors
+// carry one each — every populated value 16 digits and unique across the plan.
 func TestPlanNIKsFollowTheDemoShape(t *testing.T) {
 	p := Plan()
 	if len(p.Users) != 26 {
@@ -50,12 +50,12 @@ func TestPlanNIKsFollowTheDemoShape(t *testing.T) {
 }
 
 // TestPlanRoleCensus locks the 26-account composition docs/5. LOCAL_DEV.md
-// 6.1 publishes: one superadmin, one admin plus two satpam per facility, and
-// two vendors per facility index.
+// 6.1 publishes: one superadmin, one admin plus two security (Pengawas)
+// accounts per facility, and two vendors per facility index.
 func TestPlanRoleCensus(t *testing.T) {
 	counts := map[string]int{}
 	branchAdmins := map[string]int{}
-	branchSatpam := map[string]int{}
+	branchSecurity := map[string]int{}
 	vendorA, vendorB := 0, 0
 	for _, u := range Plan().Users {
 		counts[u.Role]++
@@ -63,7 +63,7 @@ func TestPlanRoleCensus(t *testing.T) {
 		case RoleAdmin:
 			branchAdmins[u.LocationCode]++
 		case RoleSecurity:
-			branchSatpam[u.LocationCode]++
+			branchSecurity[u.LocationCode]++
 		case RoleVendor:
 			switch u.VendorName {
 			case "PT Lintas Fiber":
@@ -85,8 +85,8 @@ func TestPlanRoleCensus(t *testing.T) {
 		if branchAdmins[l.Code] != 1 {
 			t.Errorf("facility %s: %d admins, want 1", l.Code, branchAdmins[l.Code])
 		}
-		if branchSatpam[l.Code] != 2 {
-			t.Errorf("facility %s: %d satpam, want 2", l.Code, branchSatpam[l.Code])
+		if branchSecurity[l.Code] != 2 {
+			t.Errorf("facility %s: %d pengawas, want 2", l.Code, branchSecurity[l.Code])
 		}
 	}
 	if vendorA != 5 || vendorB != 5 {
@@ -105,15 +105,15 @@ func TestValidateRefusesBadNIKs(t *testing.T) {
 		p.Users[i].NIK = nik
 		return p
 	}
-	adminIdx, vendorIdx, satpamIdx := -1, -1, -1
+	adminIdx, vendorIdx, securityIdx := -1, -1, -1
 	for i, u := range base.Users {
 		switch {
 		case u.Role == RoleAdmin && adminIdx < 0:
 			adminIdx = i
 		case u.Role == RoleVendor && vendorIdx < 0:
 			vendorIdx = i
-		case u.Role == RoleSecurity && satpamIdx < 0:
-			satpamIdx = i
+		case u.Role == RoleSecurity && securityIdx < 0:
+			securityIdx = i
 		}
 	}
 	for _, tc := range []struct {
@@ -125,7 +125,7 @@ func TestValidateRefusesBadNIKs(t *testing.T) {
 		{"admin with non-numeric NIK", mutate(adminIdx, "35780101000000AB")},
 		{"vendor without NIK", mutate(vendorIdx, "")},
 		{"vendor with long NIK", mutate(vendorIdx, "35780102000000011")},
-		{"satpam with NIK", mutate(satpamIdx, "3578010100000001")},
+		{"pengawas with NIK", mutate(securityIdx, "3578010100000001")},
 		{"duplicated NIK", mutate(vendorIdx, base.Users[adminIdx].NIK)},
 	} {
 		if err := Validate(tc.plan); err == nil {
