@@ -252,4 +252,16 @@ describe('Pagination', () => {
 
     expect(screen.getByLabelText(/Baris per halaman/)).toBeDisabled()
   })
+
+  it('memakai label nav kustom saat ariaLabel diberikan', () => {
+    renderPagination({ page: 1, totalPages: 5, ariaLabel: 'Paginasi daftar user' })
+
+    expect(screen.getByRole('navigation', { name: 'Paginasi daftar user' })).toBeInTheDocument()
+  })
+
+  it('mempertahankan label nav default "Paginasi kunjungan" saat ariaLabel tidak diberikan', () => {
+    renderPagination({ page: 1, totalPages: 5 })
+
+    expect(screen.getByRole('navigation', { name: 'Paginasi kunjungan' })).toBeInTheDocument()
+  })
 })

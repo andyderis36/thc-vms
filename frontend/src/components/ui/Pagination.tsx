@@ -26,6 +26,8 @@ export interface PaginationProps {
   pageSize?: number
   /** Callback saat ukuran halaman berubah. Terima angka, bukan string. Hanya render selektor saat disediakan. */
   onPageSizeChange?: (pageSize: number) => void
+  /** Label nav untuk screen reader; default dipertahankan agar halaman kunjungan tidak berubah. */
+  ariaLabel?: string
 }
 
 type PageItem = number | 'ellipsis'
@@ -83,6 +85,7 @@ export function Pagination({
   nextLabel = 'Berikutnya',
   pageSize,
   onPageSizeChange,
+  ariaLabel = 'Paginasi kunjungan',
 }: PaginationProps) {
   const currentPage = Math.max(1, Math.min(totalPages, page))
   const canPrev = currentPage > 1 && !disabled
@@ -96,7 +99,7 @@ export function Pagination({
   }
 
   return (
-    <nav aria-label="Paginasi kunjungan" className={className}>
+    <nav aria-label={ariaLabel} className={className}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         {showInfo && (
           <>
