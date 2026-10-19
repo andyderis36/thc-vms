@@ -27,7 +27,7 @@ export function Spinner({ size = 'md', label = 'Memuat…', className }: Spinner
         viewBox="0 0 24 24"
         fill="none"
         aria-hidden="true"
-        className="size-full animate-spin motion-reduce:animate-none"
+        className="size-full text-current animate-spin motion-reduce:animate-none"
       >
         <circle
           cx="12"

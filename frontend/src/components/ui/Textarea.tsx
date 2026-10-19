@@ -26,7 +26,7 @@ export function Textarea({
   const describedBy = error ? errorId : hint ? hintId : undefined
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       {label ? (
         <label htmlFor={textareaId} className="text-label font-semibold text-ink">
           {label}
@@ -40,7 +40,7 @@ export function Textarea({
         required={required}
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy}
-        className={`${FIELD_BASE_CLASS} min-h-[120px] resize-y py-2 ${error ? 'border-brand' : ''} ${className}`.trim()}
+        className={`${FIELD_BASE_CLASS} min-h-[120px] resize-y ${error ? 'border-brand' : ''} ${className}`.trim()}
       />
 
       {error ? (

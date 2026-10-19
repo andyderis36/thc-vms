@@ -6,7 +6,7 @@ import { Providers } from './providers'
 import { SessionProvider } from '@/lib/auth/session'
 
 /**
- * Inter is the mandated typeface (docs/stitch-ui/02-design-system.md §3).
+ * Inter is the mandated typeface (AGENTS.md §3.1; docs/stitch-ui is STALE).
  * next/font self-hosts the subset at build time — no external font request
  * at runtime and no layout shift.
  */
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
 
 /**
  * Token warna brand — nilai TS dari `--color-brand` di `./globals.css`
- * (SSOT design system, docs/stitch-ui/02-design-system.md §2).
+ * (SSOT: AGENTS.md §3.1 design tokens; docs/stitch-ui is STALE).
  * Metadata Next.js dibangun statis sehingga tidak bisa membaca CSS variable;
  * hex dicerminkan sekali di sini dan dipakai `viewport.themeColor` di bawah.
  */

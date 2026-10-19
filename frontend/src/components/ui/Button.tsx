@@ -1,7 +1,17 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { Spinner } from './Spinner'
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'success'
+export type ButtonVariant =
+  | 'primary'
+  | 'secondary'
+  | 'danger'
+  | 'ghost'
+  | 'success'
+  | 'gradient'
+  | 'glass'
+  | 'outline'
+  | 'icon'
+  | 'soft'
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'gate'
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
@@ -10,6 +20,12 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   danger: 'bg-checkout text-brand-contrast hover:opacity-90',
   ghost: 'text-ink-secondary hover:bg-neutral-bg',
   success: 'bg-checkin text-brand-contrast hover:opacity-90',
+  /* --- Varian Jokoui (palet THC biru) --- */
+  gradient: 'bg-gradient-to-r from-brand via-brand-dark to-brand text-brand-contrast hover:from-brand-dark hover:to-brand-dark',
+  glass: 'bg-brand/10 backdrop-blur-sm border border-brand/20 text-brand hover:bg-brand/20',
+  outline: 'border border-brand text-brand hover:bg-brand/10',
+  soft: 'bg-brand/10 text-brand-dark hover:bg-brand/20',
+  icon: 'px-2',
 }
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
@@ -30,6 +46,10 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
  * Tombol atomik. `type="button"` adalah default agar tidak pernah
  * tidak sengaja submit form; `loading` menjaga lebar label tetap stabil
  * (label disamarkan, spinner menimpa tanpa menggeser layout).
+ *
+ * Base carries `min-h-touch` (target sentuh 44px, §6.5 AGENTS.md) +
+ * `uppercase`; varian legacy (primary/secondary/danger/ghost/success)
+ * dipertahankan, varian jokoui (gradient/glass/outline/icon/soft) ditambahkan.
  */
 export function Button({
   variant = 'primary',
@@ -43,7 +63,7 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const classes = [
-    'relative inline-flex items-center justify-center gap-2 rounded-control px-4 font-semibold uppercase tracking-wide transition duration-150 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60',
+    'relative inline-flex items-center justify-center gap-2 rounded-control px-4 min-h-touch font-semibold uppercase tracking-wide transition duration-150 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60',
     VARIANT_CLASSES[variant],
     SIZE_CLASSES[size],
     fullWidth ? 'w-full' : '',

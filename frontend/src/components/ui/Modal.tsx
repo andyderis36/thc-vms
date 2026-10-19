@@ -53,7 +53,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/35 backdrop-blur-sm p-4"
       onClick={(event) => {
         // Hanya tutup bila klik mendarat pada overlay, bukan isi panel.
         if (event.target === event.currentTarget) onClose()
@@ -64,24 +64,29 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`w-full ${SIZE_CLASSES[size]} rounded-modal bg-surface p-6 shadow-modal`}
+        className={`w-full ${SIZE_CLASSES[size]} rounded-modal bg-surface border border-border-light/60 p-6 shadow-modal`}
       >
         <header className="mb-4 flex items-start justify-between gap-4">
           <h2 id={titleId} className="text-lg font-semibold text-ink">
             {title}
           </h2>
           {/*
-            Target sentuh 44×44px (§5.2.1): `size-11` + `p-1`, lalu ikon X
-            dipatok ke sudut kanan-atas (`items-start justify-end`) agar posisi
-            visualnya persis seperti sebelumnya saat tombol hanya ~28px.
+            Target sentuh 44×44px (§5.2.1) tetap di tombol (`size-11` + `p-1`).
+            Sorotan hover dipasang pada span dalam `size-7` (28×28, seukuran
+            tombol lama) yang dipatok ke sudut kanan-atas lewat `items-start
+            justify-end`, sehingga ikon X tetap di posisi visual semula dan
+            sorotan hover rapat/konsentris di sekelilingnya - bukan kotak 44px
+            yang membuat sudutnya tampak tidak presisi.
           */}
           <button
             type="button"
             onClick={onClose}
             aria-label="Tutup"
-            className="-m-1 flex size-11 items-start justify-end rounded-control p-1 text-ink-secondary hover:bg-neutral-bg"
+            className="group -m-1 flex size-11 items-start justify-end rounded-control p-1 text-ink-secondary"
           >
-            <X aria-hidden="true" className="size-5 shrink-0" />
+            <span className="flex size-7 items-center justify-center rounded-control transition-colors group-hover:bg-neutral-bg">
+              <X aria-hidden="true" className="size-5 shrink-0" />
+            </span>
           </button>
         </header>
 

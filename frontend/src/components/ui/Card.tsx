@@ -1,16 +1,31 @@
 import type { HTMLAttributes, ReactNode } from 'react'
 
+export type CardVariant = 'default' | 'elevated' | 'outline'
+
 function mergeClasses(...classes: Array<string | undefined>): string {
   return classes.filter(Boolean).join(' ')
 }
 
+const CARD_VARIANT_CLASSES: Record<CardVariant, string> = {
+  default: 'card',
+  elevated: 'card shadow-modal',
+  outline: 'card border-2 border-border-light',
+}
+
 /**
  * Kartu permukaan — memakai kelas global `.card` dari `globals.css`
- * (border, radius, shadow) supaya tidak ada deklarasi style ganda.
+ * (border, radius 8px, shadow-card subtil) supaya tidak ada deklarasi
+ * style ganda. Varian `elevated` (bayangan lebih tebal) dan `outline`
+ * (border lebih tebal) opsional.
  */
-export function Card({ className, children, ...rest }: HTMLAttributes<HTMLDivElement>) {
+export function Card({
+  className,
+  children,
+  variant = 'default',
+  ...rest
+}: HTMLAttributes<HTMLDivElement> & { variant?: CardVariant }) {
   return (
-    <div className={mergeClasses('card', className)} {...rest}>
+    <div className={mergeClasses(CARD_VARIANT_CLASSES[variant], className)} {...rest}>
       {children}
     </div>
   )

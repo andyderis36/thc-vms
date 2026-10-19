@@ -1,6 +1,6 @@
 /* =============================================================================
  * THC Visitor Management System (VMS) — Design Tokens
- * Source of truth: docs/stitch-ui/02-design-system.md
+ * Source of truth: AGENTS.md §3.1 (jokoui component patterns). docs/stitch-ui/ is STALE, not an authority.
  *
  * Tailwind CSS v4 CSS-FIRST configuration.
  *   - entrypoint is `@import "tailwindcss";`  (v3 `@tailwind base;` is REMOVED)
@@ -18,10 +18,10 @@
 
 @theme {
   /* --- Typography --------------------------------------------------------- */
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: var(--font-inter), 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   --text-label: 0.8125rem; /* 13px — form labels, small button text */
-  --text-badge: 0.6875rem; /* 11px — status badge (uppercase, bold) */
+  --text-badge: 0.6875rem; /* 11px — badge/chip & pill labels (normal-case, medium) */
 
   /* --- Brand (Ungu-Biru Trans Hybrid Communication) ------------------------ */
   --color-brand: #422ad5;
@@ -61,15 +61,28 @@
   --color-neutral-text: #6b7280;
   --color-neutral-bg: #f3f4f6;
 
+  /* --- Semantik Jokoui (alias ke palet THC biru) ----------------------- */
+  --color-background: #ffffff;      /* bg halaman dasar */
+  --color-foreground: #18181b;      /* teks utama */
+  --color-card: #ffffff;            /* bg kartu & panel */
+  --color-border: #eeeeee;          /* border halus */
+  --color-muted: #f3f4f6;           /* surface redup */
+  --color-muted-foreground: #71717a; /* teks redup */
+  --color-primary: #422ad5;         /* THC biru (brand) */
+  --color-primary-foreground: #e0e7ff; /* teks kontras di atas biru */
+  /* Catatan: tidak ada alias `secondary` semantik — magenta THC tetap
+     di --color-secondary (#f43098); latar sekunder pakai bg-muted. */
+
   /* --- Action buttons (SCR-05 gerbang) — PENGECUALIAN FUNGSIONAL ---------- */
   --color-checkin: #16a34a; /* tombol "CHECK-IN MASUK" */
   --color-checkout: #dc2626; /* tombol "CHECK-OUT KELUAR" / Reject */
 
-  /* --- Border radius ------------------------------------------------------ */
-  --radius-badge: 0.375rem; /* 6px  */
-  --radius-control: 0.25rem; /* 4px  button & input */
+/* --- Border radius ------------------------------------------------------ */
+  --radius-badge: 9999px; /* pill */
+  --radius-control: 0.5rem; /* 8px button & input */
   --radius-card: 0.5rem; /* 8px card */
   --radius-modal: 1rem; /* 16px modal */
+  --radius-hero: 2.5rem; /* 40px sudut bawah hero full-bleed (mobile login) */
 
   /* --- Elevation ---------------------------------------------------------- */
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -154,16 +167,36 @@
     box-shadow: var(--shadow-card);
   }
 
-  /* Status badge: 11px uppercase bold, per design system §3 */
+  /* Status badge: pill, normal-case, soft-tinted (jokoui) */
   .status-badge {
     display: inline-flex;
     align-items: center;
     border-radius: var(--radius-badge);
     padding: 4px 8px;
-    font-size: var(--text-badge);
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    text-transform: none;
     line-height: 1.4;
+  }
+
+  /*
+   * SCR-03 — penanda lembut field wajib yang gagal divalidasi. Dipasang
+   * sesaat oleh `revealInvalidField` (features/visits/form/invalid-fields.ts)
+   * pada field invalid pertama selama 1600ms.
+   *
+   * Sengaja TANPA outline: beberapa target fokus (mis. baris UploadBox mode
+   * ringkas) melebar penuh satu sel grid, sehingga outline merah melingkupi
+   * area kosong dan terbaca "melebihi" tombol. Penanda galat yang dipakai
+   * hanyalah pesan teks merah `role="alert"` yang sudah ada di bawah setiap
+   * field wajib, ditambah latar lembut di sini sebagai penanda sesaat.
+   *
+   * `!important` pada latar wajib: field target membawa utility `bg-surface` /
+   * `bg-page` di `@layer utilities` yang menurut urutan cascade SELALU menang
+   * atas `@layer components` — tanpa flag ini tint tidak akan pernah tampak.
+   */
+  .field-attention {
+    background-color: var(--color-danger-bg) !important;
+    border-radius: var(--radius-control);
   }
 }

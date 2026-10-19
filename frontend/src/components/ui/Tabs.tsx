@@ -98,7 +98,7 @@ export function Tabs({
       aria-label={ariaLabel}
       onKeyDown={handleKeyDown}
       className={[
-        'flex w-full gap-1 border-b border-border-light',
+        'flex w-full gap-2',
         isGate ? '' : 'overflow-x-auto',
         className,
       ]
@@ -121,7 +121,7 @@ export function Tabs({
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(tab.id)}
             className={[
-              'flex items-center justify-center gap-2 border-b-2 text-sm font-semibold transition-colors',
+              'flex items-center justify-center gap-2 rounded-control text-sm font-medium transition-colors',
               height,
               // Gate: `flex-1 min-w-0` membagi lebar rata dan mengizinkan
               // teks membungkus, sehingga tidak ada tab terpotong/scroll.
@@ -129,15 +129,15 @@ export function Tabs({
                 ? 'min-w-0 flex-1 whitespace-normal px-2 text-center leading-tight'
                 : 'shrink-0 whitespace-nowrap px-2 sm:px-4 max-sm:text-xs',
               selected
-                ? 'border-brand text-brand'
-                : 'border-transparent text-ink-secondary hover:text-ink',
+                ? 'bg-brand-soft text-brand'
+                : 'text-ink-secondary hover:bg-neutral-bg/50 hover:text-ink',
             ].join(' ')}
           >
             {tab.label}
             {tab.count !== undefined ? (
               <span
                 className={`rounded-badge px-1.5 py-0.5 text-badge ${
-                  selected ? 'bg-brand-soft text-brand' : 'bg-neutral-bg text-ink-secondary'
+                  selected ? 'bg-brand-soft text-brand' : 'bg-neutral-bg/50 text-ink-secondary'
                 }`}
               >
                 {tab.count}

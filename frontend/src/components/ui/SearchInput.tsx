@@ -1,7 +1,7 @@
 'use client'
 
 import { Search } from 'lucide-react'
-import { Input, type InputProps } from '@/components/ui/Input'
+import { Input, type InputProps, FIELD_BASE_CLASS } from '@/components/ui/Input'
 
 /**
  * Input pencarian dengan ikon `Search` dekoratif di kiri — satu sumber untuk
@@ -26,7 +26,10 @@ export function SearchInput({ className = '', ...rest }: SearchInputProps) {
         aria-hidden="true"
         className="pointer-events-none absolute inset-y-0 left-3 my-auto size-4 text-ink-muted"
       />
-      <Input className={`pl-9 ${className}`.trim()} {...rest} />
+      <Input
+        className={[FIELD_BASE_CLASS, 'pl-9 min-h-touch', className].filter(Boolean).join(' ')}
+        {...rest}
+      />
     </div>
   )
 }

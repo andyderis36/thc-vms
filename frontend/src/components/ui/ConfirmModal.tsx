@@ -34,7 +34,7 @@ export function ConfirmModal({
       size="sm"
       footer={
         <>
-          <Button variant="secondary" className="min-h-touch" onClick={onClose}>
+          <Button variant="ghost" className="min-h-touch" onClick={onClose}>
             Batal
           </Button>
           <Button

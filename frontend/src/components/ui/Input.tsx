@@ -13,8 +13,16 @@ export const FIELD_HEIGHT: Record<FieldSize, string> = {
   gate: 'h-10 md:h-12 lg:h-10',
 }
 
+/**
+ * Permukaan field: `rounded-control` (4px, §3 "Border … Rounded 4px") +
+ * `px-3 py-2` + `text-sm`, fokus biru (border brand + cincin lembut
+ * `brand/12`, bukan garis outline). Radius memakai token, bukan skala
+ * Tailwind, supaya seragam dengan `Button` dan pill kontrol lain.
+ * `py-2` hanya berlaku pada field ber-tinggi-otomatis; `FIELD_HEIGHT` tetap
+ * menang karena preflight memakai `box-sizing: border-box`.
+ */
 export const FIELD_BASE_CLASS =
-  'w-full rounded-control border border-border-mid bg-surface px-3 text-sm text-ink placeholder:text-ink-muted focus:border-brand focus:ring-2 focus:ring-brand-soft focus:outline-none disabled:bg-border-light'
+  'w-full rounded-control border border-border-mid bg-surface px-3 py-2 text-sm text-ink transition-colors placeholder:text-ink-muted focus:border-brand focus:ring-4 focus:ring-brand/12 focus:outline-none disabled:cursor-not-allowed disabled:bg-border-light'
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string
@@ -44,7 +52,7 @@ export function Input({
   const describedBy = error ? errorId : hint ? hintId : undefined
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       {label ? (
         <label htmlFor={inputId} className="text-label font-semibold text-ink">
           {label}

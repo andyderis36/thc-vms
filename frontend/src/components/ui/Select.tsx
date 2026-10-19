@@ -42,7 +42,7 @@ export function Select({
   const height = FIELD_HEIGHT[fieldSize]
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       {label ? (
         <label htmlFor={selectId} className="text-label font-semibold text-ink">
           {label}
@@ -57,7 +57,7 @@ export function Select({
           required={required}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
-          className={`${FIELD_BASE_CLASS} ${height} appearance-none pr-9 ${error ? 'border-brand' : ''} ${className}`.trim()}
+          className={`${FIELD_BASE_CLASS} ${height} appearance-none pr-10 ${error ? 'border-brand' : ''} ${className}`.trim()}
         >
           {placeholder ? (
             <option value="" disabled>
