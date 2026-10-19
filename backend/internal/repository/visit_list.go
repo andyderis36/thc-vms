@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -11,14 +12,14 @@ import (
 )
 
 // defaultListLimit is the page size when the caller passes no limit.
-const defaultListLimit = 20
+const defaultListLimit = 10
 
 // maxListLimit caps a single page so a caller cannot ask for the whole table.
 const maxListLimit = 100
 
 // List returns one page plus the total for the caller's scope. The dispatch is
 // total and branch-safe by construction: a location scope can only reach the
-// hard `location_id = $1` query, a vendor scope only the `pic_user_id = $1`
+// hard `location_id = $1` query, a vendor scope only the `vendor_user_id = $1`
 // query, and the unscoped super_admin query runs ONLY when both are nil, so
 // there is no code path where a branch caller silently receives every branch.
 // When both scopes are set the branch scope wins and the vendor scope is ignored;
@@ -43,7 +44,9 @@ func (r *visitRepository) List(
 			Status:     statusParam(filter.Status),
 			DateFrom:   pgTimestamptz(filter.From),
 			DateTo:     pgTimestamptz(filter.To),
-			Search:     pgtype.Text{},
+			Search:     searchParam(filter.Search),
+			SortBy:     sortParam(string(filter.SortBy.Normalized())),
+			SortOrder:  sortParam(string(filter.Order.Normalized())),
 			Offset:     offset,
 			Limit:      limit32,
 		})
@@ -55,7 +58,7 @@ func (r *visitRepository) List(
 			Status:     statusParam(filter.Status),
 			DateFrom:   pgTimestamptz(filter.From),
 			DateTo:     pgTimestamptz(filter.To),
-			Search:     pgtype.Text{},
+			Search:     searchParam(filter.Search),
 		})
 		if err != nil {
 			return nil, 0, MapError(err)
@@ -67,29 +70,31 @@ func (r *visitRepository) List(
 		return visits, total, nil
 	}
 
-	if filter.PICUserID != nil {
-		picID, err := fromDomainUUID(*filter.PICUserID)
+	if filter.VendorUserID != nil {
+		vendorUserID, err := fromDomainUUID(*filter.VendorUserID)
 		if err != nil {
 			return nil, 0, err
 		}
-		rows, err := q.ListVisitsForPIC(ctx, db.ListVisitsForPICParams{
-			PicUserID: picID,
-			Status:    statusParam(filter.Status),
-			DateFrom:  pgTimestamptz(filter.From),
-			DateTo:    pgTimestamptz(filter.To),
-			Search:    pgtype.Text{},
-			Offset:    offset,
-			Limit:     limit32,
+		rows, err := q.ListVisitsForVendorUser(ctx, db.ListVisitsForVendorUserParams{
+			VendorUserID: vendorUserID,
+			Status:       statusParam(filter.Status),
+			DateFrom:     pgTimestamptz(filter.From),
+			DateTo:       pgTimestamptz(filter.To),
+			Search:       searchParam(filter.Search),
+			SortBy:       sortParam(string(filter.SortBy.Normalized())),
+			SortOrder:    sortParam(string(filter.Order.Normalized())),
+			Offset:       offset,
+			Limit:        limit32,
 		})
 		if err != nil {
 			return nil, 0, MapError(err)
 		}
-		total, err := q.CountVisitsForPIC(ctx, db.CountVisitsForPICParams{
-			PicUserID: picID,
-			Status:    statusParam(filter.Status),
-			DateFrom:  pgTimestamptz(filter.From),
-			DateTo:    pgTimestamptz(filter.To),
-			Search:    pgtype.Text{},
+		total, err := q.CountVisitsForVendorUser(ctx, db.CountVisitsForVendorUserParams{
+			VendorUserID: vendorUserID,
+			Status:       statusParam(filter.Status),
+			DateFrom:     pgTimestamptz(filter.From),
+			DateTo:       pgTimestamptz(filter.To),
+			Search:       searchParam(filter.Search),
 		})
 		if err != nil {
 			return nil, 0, MapError(err)
@@ -106,7 +111,9 @@ func (r *visitRepository) List(
 		Status:     statusParam(filter.Status),
 		DateFrom:   pgTimestamptz(filter.From),
 		DateTo:     pgTimestamptz(filter.To),
-		Search:     pgtype.Text{},
+		Search:     searchParam(filter.Search),
+		SortBy:     sortParam(string(filter.SortBy.Normalized())),
+		SortOrder:  sortParam(string(filter.Order.Normalized())),
 		Offset:     offset,
 		Limit:      limit32,
 	})
@@ -118,7 +125,7 @@ func (r *visitRepository) List(
 		Status:     statusParam(filter.Status),
 		DateFrom:   pgTimestamptz(filter.From),
 		DateTo:     pgTimestamptz(filter.To),
-		Search:     pgtype.Text{},
+		Search:     searchParam(filter.Search),
 	})
 	if err != nil {
 		return nil, 0, MapError(err)
@@ -197,4 +204,25 @@ func statusParam(status *domain.VisitStatus) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: string(*status), Valid: true}
+}
+
+// sortParam maps one ORDER BY knob to its nullable SQL predicate: blank means
+// SQL NULL so the query's COALESCE falls back to the legacy default
+// (created_at desc); a trimmed value travels as a bound parameter compared
+// inside static CASE branches, never concatenated into SQL.
+func sortParam(sort string) pgtype.Text {
+	if strings.TrimSpace(sort) == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: strings.TrimSpace(sort), Valid: true}
+}
+
+// searchParam maps the free-text filter to the nullable search predicate the
+// list/count queries share: blank means SQL NULL (no text match, legacy
+// unfiltered listing), a trimmed term means ILIKE over vendor user name / visit_id.
+func searchParam(search string) pgtype.Text {
+	if strings.TrimSpace(search) == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: strings.TrimSpace(search), Valid: true}
 }

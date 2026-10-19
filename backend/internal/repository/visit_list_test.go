@@ -31,9 +31,9 @@ func TestList_LocationScopeNeverLeaksOtherBranches(t *testing.T) {
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	end := start.Add(4 * time.Hour)
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000201", PIC: vendorA, Location: locA, Start: start, End: end, Status: domain.VisitStatusRequested})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000202", PIC: vendorA, Location: locA, Start: start, End: end, Status: domain.VisitStatusApproved})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000203", PIC: vendorB, Location: locB, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000201", VendorUser: vendorA, Location: locA, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000202", VendorUser: vendorA, Location: locA, Start: start, End: end, Status: domain.VisitStatusApproved})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000203", VendorUser: vendorB, Location: locB, Start: start, End: end, Status: domain.VisitStatusRequested})
 
 	visits, total, err := repos.List(ctx, domain.VisitFilter{LocationID: &locA, Page: 1, Limit: 10})
 	if err != nil {
@@ -66,11 +66,11 @@ func TestList_VendorScopeNeverLeaksOtherVendors(t *testing.T) {
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	end := start.Add(4 * time.Hour)
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000211", PIC: vendor1, Location: loc, Start: start, End: end, Status: domain.VisitStatusRequested})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000212", PIC: vendor1, Location: loc, Start: start, End: end, Status: domain.VisitStatusApproved})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000213", PIC: vendor2, Location: loc, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000211", VendorUser: vendor1, Location: loc, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000212", VendorUser: vendor1, Location: loc, Start: start, End: end, Status: domain.VisitStatusApproved})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000213", VendorUser: vendor2, Location: loc, Start: start, End: end, Status: domain.VisitStatusRequested})
 
-	visits, total, err := repos.List(ctx, domain.VisitFilter{PICUserID: &vendor1, Page: 1, Limit: 10})
+	visits, total, err := repos.List(ctx, domain.VisitFilter{VendorUserID: &vendor1, Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("List vendor scope: %v", err)
 	}
@@ -78,8 +78,8 @@ func TestList_VendorScopeNeverLeaksOtherVendors(t *testing.T) {
 		t.Fatalf("total=%d items=%d, want 2 and 2", total, len(visits))
 	}
 	for _, v := range visits {
-		if v.PICUserID != vendor1 {
-			t.Fatalf("leaked visit %s of vendor %s into vendor %s (RED: cross-vendor leak)", v.VisitID, v.PICUserID, vendor1)
+		if v.VendorUserID != vendor1 {
+			t.Fatalf("leaked visit %s of vendor %s into vendor %s (RED: cross-vendor leak)", v.VisitID, v.VendorUserID, vendor1)
 		}
 	}
 }
@@ -98,9 +98,9 @@ func TestList_NilScopeReturnsAllForSuperAdmin(t *testing.T) {
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	end := start.Add(4 * time.Hour)
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000221", PIC: vendor, Location: locA, Start: start, End: end, Status: domain.VisitStatusRequested})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000222", PIC: vendor, Location: locB, Start: start, End: end, Status: domain.VisitStatusApproved})
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000223", PIC: vendor, Location: locB, Start: start, End: end, Status: domain.VisitStatusRejected})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000221", VendorUser: vendor, Location: locA, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000222", VendorUser: vendor, Location: locB, Start: start, End: end, Status: domain.VisitStatusApproved})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000223", VendorUser: vendor, Location: locB, Start: start, End: end, Status: domain.VisitStatusRejected})
 
 	visits, total, err := repos.List(ctx, domain.VisitFilter{Page: 1, Limit: 10})
 	if err != nil {
@@ -124,7 +124,7 @@ func TestFindByVisitCode_ResolvesManualScanCode(t *testing.T) {
 
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	id := seedVisit(t, pool, seedVisitParams{
-		Code: "VST-0000000231", PIC: vendor, Location: loc,
+		Code: "VST-0000000231", VendorUser: vendor, Location: loc,
 		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusApproved,
 	})
 

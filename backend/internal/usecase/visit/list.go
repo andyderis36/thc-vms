@@ -9,7 +9,7 @@ import (
 
 // List limits: the default page size and the hard cap callers may request.
 const (
-	defaultListLimit = 20
+	defaultListLimit = 10
 	maxListLimit     = 100
 )
 
@@ -22,6 +22,8 @@ const (
 // value is ignored, so a caller can never widen their visibility.
 type ListVisitsInput struct {
 	Status *domain.VisitStatus
+	// Search is the optional free-text filter (?q=); empty means unfiltered.
+	Search string
 	From   *time.Time
 	To     *time.Time
 	Page   int
@@ -29,6 +31,11 @@ type ListVisitsInput struct {
 	// LocationID narrows the result to one branch. Honoured only for
 	// super_admin; ignored for admin, security and vendor.
 	LocationID *domain.UUID
+	// SortBy/Order select the ORDER BY column and direction (?sort_by=,
+	// ?order=). Empty means the legacy default (created_at desc); unknown
+	// values are normalised to that default so they can never reach SQL.
+	SortBy domain.VisitSortBy
+	Order  domain.VisitSortOrder
 }
 
 // ListVisits builds the domain.VisitFilter from the actor. This mapping IS the
@@ -38,10 +45,13 @@ type ListVisitsInput struct {
 func (s *Service) ListVisits(ctx context.Context, actor Actor, in ListVisitsInput) ([]domain.VisitRequest, int64, error) {
 	filter := domain.VisitFilter{
 		Status: in.Status,
+		Search: in.Search,
 		From:   in.From,
 		To:     in.To,
 		Page:   in.Page,
 		Limit:  in.Limit,
+		SortBy: in.SortBy.Normalized(),
+		Order:  in.Order.Normalized(),
 	}
 	switch actor.Role {
 	case domain.RoleAdmin, domain.RoleSecurity:
@@ -49,10 +59,10 @@ func (s *Service) ListVisits(ctx context.Context, actor Actor, in ListVisitsInpu
 		// caller-supplied LocationID: isolation must not be negotiable by query
 		// parameter.
 		filter.LocationID = actor.LocationID
-		filter.PICUserID = nil
+		filter.VendorUserID = nil
 	case domain.RoleVendor:
-		picID := actor.ID
-		filter.PICUserID = &picID
+		vendorUserID := actor.ID
+		filter.VendorUserID = &vendorUserID
 		filter.LocationID = nil
 	case domain.RoleSuperAdmin:
 		// Global scope; the optional branch filter is the only narrowing allowed.

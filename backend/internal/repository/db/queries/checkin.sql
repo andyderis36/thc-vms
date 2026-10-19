@@ -21,7 +21,7 @@ VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetCheckInByVisitRequest :one
--- Existence + fact read used by the auto-rule worker (SweepNoShowApprovedVisits)
+-- Existence + fact read used by the auto-rule worker (SweepNoShowVisits)
 -- and by SCR-05 to render the "Sedang di Lokasi" badge. pgx reports a missing
 -- row as pgx.ErrNoRows, which is the existence check.
 SELECT * FROM check_in WHERE visit_request_id = $1;

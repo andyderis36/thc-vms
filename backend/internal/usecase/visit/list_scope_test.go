@@ -36,7 +36,7 @@ func TestListVisits_SuperAdminCanNarrowByLocation(t *testing.T) {
 	if *repo.lastFilter.LocationID != branch {
 		t.Fatalf("VisitFilter.LocationID = %q, want the requested branch %q", *repo.lastFilter.LocationID, branch)
 	}
-	if repo.lastFilter.PICUserID != nil {
+	if repo.lastFilter.VendorUserID != nil {
 		t.Fatal("a location filter must never introduce a vendor scope")
 	}
 }
@@ -49,7 +49,7 @@ func TestListVisits_SuperAdminWithoutFilterIsGlobal(t *testing.T) {
 		testActor(domain.RoleSuperAdmin, "sa", ""), ListVisitsInput{}); err != nil {
 		t.Fatalf("super_admin global listing must succeed: %v", err)
 	}
-	if repo.lastFilter.LocationID != nil || repo.lastFilter.PICUserID != nil {
+	if repo.lastFilter.LocationID != nil || repo.lastFilter.VendorUserID != nil {
 		t.Fatalf("an unfiltered super_admin listing must carry no scope, got %+v", repo.lastFilter)
 	}
 }
@@ -84,12 +84,12 @@ func TestListVisits_VendorCannotEscapeItsOwnVisits(t *testing.T) {
 	branch := domain.UUID("44444444-4444-4444-8444-444444444444")
 
 	if _, _, err := svc.ListVisits(context.Background(),
-		testActor(domain.RoleVendor, "pic-1", ""),
+		testActor(domain.RoleVendor, "vendor-1", ""),
 		ListVisitsInput{LocationID: &branch}); err != nil {
 		t.Fatalf("listing must succeed: %v", err)
 	}
-	if repo.lastFilter.PICUserID == nil || *repo.lastFilter.PICUserID != domain.UUID("pic-1") {
-		t.Fatalf("VisitFilter.PICUserID = %v, want the actor's own id", repo.lastFilter.PICUserID)
+	if repo.lastFilter.VendorUserID == nil || *repo.lastFilter.VendorUserID != domain.UUID("vendor-1") {
+		t.Fatalf("VisitFilter.VendorUserID = %v, want the actor's own id", repo.lastFilter.VendorUserID)
 	}
 	if repo.lastFilter.LocationID != nil {
 		t.Fatalf("a vendor listing must carry no branch scope, got %q", *repo.lastFilter.LocationID)

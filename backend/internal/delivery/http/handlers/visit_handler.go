@@ -63,8 +63,55 @@ func (h *VisitHandler) List(c *gin.Context) {
 		status = &parsed
 	}
 	page := queryInt(c.Query("page"), 1)
-	limit := queryInt(c.Query("limit"), 20)
-	in := visit.ListVisitsInput{Status: status, Page: page, Limit: limit}
+	limit := queryInt(c.Query("limit"), 10)
+	// q is the documented free-text filter (openapi GET /visits): ILIKE over
+	// vendor user name / visit_id in SQL. `search` stays accepted as a legacy alias so
+	// older clients keep filtering; both are trimmed and an empty value means
+	// unfiltered, never an error. It narrows within the actor's scope only.
+	search := strings.TrimSpace(c.Query("q"))
+	if search == "" {
+		search = strings.TrimSpace(c.Query("search"))
+	}
+	// date_from/date_to is the documented window filter (openapi GET /visits):
+	// vr.start_date >= date_from AND vr.start_date < date_to in SQL. Both
+	// accept full RFC3339 (offset preserved, TZ-safe) or date-only YYYY-MM-DD
+	// (midnight UTC); a date-only upper bound shifts +24h so the day stays
+	// inclusive under the half-open SQL window. Empty means unfiltered.
+	// A bad value or a reversed window is a 400, never a silent listing.
+	// The pair only NARROWS within the actor's scope (usecase list.go assigns
+	// LocationID/VendorUserID unconditionally): it can never widen visibility,
+	// including for security whose scope stays the branch equality.
+	from, err := parseVisitDateBound(strings.TrimSpace(c.Query("date_from")), false)
+	if err != nil {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Format date_from tidak valid.")
+		return
+	}
+	to, err := parseVisitDateBound(strings.TrimSpace(c.Query("date_to")), true)
+	if err != nil {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Format date_to tidak valid.")
+		return
+	}
+	if from != nil && to != nil && from.After(*to) {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Rentang tanggal tidak valid: date_from harus sebelum date_to.")
+		return
+	}
+	// sort_by/order is the documented ordering pair (openapi GET /visits):
+	// ?sort_by=created_at|start_date|end_date & ?order=asc|desc, defaulting to
+	// created_at desc (legacy listing order). Either side may be omitted
+	// independently; a value outside the vocabulary is a 400, never a silent
+	// listing, so an unknown column can never travel toward SQL.
+	rawQuery := c.Request.URL.RawQuery
+	if sortValueDropped(rawQuery, "sort_by", c.Query("sort_by")) ||
+		sortValueDropped(rawQuery, "order", c.Query("order")) {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Parameter sort_by atau order tidak valid.")
+		return
+	}
+	sortBy, order, ok := parseVisitSort(c.Query("sort_by"), c.Query("order"))
+	if !ok {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Parameter sort_by atau order tidak valid.")
+		return
+	}
+	in := visit.ListVisitsInput{Status: status, Search: search, From: from, To: to, Page: page, Limit: limit, SortBy: sortBy, Order: order}
 
 	// location_id is the documented optional branch filter (openapi L264-267,
 	// PRD L109: superadmin may filter by branch). It is passed through as a
@@ -137,7 +184,7 @@ func (h *VisitHandler) Create(c *gin.Context) {
 	}
 	// The create path returns the bare row, so re-read through the GET path
 	// before answering 201: the same usecase/repository enrichment fills
-	// location/pic names, vendor_name, named purposes, roster and SPK URL.
+	// location/vendor user names, vendor_name, named purposes, roster and SPK URL.
 	// A failed re-read never fails the create; the bare row still answers.
 	if enriched, gerr := h.visits.GetVisit(c.Request.Context(), actor, string(created.ID)); gerr == nil {
 		created = enriched
@@ -276,6 +323,77 @@ func checkCreateBody(body createVisitBody) string {
 		return "Surat Tugas / SPK wajib diunggah."
 	}
 	return ""
+}
+
+// parseVisitDateBound parses one ?date_from= / ?date_to= value for List.
+// Empty means unfiltered (nil, no error). A value containing "T" parses as
+// full RFC3339 with its offset preserved; anything else parses as date-only
+// YYYY-MM-DD at midnight UTC. A date-only upper bound shifts +24h so the
+// calendar day stays inclusive under the half-open SQL window
+// (start_date >= from AND start_date < to).
+func parseVisitDateBound(raw string, isUpper bool) (*time.Time, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	if strings.Contains(raw, "T") {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return nil, err
+		}
+		return &parsed, nil
+	}
+	day, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return nil, err
+	}
+	if isUpper {
+		day = day.Add(24 * time.Hour)
+	}
+	return &day, nil
+}
+
+// sortValueDropped reports whether RawQuery carries key= with a non-empty value
+// that url.ParseQuery silently discarded (a raw ';' makes the stdlib skip the
+// whole pair), while the parsed value is empty. Without this guard an injection
+// probe like ?sort_by=created_at;DROP would degrade to the default listing
+// instead of the 400 the contract requires. Only the sort pair is inspected:
+// ?q=/date_* keep their legacy empty-means-unfiltered behaviour.
+func sortValueDropped(rawQuery, key, parsed string) bool {
+	if strings.TrimSpace(parsed) != "" {
+		return false
+	}
+	for _, pair := range strings.Split(rawQuery, "&") {
+		k, v, _ := strings.Cut(pair, "=")
+		if k == key && v != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// parseVisitSort maps the ?sort_by= / ?order= pair onto the domain sort
+// vocabulary. Empty means the legacy default (created_at desc); ok=false
+// means either side is outside the vocabulary and the caller must answer 400.
+func parseVisitSort(rawSort, rawOrder string) (domain.VisitSortBy, domain.VisitSortOrder, bool) {
+	sortBy := domain.VisitSortBy(strings.ToLower(strings.TrimSpace(rawSort)))
+	order := domain.VisitSortOrder(strings.ToLower(strings.TrimSpace(rawOrder)))
+	if sortBy == "" {
+		sortBy = domain.VisitSortCreatedAt
+	}
+	if order == "" {
+		order = domain.VisitSortDesc
+	}
+	switch sortBy {
+	case domain.VisitSortCreatedAt, domain.VisitSortStartDate, domain.VisitSortEndDate:
+	default:
+		return "", "", false
+	}
+	switch order {
+	case domain.VisitSortAsc, domain.VisitSortDesc:
+	default:
+		return "", "", false
+	}
+	return sortBy, order, true
 }
 
 // queryInt reads a positive query integer with a default fallback.

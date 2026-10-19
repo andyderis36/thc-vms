@@ -9,7 +9,7 @@ import (
 
 func TestListVisits_BuildsTheCorrectScopePerRole(t *testing.T) {
 	locA := domain.UUID("loc-A")
-	vendorID := domain.UUID("pic-1")
+	vendorID := domain.UUID("vendor-1")
 
 	cases := []struct {
 		name         string
@@ -20,7 +20,7 @@ func TestListVisits_BuildsTheCorrectScopePerRole(t *testing.T) {
 		{"super_admin sees all", testActor(domain.RoleSuperAdmin, "super-1", ""), nil, nil},
 		{"admin locked to branch", testActor(domain.RoleAdmin, "admin-1", "loc-A"), &locA, nil},
 		{"security locked to branch", testActor(domain.RoleSecurity, "sec-1", "loc-A"), &locA, nil},
-		{"vendor locked to own visits", testActor(domain.RoleVendor, "pic-1", ""), nil, &vendorID},
+		{"vendor locked to own visits", testActor(domain.RoleVendor, "vendor-1", ""), nil, &vendorID},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,15 +45,15 @@ func TestListVisits_BuildsTheCorrectScopePerRole(t *testing.T) {
 				}
 			}
 			if tc.wantVendor == nil {
-				if got.PICUserID != nil {
-					t.Errorf("PICUserID = %q, want nil", *got.PICUserID)
+				if got.VendorUserID != nil {
+					t.Errorf("VendorUserID = %q, want nil", *got.VendorUserID)
 				}
 			} else {
-				if got.PICUserID == nil {
-					t.Fatalf("PICUserID = nil, want %q", *tc.wantVendor)
+				if got.VendorUserID == nil {
+					t.Fatalf("VendorUserID = nil, want %q", *tc.wantVendor)
 				}
-				if *got.PICUserID != *tc.wantVendor {
-					t.Errorf("PICUserID = %q, want %q", *got.PICUserID, *tc.wantVendor)
+				if *got.VendorUserID != *tc.wantVendor {
+					t.Errorf("VendorUserID = %q, want %q", *got.VendorUserID, *tc.wantVendor)
 				}
 			}
 		})
@@ -68,10 +68,10 @@ func TestListVisits_NormalisesPagination(t *testing.T) {
 		wantPage  int
 		wantLimit int
 	}{
-		{"zero page and limit", 0, 0, 1, 20},
+		{"zero page and limit", 0, 0, 1, 10},
 		{"negative page", -3, 10, 1, 10},
-		{"limit over cap", 1, 500, 1, 20},
-		{"negative limit", 2, -5, 2, 20},
+		{"limit over cap", 1, 500, 1, 10},
+		{"negative limit", 2, -5, 2, 10},
 		{"valid pair passes through", 2, 10, 2, 10},
 	}
 	for _, tc := range cases {

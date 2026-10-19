@@ -37,7 +37,7 @@ type GetCheckInByVisitRequestParams struct {
 	VisitRequestID uuid.UUID `json:"visit_request_id"`
 }
 
-// Existence + fact read used by the auto-rule worker (SweepNoShowApprovedVisits)
+// Existence + fact read used by the auto-rule worker (SweepNoShowVisits)
 // and by SCR-05 to render the "Sedang di Lokasi" badge. pgx reports a missing
 // row as pgx.ErrNoRows, which is the existence check.
 func (q *Queries) GetCheckInByVisitRequest(ctx context.Context, arg GetCheckInByVisitRequestParams) (CheckIn, error) {

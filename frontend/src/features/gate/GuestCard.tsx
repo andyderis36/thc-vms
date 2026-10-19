@@ -84,13 +84,14 @@ export function GuestCard({ visit, pending, onCheckIn, onCheckOut, onSelect }: G
           <div className="min-w-0">
             {select !== null ? (
               // Klik Visit ID = buka popup detail (data segar diambil halaman
-              // /gate, sama seperti hasil pindai). Tampilan teks tidak berubah
-              // selain kursor pointer + label aksesibel untuk pembaca layar.
+              // /gate, sama seperti hasil pindai). Teks ditata sebagai tautan
+              // biru bergaris bawah ala CTA agar jelas dapat diklik, namun
+              // aksinya tetap membuka popup, BUKAN pindah halaman.
               <button
                 type="button"
                 onClick={() => select(visit)}
                 aria-label={`Lihat detail ${visit.visit_id}`}
-                className="cursor-pointer text-left text-base font-bold text-ink"
+                className="inline-flex min-h-touch cursor-pointer items-center text-left text-base font-bold text-brand underline underline-offset-2 hover:text-brand-dark"
               >
                 {visit.visit_id}
               </button>

@@ -12,11 +12,14 @@ import {
   Plus,
 } from 'lucide-react'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
-import { PicMobileShell } from '@/components/layouts/PicMobileShell'
+import { VendorMobileShell } from '@/components/layouts/VendorMobileShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { FilterResetButton } from '@/components/ui/FilterResetButton'
+import { Pagination } from '@/components/ui/Pagination'
+import { Input } from '@/components/ui/Input'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
@@ -26,12 +29,73 @@ import { RejectModal } from '@/features/visits/components/RejectModal'
 import { VisitCards } from '@/features/visits/components/VisitCards'
 import { VisitTable } from '@/features/visits/components/VisitTable'
 import { useLocationsQuery, usePendingApprovalCount, useVisitsQuery } from '@/lib/api/hooks'
-import type { VisitDetail, VisitListParams, VisitStatus } from '@/lib/api/types'
+import type { VisitDetail, VisitListParams, VisitOrder, VisitSortField, VisitStatus } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import { DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { VISIT_STATUS_META } from '@/lib/visits/status-badge'
 import { mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
+
+/** Kombinasi filter SCR-02 yang dipetakan ke query params `GET /visits`. */
+export interface VisitListFilter {
+  facilityId: string
+  q: string
+  dateFrom: string
+  dateTo: string
+  page: number
+  sortBy: VisitSortField
+  order: VisitOrder
+  pageSize: number
+}
+
+function visitCoreParams(filter: VisitListFilter): VisitListParams {
+  return {
+    ...(filter.facilityId !== 'all' ? { location_id: filter.facilityId } : {}),
+    ...(filter.q !== '' ? { q: filter.q } : {}),
+    ...(filter.dateFrom !== '' ? { date_from: filter.dateFrom } : {}),
+    ...(filter.dateTo !== '' ? { date_to: filter.dateTo } : {}),
+  }
+}
+
+export function toVisitListParams(filter: VisitListFilter, status?: VisitStatus): VisitListParams {
+  const params: VisitListParams = {
+    ...visitCoreParams(filter),
+    ...(status !== undefined ? { status } : {}),
+    page: filter.page,
+    limit: filter.pageSize,
+    sort_by: filter.sortBy,
+    order: filter.order,
+  }
+  return params
+}
+
+/** Params metrik kartu/tab: hanya `total` server yang dipakai (`limit:1`), tanpa `page`/`sort`. */
+export function toVisitMetricsParams(filter: VisitListFilter, status?: VisitStatus): VisitListParams {
+  const params: VisitListParams = {
+    ...visitCoreParams(filter),
+    ...(status !== undefined ? { status } : {}),
+    limit: 1,
+  }
+  return params
+}
+
+export const VISIT_SORT_OPTIONS: SelectOption[] = [
+  { value: 'created_at:desc', label: 'Terbaru dibuat' },
+  { value: 'created_at:asc', label: 'Terlama dibuat' },
+  { value: 'start_date:asc', label: 'Jadwal mulai (terdekat)' },
+  { value: 'start_date:desc', label: 'Jadwal mulai (terjauh)' },
+  { value: 'end_date:desc', label: 'Jadwal selesai (terbaru)' },
+  { value: 'end_date:asc', label: 'Jadwal selesai (terlama)' },
+]
+
+export function parseVisitSort(value: string): { sortBy: VisitSortField; order: VisitOrder } {
+  const [field, direction] = value.split(':')
+  return {
+    sortBy: field === 'start_date' || field === 'end_date' ? field : 'created_at',
+    order: direction === 'asc' ? 'asc' : 'desc',
+  }
+}
 
 /**
  * SCR-02 — Dashboard Kunjungan & Antrean.
@@ -77,15 +141,26 @@ function DashboardScreen() {
   const router = useRouter()
 
   // Filter fasilitas bersatu: sentinel 'all' sama dengan switcher SuperadminShell.
-  const [facilityFilter, setFacilityFilter] = useState<string>(
+  // ATURAN default diekstrak menjadi satu konstanta → dipakai useState (nilai
+  // awal), handleResetFilters, DAN isFiltered, sehingga ketiganya mustahil
+  // menyimpang satu sama lain. (RequireAuth hanya me-mount layar ini saat sesi
+  // sudah ter-autentikasi, jadi `user` sudah terisi pada render pertama.)
+  const defaultFacilityFilter =
     user !== null && user.role !== 'super_admin' && user.role !== 'vendor'
       ? (user.location_id ?? 'all')
-      : 'all',
-  )
+      : 'all'
+  const [facilityFilter, setFacilityFilter] = useState<string>(defaultFacilityFilter)
   // Satu state status dipakai BERSAMAAN oleh Tabs dan Select status.
   const [statusFilter, setStatusFilter] = useState<VisitStatus | undefined>(undefined)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [sortBy, setSortBy] = useState<VisitSortField>('created_at')
+  const [order, setSortOrder] = useState<VisitOrder>('desc')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
+  const handlePageSizeChange = (next: number): void => { setPageSize(next); setPage(1) }
   const [approveTarget, setApproveTarget] = useState<VisitDetail | null>(null)
   const [rejectTarget, setRejectTarget] = useState<VisitDetail | null>(null)
 
@@ -107,35 +182,81 @@ function DashboardScreen() {
     return () => clearTimeout(timer)
   }, [searchInput])
 
+  // Filter/urutan berubah → kembali ke halaman 1 (baris halaman N tidak
+  // relevan untuk kombinasi filter baru).
+  useEffect(() => {
+    setPage(1)
+  }, [facilityFilter, statusFilter, search, dateFrom, dateTo, sortBy, order])
+
+  // Status "ada filter aktif" untuk `disabled` tombol Reset Filter — HANYA
+  // kontrol bar filter yang dihitung; paginasi (page/pageSize) bukan filter
+  // dan punya kontrolnya sendiri, jadi tidak menyalakan tombol ini.
+  const isFiltered =
+    facilityFilter !== defaultFacilityFilter ||
+    statusFilter !== undefined ||
+    searchInput !== '' ||
+    search !== '' ||
+    dateFrom !== '' ||
+    dateTo !== '' ||
+    sortBy !== 'created_at' ||
+    order !== 'desc'
+
+  // Reset Filter: kembalikan SEMUA state bar + paginasi ke nilai defaultnya.
+  // - `searchInput` (draft) dan `search` (debounced 300ms) direset BERSAMAAN
+  //   agar sisa ketikan tidak "hidup lagi" lewat effect debounce.
+  // - KONSISTENSI TAB: `statusFilter` adalah SATU-satunya sumber kebenaran
+  //   bagi Tabs (lihat `tabValue` yang diturunkan darinya) MAUPUN Select
+  //   "Status" — tidak ada state tab terpisah. Mereset ke `undefined` otomatis
+  //   mematikan sorotan tab (kembali "Semua Kunjungan") dan Select (kembali
+  //   "Semua Status") sekaligus, sehingga keduanya mustahil bertentangan.
+  // - Paginasi ikut reset (page 1, ukuran halaman default) karena baris
+  //   halaman N tidak relevan untuk kombinasi filter yang sudah bersih.
+  const handleResetFilters = (): void => {
+    setFacilityFilter(defaultFacilityFilter)
+    setStatusFilter(undefined)
+    setSearchInput('')
+    setSearch('')
+    setDateFrom('')
+    setDateTo('')
+    setSortBy('created_at')
+    setSortOrder('desc')
+    setPage(1)
+    setPageSize(DEFAULT_PAGE_SIZE)
+  }
+
   const locationsQuery = useLocationsQuery()
 
-  const baseParams: VisitListParams = {
-    limit: 100,
-    ...(facilityFilter !== 'all' ? { location_id: facilityFilter } : {}),
-    ...(search !== '' ? { search } : {}),
-  }
-  const listParams: VisitListParams = {
-    ...baseParams,
-    ...(statusFilter !== undefined ? { status: statusFilter } : {}),
+  const filter: VisitListFilter = {
+    facilityId: facilityFilter,
+    q: search,
+    dateFrom,
+    dateTo,
+    page,
+    sortBy,
+    order,
+    pageSize,
   }
 
-  const baseQuery = useVisitsQuery(baseParams)
-  const listQuery = useVisitsQuery(listParams)
+  // Metrik kartu + tab: total SERVER per status (`limit:1` — hanya `total`
+  // yang dipakai), tanpa paginasi/urutan supaya kunci tidak ikut berubah
+  // saat user ganti halaman atau sortir.
+  const totalCountQuery = useVisitsQuery(toVisitMetricsParams(filter))
+  const visitingQuery = useVisitsQuery(toVisitMetricsParams(filter, 'visiting'))
+  const completedQuery = useVisitsQuery(toVisitMetricsParams(filter, 'completed'))
+  const listQuery = useVisitsQuery(toVisitListParams(filter, statusFilter))
   // Tab "Menunggu Approval" (status requested) juga menampilkan kunjungan
   // `rescheduled` — keduanya menunggu keputusan admin. Query kedua HANYA
   // aktif di tab tersebut agar tab lain tetap single-query; hasilnya digabung
   // client-side oleh mergeUpcomingQueue (dedupe by id, urut kronologis) —
   // persis pola antrean "Akan Hadir" gerbang.
   const menungguRescheduledQuery = useVisitsQuery(
-    { ...baseParams, status: 'rescheduled' },
+    toVisitListParams(filter, 'rescheduled'),
     statusFilter === 'requested',
   )
   // `pendingCount` mencakup `requested` + `rescheduled` (keduanya menunggu
-  // keputusan) → tab, kartu metrik, dan badge shell selalu satu angka.
-  // PERUBAHAN SADAR (konsistensi): sumbernya kini total SERVER, bukan filter
-  // client atas halaman `baseQuery` `limit:100` yang bisa undercount saat >100
-  // item — sumber yang sama dengan badge di 6 halaman lain; scope cabang/peran
-  // tetap ikut backend. (Harus dipanggil sebelum early-return `user === null`
+  // keputusan) → tab, kartu metrik, dan badge shell selalu satu angka;
+  // sumbernya total server (usePendingApprovalCount), konsisten dengan badge
+  // di halaman lain. (Harus dipanggil sebelum early-return `user === null`
   // agar urutan hook stabil.)
   const { pendingCount } = usePendingApprovalCount()
   // Galat HANYA dari query utama: kegagalan query rescheduled menghasilkan
@@ -154,10 +275,16 @@ function DashboardScreen() {
   const allowApproval = can(role, 'approveVisit')
   const canSubmit = can(role, 'submitVisit')
 
-  const baseItems: VisitDetail[] = baseQuery.data?.items ?? []
-  const totalCount = baseQuery.data?.total ?? 0
-  const visitingCount = baseItems.filter((visit) => visit.status === 'visiting').length
-  const completedCount = baseItems.filter((visit) => visit.status === 'completed').length
+  const totalCount = totalCountQuery.data?.total ?? 0
+  const visitingCount = visitingQuery.data?.total ?? 0
+  const completedCount = completedQuery.data?.total ?? 0
+  const listTotal = listQuery.data?.total ?? 0
+  const rescheduledTotal =
+    statusFilter === 'requested' ? (menungguRescheduledQuery.data?.total ?? 0) : 0
+  const total = listTotal + rescheduledTotal
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const rangeStart = total > 0 ? (page - 1) * pageSize + 1 : 0
+  const rangeEnd = rows.length > 0 ? rangeStart + rows.length - 1 : 0
 
   const tabs: TabItem[] = [
     { id: 'semua', label: 'Semua Kunjungan', count: totalCount },
@@ -206,11 +333,31 @@ function DashboardScreen() {
           },
         ]
 
-  const metrics: Array<{ label: string; value: number; icon: ReactNode }> = [
-    { label: 'Total Kunjungan Cabang', value: totalCount, icon: <CalendarDays className="size-5" /> },
-    { label: 'Menunggu Approval', value: pendingCount, icon: <Clock className="size-5" /> },
-    { label: 'Sedang di Lokasi', value: visitingCount, icon: <MapPin className="size-5" /> },
-    { label: 'Selesai', value: completedCount, icon: <CheckCircle2 className="size-5" /> },
+  const metrics: Array<{ label: string; value: number; icon: ReactNode; chip: string }> = [
+    {
+      label: 'Total Kunjungan Cabang',
+      value: totalCount,
+      icon: <CalendarDays className="size-5" />,
+      chip: 'bg-brand-soft text-brand',
+    },
+    {
+      label: 'Menunggu Approval',
+      value: pendingCount,
+      icon: <Clock className="size-5" />,
+      chip: 'bg-warning-bg text-warning-text',
+    },
+    {
+      label: 'Sedang di Lokasi',
+      value: visitingCount,
+      icon: <MapPin className="size-5" />,
+      chip: 'bg-info-bg text-info-text',
+    },
+    {
+      label: 'Selesai',
+      value: completedCount,
+      icon: <CheckCircle2 className="size-5" />,
+      chip: 'bg-success-bg text-success-text',
+    },
   ]
 
   const emptyTitle =
@@ -230,8 +377,11 @@ function DashboardScreen() {
     <>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-ink">Dashboard Kunjungan</h1>
-          <p className="mt-1 text-sm text-ink-secondary">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight text-ink">Dashboard Kunjungan</h1>
+            {pendingCount > 0 ? <Badge tone="warning">{pendingCount} menunggu</Badge> : null}
+          </div>
+          <p className="mt-1.5 text-sm text-ink-secondary">
             Pantau izin akses & antrean persetujuan fasilitas THC.
           </p>
         </div>
@@ -242,7 +392,7 @@ function DashboardScreen() {
           dokumen (bukan fixed) sehingga tidak pernah menutupi kartu/aksi
           approve-reject, langsung above-the-fold di 375px (1 ketukan), dan
           bebas berebut z-index/offset dengan BottomNav (z-30, 64px).
-          Vendor/Mitra dikecualikan: punya aksi sendiri di PicMobileShell. */}
+          Vendor/Mitra dikecualikan: punya aksi sendiri di VendorMobileShell. */}
       {canSubmit && role !== 'vendor' ? (
         <div className="mb-5 md:hidden">
           <Button
@@ -257,12 +407,12 @@ function DashboardScreen() {
         </div>
       ) : null}
 
-      {/* Kartu identitas Vendor/Mitra — di atas metrik, ikut PicMobileShell. */}
+      {/* Kartu identitas Vendor/Mitra — di atas metrik, ikut VendorMobileShell. */}
       {role === 'vendor' ? (
         <section aria-label="Identitas Vendor/Mitra" className="card mb-5 flex items-center gap-4 p-4">
           <span
             aria-hidden="true"
-            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-brand text-lg font-bold text-brand-contrast"
+            className="flex size-12 shrink-0 items-center justify-center rounded-badge bg-brand text-lg font-bold text-brand-contrast"
           >
             {(user.name.charAt(0) || 'P').toUpperCase()}
           </span>
@@ -278,7 +428,7 @@ function DashboardScreen() {
             </p>
           </div>
           <Badge tone={user.status === 'active' ? 'success' : 'neutral'}>
-            {user.status === 'active' ? 'AKTIF' : 'NONAKTIF'}
+            {user.status === 'active' ? 'Aktif' : 'Nonaktif'}
           </Badge>
         </section>
       ) : null}
@@ -289,12 +439,12 @@ function DashboardScreen() {
           <div key={metric.label} className="card flex items-center gap-3 p-4">
             <span
               aria-hidden="true"
-              className="flex size-10 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand"
+              className={`flex size-10 shrink-0 items-center justify-center rounded-control ${metric.chip}`}
             >
               {metric.icon}
             </span>
             <div className="min-w-0">
-              <p className="truncate text-badge text-ink-secondary">{metric.label}</p>
+              <p className="text-badge leading-tight text-ink-secondary">{metric.label}</p>
               <p className="text-xl font-bold text-ink">{metric.value}</p>
             </div>
           </div>
@@ -302,7 +452,7 @@ function DashboardScreen() {
       </div>
 
       {/* Filter bar: Fasilitas (super_admin aktif, admin terkunci, Vendor/Mitra sembunyi). */}
-      <div className="card mt-5 flex flex-wrap items-end gap-3 p-4">
+      <div className="card mt-5 flex flex-wrap items-end gap-3 border-brand/20 bg-brand-soft/40 p-4">
         {role !== 'vendor' ? (
           <div className="min-w-40 flex-1 sm:w-56 sm:flex-none">
             <Select
@@ -331,9 +481,39 @@ function DashboardScreen() {
         <div className="min-w-48 flex-1">
           <SearchInput
             aria-label="Cari kunjungan"
-            placeholder="Cari Visit ID, Vendor/Mitra, atau vendor…"
+            placeholder="Cari Visit ID, Vendor/Mitra, atau lokasi…"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
+          />
+        </div>
+        <div className="min-w-36 flex-1 sm:w-44 sm:flex-none">
+          <Input
+            label="Dari Tanggal"
+            type="date"
+            value={dateFrom}
+            max={dateTo === '' ? undefined : dateTo}
+            onChange={(event) => setDateFrom(event.target.value)}
+          />
+        </div>
+        <div className="min-w-36 flex-1 sm:w-44 sm:flex-none">
+          <Input
+            label="Sampai Tanggal"
+            type="date"
+            value={dateTo}
+            min={dateFrom === '' ? undefined : dateFrom}
+            onChange={(event) => setDateTo(event.target.value)}
+          />
+        </div>
+        <div className="min-w-44 flex-1 sm:w-52 sm:flex-none">
+          <Select
+            label="Urutkan"
+            options={VISIT_SORT_OPTIONS}
+            value={`${sortBy}:${order}`}
+            onChange={(event) => {
+              const next = parseVisitSort(event.target.value)
+              setSortBy(next.sortBy)
+              setSortOrder(next.order)
+            }}
           />
         </div>
         {canSubmit && role !== 'vendor' ? (
@@ -344,11 +524,20 @@ function DashboardScreen() {
             </Button>
           </div>
         ) : null}
+        {/* Reset Filter — anak TERAKHIR bar (flex-wrap menempelkan ke ujung
+            baris); mengembalikan seluruh kontrol bar plus switcher cabang
+            SuperadminShell (terhubung lewat branchId={facilityFilter}). */}
+        <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
       </div>
 
       <Tabs className="mt-5" tabs={tabs} value={tabValue} onChange={handleTabChange} />
 
       <div className="mt-4">
+        {rows.length > 0 ? (
+          <p className="mb-3 text-label tabular-nums text-ink-secondary">
+            Menampilkan {rangeStart}–{rangeEnd} dari {total} kunjungan
+          </p>
+        ) : null}
         {rowsLoading ? (
           <div className="card flex items-center justify-center gap-3 py-12 text-sm text-ink-secondary">
             <Spinner size="sm" />
@@ -356,8 +545,13 @@ function DashboardScreen() {
           </div>
         ) : listQuery.isError ? (
           <div className="card p-6">
-            <p className="flex items-center gap-2 text-sm font-semibold text-danger-text">
-              <AlertTriangle className="size-4" aria-hidden="true" />
+            <p className="flex items-center gap-2.5 text-sm font-semibold text-danger-text">
+              <span
+                aria-hidden="true"
+                className="flex size-7 shrink-0 items-center justify-center rounded-control bg-danger-bg"
+              >
+                <AlertTriangle className="size-4" />
+              </span>
               Gagal memuat daftar kunjungan
             </p>
             <p className="mt-2 text-sm text-ink-secondary">{apiErrorMessage(listQuery.error)}</p>
@@ -387,6 +581,12 @@ function DashboardScreen() {
               role={role}
               onApprove={setApproveTarget}
               onReject={setRejectTarget}
+              sortBy={sortBy}
+              order={order}
+              onSortChange={(field, nextOrder) => {
+                setSortBy(field)
+                setSortOrder(nextOrder)
+              }}
             />
             <VisitCards
               visits={rows}
@@ -397,6 +597,17 @@ function DashboardScreen() {
           </>
         )}
       </div>
+
+      {rows.length > 0 ? (
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          pageSize={pageSize}
+          onPageSizeChange={handlePageSizeChange}
+          className="mt-4"
+        />
+      ) : null}
 
       {/* Aksi Buat Kunjungan mobile kini entry inline di atas (lihat komentar
           pada tombol `md:hidden` di awal konten) — FAB fixed dihapus agar tidak
@@ -412,7 +623,7 @@ function DashboardScreen() {
   )
 
   if (role === 'vendor') {
-    return <PicMobileShell activeHref="/dashboard">{content}</PicMobileShell>
+    return <VendorMobileShell activeHref="/dashboard">{content}</VendorMobileShell>
   }
 
   if (role === 'super_admin') {
@@ -421,6 +632,7 @@ function DashboardScreen() {
         pendingCount={pendingCount}
         allLocations={locationsQuery.data ?? []}
         activeHref="/dashboard"
+        branchId={facilityFilter}
         onBranchChange={setFacilityFilter}
       >
         {content}

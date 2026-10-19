@@ -1,10 +1,17 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { X } from 'lucide-react'
 import { toast } from 'sonner'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
 import { SecurityKioskShell, type KioskTabId } from '@/components/layouts/SecurityKioskShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
+import { Button } from '@/components/ui/Button'
+import { FilterResetButton } from '@/components/ui/FilterResetButton'
+import { Input } from '@/components/ui/Input'
+import { Pagination } from '@/components/ui/Pagination'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { Select, type SelectOption } from '@/components/ui/Select'
 import { RequireRole } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
 import {
@@ -13,8 +20,17 @@ import {
   usePendingApprovalCount,
   useVisitsQuery,
 } from '@/lib/api/hooks'
-import type { Role, VisitDetail, VisitStatus } from '@/lib/api/types'
-import { mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
+import type {
+  NotificationItem,
+  Role,
+  VisitDetail,
+  VisitListParams,
+  VisitOrder,
+  VisitSortField,
+  VisitStatus,
+} from '@/lib/api/types'
+import { DEFAULT_PAGE_SIZE } from '@/lib/pagination'
+import { isCheckinWindowOpen, mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
 import { ScannerPanel, type ScanPhase } from '@/features/gate/ScannerPanel'
 import { GateQueue } from '@/features/gate/GateQueue'
 import { GuestSelectContext } from '@/features/gate/GuestCard'
@@ -32,6 +48,50 @@ const TAB_STATUS: Record<KioskTabId, VisitStatus> = {
   completed: 'completed',
 }
 
+const GATE_SEARCH_ID = 'thc-gate-visit-search'
+
+/** Kombinasi filter antrean gerbang (pencarian + tanggal jadwal + urutan) — dipetakan ke query params `GET /visits`. */
+export interface GateListFilter {
+  q?: string
+  dateFrom: string
+  dateTo: string
+  page: number
+  pageSize: number
+  sortBy: VisitSortField
+  order: VisitOrder
+}
+
+export function toGateListParams(filter: GateListFilter, status: VisitStatus): VisitListParams {
+  const params: VisitListParams = {
+    status,
+    page: filter.page,
+    limit: filter.pageSize,
+    sort_by: filter.sortBy,
+    order: filter.order,
+    ...(filter.q ? { q: filter.q } : {}),
+    ...(filter.dateFrom !== '' ? { date_from: filter.dateFrom } : {}),
+    ...(filter.dateTo !== '' ? { date_to: filter.dateTo } : {}),
+  }
+  return params
+}
+
+export const VISIT_SORT_OPTIONS: SelectOption[] = [
+  { value: 'created_at:desc', label: 'Terbaru dibuat' },
+  { value: 'created_at:asc', label: 'Terlama dibuat' },
+  { value: 'start_date:asc', label: 'Jadwal mulai (terdekat)' },
+  { value: 'start_date:desc', label: 'Jadwal mulai (terjauh)' },
+  { value: 'end_date:desc', label: 'Jadwal selesai (terbaru)' },
+  { value: 'end_date:asc', label: 'Jadwal selesai (terlama)' },
+]
+
+export function parseVisitSort(value: string): { sortBy: VisitSortField; order: VisitOrder } {
+  const [field, direction] = value.split(':')
+  return {
+    sortBy: field === 'start_date' || field === 'end_date' ? field : 'created_at',
+    order: direction === 'asc' ? 'asc' : 'desc',
+  }
+}
+
 /**
  * SCR-05 - Security Gate / Site Check-in.
  *
@@ -39,7 +99,7 @@ const TAB_STATUS: Record<KioskTabId, VisitStatus> = {
  * (dual-role), DAN `super_admin` (bypass lintas cabang). `RequireRole` yang
  * menahan Vendor/Mitra, dan `security` tidak pernah melihat kontrol persetujuan.
  *
- * Shell mengikuti peran agar transisi dari dashboard tidak janggal: satpam
+ * Shell mengikuti peran agar transisi dari dashboard tidak janggal: pengawas
  * tetap kios zero-sidebar (SHELL-03); admin/superadmin memakai shell
  * masing-masing dengan menu `Pos Check-in` aktif.
  */
@@ -57,6 +117,17 @@ export default function GatePage() {
  */
 function GateContent() {
   const [tab, setTab] = useState<KioskTabId>('upcoming')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [sortBy, setSortBy] = useState<VisitSortField>('start_date')
+  const [order, setSortOrder] = useState<VisitOrder>('asc')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
+  const handlePageSizeChange = (next: number): void => { setPageSize(next); setPage(1) }
+  // `searchInput` = nilai mentah dari field (responsif saat diketik);
+  // `search` = nilai setelah debounce 300ms yang benar-benar dikirim ke `q`.
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
   const [phase, setPhase] = useState<ScanPhase>({ phase: 'idle' })
   const [pendingVisitId, setPendingVisitId] = useState<string | null>(null)
   const [scanVisit, setScanVisit] = useState<VisitDetail | null>(null)
@@ -70,11 +141,29 @@ function GateContent() {
   const role: Role | null = user !== null ? user.role : null
 
   const isUpcoming = tab === 'upcoming'
-  const visitsQuery = useVisitsQuery({ status: TAB_STATUS[tab], limit: 50 })
+
+  // Filter/urutan/tab/pencarian berubah → kembali ke halaman 1 (baris halaman N tidak
+  // relevan untuk kombinasi filter baru).
+  useEffect(() => {
+    setPage(1)
+  }, [tab, dateFrom, dateTo, sortBy, order, search])
+
+  // Debounce pencarian 300ms supaya setiap ketikan tidak memicu request —
+  // pola identik halaman dashboard dan approvals.
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  const filter: GateListFilter = { q: search, dateFrom, dateTo, page, pageSize, sortBy, order }
+  const visitsQuery = useVisitsQuery(toGateListParams(filter, TAB_STATUS[tab]))
   // Tab "Akan Hadir" juga menampilkan kunjungan `rescheduled` (keduanya
   // check-in-able). Query kedua HANYA aktif di tab upcoming agar tab lain
   // tetap single-query; hasilnya digabung client-side oleh mergeUpcomingQueue.
-  const rescheduledQuery = useVisitsQuery({ status: 'rescheduled', limit: 50 }, isUpcoming)
+  const rescheduledQuery = useVisitsQuery(
+    toGateListParams(filter, 'rescheduled'),
+    isUpcoming,
+  )
   const checkIn = useCheckInVisitMutation()
   const checkOut = useCheckOutVisitMutation()
   // Badge antrean shell admin/superadmin (server-total, limit 1 — hanya total
@@ -84,8 +173,9 @@ function GateContent() {
   /**
    * Semantik gabungan (keputusan, terdokumentasi):
    * - `visits`: gabungan `approved` + `rescheduled` hanya di tab upcoming
-   *   (dedupe by id, urut `start_date` ASC); tab lain tetap daftar utama
-   *   apa adanya.
+   *   (dedupe by id, urut `start_date` ASC), lalu baris dengan jendela
+   *   check-in sudah ditutup (`end_date + 2 jam <= now`) dibuang oleh
+   *   `isCheckinWindowOpen`; tab lain tetap daftar utama apa adanya.
    * - Loading: menunggu query UTAMA ATAU query rescheduled (saat tab
    *   upcoming) — antrean baru dirender saat kedua daftar sudah settle.
    * - Error: HANYA dari query utama. Kegagalan query rescheduled tidak
@@ -96,9 +186,54 @@ function GateContent() {
   const visits = useMemo(() => {
     const primary = visitsQuery.data?.items ?? []
     if (!isUpcoming) return primary
-    return mergeUpcomingQueue(primary, rescheduledQuery.data?.items ?? [])
+    return mergeUpcomingQueue(primary, rescheduledQuery.data?.items ?? []).filter((visit) =>
+      isCheckinWindowOpen(visit),
+    )
   }, [isUpcoming, visitsQuery.data, rescheduledQuery.data])
   const queueLoading = visitsQuery.isPending || (isUpcoming && rescheduledQuery.isPending)
+  const listTotal = visitsQuery.data?.total ?? 0
+  const rescheduledTotal = isUpcoming ? (rescheduledQuery.data?.total ?? 0) : 0
+  const total = listTotal + rescheduledTotal
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const rangeStart = total > 0 ? (page - 1) * pageSize + 1 : 0
+  const rangeEnd = visits.length > 0 ? rangeStart + visits.length - 1 : 0
+
+  /** Reset pencarian (clear affordance): kosongkan field dan nilai debounce. */
+  function handleClearSearch(): void {
+    setSearchInput('')
+    setSearch('')
+    document.getElementById(GATE_SEARCH_ID)?.focus()
+  }
+
+  /**
+   * Reset SEMUA filter bar gerbang ke default: tab antrean, rentang tanggal
+   * jadwal, urutan, pencarian (mentah + debounce), dan halaman paginasi.
+   * Berbeda dari `handleClearSearch` yang HANYA mengosongkan field pencarian
+   * (affordance terpisah di dalam SearchInput). Halaman ikut di-reset karena
+   * baris halaman N tidak relevan untuk kombinasi filter default.
+   */
+  function handleResetFilters(): void {
+    setTab('upcoming')
+    setDateFrom('')
+    setDateTo('')
+    setSortBy('start_date')
+    setSortOrder('asc')
+    setSearchInput('')
+    setSearch('')
+    setPage(1)
+  }
+
+  // Tombol Reset Filter aktif hanya bila ada minimal satu filter yang
+  // menyimpang dari default (nilai paginasi di luar default TIDAK dihitung —
+  // paginasi bukan "filter", hanya efek samping dari filter lain).
+  const isFiltered =
+    searchInput !== '' ||
+    search !== '' ||
+    dateFrom !== '' ||
+    dateTo !== '' ||
+    sortBy !== 'start_date' ||
+    order !== 'asc' ||
+    tab !== 'upcoming'
 
   /**
    * Hasil pemindaian memuat kode QR mentah. Payload QR dari backend bersifat
@@ -146,24 +281,34 @@ function GateContent() {
   }
 
   /**
-   * Klik Visit ID pada kartu antrean: muat ULANG data lewat `resolveVisit`
-   * (helper yang sama dengan alur pindai) lalu buka `ScanResultModal`.
-   * Baris daftar bisa basi (polling tertunda / status berubah), jadi konfirmasi
-   * tidak pernah bertumpu pada data cache antrean — identik dengan hasil scan.
+   * Klik Visit ID pada kartu antrean ATAU klik notifikasi kios pengawas: muat
+   * ULANG data lewat `resolveVisit` (helper yang sama dengan alur pindai)
+   * lalu buka `ScanResultModal`. Baris daftar / isi notifikasi bisa basi
+   * (polling tertunda / status berubah), jadi konfirmasi tidak pernah
+   * bertumpu pada data cache — identik dengan hasil scan. Galat muat ->
+   * toast, tanpa navigasi.
    */
-  async function handleSelectVisit(visit: VisitDetail) {
+  async function openVisitModal(code: string, label: string): Promise<void> {
     // Naikkan resetKey seperti siklus pindai agar kunci kamera ScannerPanel
     // terlepas; siklus ditutup oleh handleScanClose/handleScanConfirm yang
     // sudah ada (tanpa perubahan perilaku scanner).
     setScanResetKey((key) => key + 1)
-    const fresh = await resolveVisit(visit.visit_id)
+    const fresh = await resolveVisit(code)
     if (fresh === null) {
-      toast.error(`Detail ${visit.visit_id} gagal dimuat. Coba lagi.`)
+      toast.error(`Detail ${label} gagal dimuat. Coba lagi.`)
       return
     }
     setScanVisit(fresh)
     setScanError(null)
     setScanOpen(true)
+  }
+
+  async function handleSelectVisit(visit: VisitDetail) {
+    await openVisitModal(visit.visit_id, visit.visit_id)
+  }
+
+  async function handleNotificationSelect(item: NotificationItem) {
+    await openVisitModal(item.visit_request_id, item.visit_id || item.visit_request_id)
   }
 
   async function handleCheckIn(visit: VisitDetail) {
@@ -244,6 +389,73 @@ function GateContent() {
         />
       </div>
       <div className="min-w-0 lg:w-[58%]">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-base font-semibold text-ink">Antrean Kunjungan</h2>
+          {visits.length > 0 ? (
+            <p className="text-label tabular-nums text-ink-secondary">
+              Menampilkan {rangeStart}–{rangeEnd} dari {total} kunjungan
+            </p>
+          ) : null}
+        </div>
+        <div className="card mb-4 flex flex-wrap items-end gap-3 border-brand/20 bg-brand-soft/40 p-4">
+          <div className="relative min-w-48 flex-1 sm:w-64 sm:flex-none">
+            <SearchInput
+              id={GATE_SEARCH_ID}
+              aria-label="Cari kunjungan"
+              placeholder="Cari Visit ID atau Vendor/Mitra…"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              fieldSize="gate"
+              className={searchInput !== '' ? 'pr-12' : ''}
+            />
+            {searchInput !== '' ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="absolute right-2 top-1/2 -translate-y-1/2"
+                onClick={handleClearSearch}
+                aria-label="Hapus pencarian"
+              >
+                <X className="size-4 shrink-0" aria-hidden="true" />
+              </Button>
+            ) : null}
+          </div>
+          <div className="min-w-36 flex-1 sm:w-44 sm:flex-none">
+            <Input
+              label="Dari Tanggal"
+              type="date"
+              fieldSize="gate"
+              value={dateFrom}
+              max={dateTo === '' ? undefined : dateTo}
+              onChange={(event) => setDateFrom(event.target.value)}
+            />
+          </div>
+          <div className="min-w-36 flex-1 sm:w-44 sm:flex-none">
+            <Input
+              label="Sampai Tanggal"
+              type="date"
+              fieldSize="gate"
+              value={dateTo}
+              min={dateFrom === '' ? undefined : dateFrom}
+              onChange={(event) => setDateTo(event.target.value)}
+            />
+          </div>
+          <div className="min-w-44 flex-1 sm:w-52 sm:flex-none">
+            <Select
+              label="Urutkan"
+              fieldSize="gate"
+              options={VISIT_SORT_OPTIONS}
+              value={`${sortBy}:${order}`}
+              onChange={(event) => {
+                const next = parseVisitSort(event.target.value)
+                setSortBy(next.sortBy)
+                setSortOrder(next.order)
+              }}
+            />
+          </div>
+          <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        </div>
         {/* Konteks pengganti prop-drilling: GateQueue tidak diubah, tetapi
             GuestCard tetap menerima handler klik kartu untuk popup detail. */}
         <GuestSelectContext.Provider value={handleSelectVisit}>
@@ -261,6 +473,16 @@ function GateContent() {
             onCheckOut={(visit) => void handleCheckOut(visit)}
           />
         </GuestSelectContext.Provider>
+        {visits.length > 0 ? (
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            pageSize={pageSize}
+            onPageSizeChange={handlePageSizeChange}
+            className="mt-4"
+          />
+        ) : null}
       </div>
       <ScanResultModal
         visit={scanVisit}
@@ -273,7 +495,7 @@ function GateContent() {
     </div>
   )
 
-  // Shell mengikuti peran: satpam tetap kios zero-sidebar; admin/superadmin
+  // Shell mengikuti peran: pengawas tetap kios zero-sidebar; admin/superadmin
   // memakai shell masing-masing agar transisi dari dashboard tidak janggal.
   if (role === 'admin') {
     return (
@@ -293,7 +515,8 @@ function GateContent() {
     <SecurityKioskShell
       activeTab={tab}
       onTabChange={(id) => setTab(id as KioskTabId)}
-      onSiteCount={tab === 'on-site' ? visits.length : undefined}
+      onSiteCount={tab === 'on-site' ? (visitsQuery.data?.total ?? 0) : undefined}
+      onNotificationSelect={handleNotificationSelect}
     >
       {gateContent}
     </SecurityKioskShell>

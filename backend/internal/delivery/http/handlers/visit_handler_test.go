@@ -82,8 +82,8 @@ func TestListVisits_DefaultsPageAndLimit(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &page); err != nil {
 		t.Fatalf("list data shape wrong: %v", err)
 	}
-	if page.Page != 1 || page.Limit != 20 {
-		t.Fatalf("got page=%d limit=%d, want defaults 1/20", page.Page, page.Limit)
+	if page.Page != 1 || page.Limit != 10 {
+		t.Fatalf("got page=%d limit=%d, want defaults 1/10", page.Page, page.Limit)
 	}
 }
 
@@ -146,7 +146,7 @@ func TestCreateVisit_Returns201WithDetail(t *testing.T) {
 
 // TestCreateVisit_EchoMatchesGetDetail pins the 201 echo contract: the create
 // response must carry the same enriched members as GET /visits/{id} (location
-// name, pic_user name/email, vendor_name, named purposes, roster, SPK URL),
+// name, vendor_user name/email, vendor_name, named purposes, roster, SPK URL),
 // minus the gate times which belong to the single-GET path only.
 func TestCreateVisit_EchoMatchesGetDetail(t *testing.T) {
 	enriched := cannedVisit()
@@ -157,15 +157,15 @@ func TestCreateVisit_EchoMatchesGetDetail(t *testing.T) {
 	// purposes); the handler must re-read via the GET path before answering
 	// 201 so the echo is as complete as a GET.
 	bare := domain.VisitRequest{
-		ID:          enriched.ID,
-		VisitID:     enriched.VisitID,
-		PICUserID:   enriched.PICUserID,
-		LocationID:  enriched.LocationID,
-		Status:      domain.VisitStatusRequested,
-		StartDate:   enriched.StartDate,
-		EndDate:     enriched.EndDate,
-		CreatedAt:   enriched.CreatedAt,
-		Visitors:    enriched.Visitors,
+		ID:           enriched.ID,
+		VisitID:      enriched.VisitID,
+		VendorUserID: enriched.VendorUserID,
+		LocationID:   enriched.LocationID,
+		Status:       domain.VisitStatusRequested,
+		StartDate:    enriched.StartDate,
+		EndDate:      enriched.EndDate,
+		CreatedAt:    enriched.CreatedAt,
+		Visitors:     enriched.Visitors,
 	}
 	svc := &fakeVisitService{
 		created:    bare,
@@ -415,7 +415,7 @@ func TestListVisits_RendersLocationNameAndType(t *testing.T) {
 	}
 }
 
-func TestListVisits_RendersPICUserNameAndEmail(t *testing.T) {
+func TestListVisits_RendersVendorUserNameAndEmail(t *testing.T) {
 	svc := &fakeVisitService{
 		listItems: []domain.VisitRequest{cannedVisit()},
 		listTotal: 1,
@@ -435,8 +435,8 @@ func TestListVisits_RendersPICUserNameAndEmail(t *testing.T) {
 		t.Fatalf("pic_user missing: %v", detail["pic_user"])
 	}
 	assertSubset(t, "User", user)
-	if user["id"] != "pic-1" {
-		t.Fatalf("pic_user.id = %v, want pic-1", user["id"])
+	if user["id"] != "vendor-1" {
+		t.Fatalf("pic_user.id = %v, want vendor-1", user["id"])
 	}
 	if user["name"] != "Dimas Prasetyo" {
 		t.Fatalf("pic_user.name = %v, want Dimas Prasetyo", user["name"])
@@ -446,7 +446,7 @@ func TestListVisits_RendersPICUserNameAndEmail(t *testing.T) {
 	}
 }
 
-func TestGetVisit_RendersPICUserNameAndEmail(t *testing.T) {
+func TestGetVisit_RendersVendorUserNameAndEmail(t *testing.T) {
 	svc := &fakeVisitService{
 		visitByKey: map[string]domain.VisitRequest{"visit-1": cannedVisit()},
 	}

@@ -18,7 +18,7 @@
 --     admin       : ListVisitsForLocation     (location_id REQUIRED)
 --     security    : ListVisitsForLocation     (location_id REQUIRED,
 --                                              + date_from/date_to = TODAY, PRD L97)
---     vendor       : ListVisitsForPIC          (pic_user_id REQUIRED)
+--     vendor       : ListVisitsForVendorUser          (vendor_user_id REQUIRED)
 --   Each list query has a Count* twin with the identical predicate so the
 --   {items,total,page,limit} envelope (openapi L896-913) cannot drift from the
 --   page it is counting.
@@ -30,7 +30,7 @@
 -- by chk_visit_request_visit_id_format. status is pinned to 'requested'
 -- (PRD L133) and cannot be set by the request body.
 INSERT INTO visit_request (
-    visit_id, pic_user_id, vendor_id, location_id,
+    visit_id, vendor_user_id, vendor_id, location_id,
     start_date, end_date, is_multi_day, status,
     assignment_letter_url, is_nda_accepted, notes, purpose_note
 )
@@ -39,7 +39,7 @@ RETURNING *;
 
 -- Detail read for GET /visits/{id} (openapi L309-327) and for every
 -- owner-scoped response. The projection is the visit row plus the joined names
--- the openapi VisitDetail schema needs (location, vendor_name, pic_user).
+-- the openapi VisitDetail schema needs (location, vendor_name, vendor_user).
 -- name: GetVisitByID :one
 SELECT
     vr.*,
@@ -47,11 +47,11 @@ SELECT
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-JOIN users pu ON pu.id = vr.pic_user_id
+JOIN users pu ON pu.id = vr.vendor_user_id
 WHERE vr.id = $1;
 
 -- name: GetVisitByVisitCode :one
@@ -64,11 +64,11 @@ SELECT
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-JOIN users pu ON pu.id = vr.pic_user_id
+JOIN users pu ON pu.id = vr.vendor_user_id
 WHERE vr.visit_id = $1;
 
 -- name: GetVisitByIDForUpdate :one
@@ -79,11 +79,11 @@ SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type,
     v.name AS vendor_name,
-    pu.name AS pic_name
+    pu.name AS vendor_user_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-JOIN users pu ON pu.id = vr.pic_user_id
+JOIN users pu ON pu.id = vr.vendor_user_id
 WHERE vr.id = $1
 FOR UPDATE OF vr;
 
@@ -93,11 +93,11 @@ SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type,
     v.name AS vendor_name,
-    pu.name AS pic_name
+    pu.name AS vendor_user_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-JOIN users pu ON pu.id = vr.pic_user_id
+JOIN users pu ON pu.id = vr.vendor_user_id
 WHERE vr.visit_id = $1
 FOR UPDATE OF vr;
 
@@ -105,18 +105,20 @@ FOR UPDATE OF vr;
 -- Superadmin scope (PRD L109): no location filter, or one optional location
 -- filter. `status`, `date_from`, `date_to` and `search` are all NULLable
 -- (narg) so "no filter" is expressed by a NULL bound value, never by removing
--- a predicate at runtime.
+-- a predicate at runtime. sort_by/sort_order ride along as bound parameters
+-- compared inside static CASE branches (never concatenated): an unknown or
+-- NULL value matches no branch and the listing falls back to created_at desc.
 -- ORDER BY is fully specified (id last) so LIMIT/OFFSET pagination cannot
 -- repeat or drop a row.
 SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-JOIN users pu ON pu.id = vr.pic_user_id
+JOIN users pu ON pu.id = vr.vendor_user_id
 WHERE (sqlc.narg('location_id')::uuid IS NULL OR vr.location_id = sqlc.narg('location_id')::uuid)
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
@@ -125,15 +127,28 @@ WHERE (sqlc.narg('location_id')::uuid IS NULL OR vr.location_id = sqlc.narg('loc
         sqlc.narg('search')::text IS NULL
      OR pu.name ILIKE '%' || sqlc.narg('search')::text || '%'
      OR vr.visit_id ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR v.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR l.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || sqlc.narg('search')::text || '%')
+     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || sqlc.narg('search')::text || '%')
   )
-ORDER BY vr.start_date DESC, vr.created_at DESC, vr.id DESC
+ORDER BY
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'start_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') = 'asc' THEN vr.start_date END ASC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'start_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') <> 'asc' THEN vr.start_date END DESC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'end_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') = 'asc' THEN vr.end_date END ASC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'end_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') <> 'asc' THEN vr.end_date END DESC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'created_at' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') = 'asc' THEN vr.created_at END ASC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'created_at' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') <> 'asc' THEN vr.created_at END DESC,
+  vr.id DESC
 LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: CountVisitsForSuperAdmin :one
 -- Companion count; predicate is byte-for-byte the ListVisitsForSuperAdmin one.
 SELECT count(*)
 FROM visit_request vr
-JOIN users pu ON pu.id = vr.pic_user_id
+JOIN users pu ON pu.id = vr.vendor_user_id
+JOIN location l ON l.id = vr.location_id
+LEFT JOIN vendor v ON v.id = vr.vendor_id
 WHERE (sqlc.narg('location_id')::uuid IS NULL OR vr.location_id = sqlc.narg('location_id')::uuid)
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
@@ -142,6 +157,10 @@ WHERE (sqlc.narg('location_id')::uuid IS NULL OR vr.location_id = sqlc.narg('loc
         sqlc.narg('search')::text IS NULL
      OR pu.name ILIKE '%' || sqlc.narg('search')::text || '%'
      OR vr.visit_id ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR v.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR l.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || sqlc.narg('search')::text || '%')
+     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || sqlc.narg('search')::text || '%')
   );
 
 -- name: ListVisitsForLocation :many
@@ -155,11 +174,11 @@ SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-JOIN users pu ON pu.id = vr.pic_user_id
+JOIN users pu ON pu.id = vr.vendor_user_id
 WHERE vr.location_id = sqlc.arg('location_id')::uuid
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
@@ -168,14 +187,27 @@ WHERE vr.location_id = sqlc.arg('location_id')::uuid
         sqlc.narg('search')::text IS NULL
      OR pu.name ILIKE '%' || sqlc.narg('search')::text || '%'
      OR vr.visit_id ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR v.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR l.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || sqlc.narg('search')::text || '%')
+     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || sqlc.narg('search')::text || '%')
   )
-ORDER BY vr.start_date DESC, vr.created_at DESC, vr.id DESC
+ORDER BY
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'start_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') = 'asc' THEN vr.start_date END ASC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'start_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') <> 'asc' THEN vr.start_date END DESC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'end_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') = 'asc' THEN vr.end_date END ASC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'end_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') <> 'asc' THEN vr.end_date END DESC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'created_at' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') = 'asc' THEN vr.created_at END ASC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'created_at' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') <> 'asc' THEN vr.created_at END DESC,
+  vr.id DESC
 LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: CountVisitsForLocation :one
 SELECT count(*)
 FROM visit_request vr
-JOIN users pu ON pu.id = vr.pic_user_id
+JOIN users pu ON pu.id = vr.vendor_user_id
+JOIN location l ON l.id = vr.location_id
+LEFT JOIN vendor v ON v.id = vr.vendor_id
 WHERE vr.location_id = sqlc.arg('location_id')::uuid
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
@@ -184,23 +216,27 @@ WHERE vr.location_id = sqlc.arg('location_id')::uuid
         sqlc.narg('search')::text IS NULL
      OR pu.name ILIKE '%' || sqlc.narg('search')::text || '%'
      OR vr.visit_id ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR v.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR l.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || sqlc.narg('search')::text || '%')
+     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || sqlc.narg('search')::text || '%')
   );
 
--- name: ListVisitsForPIC :many
--- PIC / external-staff scope (PRD L112, AGENTS.md rule 6.1): strictly
--- WHERE pic_user_id = auth_user.id. A vendor can never widen this to see another
--- vendor's visits, whatever they send in the query string. Uses idx_visit_pic
+-- name: ListVisitsForVendorUser :many
+-- Vendor-user / external-staff scope (PRD L112, AGENTS.md rule 6.1): strictly
+-- WHERE vendor_user_id = auth_user.id. A vendor can never widen this to see another
+-- vendor's visits, whatever they send in the query string. Uses idx_visit_vendor_user
 -- (PRD L209).
 SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS pic_name, pu.email AS pic_email, pu.phone AS pic_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-JOIN users pu ON pu.id = vr.pic_user_id
-WHERE vr.pic_user_id = sqlc.arg('pic_user_id')::uuid
+JOIN users pu ON pu.id = vr.vendor_user_id
+WHERE vr.vendor_user_id = sqlc.arg('vendor_user_id')::uuid
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
   AND (sqlc.narg('date_to')::timestamptz IS NULL OR vr.start_date < sqlc.narg('date_to')::timestamptz)
@@ -208,15 +244,28 @@ WHERE vr.pic_user_id = sqlc.arg('pic_user_id')::uuid
         sqlc.narg('search')::text IS NULL
      OR pu.name ILIKE '%' || sqlc.narg('search')::text || '%'
      OR vr.visit_id ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR v.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR l.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || sqlc.narg('search')::text || '%')
+     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || sqlc.narg('search')::text || '%')
   )
-ORDER BY vr.start_date DESC, vr.created_at DESC, vr.id DESC
+ORDER BY
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'start_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') = 'asc' THEN vr.start_date END ASC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'start_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') <> 'asc' THEN vr.start_date END DESC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'end_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') = 'asc' THEN vr.end_date END ASC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'end_date' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') <> 'asc' THEN vr.end_date END DESC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'created_at' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') = 'asc' THEN vr.created_at END ASC,
+  CASE WHEN COALESCE(sqlc.narg('sort_by')::text, 'created_at') = 'created_at' AND COALESCE(sqlc.narg('sort_order')::text, 'desc') <> 'asc' THEN vr.created_at END DESC,
+  vr.id DESC
 LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
--- name: CountVisitsForPIC :one
+-- name: CountVisitsForVendorUser :one
 SELECT count(*)
 FROM visit_request vr
-JOIN users pu ON pu.id = vr.pic_user_id
-WHERE vr.pic_user_id = sqlc.arg('pic_user_id')::uuid
+JOIN users pu ON pu.id = vr.vendor_user_id
+JOIN location l ON l.id = vr.location_id
+LEFT JOIN vendor v ON v.id = vr.vendor_id
+WHERE vr.vendor_user_id = sqlc.arg('vendor_user_id')::uuid
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
   AND (sqlc.narg('date_to')::timestamptz IS NULL OR vr.start_date < sqlc.narg('date_to')::timestamptz)
@@ -224,6 +273,10 @@ WHERE vr.pic_user_id = sqlc.arg('pic_user_id')::uuid
         sqlc.narg('search')::text IS NULL
      OR pu.name ILIKE '%' || sqlc.narg('search')::text || '%'
      OR vr.visit_id ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR v.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR l.name ILIKE '%' || sqlc.narg('search')::text || '%'
+     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || sqlc.narg('search')::text || '%')
+     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || sqlc.narg('search')::text || '%')
   );
 
 -- name: UpdateVisitStatus :one
