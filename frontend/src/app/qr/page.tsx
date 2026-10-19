@@ -6,7 +6,7 @@ import { QrCode } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Spinner } from '@/components/ui/Spinner'
-import { PicMobileShell } from '@/components/layouts/PicMobileShell'
+import { VendorMobileShell } from '@/components/layouts/VendorMobileShell'
 import { useVisitsQuery } from '@/lib/api/hooks'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 import { RequireRole } from '@/lib/auth/guards'
@@ -23,9 +23,9 @@ import { RequireRole } from '@/lib/auth/guards'
 export default function QrTicketPage() {
   return (
     <RequireRole allow={['vendor']}>
-      <PicMobileShell activeHref="/qr">
+      <VendorMobileShell activeHref="/qr">
         <QrResolver />
-      </PicMobileShell>
+      </VendorMobileShell>
     </RequireRole>
   )
 }

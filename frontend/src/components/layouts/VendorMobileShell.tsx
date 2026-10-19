@@ -6,9 +6,10 @@ import type { ReactNode } from 'react'
 import { useSession } from '@/lib/auth/session'
 import { getRoleLabel } from '@/lib/auth/capabilities'
 import type { VisitStatus } from '@/lib/api/types'
+import { NotificationsMenu } from '@/components/ui/NotificationsMenu'
 import { SkipToContentLink } from './SkipToContentLink'
 
-interface PicNavDestination {
+interface VendorNavDestination {
   id: string
   /** Label penuh untuk top navigation desktop (>= 1024px). */
   label: string
@@ -25,7 +26,7 @@ interface PicNavDestination {
  * empty state + ajakan mengajukan. Layar pemilik rute boleh
  * menyesuaikan konstanta ini bila peta rute berubah.
  */
-const PIC_NAV: PicNavDestination[] = [
+const VENDOR_NAV: VendorNavDestination[] = [
   {
     id: 'visits',
     label: 'Kunjungan Saya',
@@ -71,7 +72,7 @@ export function isQrVisible(status: VisitStatus): boolean {
 }
 
 /**
- * Rute detail SCR-04 (`/visits/[id]`) tidak punya pasangan di `PIC_NAV`,
+ * Rute detail SCR-04 (`/visits/[id]`) tidak punya pasangan di `VENDOR_NAV`,
  * jadi `aria-current` pernah kosong. Petakan: status yang menampilkan kartu
  * QR (approved/visiting) -> `/qr` (Tiket QR); selainnya -> `/dashboard`
  * (Kunjungan Saya). Rute lain diteruskan apa adanya.
@@ -84,7 +85,7 @@ function resolveActiveHref(activeHref: string, visitStatus: VisitStatus | undefi
     : '/dashboard'
 }
 
-export interface PicMobileShellProps {
+export interface VendorMobileShellProps {
   children: ReactNode
   /**
    * Bandingkan dengan `href` tujuan untuk menandai `aria-current="page"`.
@@ -100,18 +101,18 @@ export interface PicMobileShellProps {
 }
 
 /**
- * SHELL-04 — Vendor Mobile Shell (`PicMobileShell`).
+ * SHELL-04 — Vendor Mobile Shell (`VendorMobileShell`).
  *
  * Hanya untuk peran `vendor` (Vendor/Mitra — customer / teknisi vendor). Tanpa sidebar:
  * ponsel/tablet (< 1024px) memakai bottom navigation tetap berisi 3 tujuan
  * (Kunjungan Saya, tombol bundar raised + Ajukan, Tiket QR); desktop
  * (>= 1024px) menggantinya dengan top navigation horizontal di dalam header.
  */
-export function PicMobileShell({
+export function VendorMobileShell({
   children,
   activeHref = '/dashboard',
   visitStatus,
-}: PicMobileShellProps) {
+}: VendorMobileShellProps) {
   const { user, signOut } = useSession()
   const vendorLabel = user?.vendor_name ?? getRoleLabel('vendor')
   const currentHref = resolveActiveHref(activeHref, visitStatus)
@@ -125,23 +126,27 @@ export function PicMobileShell({
       {/* Pintas keyboard pertama: lompat langsung ke konten utama. */}
       <SkipToContentLink />
 
-      {/* Header sticky: logo + nama produk, nav desktop, vendor + logout.
-          overflow-hidden: potongan terakhir bila ada child nowrap (logo
-          group) yang keberatan mengecil di 375px. */}
-      <header className="sticky top-0 z-30 h-14 overflow-hidden border-b border-border-light bg-surface lg:h-topbar">
+      {/* Header sticky: logo + nama produk, nav desktop, lonceng notifikasi,
+          vendor + logout. `overflow-visible` WAJIB: panel notifikasi membuka
+          ke bawah di luar kotak header, jadi ancestor `overflow-hidden` akan
+          memotong dropdownnya. Overflow kini dicegah di dalam lewat
+          `min-w-0` + `truncate` pada grup logo, bukan lewat clipping header. */}
+      <header className="sticky top-0 z-30 h-14 overflow-visible border-b border-border-light bg-surface lg:h-topbar">
         <div className="flex h-full items-center justify-between gap-3 px-4">
-          <div className="flex shrink-0 items-center gap-2">
+          {/* Tanpa `shrink-0`: modifier itu menetralkan `min-w-0` sehingga label
+              nowrap tak pernah menyusut dan header meluber di 375px. */}
+          <div className="flex min-w-0 items-center gap-2">
             <span
               aria-hidden="true"
               className="flex size-8 shrink-0 items-center justify-center rounded-badge bg-brand text-badge font-black text-brand-contrast"
             >
               THC
             </span>
-            <span className="whitespace-nowrap text-sm font-bold text-ink">Visitor Portal</span>
+            <span className="truncate text-sm font-bold text-ink">Visitor Portal</span>
           </div>
 
           <nav aria-label="Navigasi utama" className="hidden items-center gap-1 lg:flex">
-            {PIC_NAV.map((item) => {
+            {VENDOR_NAV.map((item) => {
               const active = currentHref === item.href
               return (
                 <Link
@@ -167,6 +172,10 @@ export function PicMobileShell({
             <span className="min-w-0 max-w-28 truncate text-label font-semibold text-ink-secondary sm:max-w-72 lg:max-w-40">
               {vendorLabel}
             </span>
+            {/* Lonceng notifikasi tersimpan milik vendor (approved/rejected/
+                reminder/auto_cancelled) — shell ini satu-satunya entitlement
+                vendor, jadi panelnya WAJIB tersedia di SHELL-04. */}
+            <NotificationsMenu className="shrink-0" />
             <button
               type="button"
               onClick={handleSignOut}
@@ -193,7 +202,7 @@ export function PicMobileShell({
         className="fixed inset-x-0 bottom-0 z-30 h-bottomnav border-t border-border-light bg-surface shadow-dropdown lg:hidden"
       >
         <div className="flex h-full items-stretch">
-          {PIC_NAV.map((item) => {
+          {VENDOR_NAV.map((item) => {
             const active = currentHref === item.href
 
             if (item.id === CENTRE_NAV_ID) {
@@ -205,7 +214,7 @@ export function PicMobileShell({
                   aria-label="Ajukan kunjungan baru"
                   className="relative flex flex-1 items-start justify-center"
                 >
-                  <span className="flex size-14 -translate-y-6 flex-col items-center justify-center gap-0.5 rounded-full bg-brand text-brand-contrast shadow-dropdown ring-4 ring-surface">
+                  <span className="flex size-14 -translate-y-6 flex-col items-center justify-center gap-0.5 rounded-badge bg-brand text-brand-contrast shadow-dropdown ring-4 ring-surface">
                     <item.Icon aria-hidden="true" className="size-5 shrink-0" />
                     <span className="text-badge font-bold leading-none">{item.mobileLabel}</span>
                   </span>

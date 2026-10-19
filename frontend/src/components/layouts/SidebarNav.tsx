@@ -33,9 +33,9 @@ export interface SidebarNavProps {
  */
 const STATE_CLASSES: Record<SidebarNavVariant, { active: string; inactive: string }> = {
   dark: {
-    active: 'bg-sidebar-dark-active border-brand text-brand-contrast',
+    active: 'bg-brand/10 border-brand text-brand-contrast',
     inactive:
-      'border-transparent text-ink-muted hover:bg-sidebar-dark-active hover:text-brand-contrast',
+      'border-transparent text-ink-muted hover:bg-brand/10 hover:text-brand-contrast',
   },
   light: {
     active: 'bg-brand-soft border-brand text-brand',
@@ -83,7 +83,7 @@ export function SidebarNav({ items, activeHref, variant }: SidebarNavProps) {
                 className={[
                   // `py-3` (12px×2 + baris teks 20px = 44px): target sentuh
                   // minimum §5.2.1 — sebelumnya `py-2.5` hanya 40px.
-                  'flex w-full items-center gap-3 border-l-[3px] px-4 py-3 text-sm font-medium transition-colors',
+                  'flex w-full items-center gap-3 border-l-[3px] rounded-control px-4 py-3 text-sm font-medium transition-colors',
                   isActive ? state.active : state.inactive,
                 ]
                   .filter(Boolean)
@@ -96,7 +96,7 @@ export function SidebarNav({ items, activeHref, variant }: SidebarNavProps) {
                 )}
                 <span className="truncate">{item.label}</span>
                 {showBadge && (
-                  <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1.5 text-badge font-bold tabular-nums text-brand-contrast">
+                  <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-badge bg-brand px-1.5 text-badge font-bold tabular-nums text-brand-contrast">
                     {count}
                   </span>
                 )}
@@ -165,7 +165,7 @@ export function BottomNav({ items, activeHref, className }: BottomNavProps) {
             )}
             <span className="text-badge font-semibold">{item.label}</span>
             {showBadge && (
-              <span className="absolute right-3 top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-badge font-bold tabular-nums text-brand-contrast">
+              <span className="absolute right-3 top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-badge bg-brand px-1 text-badge font-bold tabular-nums text-brand-contrast">
                 {count}
               </span>
             )}

@@ -3,12 +3,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Bell,
   Clock,
   DoorOpen,
   LayoutDashboard,
   Lock,
-  LogOut,
   MapPin,
   Menu,
   Plus,
@@ -16,10 +14,12 @@ import {
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { NotificationsMenu } from '@/components/ui/NotificationsMenu'
+import { ProfileMenu } from '@/components/ui/ProfileMenu'
 import { Spinner } from '@/components/ui/Spinner'
 import { BottomNav, SidebarNav, type SidebarNavItem } from '@/components/layouts/SidebarNav'
 import { SkipToContentLink } from '@/components/layouts/SkipToContentLink'
-import { getLoginRedirect } from '@/lib/auth/capabilities'
+import { getLoginRedirect, getRoleLabel } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 import { NAV_LABELS } from '@/lib/nav/labels'
 
@@ -29,17 +29,6 @@ export interface AdminBranchShellProps {
   pendingCount?: number
   /** Rute aktif; default '/dashboard' (layar pemilik meneruskannya). */
   activeHref?: string
-}
-
-/** Inisial untuk avatar (maksimal 2 huruf), aman terhadap nama kosong. */
-function initialsOf(name: string): string {
-  const initials = name
-    .split(/\s+/)
-    .filter((part) => part !== '')
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join('')
-  return initials === '' ? '?' : initials
 }
 
 /**
@@ -83,8 +72,7 @@ export function AdminBranchShell({
   const locationName = user !== null && user.location_name !== null ? user.location_name : null
   const branchLabel = locationName !== null ? `Cabang ${locationName}` : 'Cabang'
   const displayName = user !== null ? user.name : 'Pengguna'
-  const initials = initialsOf(displayName)
-  const hasPending = typeof pendingCount === 'number' && pendingCount > 0
+  const roleLabel = user !== null ? getRoleLabel(user.role) : undefined
   const closeDrawer = (): void => setDrawerOpen(false)
 
   // Tutup laci dengan Escape + jebak fokus keyboard di dalam laci (WCAG 2.1):
@@ -172,7 +160,7 @@ export function AdminBranchShell({
   /**
    * Sama seperti SHELL-01: setiap item punya halaman mandiri. Persetujuan =
    * `/approvals` (irisan requested + aksi); Pengawas = `/security` (panel
-   * kelola satpam cabangnya). Rute nyata: dashboard, approvals, gerbang
+   * kelola pengawas cabangnya). Rute nyata: dashboard, approvals, gerbang
    * (`/gate`), security, form (`/visits/new`). Tepat 4 tab mobile §6.2.
    * Label menu SEMUA diambil dari `NAV_LABELS` — sumber kebenaran tunggal
    * yang dibagikan dengan SHELL-01 (tujuan sama = label sama antar role).
@@ -203,16 +191,6 @@ export function AdminBranchShell({
     { href: '/gate', label: NAV_LABELS.gate.mobile, icon: <DoorOpen aria-hidden="true" className="size-5 shrink-0" /> },
     { href: '/security', label: NAV_LABELS.security.mobile, icon: <Shield aria-hidden="true" className="size-5 shrink-0" /> },
   ]
-
-  const avatar = (
-    <span
-      role="img"
-      aria-label={`Akun ${displayName}`}
-      className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand text-label font-bold text-brand-contrast"
-    >
-      {initials}
-    </span>
-  )
 
   const logoMark = (
     <span
@@ -253,15 +231,18 @@ export function AdminBranchShell({
           Memuat…
         </div>
       ) : (
-        <div className="mt-3 flex items-center gap-3">
-          {avatar}
-          <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{displayName}</p>
+        /*
+         * Pemicu akun SATU untuk seluruh shell (sidebar desktop & laci mobile
+         * memakai `sidebarInner` yang sama) — avatar topbar/mobile dihapus agar
+         * tepat satu avatar per breakpoint; logout kini di dalam menu.
+         * Varian `[&_[role=menu]]` membalik panel `top-full` bawaan ProfileMenu
+         * menjadi terbuka ke atas: pemicu menempel di tepi bawah viewport,
+         * sehingga panel ke bawah akan terpotong layar.
+         */
+        <div className="mt-3 [&_[role=menu]]:top-auto [&_[role=menu]]:bottom-full [&_[role=menu]]:mt-0 [&_[role=menu]]:mb-1">
+          <ProfileMenu user={{ name: displayName, role: roleLabel }} onLogout={handleSignOut} />
         </div>
       )}
-      <Button variant="secondary" size="sm" fullWidth className="mt-4 min-h-touch" onClick={handleSignOut}>
-        <LogOut className="size-4 shrink-0" aria-hidden="true" />
-        Keluar
-      </Button>
     </div>
   )
 
@@ -293,8 +274,10 @@ export function AdminBranchShell({
 
       <div ref={contentRef} className="lg:pl-sidebar">
         {/* Topbar desktop — slot & urutan identik dengan SHELL-01:
-            identitas/konteks → aksi → notifikasi → avatar (tinggi `h-topbar`,
-            padding `px-6` — sama persis dengan SuperadminShell). */}
+            identitas/konteks → aksi → notifikasi (tinggi `h-topbar`,
+            padding `px-6` — sama persis dengan SuperadminShell).
+            Slot avatar DIHAPUS: pemicu akun kini `ProfileMenu` di
+            `sidebarFooter` — Bell & menu profil koeksis, tanpa dobel. */}
         <header className="sticky top-0 z-30 hidden h-topbar items-center gap-4 border-b border-border-light bg-surface px-6 lg:flex">
           {/* Slot 1 — identitas/konteks: lencana cabang TERKUNCI (<span> statis, bukan kontrol). */}
           <span
@@ -311,20 +294,10 @@ export function AdminBranchShell({
           {/* Slot 2 — aksi cepat: DIHAPUS (tombol Buat Kunjungan & Tambah
               Pengawas; keduanya tersedia dari konten halaman & menu sidebar). */}
           <div className="ml-auto flex items-center gap-3">
-            {/* Slot 3 — notifikasi persetujuan. */}
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={hasPending ? `Notifikasi, ${pendingCount ?? 0} persetujuan tertunda` : 'Notifikasi'}
-              className="relative"
-            >
-              <Bell className="size-5" aria-hidden="true" />
-              {hasPending && (
-                <span aria-hidden="true" className="absolute right-1.5 top-1.5 size-2 rounded-full bg-brand" />
-              )}
-            </Button>
-            {/* Slot 4 — avatar akun. */}
-            {avatar}
+            {/* Slot 3 — notifikasi: dropdown feed (bukan lompat ke /approvals).
+                Badge lonceng bersumber dari `unread_count` notifikasi sendiri;
+                `pendingCount` tetap menggerakkan badge `/approvals` di sidebar. */}
+            <NotificationsMenu />
           </div>
         </header>
 
@@ -344,18 +317,19 @@ export function AdminBranchShell({
           </Button>
           {logoMark}
           <span className="truncate text-sm font-bold text-ink">THC VMS</span>
-          {/* Chip cabang terkunci di mobile — tetap statis, tidak interaktif. */}
+          {/* Chip cabang terkunci di mobile — tetap statis, tidak interaktif.
+              `ml-auto` mendorongnya ke tepi kanan (peran lama span avatar).
+              Avatar header sengaja TIDAK dirender: satu-satunya avatar di
+              breakpoint mobile ada di footer laci (ProfileMenu) — tanpa ini
+              avatar dobel saat laci terbuka. */}
           <span
             aria-disabled="true"
-            className="inline-flex min-w-0 items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 text-badge font-bold text-brand"
+            className="ml-auto inline-flex min-w-0 items-center gap-1 rounded-badge bg-brand-soft px-2.5 py-1 text-badge font-bold text-brand"
           >
             <MapPin className="size-3 shrink-0" aria-hidden="true" />
             <span className="truncate">{locationName !== null ? locationName : 'Cabang'}</span>
             <span className="sr-only">(terkunci)</span>
           </span>
-          {/* `ml-auto` tetap di span avatar: mendorong sisa konten (avatar)
-              ke tepi kanan setelah tombol menu dipindah ke depan. */}
-          <span className="ml-auto shrink-0">{avatar}</span>
         </header>
 
         {/* Konten utama — min-w-0 (min-inline-size:0) menjamin tidak ada scroll

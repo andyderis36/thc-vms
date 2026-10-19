@@ -7,11 +7,11 @@ export type { Role } from '@/lib/api/types'
  *
  * Aturan emas: isolasi cabang ditegakkan di backend. `viewAllBranches` hanya
  * dimiliki `super_admin` (Kantor Pusat); `admin` terkunci pada `location_id`
- * cabangnya. Satpam hanya boleh check-in/out, dan vendor (Vendor/Mitra)
+ * cabangnya. Pengawas hanya boleh check-in/out, dan vendor (Vendor/Mitra)
  * tidak pernah bisa
- * menyetujui, menolak, atau mengelola satpam. Hapus permanen
+ * menyetujui, menolak, atau mengelola pengawas. Hapus permanen
  * (`deleteRecords`: DELETE /visits, /users, /locations) hanya super_admin;
- * `admin` tidak memiliki kapabilitas ini. Hapus satpam cabang
+ * `admin` tidak memiliki kapabilitas ini. Hapus pengawas cabang
  * (`deleteSecurity`: DELETE /users/security/{id}) dimiliki super_admin
  * dan admin cabang (terkunci ke cabangnya); vendor/security tidak.
  */
@@ -89,7 +89,7 @@ export function can(role: Role, capability: Capability): boolean {
   return CAPABILITIES_BY_ROLE[role].has(capability)
 }
 
-/** Layar tujuan setelah login: kiosk gerbang untuk satpam, dashboard untuk peran lain. */
+/** Layar tujuan setelah login: kiosk gerbang untuk pengawas, dashboard untuk peran lain. */
 export function getLoginRedirect(role: Role): '/gate' | '/dashboard' {
   return LOGIN_REDIRECT_BY_ROLE[role]
 }

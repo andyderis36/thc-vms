@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isQrVisible } from '@/components/layouts/PicMobileShell'
+import { isQrVisible } from '@/components/layouts/VendorMobileShell'
 import type { VisitStatus } from '@/lib/api/types'
 
 /** Seluruh anggota union `VisitStatus`: uji harus tetap exhaustif bila status baru ditambah. */

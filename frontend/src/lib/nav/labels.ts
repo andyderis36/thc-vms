@@ -28,7 +28,7 @@ export const NAV_LABELS = {
   approvals: { desktop: 'Antrean Approval', mobile: 'Approval' },
   /** `/facilities` — daftar cabang/POP/miniPOP; hanya SHELL-01 (superadmin). */
   facilities: { desktop: 'Fasilitas', mobile: 'Fasilitas' },
-  /** `/security` — panel kelola satpam/pengawas; kedua role. */
+  /** `/security` — panel kelola pengawas/pengawas; kedua role. */
   security: { desktop: getRoleLabel('security'), mobile: getRoleLabel('security') },
   /** `/users` — manajemen admin cabang & mitra vendor; hanya SHELL-01. */
   users: { desktop: 'Users', mobile: 'Users' },
@@ -36,4 +36,6 @@ export const NAV_LABELS = {
   gate: { desktop: 'Pos Check-in Gerbang', mobile: 'Check-in' },
   /** `/visits/new` — SCR-03; item desktop SHELL-02 (tak punya tab mobile). */
   createVisit: { desktop: 'Buat Kunjungan Baru', mobile: 'Buat Kunjungan' },
+  /** `/audit` — jejak audit lintas cabang; hanya SHELL-01 (superadmin). */
+  auditLogs: { desktop: 'Jejak Audit', mobile: 'Jejak Audit' },
 } satisfies Record<string, NavLabel>
