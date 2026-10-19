@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type KeyboardEvent } from 'react'
 import { AlertTriangle, Fingerprint, Inbox, Info, Server, Tag, UserRound } from 'lucide-react'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { Badge } from '@/components/ui/Badge'
@@ -20,7 +20,9 @@ import {
 } from '@/lib/api/hooks'
 import type { AuditLog, AuditLogListParams } from '@/lib/api/types'
 import { RequireRole } from '@/lib/auth/guards'
+import { TABLE_CARD_LIST_CLASS, TABLE_TD_CLASS, TABLE_TH_CLASS, TABLE_WRAPPER_CLASS, TABLE_CLASS } from '@/lib/table-styles'
 import { type StatusTone } from '@/lib/visits/status-badge'
+import { AuditDetailModal } from './AuditDetailModal'
 
 // ---------------------------------------------------------------------------
 // Helper murni (diekspor agar dapat diuji unit — lihat tests/audit-logs.test.ts)
@@ -152,6 +154,9 @@ export default function AuditPage() {
 function AuditScreen() {
   const [filter, setFilter] = useState<AuditFilter>(EMPTY_AUDIT_FILTER)
   const [page, setPage] = useState(1)
+  // Record terpilih untuk modal detail; null = tertutup. Record lengkap sudah
+  // ada di `items`, jadi pemilihan murni state UI tanpa fetch baris tambahan.
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null)
 
   const params = useMemo(() => toAuditLogListParams(filter, page), [filter, page])
   const auditQuery = useAuditLogsQuery(params)
@@ -185,6 +190,13 @@ function AuditScreen() {
     setPage(1)
   }
 
+  // Toggle: memilih baris yang sama lagi menutup modal. Overlay menutupi
+  // tabel saat modal terbuka, jadi jalur toggle praktis hanya lewat keyboard
+  // — tetap dibuat konsisten agar klik dan Enter/Space berperilaku sama.
+  const handleSelectLog = (log: AuditLog): void => {
+    setSelectedLog((prev) => (prev?.id === log.id ? null : log))
+  }
+
   const items = auditQuery.data?.items ?? []
   const total = auditQuery.data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / AUDIT_PAGE_LIMIT))
@@ -194,9 +206,6 @@ function AuditScreen() {
     filter.action !== '' ||
     filter.dateFrom !== '' ||
     filter.dateTo !== ''
-  const rangeStart = total > 0 ? (page - 1) * AUDIT_PAGE_LIMIT + 1 : 0
-  const rangeEnd = total > 0 ? rangeStart + items.length - 1 : 0
-
   const emptyTitle = hasActiveFilter
     ? 'Tidak ada jejak audit yang cocok'
     : 'Belum ada jejak audit'
@@ -294,13 +303,14 @@ function AuditScreen() {
               </div>
             ) : (
               <>
-                <AuditTable items={items} usersById={usersById} />
-                <AuditCards items={items} usersById={usersById} />
+                <AuditTable items={items} usersById={usersById} onSelect={handleSelectLog} />
+                <AuditCards items={items} usersById={usersById} onSelect={handleSelectLog} />
               </>
             )}
 
             {total > 0 ? (
               <Pagination
+                ariaLabel="Paginasi jejak audit"
                 page={page}
                 totalPages={totalPages}
                 onPageChange={setPage}
@@ -310,6 +320,12 @@ function AuditScreen() {
           </>
         )}
       </div>
+
+      <AuditDetailModal
+        log={selectedLog}
+        usersById={usersById}
+        onClose={() => setSelectedLog(null)}
+      />
     </SuperadminShell>
   )
 }
@@ -322,12 +338,30 @@ function AuditScreen() {
 interface AuditListProps {
   items: AuditLog[]
   usersById: ReadonlyMap<string, string>
+  /** Membuka (atau menutup lewat toggle) modal detail untuk baris ini. */
+  onSelect: (log: AuditLog) => void
 }
 
-function AuditTable({ items, usersById }: AuditListProps) {
+/**
+ * Aktivasi baris via keyboard (Enter/Space). `role="button"` tidak sah pada
+ * `<tr>` di dalam tabel (melanggar model tabel), jadi baris cukup `tabIndex`
+ * + handler ini — cincin fokus datang dari `:focus-visible` global di
+ * globals.css, tanpa ARIA tambahan yang berisiko salah.
+ */
+function activateRowOnKeyDown(
+  event: KeyboardEvent<HTMLElement>,
+  activate: () => void,
+): void {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault() // Space tidak boleh menggulir halaman
+    activate()
+  }
+}
+
+function AuditTable({ items, usersById, onSelect }: AuditListProps) {
   return (
-    <div className="card hidden overflow-hidden lg:block">
-      <table className="w-full table-fixed border-collapse text-left">
+    <div className={TABLE_WRAPPER_CLASS}>
+      <table className={TABLE_CLASS}>
         <thead>
           <tr>
             {[
@@ -341,7 +375,7 @@ function AuditTable({ items, usersById }: AuditListProps) {
               <th
                 key={header.label}
                 scope="col"
-                className={`${header.width} border-b border-border-light bg-brand/5 px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm font-semibold text-ink-secondary`}
+                className={`${header.width} ${TABLE_TH_CLASS}`}
               >
                 {header.label}
               </th>
@@ -352,14 +386,17 @@ function AuditTable({ items, usersById }: AuditListProps) {
           {items.map((log) => (
             <tr
               key={log.id}
-              className="transition-colors hover:bg-brand/5"
+              tabIndex={0}
+              className="cursor-pointer transition-colors hover:bg-brand/5"
+              onClick={() => onSelect(log)}
+              onKeyDown={(event) => activateRowOnKeyDown(event, () => onSelect(log))}
             >
-              <td className="px-2 sm:px-3 lg:px-6 py-3">
+              <td className={TABLE_TD_CLASS}>
                 <p className="whitespace-nowrap text-xs sm:text-sm text-ink">
                   {formatTanggalWaktu(log.timestamp)}
                 </p>
               </td>
-              <td className="px-2 sm:px-3 lg:px-6 py-3">
+              <td className={TABLE_TD_CLASS}>
                 <p
                   className="truncate text-xs sm:text-sm font-semibold text-ink"
                   title={log.user_id ?? undefined}
@@ -367,12 +404,12 @@ function AuditTable({ items, usersById }: AuditListProps) {
                   {auditActorLabel(log.user_id, usersById)}
                 </p>
               </td>
-              <td className="px-2 sm:px-3 lg:px-6 py-3">
+              <td className={TABLE_TD_CLASS}>
                 <Badge tone={auditActionTone(log.action)}>
                   {auditActionLabel(log.action)}
                 </Badge>
               </td>
-              <td className="px-2 sm:px-3 lg:px-6 py-3">
+              <td className={TABLE_TD_CLASS}>
                 <Badge tone="neutral">{auditEntityLabel(log.entity)}</Badge>
                 {log.entity_id !== null ? (
                   <p className="mt-1 truncate text-xs text-ink-muted" title={log.entity_id}>
@@ -380,12 +417,12 @@ function AuditTable({ items, usersById }: AuditListProps) {
                   </p>
                 ) : null}
               </td>
-              <td className="px-2 sm:px-3 lg:px-6 py-3">
+              <td className={TABLE_TD_CLASS}>
                 <p className="truncate text-xs sm:text-sm tabular-nums text-ink-secondary" title={log.ip}>
                   {log.ip !== '' ? log.ip : '—'}
                 </p>
               </td>
-              <td className="px-2 sm:px-3 lg:px-6 py-3">
+              <td className={TABLE_TD_CLASS}>
                 <p
                   className="truncate text-xs sm:text-sm text-ink-secondary"
                   title={auditMetadataSummary(log.metadata)}
@@ -401,11 +438,17 @@ function AuditTable({ items, usersById }: AuditListProps) {
   )
 }
 
-function AuditCards({ items, usersById }: AuditListProps) {
+function AuditCards({ items, usersById, onSelect }: AuditListProps) {
   return (
-    <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:hidden">
+    <ul className={TABLE_CARD_LIST_CLASS}>
       {items.map((log) => (
-        <li key={log.id} className="card flex flex-col p-4">
+        <li
+          key={log.id}
+          tabIndex={0}
+          className="card flex cursor-pointer flex-col p-4 transition-colors hover:bg-brand/5"
+          onClick={() => onSelect(log)}
+          onKeyDown={(event) => activateRowOnKeyDown(event, () => onSelect(log))}
+        >
           <div className="flex items-start justify-between gap-3">
             <Badge tone={auditActionTone(log.action)}>
               {auditActionLabel(log.action)}

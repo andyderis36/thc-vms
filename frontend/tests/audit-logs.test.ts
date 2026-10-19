@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { auditDetail } from '@/app/audit/AuditDetailModal'
 import {
   AUDIT_ACTION_LABEL,
   AUDIT_ENTITY_LABEL,
@@ -12,6 +13,7 @@ import {
   auditMetadataSummary,
   toAuditLogListParams,
 } from '@/app/audit/page'
+import type { AuditLog } from '@/lib/api/types'
 
 describe('toAuditLogListParams', () => {
   it('hanya menyertakan page dan limit saat filter kosong', () => {
@@ -125,5 +127,72 @@ describe('label & nada aksi', () => {
     expect(auditActionTone('auth.login.failed')).toBe('danger')
     expect(auditActionTone('user.delete')).toBe('warning')
     expect(auditActionTone('user.create')).toBe('info')
+  })
+})
+
+describe('auditDetail', () => {
+  // Record kasar: baris sistem, ip/user-agent/id-entity kosong, metadata nol.
+  const baseLog: AuditLog = {
+    id: 'log-1',
+    user_id: null,
+    action: 'auth.login.failed',
+    entity: 'auth',
+    entity_id: null,
+    timestamp: '2026-10-16T10:00:00Z',
+    ip: '',
+    user_agent: '',
+    metadata: {},
+  }
+
+  const valueOf = (log: AuditLog, label: string): string | undefined =>
+    auditDetail(log, new Map()).rows.find((row) => row.label === label)?.value
+
+  it('mencakup seluruh baris wajib detail', () => {
+    expect(auditDetail(baseLog, new Map()).rows.map((row) => row.label)).toEqual([
+      'Waktu',
+      'Pelaku',
+      'Aksi',
+      'Kode aksi',
+      'Entitas',
+      'ID Entitas',
+      'Alamat IP',
+      'User Agent',
+    ])
+  })
+
+  it('baris sistem (user_id null) berlabel Sistem', () => {
+    expect(valueOf(baseLog, 'Pelaku')).toBe('Sistem')
+  })
+
+  it('pelaku terdaftar memakai nama dari peta user', () => {
+    const withActor: AuditLog = { ...baseLog, user_id: 'uuid-1' }
+    const detail = auditDetail(withActor, new Map([['uuid-1', 'Bayu Santoso']]))
+    expect(detail.rows.find((row) => row.label === 'Pelaku')?.value).toBe('Bayu Santoso')
+  })
+
+  it('ip, user_agent, dan id entitas kosong menjadi strip', () => {
+    expect(valueOf(baseLog, 'Alamat IP')).toBe('—')
+    expect(valueOf(baseLog, 'User Agent')).toBe('—')
+    expect(valueOf(baseLog, 'ID Entitas')).toBe('—')
+  })
+
+  it('aksi memakai label Indonesia sedangkan kode aksi tetap mentah', () => {
+    expect(valueOf(baseLog, 'Aksi')).toBe('Masuk gagal')
+    expect(valueOf(baseLog, 'Kode aksi')).toBe('auth.login.failed')
+  })
+
+  it('metadata kosong menghasilkan daftar entri kosong (renderer menampilkan strip)', () => {
+    expect(auditDetail(baseLog, new Map()).metadata).toEqual([])
+  })
+
+  it('menyertakan setiap pasangan kunci→nilai metadata', () => {
+    const withMetadata: AuditLog = {
+      ...baseLog,
+      metadata: { email: 'a@thc.net.id', status: 'active' },
+    }
+    expect(auditDetail(withMetadata, new Map()).metadata).toEqual([
+      { key: 'email', value: 'a@thc.net.id' },
+      { key: 'status', value: 'active' },
+    ])
   })
 })
