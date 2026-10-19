@@ -75,12 +75,13 @@ function SecurityScreen() {
 
       {/*
         TIDAK ada pembungkus `.card` di sini: `SecurityUserPanel` sudah
-        memancarkan kartunya sendiri (tumpukan < 768px, 2 kolom >= 768px).
+        memancarkan kartunya sendiri (tumpukan < 768px, kartu 2 kolom
+        768-1023px, tabel desktop >= 1024px — prop `variant="page"`).
         Membungkusnya kartu lagi menghasilkan kotak berborder di dalam
         kotak berbordered. Pola yang sama dipakai dashboard/approvals —
         kartu hasil berada langsung di atas latar halaman.
       */}
-      <SecurityUserPanel enabled onCreated={() => undefined} />
+      <SecurityUserPanel enabled variant="page" onCreated={() => undefined} />
     </RoleShell>
   )
 }

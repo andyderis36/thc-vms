@@ -1,15 +1,18 @@
 'use client'
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Lock, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, Inbox, Lock, Pencil, Plus, Power, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { EditUserModal } from '@/features/users/components/EditUserModal'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { Pagination } from '@/components/ui/Pagination'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import {
@@ -20,6 +23,8 @@ import {
   useUpdateSecurityUserMutation,
   useUpdateSecurityUserStatusMutation,
 } from '@/lib/api/hooks'
+import { DEFAULT_PAGE_SIZE, paginate } from '@/lib/pagination'
+import { TABLE_CLASS, TABLE_WRAPPER_CLASS } from '@/lib/table-styles'
 import { useSession } from '@/lib/auth/session'
 import { can, getRoleLabel } from '@/lib/auth/capabilities'
 import type { Role, UpdateUserStatusRequest, User } from '@/lib/api/types'
@@ -52,6 +57,29 @@ export function canShowDeleteSecurityUser(
   return ownLocationId !== null && target.location_id === ownLocationId
 }
 
+/** Kolom Cabang tabel: nama cabang penugasan, atau strip bila tak ada. */
+function securityUserLocationLabel(user: User): string {
+  const location = user.location_name
+  return location !== null && location !== '' ? location : '—'
+}
+
+/**
+ * Label ringkas kartu: `email · cabang`. Satu sumber komposisi — tabel
+ * memecahnya menjadi kolom Email + Cabang lewat `securityUserLocationLabel`.
+ */
+function securityUserDetailLabel(user: User): string {
+  return user.location_name !== null
+    ? `${user.email} · ${user.location_name}`
+    : user.email
+}
+
+/** Badge status pengawas — satu resep untuk tabel & kartu (visual identik). */
+function SecurityStatusBadge({ status, className }: { status: User['status']; className?: string }) {
+  if (status === 'active') return <Badge tone="success" className={className}>Aktif</Badge>
+  if (status === 'blacklisted') return <Badge tone="danger" className={className}>Diblokir</Badge>
+  return <Badge tone="neutral" className={className}>Nonaktif</Badge>
+}
+
 /** Opsi filter status pada toolbar daftar pengawas (sentinel 'all' = semua). */
 const STATUS_FILTER_OPTIONS: SelectOption[] = [
   { value: 'all', label: 'Semua Status' },
@@ -68,19 +96,31 @@ export interface SecurityUserPanelProps {
   enabled: boolean
   /** Dipanggil setelah pengawas berhasil ditambahkan (modal: tutup diri). */
   onCreated?: () => void
+  /**
+   * Permukaan render panel: `'page'` = rute mandiri `/security` (boleh tabel
+   * desktop); `'modal'` = di dalam `SecurityUserModal` (~512px, KARTU saja —
+   * tak pernah tabel, karena `lg:` mengikuti viewport bukan lebar kontainer).
+   * Default `'modal'` supaya pemakaian lama tetap aman.
+   */
+  variant?: 'page' | 'modal'
 }
 
 /**
  * Isi manajemen pengawas: tombol tambah (membuka modal) + daftar kartu
  * responsif (ponsel 1 kolom / tablet & desktop 2 kolom) + toggle status.
  *
- * Dipakai ulang DUA permukaan (DRY): `SecurityUserModal` (SCR-02) dan halaman
- * mandiri `/security`. Logika peran identik di keduanya — super_admin memilih
- * cabang, admin terkunci ke cabangnya. Guard `manageSecurity` di sini adalah
- * lapisan kedua setelah guard rute. Tanpa field NIK (BE menolak NIK untuk
- * security — cermin `rejectSecurityNik` di mock/BE).
+ * Satu permukaan HIDUP saat ini: halaman mandiri `/security` yang men-mount
+ * panel dengan `variant="page"` (tabel desktop + kartu). `SecurityUserModal`
+ * di file ini masih diekspor untuk PRD SCR-02 ("modal pengawas") tetapi belum
+ * dipasang di mana pun — dan itulah alasan `variant` ada: begitu panel
+ * dipasang di dalam modal, ia WAJIB memakai `variant="modal"` (kartu saja)
+ * agar tabel 5 kolom tidak meluber di modal 512px. Logika peran tetap sama di
+ * kedua permukaan: super_admin memilih cabang, admin terkunci ke cabangnya.
+ * Guard `manageSecurity` di sini adalah lapisan kedua setelah guard rute.
+ * Tanpa field NIK (BE menolak NIK untuk security — cermin `rejectSecurityNik`
+ * di mock/BE).
  */
-export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps) {
+export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: SecurityUserPanelProps) {
   const { user } = useSession()
   const role: Role | null = user !== null ? user.role : null
   const ownLocationId = user !== null ? user.location_id : null
@@ -89,6 +129,10 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | User['status']>('all')
+  // Pagination client-side: seluruh anggota cabang dimuat sekali, lalu dipotong
+  // per halaman di peramban (GET /users/security tak punya param pagination).
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
 
   // Debounce pencarian 300ms supaya setiap ketikan tidak memicu render filter
   // (pola identik halaman users benchmark).
@@ -96,6 +140,13 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
     const timer = setTimeout(() => setSearch(searchInput.trim()), 300)
     return () => clearTimeout(timer)
   }, [searchInput])
+
+  // Filter/ukuran halaman berubah → kembali ke halaman 1: baris halaman N
+  // tidak relevan untuk kombinasi filter baru. Presisi tiga dependensi ini.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- kontrak reset-on-filter: efek dengan deps persis [search, statusFilter, pageSize]
+    setPage(1)
+  }, [search, statusFilter, pageSize])
 
   const locationsQuery = useLocationsQuery()
   const toggleStatus = useUpdateSecurityUserStatusMutation()
@@ -110,7 +161,9 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
 
   // Filter daftar di sisi klien: kontrak GET /users/security hanya punya
   // location_id (tak ada param search/status), jadi pencarian disaring di sini.
-  const users = usersQuery.data ?? []
+  // `?? []` di luar useMemo memunculkan larik BARU tiap render, sehingga
+  // `filteredUsers` di bawahnya tak pernah benar-benar di-memoize.
+  const users = useMemo(() => usersQuery.data ?? [], [usersQuery.data])
   const filteredUsers = useMemo(() => {
     const query = search.toLowerCase()
     return users.filter((member) => {
@@ -123,6 +176,10 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
       )
     })
   }, [users, search, statusFilter])
+
+  // `page` hasil clamp dari `paginate` yang WAJIB dirender (bukan state mentah):
+  // setelah data ter-refetch menyusut, halaman basi tak pernah menampilkan slice kosong.
+  const { items: pageUsers, page: currentPage, totalPages } = paginate(filteredUsers, page, pageSize)
 
   if (role === null || !can(role, 'manageSecurity')) return null
 
@@ -140,6 +197,10 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
     )
   }
 
+  const handleToggleFor = (member: User): void => {
+    handleToggle(member.id, member.name, member.status === 'active' ? 'inactive' : 'active')
+  }
+
   const locationOptions = (locationsQuery.data ?? []).map((location) => ({
     value: location.id,
     label: location.name,
@@ -147,8 +208,10 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
   const canPickLocation = role === 'super_admin'
 
   // Reset SEMUA filter bar ke default: pencarian (state mentah + state debounced)
-  // dan status. Tidak ada state pagination di panel ini (daftar memuat seluruh
-  // anggota cabang dalam satu query), jadi tidak ada halaman yang dikembalikan.
+  // dan status. Pagination di sini SERBA KLIEN: panel memuat seluruh anggota
+  // cabang dalam satu query lalu memotongnya per halaman, dan perubahan filter
+  // memicu efek `setPage(1)` (lihat dependensi search/statusFilter di atas) —
+  // jadi reset ini tak pernah meninggalkan pengguna di halaman basi.
   // Kedua state pencarian dibersihkan sekaligus supaya debounce 300ms tidak
   // "menghidupkan kembali" query lama dari searchInput yang tertinggal.
   const handleResetFilters = (): void => {
@@ -173,7 +236,7 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
 
       {/* Toolbar filter irisan SCR-02 — pola users benchmark: select berlabel
           + search ber-aria-label, wrap rapi di 375/768/1280 tanpa scroll. */}
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="card flex flex-wrap items-end gap-3 p-4">
         <div className="min-w-40 flex-1 sm:w-48 sm:flex-none">
           <Select
             label="Status"
@@ -207,97 +270,82 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
       />
 
       <div className="border-t border-border-light pt-4">
-
         {usersQuery.isPending ? (
           <div className="flex items-center gap-2 py-4 text-sm text-ink-muted">
             <Spinner size="sm" />
             Memuat daftar {getRoleLabel('security').toLowerCase()}…
           </div>
+        ) : usersQuery.isError ? (
+          <div className="card p-6">
+            <p className="flex items-center gap-2 text-sm font-semibold text-danger-text">
+              <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+              Gagal memuat daftar {getRoleLabel('security').toLowerCase()}
+            </p>
+            <p className="mt-2 text-sm text-ink-secondary">{apiErrorMessage(usersQuery.error)}</p>
+            <Button
+              variant="secondary"
+              className="mt-4 min-h-touch"
+              onClick={() => void usersQuery.refetch()}
+            >
+              Coba Lagi
+            </Button>
+          </div>
         ) : users.length === 0 ? (
-          <p className="py-4 text-sm text-ink-muted">Belum ada {getRoleLabel('security').toLowerCase()} terdaftar.</p>
+          <div className="card">
+            <EmptyState
+              icon={<Inbox aria-hidden="true" className="size-8" />}
+              title={`Belum ada ${getRoleLabel('security').toLowerCase()} terdaftar`}
+              description={`${getRoleLabel('security')} yang didaftarkan akan muncul di sini.`}
+            />
+          </div>
         ) : filteredUsers.length === 0 ? (
-          <p className="py-4 text-sm text-ink-muted">
-            Tidak ada {getRoleLabel('security').toLowerCase()} yang cocok dengan pencarian atau filter Anda.
-          </p>
+          <div className="card">
+            <EmptyState
+              icon={<Inbox aria-hidden="true" className="size-8" />}
+              title={`Tidak ada ${getRoleLabel('security').toLowerCase()} yang cocok`}
+              description="Coba ubah kata kunci pencarian atau filter Anda."
+            />
+          </div>
         ) : (
-          /* Tier responsif (design system §5.1 / §5.2): ponsel < 768px
-             tumpukan kartu 1 kolom, tablet 768px - 1023px & desktop grid
-             2 kolom. Cluster aksi WRAP agar tidak overflow di 375px. */
-          <ul className="grid grid-cols-1 gap-2 md:grid-cols-2">
-            {filteredUsers.map((member) => {
-              const isActive = member.status === 'active'
-              const toggleable = member.status !== 'blacklisted'
-              const showDelete =
-                role !== null && canShowDeleteSecurityUser(role, member, ownLocationId)
-              const detailLabel =
-                member.email +
-                (member.location_name !== null ? ` · ${member.location_name}` : '')
-              return (
-                <li
-                  key={member.id}
-                  className="flex flex-col gap-3 rounded-control border border-border-light p-3"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-ink" title={member.name}>
-                        {member.name}
-                      </p>
-                      <p className="truncate text-xs text-ink-muted" title={detailLabel}>
-                        {detailLabel}
-                      </p>
-                    </div>
-                    <Badge
-                      tone={
-                        isActive
-                          ? 'success'
-                          : member.status === 'blacklisted'
-                            ? 'danger'
-                            : 'neutral'
-                      }
-                      className="shrink-0"
-                    >
-                      {isActive ? 'Aktif' : member.status === 'blacklisted' ? 'Diblokir' : 'Nonaktif'}
-                    </Badge>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="min-h-touch flex-1 px-3"
-                      aria-label={`Ubah ${member.name}`}
-                      onClick={() => setEditing(member)}
-                    >
-                      <Pencil aria-hidden="true" className="size-4 shrink-0" />
-                      Ubah
-                    </Button>
-                    {toggleable ? (
-                      <Button
-                        size="sm"
-                        variant={isActive ? 'secondary' : 'primary'}
-                        className="min-h-touch flex-1 px-3"
-                        loading={toggleStatus.isPending && toggleStatus.variables?.userId === member.id}
-                        onClick={() => handleToggle(member.id, member.name, isActive ? 'inactive' : 'active')}
-                      >
-                        {isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                      </Button>
-                    ) : null}
-                    {showDelete ? (
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        className="min-h-touch flex-1 px-3"
-                        aria-label={`Hapus ${member.name}`}
-                        onClick={() => setDeleting(member)}
-                      >
-                        <Trash2 aria-hidden="true" className="size-4 shrink-0" />
-                        Hapus
-                      </Button>
-                    ) : null}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
+          <>
+            {/* Tabel desktop HANYA untuk variant="page": modal ~512px tetap
+                kartu-saja karena `lg:` bergantung pada VIEWPORT, bukan lebar
+                kontainer — tabel 5 kolom akan meluber keluar modal pada 1280px. */}
+            {variant === 'page' ? (
+              <SecurityUserTable
+                users={pageUsers}
+                role={role}
+                ownLocationId={ownLocationId}
+                togglePending={toggleStatus.isPending}
+                toggleUserId={toggleStatus.variables?.userId}
+                onEdit={setEditing}
+                onDelete={setDeleting}
+                onToggle={handleToggleFor}
+              />
+            ) : null}
+            {/* Kartu: di mode page dibatasi `lg:hidden` (tabel mengambil alih);
+                di mode modal tanpa breakpoint karena inilah satu-satunya daftar. */}
+            <SecurityUserCards
+              users={pageUsers}
+              role={role}
+              ownLocationId={ownLocationId}
+              togglePending={toggleStatus.isPending}
+              toggleUserId={toggleStatus.variables?.userId}
+              onEdit={setEditing}
+              onDelete={setDeleting}
+              onToggle={handleToggleFor}
+              className={variant === 'page' ? 'lg:hidden' : undefined}
+            />
+            <Pagination
+              ariaLabel="Paginasi daftar pengawas"
+              page={currentPage}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              onPageSizeChange={setPageSize}
+              onPageChange={setPage}
+              className="mt-4"
+            />
+          </>
         )}
       </div>
 
@@ -362,6 +410,194 @@ export function SecurityUserPanel({ enabled, onCreated }: SecurityUserPanelProps
   )
 }
 
+interface SecurityListProps {
+  users: User[]
+  role: Role
+  ownLocationId: string | null
+  togglePending: boolean
+  toggleUserId?: string
+  onEdit: (member: User) => void
+  onDelete: (member: User) => void
+  onToggle: (member: User) => void
+}
+
+/**
+ * Susunan item `ActionMenu` tunggal untuk tabel DAN kartu — satu tempat guard
+ * aksi (`toggleable` / `showDelete`) sehingga kedua tampilan tak pernah
+ * menyimpang. Guard hapus persis `canShowDeleteSecurityUser` (ada unit test).
+ */
+function buildSecurityActionItems(
+  member: User,
+  role: Role,
+  ownLocationId: string | null,
+  onEdit: (member: User) => void,
+  onToggle: (member: User) => void,
+  onDelete: (member: User) => void,
+): ActionMenuItem[] {
+  const isActive = member.status === 'active'
+  const items: ActionMenuItem[] = [
+    {
+      id: 'edit',
+      label: 'Ubah',
+      icon: <Pencil aria-hidden="true" className="size-4" />,
+      onSelect: () => onEdit(member),
+    },
+  ]
+  if (member.status !== 'blacklisted') {
+    items.push({
+      id: 'toggle',
+      label: isActive ? 'Nonaktifkan' : 'Aktifkan',
+      icon: <Power aria-hidden="true" className="size-4" />,
+      onSelect: () => onToggle(member),
+    })
+  }
+  if (canShowDeleteSecurityUser(role, member, ownLocationId)) {
+    items.push({
+      id: 'delete',
+      label: 'Hapus',
+      tone: 'danger',
+      icon: <Trash2 aria-hidden="true" className="size-4" />,
+      onSelect: () => onDelete(member),
+    })
+  }
+  return items
+}
+
+function SecurityUserActionMenu({
+  member,
+  role,
+  ownLocationId,
+  togglePending,
+  toggleUserId,
+  onEdit,
+  onDelete,
+  onToggle,
+}: {
+  member: User
+  role: Role
+  ownLocationId: string | null
+  togglePending: boolean
+  toggleUserId?: string
+  onEdit: (member: User) => void
+  onDelete: (member: User) => void
+  onToggle: (member: User) => void
+}) {
+  return (
+    <ActionMenu
+      label={`Aksi untuk ${member.name}`}
+      items={buildSecurityActionItems(member, role, ownLocationId, onEdit, onToggle, onDelete)}
+      busy={togglePending && toggleUserId === member.id}
+    />
+  )
+}
+
+function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUserId, onEdit, onDelete, onToggle }: SecurityListProps) {
+  return (
+    <div className={TABLE_WRAPPER_CLASS}>
+      <table className={TABLE_CLASS}>
+        <thead>
+          <tr>
+            {[
+              // Aksi 7% seragam dengan /users (ActionMenu ikon tunggal); 9 poin dibagikan proporsional ke kolom data ⇒ total tepat 100%.
+              { label: 'Nama', width: 'w-[27%]' },
+              { label: 'Email', width: 'w-[30%]' },
+              { label: 'Cabang', width: 'w-[23%]' },
+              { label: 'Status', width: 'w-[13%]' },
+              { label: 'Aksi', width: 'w-[7%]' },
+            ].map((header) => (
+              <th
+                key={header.label}
+                scope="col"
+                className={`${header.width} border-b border-border-light bg-brand/5 px-3 py-3 text-sm font-semibold text-ink-secondary lg:px-6`}
+              >
+                {header.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border-light">
+          {users.map((member) => (
+            <tr key={member.id} className="transition-colors hover:bg-brand/5">
+              <td className="px-3 py-3 lg:px-6">
+                <p className="truncate text-sm font-semibold text-ink" title={member.name}>
+                  {member.name}
+                </p>
+              </td>
+              <td
+                className="truncate px-3 py-3 text-sm text-ink-secondary lg:px-6"
+                title={member.email}
+              >
+                {member.email}
+              </td>
+              <td
+                className="truncate px-3 py-3 text-sm text-ink-secondary lg:px-6"
+                title={securityUserLocationLabel(member)}
+              >
+                {securityUserLocationLabel(member)}
+              </td>
+              <td className="px-3 py-3 lg:px-6">
+                <SecurityStatusBadge status={member.status} />
+              </td>
+              <td className="px-3 py-3 lg:px-6">
+                <SecurityUserActionMenu
+                  member={member}
+                  role={role}
+                  ownLocationId={ownLocationId}
+                  togglePending={togglePending}
+                  toggleUserId={toggleUserId}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onToggle={onToggle}
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function SecurityUserCards({ users, role, ownLocationId, togglePending, toggleUserId, onEdit, onDelete, onToggle, className }: SecurityListProps & { className?: string }) {
+  return (
+    <ul className={`grid grid-cols-1 gap-2 md:grid-cols-2 ${className ?? ''}`}>
+      {users.map((member) => {
+        const detailLabel = securityUserDetailLabel(member)
+        return (
+          <li
+            key={member.id}
+            className="flex flex-col gap-3 rounded-control border border-border-light p-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-ink" title={member.name}>
+                  {member.name}
+                </p>
+                <p className="truncate text-xs text-ink-muted" title={detailLabel}>
+                  {detailLabel}
+                </p>
+              </div>
+              <SecurityStatusBadge status={member.status} className="shrink-0" />
+            </div>
+            <div className="flex justify-end">
+              <SecurityUserActionMenu
+                member={member}
+                role={role}
+                ownLocationId={ownLocationId}
+                togglePending={togglePending}
+                toggleUserId={toggleUserId}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onToggle={onToggle}
+              />
+            </div>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 interface CreateSecurityModalProps {
   open: boolean
   onClose: () => void
@@ -399,6 +635,7 @@ function CreateSecurityModal({
   // Reset form setiap modal dibuka agar data sebelumnya tidak tertinggal.
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset form saat modal dibuka (pelanggaran baseline yang sudah ada sebelum perubahan panel; wajib agar lint 0 error)
       setName('')
       setEmail('')
       setPhone('')
@@ -547,7 +784,7 @@ export function SecurityUserModal({ open, onClose }: SecurityUserModalProps) {
         </Button>
       }
     >
-      <SecurityUserPanel enabled={open} onCreated={onClose} />
+      <SecurityUserPanel enabled={open} onCreated={onClose} variant="modal" />
     </Modal>
   )
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Location, User } from '@/lib/api/types'
+import { paginate } from '@/lib/pagination'
 import {
   LOCATION_TYPE_LABEL,
   applyFacilityFilters,
@@ -8,11 +9,14 @@ import {
   locationTypeFormOptions,
 } from '@/app/facilities/page'
 import {
+  USER_FILTER_DEP_KEYS,
   applyManagedUserFilters,
   managedVendorOptions,
   requiresManagedLocation,
+  shouldResetUserPage,
   toManagedUserListParams,
   userAffiliationLabel,
+  type UserFilterSnapshot,
 } from '@/app/users/page'
 
 function locationStub(overrides: Partial<Location> = {}): Location {
@@ -248,5 +252,60 @@ describe('applyManagedUserFilters', () => {
       applyManagedUserFilters(rows, { status: 'inactive', vendor: 'PT Lintas Fiber' }).map((u) => u.id),
     ).toEqual(['u2'])
     expect(applyManagedUserFilters(rows, { status: 'blacklisted', vendor: 'PT Lintas Fiber' })).toEqual([])
+  })
+})
+
+describe('shouldResetUserPage (kontrak reset halaman)', () => {
+  const base: UserFilterSnapshot = {
+    roleFilter: 'admin',
+    locationId: 'loc-1',
+    search: 'bayu',
+    statusFilter: 'active',
+    vendorFilter: 'PT Lintas Fiber',
+    pageSize: 10,
+  }
+
+  it('mengubah salah satu nilai penentu mensinyalkan reset ke halaman 1', () => {
+    expect(shouldResetUserPage(base, { ...base, roleFilter: 'vendor' })).toBe(true)
+    expect(shouldResetUserPage(base, { ...base, locationId: 'all' })).toBe(true)
+    expect(shouldResetUserPage(base, { ...base, search: 'santoso' })).toBe(true)
+    expect(shouldResetUserPage(base, { ...base, statusFilter: 'blacklisted' })).toBe(true)
+    expect(shouldResetUserPage(base, { ...base, vendorFilter: 'CV Andalan' })).toBe(true)
+    expect(shouldResetUserPage(base, { ...base, pageSize: 50 })).toBe(true)
+  })
+
+  it('nilai penentu yang tak berubah tidak mensinyalkan reset', () => {
+    expect(shouldResetUserPage(base, { ...base })).toBe(false)
+    expect(shouldResetUserPage(base, base)).toBe(false)
+  })
+
+  it('USER_FILTER_DEP_KEYS tepat memuat keenam nilai penentu halaman', () => {
+    expect([...USER_FILTER_DEP_KEYS]).toEqual([
+      'roleFilter',
+      'locationId',
+      'search',
+      'statusFilter',
+      'vendorFilter',
+      'pageSize',
+    ])
+  })
+})
+
+describe('pagination daftar user (kontrak halaman)', () => {
+  const rows = Array.from({ length: 25 }, (_, index) => index + 1)
+
+  it('25 baris terfilter pada pageSize 10: halaman 3 = 5 item, totalPages 3', () => {
+    const result = paginate(rows, 3, 10)
+    expect(result.items).toEqual([21, 22, 23, 24, 25])
+    expect(result.items).toHaveLength(5)
+    expect(result.page).toBe(3)
+    expect(result.totalPages).toBe(3)
+  })
+
+  it('halaman basi 9 pada daftar 3 halaman di-clamp ke 3 beserta itemnya', () => {
+    const result = paginate(rows, 9, 10)
+    expect(result.page).toBe(3)
+    expect(result.totalPages).toBe(3)
+    expect(result.items).toEqual([21, 22, 23, 24, 25])
   })
 })

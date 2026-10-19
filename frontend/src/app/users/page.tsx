@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { AlertTriangle, Building2, Inbox, Pencil, Plus, Power, Trash2, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
+import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
@@ -11,6 +12,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { Pagination } from '@/components/ui/Pagination'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
@@ -32,7 +34,15 @@ import type {
   UpdateUserStatusRequest,
   User,
 } from '@/lib/api/types'
-import { managedRoleTone, type StatusTone } from '@/lib/visits/status-badge'
+import { DEFAULT_PAGE_SIZE, paginate } from '@/lib/pagination'
+import {
+  TABLE_CARD_LIST_CLASS,
+  TABLE_CLASS,
+  TABLE_TD_CLASS,
+  TABLE_TH_CLASS,
+  TABLE_WRAPPER_CLASS,
+} from '@/lib/table-styles'
+import { managedRoleTone } from '@/lib/visits/status-badge'
 import {
   VENDOR_NAME_MAX_LENGTH,
   resolveVendorInput,
@@ -142,6 +152,41 @@ export function deleteUserConfirmMessage(target: User): string {
 }
 
 // ---------------------------------------------------------------------------
+// Pagination: kontrak reset halaman saat filter berubah
+// ---------------------------------------------------------------------------
+
+/** Snapshot nilai yang menentukan isi daftar user (filter bar + ukuran halaman). */
+export interface UserFilterSnapshot {
+  roleFilter: ManagedRoleFilter
+  locationId: string
+  search: string
+  statusFilter: ManagedStatusFilter
+  vendorFilter: string
+  pageSize: number
+}
+
+/**
+ * Nilai penentu halaman: perubahan salah satunya mengembalikan daftar ke
+ * halaman 1 (kunci SAMA PERSIS dengan dependency effect reset di `UsersScreen`).
+ */
+export const USER_FILTER_DEP_KEYS = [
+  'roleFilter',
+  'locationId',
+  'search',
+  'statusFilter',
+  'vendorFilter',
+  'pageSize',
+] as const satisfies readonly (keyof UserFilterSnapshot)[]
+
+/** `true` bila ada satu nilai penentu halaman yang berubah (predikat murni, dapat diuji). */
+export function shouldResetUserPage(
+  prev: UserFilterSnapshot,
+  next: UserFilterSnapshot,
+): boolean {
+  return USER_FILTER_DEP_KEYS.some((key) => prev[key] !== next[key])
+}
+
+// ---------------------------------------------------------------------------
 // Opsi select
 // ---------------------------------------------------------------------------
 
@@ -183,6 +228,8 @@ function UsersScreen() {
   const [statusFilter, setStatusFilter] = useState<ManagedStatusFilter>('all')
   // Filter vendor (client-side, exact-match atas `vendor_name`).
   const [vendorFilter, setVendorFilter] = useState(VENDOR_FILTER_ALL)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
   const [createOpen, setCreateOpen] = useState(false)
   const [deleting, setDeleting] = useState<User | null>(null)
   const [editing, setEditing] = useState<User | null>(null)
@@ -233,6 +280,28 @@ function UsersScreen() {
       }),
     [usersQuery.data, statusFilter, roleFilter, vendorFilter],
   )
+
+  // Pagination client-side: potong `rows` (sudah terfilter) per halaman. `page`
+  // hasil clamp WAJIB dirender sebagai `safePage`, bukan state mentah, agar
+  // halaman basi pasca-refetch tak pernah menampilkan halaman kosong.
+  const { items: pageRows, page: safePage, totalPages } = paginate(rows, page, pageSize)
+
+  // Setiap filter atau ukuran halaman berubah ⇒ kembali ke halaman 1. Pola
+  // "sesuaikan state saat render" (React: You Might Not Need an Effect) dipakai
+  // karena `react-hooks/set-state-in-effect` melarang setState di dalam effect.
+  const filterSnapshot: UserFilterSnapshot = {
+    roleFilter,
+    locationId,
+    search,
+    statusFilter,
+    vendorFilter,
+    pageSize,
+  }
+  const [prevFilterSnapshot, setPrevFilterSnapshot] = useState(filterSnapshot)
+  if (shouldResetUserPage(prevFilterSnapshot, filterSnapshot)) {
+    setPrevFilterSnapshot(filterSnapshot)
+    if (page !== 1) setPage(1)
+  }
 
   const locationOptions: SelectOption[] = useMemo(
     () => [
@@ -382,8 +451,17 @@ function UsersScreen() {
           </div>
         ) : (
           <>
-            <UserTable users={rows} currentUserId={currentUserId} viewerRole={viewerRole} onDelete={setDeleting} onEdit={setEditing} />
-            <UserCards users={rows} currentUserId={currentUserId} viewerRole={viewerRole} onDelete={setDeleting} onEdit={setEditing} />
+            <UserTable users={pageRows} currentUserId={currentUserId} viewerRole={viewerRole} onDelete={setDeleting} onEdit={setEditing} />
+            <UserCards users={pageRows} currentUserId={currentUserId} viewerRole={viewerRole} onDelete={setDeleting} onEdit={setEditing} />
+            <Pagination
+              page={safePage}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              pageSize={pageSize}
+              onPageSizeChange={setPageSize}
+              ariaLabel="Paginasi daftar user"
+              className="mt-4"
+            />
           </>
         )}
       </div>
@@ -480,8 +558,8 @@ function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
   const { toggle, isPending, activeId } = useToggleManagedStatus()
 
   return (
-    <div className="card hidden overflow-hidden lg:block">
-      <table className="w-full table-fixed border-collapse text-left">
+    <div className={TABLE_WRAPPER_CLASS}>
+      <table className={TABLE_CLASS}>
         <thead>
           <tr>
             {[
@@ -490,12 +568,12 @@ function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
               { label: 'Peran', width: 'w-[12%]' },
               { label: 'Cabang / Vendor', width: 'w-[20%]' },
               { label: 'Status', width: 'w-[11%]' },
-              { label: 'Aksi', width: 'w-[15%]' },
+              { label: 'Aksi', width: 'w-[7%]' },
             ].map((header) => (
               <th
                 key={header.label}
                 scope="col"
-                className={`${header.width} border-b border-border-light bg-brand/5 px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm font-semibold text-ink-secondary`}
+                className={`${header.width} ${TABLE_TH_CLASS}`}
               >
                 {header.label}
               </th>
@@ -505,12 +583,39 @@ function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
         <tbody className="divide-y divide-border-light">
           {users.map((user) => {
             const toggleable = user.status === 'active' || user.status === 'inactive'
+            const actions: ActionMenuItem[] = [
+              {
+                id: 'edit',
+                label: 'Ubah',
+                icon: <Pencil aria-hidden="true" className="size-4" />,
+                onSelect: () => onEdit(user),
+                tone: 'default',
+              },
+            ]
+            if (toggleable) {
+              actions.push({
+                id: 'toggle',
+                label: user.status === 'active' ? 'Nonaktifkan' : 'Aktifkan',
+                icon: <Power aria-hidden="true" className="size-4" />,
+                onSelect: () => toggle(user),
+                tone: 'default',
+              })
+            }
+            if (viewerRole !== null && canShowDeleteUser(viewerRole, user, currentUserId)) {
+              actions.push({
+                id: 'delete',
+                label: 'Hapus',
+                icon: <Trash2 aria-hidden="true" className="size-4" />,
+                onSelect: () => onDelete(user),
+                tone: 'danger',
+              })
+            }
             return (
               <tr
                 key={user.id}
                 className="transition-colors hover:bg-brand/5"
               >
-                <td className="px-2 sm:px-3 lg:px-6 py-3">
+                <td className={TABLE_TD_CLASS}>
                   <p className="truncate text-xs sm:text-sm font-semibold text-ink" title={user.name}>
                     {user.name}
                   </p>
@@ -521,68 +626,24 @@ function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
                     {user.nik !== null ? `NIK ${user.nik}` : 'NIK —'}
                   </p>
                 </td>
-                <td className="truncate px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm text-ink-secondary" title={user.email}>
+                <td className={`truncate ${TABLE_TD_CLASS} text-xs sm:text-sm text-ink-secondary`} title={user.email}>
                   {user.email}
                 </td>
-                <td className="px-2 sm:px-3 lg:px-6 py-3">
+                <td className={TABLE_TD_CLASS}>
                   <Badge tone={managedRoleTone(user.role)}>{getRoleLabel(user.role)}</Badge>
                 </td>
-                <td className="truncate px-2 sm:px-3 lg:px-6 py-3 text-xs sm:text-sm text-ink-secondary" title={userAffiliationLabel(user)}>
+                <td className={`truncate ${TABLE_TD_CLASS} text-xs sm:text-sm text-ink-secondary`} title={userAffiliationLabel(user)}>
                   {userAffiliationLabel(user)}
                 </td>
-                <td className="px-2 sm:px-3 lg:px-6 py-3">
+                <td className={TABLE_TD_CLASS}>
                   <StatusCell status={user.status} />
                 </td>
-                <td className="px-2 sm:px-3 lg:px-6 py-3">
-                  {/*
-                    Sel Aksi 15% (~105px di 1024px) lebih sempit dari label
-                    "Nonaktifkan" (~114px) sehingga tombol meluber ke kolom
-                    Status. Pola: ikon-saja di lg–xl, label teks kembali di
-                    xl+; screen reader tetap mendengar lewat aria-label.
-                  */}
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="min-h-touch px-3"
-                      aria-label={`Ubah ${user.name}`}
-                      onClick={() => onEdit(user)}
-                    >
-                      <Pencil aria-hidden="true" className="size-4 shrink-0" />
-                      <span className="hidden xl:inline">Ubah</span>
-                    </Button>
-                    {toggleable ? (
-                      <Button
-                        size="sm"
-                        variant={user.status === 'active' ? 'secondary' : 'primary'}
-                        className="min-h-touch px-3"
-                        aria-label={`${user.status === 'active' ? 'Nonaktifkan' : 'Aktifkan'} ${user.name}`}
-                        loading={isPending && activeId === user.id}
-                        onClick={() => toggle(user)}
-                      >
-                        <Power aria-hidden="true" className="size-4 shrink-0 xl:hidden" />
-                        <span className="hidden xl:inline">
-                          {user.status === 'active' ? 'Nonaktifkan' : 'Aktifkan'}
-                        </span>
-                      </Button>
-                    ) : (
-                      <span className="text-ink-muted" aria-hidden="true">
-                        —
-                      </span>
-                    )}
-                    {viewerRole !== null && canShowDeleteUser(viewerRole, user, currentUserId) ? (
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        className="min-h-touch px-3"
-                        aria-label={`Hapus ${user.name}`}
-                        onClick={() => onDelete(user)}
-                      >
-                        <Trash2 aria-hidden="true" className="size-4 shrink-0" />
-                        <span className="hidden xl:inline">Hapus</span>
-                      </Button>
-                    ) : null}
-                  </div>
+                <td className={`${TABLE_TD_CLASS} text-right`}>
+                  <ActionMenu
+                    label={`Aksi untuk ${user.name}`}
+                    busy={isPending && activeId === user.id}
+                    items={actions}
+                  />
                 </td>
               </tr>
             )
@@ -597,9 +658,36 @@ function UserCards({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
   const { toggle, isPending, activeId } = useToggleManagedStatus()
 
   return (
-    <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:hidden">
+    <ul className={TABLE_CARD_LIST_CLASS}>
       {users.map((user) => {
         const toggleable = user.status === 'active' || user.status === 'inactive'
+        const actions: ActionMenuItem[] = [
+          {
+            id: 'edit',
+            label: 'Ubah',
+            icon: <Pencil aria-hidden="true" className="size-4" />,
+            onSelect: () => onEdit(user),
+            tone: 'default',
+          },
+        ]
+        if (toggleable) {
+          actions.push({
+            id: 'toggle',
+            label: user.status === 'active' ? 'Nonaktifkan' : 'Aktifkan',
+            icon: <Power aria-hidden="true" className="size-4" />,
+            onSelect: () => toggle(user),
+            tone: 'default',
+          })
+        }
+        if (viewerRole !== null && canShowDeleteUser(viewerRole, user, currentUserId)) {
+          actions.push({
+            id: 'delete',
+            label: 'Hapus',
+            icon: <Trash2 aria-hidden="true" className="size-4" />,
+            onSelect: () => onDelete(user),
+            tone: 'danger',
+          })
+        }
         return (
           <li key={user.id} className="card flex flex-col p-4">
             <div className="flex items-start justify-between gap-3">
@@ -617,7 +705,14 @@ function UserCards({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
                   {user.nik !== null ? `NIK ${user.nik}` : 'NIK —'}
                 </p>
               </div>
-              <StatusCell status={user.status} className="shrink-0" />
+              <div className="flex shrink-0 items-center gap-2">
+                <StatusCell status={user.status} />
+                <ActionMenu
+                  label={`Aksi untuk ${user.name}`}
+                  busy={isPending && activeId === user.id}
+                  items={actions}
+                />
+              </div>
             </div>
             <div className="mt-3 flex flex-1 flex-col gap-2 text-sm text-ink-secondary">
               <p className="flex items-start gap-2">
@@ -631,43 +726,6 @@ function UserCards({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
                 </span>
               </p>
             </div>
-            {/* Halaman ini khusus super_admin: tombol Ubah selalu ada bila sesi
-                termuat; toggle/hapus menjaga syarat barisnya masing-masing.
-                Cluster aksi WRAP agar 3 tombol muat di 375px tanpa overflow. */}
-            {viewerRole !== null ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  className="min-h-touch flex-1"
-                  aria-label={`Ubah ${user.name}`}
-                  onClick={() => onEdit(user)}
-                >
-                  <Pencil aria-hidden="true" className="size-4 shrink-0" />
-                  Ubah
-                </Button>
-                {toggleable ? (
-                  <Button
-                    variant={user.status === 'active' ? 'secondary' : 'primary'}
-                    className="min-h-touch flex-1"
-                    loading={isPending && activeId === user.id}
-                    onClick={() => toggle(user)}
-                  >
-                    {user.status === 'active' ? 'Nonaktifkan' : 'Aktifkan'}
-                  </Button>
-                ) : null}
-                {viewerRole !== null && canShowDeleteUser(viewerRole, user, currentUserId) ? (
-                  <Button
-                    variant="danger"
-                    className="min-h-touch flex-1"
-                    aria-label={`Hapus ${user.name}`}
-                    onClick={() => onDelete(user)}
-                  >
-                    <Trash2 aria-hidden="true" className="size-4 shrink-0" />
-                    Hapus
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
           </li>
         )
       })}
