@@ -1,8 +1,0 @@
-1. apakah tiap role/akun vendor/mitra bisa buat permohonan kunjungan baru jika masih ada proses kunjungan yang belum selesai? 
-2. apakah role/akun koordinator cabang/wilayah boleh melakukan scan check-in/check-out terhadap vendor/mitra yang berkunjung seperti yang dilakukan oleh role pengawas?
-3. apakah superadmin(kantor pusat) boleh bypass check-in/check-out terhadap vendor/mitra jika terjadi situasi mendesak, misal pengawas dan koordinator wilayah sedang tidak berada di lokasi kunjungan atau hambatan lain untuk verifikasi check-in/out vendor yang berkunjung.
-
-jawaban user:
-1. Bisa, nanti akan di filter secara deskripsi dgn kepentingan permit sebelumnya, bisa saja kita reject jika double input.
-2. Iya, agar log keluar masuk data centernya terecord.
-3. Dibuat bisa saja, karena superadmin.
