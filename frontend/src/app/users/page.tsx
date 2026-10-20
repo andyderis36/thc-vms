@@ -131,14 +131,23 @@ export function applyManagedUserFilters(
 }
 
 /**
+ * Akun yang dilindungi dari aksi merusak: akun sendiri dan akun
+ * `super_admin`. Kontrak `PATCH /users/{id}/status` dan `DELETE /users/{id}`
+ * sama-sama membalas 403 untuk keduanya, jadi satu guard dipakai dua aksi.
+ * Guard peran (`can(role, ...)`) dicek terpisah di layar.
+ */
+export function isProtectedUser(target: User, currentUserId: string | null): boolean {
+  if (currentUserId !== null && target.id === currentUserId) return true
+  return target.role === 'super_admin'
+}
+
+/**
  * Baris user boleh menampilkan tombol hapus: bukan akun sendiri dan bukan
  * akun `super_admin` (kontrak DELETE /users/{id} → 403 untuk keduanya).
  * Guard peran (`can(role, 'deleteRecords')`) dicek terpisah di layar.
  */
 export function isDeletableUser(target: User, currentUserId: string | null): boolean {
-  if (currentUserId !== null && target.id === currentUserId) return false
-  if (target.role === 'super_admin') return false
-  return true
+  return !isProtectedUser(target, currentUserId)
 }
 
 /** Tombol hapus tampil iff peran boleh hapus DAN baris boleh dihapus. */
@@ -579,7 +588,9 @@ function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
         </thead>
         <tbody className="divide-y divide-border-light">
           {users.map((user) => {
-            const toggleable = user.status === 'active' || user.status === 'inactive'
+            const toggleable =
+    !isProtectedUser(user, currentUserId) &&
+    (user.status === 'active' || user.status === 'inactive')
             const actions: ActionMenuItem[] = [
               {
                 id: 'edit',
@@ -657,7 +668,9 @@ function UserCards({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
   return (
     <ul className={TABLE_CARD_LIST_CLASS}>
       {users.map((user) => {
-        const toggleable = user.status === 'active' || user.status === 'inactive'
+        const toggleable =
+    !isProtectedUser(user, currentUserId) &&
+    (user.status === 'active' || user.status === 'inactive')
         const actions: ActionMenuItem[] = [
           {
             id: 'edit',
