@@ -181,7 +181,7 @@ func run(ctx context.Context) error {
 	if cfg.App.Environment == "production" || !cfg.App.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	engine := deliveryhttp.New(deliveryhttp.Deps{
+	deps := deliveryhttp.Deps{
 		Auth: deliveryhttp.AuthRoutes{
 			Login: authHandler.Login, Me: authHandler.Me, Logout: authHandler.Logout,
 		},
@@ -190,13 +190,7 @@ func run(ctx context.Context) error {
 			UpdateStatus: userHandler.UpdateSecurityStatus, Delete: userHandler.DeleteSecurity,
 			Update: userHandler.UpdateSecurity,
 		},
-		SuperAdmin: deliveryhttp.SuperAdminRoutes{
-			CreateLocation: superAdminHandler.CreateLocation, UpdateLocation: superAdminHandler.UpdateLocation,
-			DeleteLocation: superAdminHandler.DeleteLocation,
-			ListUsers:      superAdminHandler.ListUsers, CreateUser: superAdminHandler.CreateUser,
-			UpdateUserStatus: superAdminHandler.UpdateUserStatus, DeleteUser: superAdminHandler.DeleteUser,
-			DeleteVisit: superAdminHandler.DeleteVisit,
-		},
+		SuperAdmin: superAdminRoutes(superAdminHandler),
 		Master: deliveryhttp.MasterRoutes{
 			Locations: masterHandler.ListLocations, Purposes: masterHandler.ListPurposes,
 			Vendors: masterHandler.ListVendors,
@@ -237,7 +231,13 @@ func run(ctx context.Context) error {
 			NotifyOnly: middleware.RequireRoles(
 				domain.RoleSuperAdmin, domain.RoleAdmin, domain.RoleSecurity, domain.RoleVendor),
 		},
-	})
+	}
+	// A nil route member mounts as a pass-through, so a handler forgotten here
+	// would answer 200 with an empty body and silently drop the write.
+	if err := deliveryhttp.ValidateDeps(deps); err != nil {
+		return fmt.Errorf("route wiring: %w", err)
+	}
+	engine := deliveryhttp.New(deps)
 
 	interval := worker.IntervalFromEnv()
 	if interval > worker.ReminderWindow {
@@ -292,4 +292,21 @@ func run(ctx context.Context) error {
 	slog.Info("database pool closed")
 	slog.Info("shutdown complete")
 	return nil
+}
+
+// superAdminRoutes binds the super_admin back-office handlers. It lives in
+// its own function so a test can assert that no member is left unwired: a nil
+// member mounts as a pass-through and would answer 200 with an empty body.
+func superAdminRoutes(h *handlers.SuperAdminHandler) deliveryhttp.SuperAdminRoutes {
+	return deliveryhttp.SuperAdminRoutes{
+		CreateLocation:   h.CreateLocation,
+		UpdateLocation:   h.UpdateLocation,
+		DeleteLocation:   h.DeleteLocation,
+		ListUsers:        h.ListUsers,
+		CreateUser:       h.CreateUser,
+		UpdateUser:       h.UpdateUser,
+		UpdateUserStatus: h.UpdateUserStatus,
+		DeleteUser:       h.DeleteUser,
+		DeleteVisit:      h.DeleteVisit,
+	}
 }
