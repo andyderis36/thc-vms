@@ -584,7 +584,7 @@ export function useUpdateManagedUserStatusMutation() {
   })
 }
 
-/** Ubah user terkelola → segarkan daftar managed-users (prefix ada). */
+/** Ubah user terkelola → segarkan daftar managed-users (prefix ada) + sesi sendiri. */
 export function useUpdateManagedUserMutation() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -592,6 +592,7 @@ export function useUpdateManagedUserMutation() {
       updateManagedUser(userId, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: MANAGED_USERS_PREFIX })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me() })
     },
   })
 }
