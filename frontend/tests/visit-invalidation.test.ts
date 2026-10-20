@@ -21,7 +21,6 @@ import {
   checkInVisit,
   checkOutVisit,
   rejectVisit,
-  rescheduleVisit,
 } from '@/lib/api/client'
 
 /**

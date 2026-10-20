@@ -29,7 +29,7 @@ import {
   toApprovalListParams,
   type ApprovalListFilter,
 } from '@/app/approvals/page'
-import { toGateListParams, type GateListFilter } from '@/app/gate/page'
+import { toGateListParams } from '@/app/gate/page'
 import {
   toVisitListParams,
   toVisitMetricsParams,

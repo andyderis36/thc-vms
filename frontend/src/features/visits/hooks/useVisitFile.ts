@@ -70,6 +70,9 @@ export function useVisitFile({
     let active = true
     let createdUrl: string | null = null
 
+    /* eslint-disable react-hooks/set-state-in-effect -- reset-on-retry: state lama
+       harus dikosongkan sebelum fetch berikutnya, dan effect ini satu-satunya
+       pemilik lifecycle object URL (cleanup yang membatalkan revoke). */
     setLoading(true)
     setError(null)
     setObjectUrl(null)
@@ -81,6 +84,7 @@ export function useVisitFile({
       setLoading(false)
       return
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
 
     fetchVisitFileBlob(visitId, kind, visitorId)
       .then((blob) => {

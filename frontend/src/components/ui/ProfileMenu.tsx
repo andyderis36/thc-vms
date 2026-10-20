@@ -97,6 +97,7 @@ export function ProfileMenu({ user, onLogout }: ProfileMenuProps) {
       >
         <span role="img" aria-label={`Akun ${user.name}`} className={AVATAR_CLASS}>
           {user.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- avatar 36px dari host dinamis (avatarUrl), di luar images.remotePatterns yang hanya memuat localhost:9000; next/image akan 400 untuk host lain, dan avatar ini belum pernah diisi di produksi.
             <img
               src={user.avatarUrl}
               alt=""

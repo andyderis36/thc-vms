@@ -107,7 +107,6 @@ export function PurposeDropdown({
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-controls={open ? panelId : undefined}
-          aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
           onClick={() => setOpen((previous) => !previous)}
           onKeyDown={(event) => {

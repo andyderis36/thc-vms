@@ -56,6 +56,7 @@ describe('visitFormSchema — assignment_letter wajib', () => {
   })
 
   it('menolak assignment_letter yang hilang (undefined) dengan pesan Indonesia', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- pola "omit": assignment_letter sengaja dibuang dari objek uji
     const { assignment_letter: _omitted, ...withoutLetter } = baseForm()
 
     const result = visitFormSchema.safeParse(withoutLetter)

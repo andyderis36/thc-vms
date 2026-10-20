@@ -5,7 +5,7 @@
  * di folder features yang akan memakai fungsi-fungsi ini.
  */
 
-import { apiFetch, clearToken, storeToken, uploadFile } from '@/lib/api/fetcher';
+import { apiFetch, clearToken, storeToken } from '@/lib/api/fetcher';
 import type {
   ApproveRequest,
   AuditLogListParams,

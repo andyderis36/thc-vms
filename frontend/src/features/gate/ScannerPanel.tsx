@@ -200,8 +200,13 @@ export function ScannerPanel({
   useEffect(() => {
     if (mode !== 'camera') return undefined
 
+    /* eslint-disable react-hooks/set-state-in-effect -- restart kamera wajib
+       mulai dari status bersih (ready/error) sebelum getUserMedia; lifecycle
+       html5-qrcode bersifat imperatif (stop -> clear -> start) dan effect ini
+       satu-satunya pemilik restart. */
     setCameraReady(false)
     setCameraError(null)
+    /* eslint-enable react-hooks/set-state-in-effect */
 
     let cancelled = false
     let startFinished = false
