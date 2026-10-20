@@ -24,21 +24,36 @@ cd "$REPO_DIR"
 # Akses docker. Runner Gitea Actions = systemd user-service: user yang
 # ditambahkan ke group `docker` SETELAH service start tidak mewarisi group
 # itu -> CLI docker gagal "permission denied ... /var/run/docker.sock".
-# `sg docker` membuka shell baru dengan group dari /etc/group (tanpa password).
-compose() {
-  if docker compose version >/dev/null 2>&1; then
-    docker compose "$@"
+# `sg`/`newgrp` membuka shell baru dengan group dari /etc/group (tanpa password).
+# Probe WAJIB menyentuh daemon (`docker info`), bukan `docker compose version`
+# yang hanya memeriksa CLI tanpa pernah bicara ke socket.
+docker_cli() {
+  if docker info >/dev/null 2>&1; then
+    docker "$@"
     return
   fi
+  local runner=""
   if command -v sg >/dev/null 2>&1; then
-    sg docker -c "docker compose $(printf '%q ' "$@")"
-    return
+    runner="sg"
+  elif command -v newgrp >/dev/null 2>&1; then
+    runner="newgrp"
+  fi
+  if [ -n "$runner" ]; then
+    if "$runner" docker -c "docker info" >/dev/null 2>&1; then
+      echo "==> docker group tidak terwarisi runner; memakai '$runner docker'"
+      "$runner" docker -c "docker $(printf '%q ' "$@")"
+      return
+    fi
   fi
   echo "ABORT: tidak bisa mengakses docker API (/var/run/docker.sock)." >&2
   echo "       Tambahkan user runner ke group 'docker', lalu restart runner:" >&2
   echo "         sudo usermod -aG docker <user-runner>" >&2
   echo "         systemctl --user restart act_runner" >&2
   exit 1
+}
+
+compose() {
+  docker_cli compose "$@"
 }
 
 echo "==> sync repo ($BRANCH)"
@@ -74,7 +89,7 @@ for i in $(seq 1 60); do
 done
 
 echo "==> prune dangling images"
-docker image prune -f >/dev/null
+docker_cli image prune -f >/dev/null
 
 echo "==> status"
 compose -f "$COMPOSE_FILE" ps
