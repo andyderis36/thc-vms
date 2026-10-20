@@ -11,4 +11,7 @@ jobs:
     runs-on: [self-hosted, linux, vps]
     steps:
       - name: Deploy latest main on VPS
-        run: /home/vms/thc-vms/deploy/deploy.sh
+        # Panggil lewat `bash`, bukan eksekusi langsung: file script tidak
+        # selalu punya bit executable di index git (mode 100644), dan eksekusi
+        # langsung file 644 berakhir "Permission denied" (exit 126).
+        run: bash /home/vms/thc-vms/deploy/deploy.sh

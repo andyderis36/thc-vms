@@ -6,9 +6,10 @@
 # an existing .env (root /.env is gitignored, so `git reset --hard`
 # cannot touch it either).
 #
-# Stack deployed (docker-compose.prod.yml): postgres + minio + minio-init
-# + migrate (one-shot) + backend + frontend. Backend/frontend images are
-# built from backend/Dockerfile and frontend/Dockerfile in this repo.
+# Stack deployed (docker-compose.prod.yml): postgres + rustfs (object storage
+# S3-compatible) + migrate (one-shot) + backend + frontend + caddy (reverse
+# proxy tunggal pada :80). Backend/frontend images are built from
+# backend/Dockerfile and frontend/Dockerfile in this repo.
 set -euo pipefail
 
 REPO_DIR="/home/vms/thc-vms"

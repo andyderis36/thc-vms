@@ -9,7 +9,30 @@
 import type { UploadCategory, UploadFileResult } from '@/lib/api/types';
 import { prepareUpload } from '@/lib/uploads/compressImage';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
+/**
+ * Basis URL API. Produksi menyajikan FE + BE di satu origin (reverse proxy
+ * Caddy), jadi cukup PATH dari env (`/api/v1`) — pindah IP LAN <-> domain
+ * tanpa build ulang. Dev lokal tetap URL absolut karena FE (:3210) dan BE
+ * (:8080) berbeda origin.
+ */
+export function resolveApiBase(): string {
+  const configured = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const isLocalDev = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+    if (!isLocalDev) {
+      try {
+        const path = new URL(configured, window.location.origin).pathname.replace(/\/+$/, '');
+        return path || '/api/v1';
+      } catch {
+        return '/api/v1';
+      }
+    }
+  }
+  return configured;
+}
+
+const API_BASE = resolveApiBase();
 
 const TOKEN_KEY = 'thc_vms_token';
 

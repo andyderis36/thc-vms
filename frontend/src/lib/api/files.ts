@@ -8,12 +8,12 @@
  * aplikasi), mengembalikan isi berkas (blob) — tautan/blob object tidak pernah
  * membawa host storage maupun parameter `X-Amz-*` presigned.
  */
-import { ApiError, getStoredToken } from '@/lib/api/fetcher';
+import { ApiError, getStoredToken, resolveApiBase } from '@/lib/api/fetcher';
 
 /** Jenis berkas yang didukung endpoint `GET /visits/{id}/file`. */
 export type VisitFileKind = 'assignment_letter' | 'id_card' | 'selfie';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
+const API_BASE = resolveApiBase();
 
 /** Daftar kind yang dikenal backend — kind di luar daftar → galat validasi. */
 const SUPPORTED_KINDS: ReadonlySet<VisitFileKind> = new Set<VisitFileKind>([

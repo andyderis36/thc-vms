@@ -1,0 +1,23 @@
+# Reverse proxy tunggal stack THC-VMS (Caddy).
+# Satu origin untuk frontend + backend + object storage, sehingga frontend
+# tidak perlu build ulang saat pindah dari IP LAN ke domain (atau sebaliknya).
+#
+#   /api/*  -> backend   (prefix DIJAGA; backend menyajikan route di /api/v1)
+#   /s3/*   -> rustfs    (prefix DIPOTONG; bucket disajikan di root S3)
+#   lainnya -> frontend  (Next.js standalone, :3210)
+
+:80 {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy backend:8080
+	}
+
+	handle_path /s3/* {
+		reverse_proxy rustfs:9000
+	}
+
+	handle {
+		reverse_proxy frontend:3210
+	}
+}
