@@ -19,6 +19,57 @@ Dokumen ini adalah **pedoman wajib tertinggi (*supreme directive*)** bagi setiap
 - **Prinsip KISS (Keep It Simple, Stupid)**: Jangan membuat layer abstraksi yang berlebihan jika tidak diminta. Cukup 5 layar inti MVP dan 14 endpoint utama. Tidak perlu Redis/Kafka/microservices untuk MVP; gunakan background goroutine dan pgxpool connection pool.
 - **Prinsip SOLID**: Pisahkan tanggung jawab secara tegas: Handlers hanya urus HTTP request/response; Usecase hanya urus business logic; Repository hanya urus SQL query; Infrastructure hanya urus driver pihak ketiga (MinIO/S3, mailer).
 
+### 1.1 Alur Branch WAJIB (*MANDATORY BRANCHING WORKFLOW*)
+
+```text
+main = branch PRODUKSI.  Push ke main = DEPLOY ke VPS.  Selalu bisa di-deploy.
+dev  = branch KERJA.     Semua pengembangan (fitur, UI, refactor, hotfix) terjadi di sini.
+```
+
+- **`dev` adalah branch kerja default.** Sebelum menyentuh berkas apa pun, agent **WAJIB** menjalankan `git branch --show-current`:
+  - hasilnya `dev` → lanjutkan;
+  - hasilnya `main` atau branch lain → **BERHENTI**, laporkan ke user, dan **JANGAN** pindah branch secara otomatis. Minta konfirmasi lebih dulu.
+- **`main` HANYA boleh maju lewat merge dari `dev`** (`git merge --no-ff dev`). **DILARANG** commit langsung di `main`, termasuk untuk hotfix: hotfix dikerjakan di `dev`, diuji, lalu dikirim ke `main` melalui merge yang sama.
+- **Konsekuensinya:** `dev` selalu ancestor dari `main`, sehingga **tidak ada** kewajiban merge-back `main` → `dev` dan tidak ada divergensi yang perlu dikejar.
+- **Push ke `dev` tidak pernah men-deploy** — `.gitea/workflows/deploy.yml` hanya memicu pada `branches: [main]`. Push yang tidak sengaja ke `dev` karena itu aman; push `dev` ke `origin` tetap butuh perintah user (Aturan Emas #1).
+- **DILARANG** `git push origin main` untuk pekerjaan yang belum selesai atau belum lolos gate. Satu-satunya jalan ke produksi: merge `dev` → `main`, lalu push `main` **atas perintah eksplisit user**.
+- **Migrasi database bersifat forward-only.** Migrasi baru di `dev` wajib dicek ulang nomornya saat merge ke `main` agar tidak bentrok dengan migrasi dari jalur lain.
+
+#### 1.1.1 Gate WAJIB sebelum merge `dev` → `main`
+
+```bash
+# backend
+cd backend && go build ./... && go vet ./... && go test ./...
+
+# frontend
+cd frontend && npm run lint && npm run typecheck && npm test
+```
+
+Bila salah satu perintah gagal, **DILARANG** merge ke `main`; perbaiki dulu di `dev`.
+
+#### 1.1.2 Runbook: mengirim perubahan ke produksi
+
+```bash
+# 1. kerjakan + commit di dev (satu concern per commit)
+git switch dev
+git add -A && git commit -m "<Area>: <deskripsi>"
+
+# 2. jalankan gate (§1.1.1) — wajib hijau
+
+# 3. kirim ke main
+git switch main
+git pull --ff-only origin main
+git merge --no-ff dev -m "Release: <ringkasan perubahan>"
+
+# 4. push main = DEPLOY produksi (atas perintah eksplisit user)
+git push origin main
+
+# 5. kembali ke dev
+git switch dev
+```
+
+> **Rollback produksi:** `deploy.sh` selalu memaksa working copy VPS ke `origin/main`, sehingga `git reset --hard` manual di VPS hanya sementara dan ditimpa deploy berikutnya. Rollback yang bertahan lama: `git revert` commit yang bermasalah di `main`, lalu `push origin main`. Migrasi tidak di-rollback, jadi revert wajib backward-compatible.
+
 ---
 
 ## 2. DOMAIN BISNIS & KONTEKS PROYEK
@@ -179,3 +230,4 @@ thc-vms/
 5. **JANGAN** menjalankan seed ke production; migrasi prod HANYA via service `migrate` (`backend/cmd/migrate`), karena server production tidak auto-migrate.
 6. `deploy.sh` WAJIB menolak deploy bila `.env` hilang atau masih mengandung placeholder `CHANGEME`.
 7. `NEXT_PUBLIC_*` frontend dibakar saat build (`--build-arg`); JANGAN mengandalkannya sebagai runtime `environment:`.
+8. `main` adalah branch produksi dan satu-satunya branch yang men-deploy. Satu-satunya cara `main` maju adalah merge dari `dev` (§1.1); push ke `dev` tidak pernah memicu deploy.
