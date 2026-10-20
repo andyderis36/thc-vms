@@ -115,8 +115,12 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   try {
     response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   } catch {
+    // Tidak ada respons HTTP sama sekali (koneksi ditolak / DNS / offline).
+    // `status: 0` + `code: 'NETWORK_ERROR'` membawa pembeda ini ke pemanggil,
+    // sehingga UI bisa menampilkan pesan koneksi — BUKAN tuduhan server rusak.
+    // Pesan untuk respons HTTP (401/500/dst.) di bawah TIDAK diubah.
     throw new ApiError(
-      'Gagal terhubung ke server. Periksa koneksi internet Anda.',
+      'Tidak dapat terhubung ke server. Periksa koneksi Anda.',
       0,
       'NETWORK_ERROR',
     );

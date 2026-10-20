@@ -26,10 +26,19 @@ import type { NotificationItem, NotificationType } from '@/lib/api/types'
 export interface NotificationsMenuProps {
   /**
    * Nada pemicu mengikuti permukaan shell-nya:
-   * - `'light'` (default) — topbar terang SHELL-01/02/04.
-   * - `'dark'` — topbar kios gelap SHELL-03,ikon perlu kontras terang.
+   * - `'light'` (default) — topbar terang SHELL-01/02.
+   * - `'dark'` — topbar kios gelap SHELL-03, ikon perlu kontras terang.
+   * - `'brand'` — navbar biru SHELL-04 (vendor), ikon perlu kontras terang.
+   *
+   * Nada `brand` memakai modifier `!` (important): varian `ghost` atom
+   * `Button` sudah membawa `text-ink-secondary` + `hover:bg-neutral-bg`, dan
+   * di Tailwind v4 yang menentukan pemenang adalah URUTAN STYLESHEET
+   * (utility theme key), bukan urutan atribut `class`. Tanpa `!` lonceng
+   * tampil abu-abu #52525b di atas navbar biru #422ad5 = 1.09:1 (gagal AA),
+   * sedangkan #e0e7ff mencapai 6.74:1. Jangan buang `!` tanpa menguji
+   * warna lonceng di permukaan biru.
    */
-  tone?: 'light' | 'dark'
+  tone?: 'light' | 'dark' | 'brand'
   /** Kelas tambahan pada pembungkus relatif (mis. `shrink-0` saat flex). */
   className?: string
   /**
@@ -60,6 +69,7 @@ const ITEM_READ_CLASS = 'hover:bg-neutral-bg'
 const TRIGGER_TONE_CLASS = {
   light: 'text-ink-secondary hover:bg-neutral-bg',
   dark: 'text-brand-contrast hover:bg-sidebar-dark-active',
+  brand: 'text-brand-contrast! hover:bg-brand-dark!',
 } as const
 
 /**
@@ -200,10 +210,14 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
       >
         <Bell className="size-5" aria-hidden="true" />
         {hasUnread ? (
+          /* Latar magenta `bg-secondary` (#f43098) tetap dipertahankan;
+             angka memakai `text-ink` (#18181b) = 4.83:1 (WCAG AA untuk
+             teks kecil 11px bold). `text-secondary-contrast` (#ffffff)
+             hanya 3.67:1 — gagal AA. */
           <span
             aria-hidden="true"
             data-testid="notifications-unread-badge"
-            className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-badge bg-secondary px-1 text-badge font-bold leading-none tabular-nums text-secondary-contrast"
+            className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-badge bg-secondary px-1 text-badge font-bold leading-none tabular-nums text-ink"
           >
             {formatUnreadBadge(unreadCount)}
           </span>

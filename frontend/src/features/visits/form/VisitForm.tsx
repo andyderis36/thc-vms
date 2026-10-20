@@ -66,8 +66,8 @@ const SOP_STATEMENT =
 /**
  * SCR-03 — Formulir Pengajuan Kunjungan.
  * React Hook Form + zod; seluruh pesan galat berbahasa Indonesia.
- * Bilah kirim menempel di bawah layar (stabil di atas bottom navigation),
- * dengan padding bawah pada formulir agar tidak pernah menutupi isian terakhir.
+ * Tombol kirim berada di aliran normal SETELAH bagian SOP keselamatan —
+ * bukan bilah lengket — sehingga tidak pernah menutupi isian saat menggulir.
  */
 export function VisitForm() {
   const router = useRouter()
@@ -345,7 +345,7 @@ export function VisitForm() {
     <form
       noValidate
       onSubmit={handleSubmit(onSubmit, onInvalidSubmit)}
-      className="flex flex-col gap-4 pb-28"
+      className="flex flex-col gap-4"
     >
       <div className="flex flex-col gap-1">
         <Button
@@ -606,12 +606,13 @@ export function VisitForm() {
       </Card>
 
       {/*
-        Bilah kirim menempel di bawah viewport (sticky, BUKAN fixed): tetap
-        terlihat saat mengisi form panjang tanpa menimpa sidebar shell mana
-        pun (admin 250px / superadmin 260px / vendor tanpa sidebar). Di ponsel
-        menempel di atas bottom nav; di desktop di tepi bawah viewport.
+        Bilah kirim mengalir NORMAL di akhir formulir — TIDAK sticky/fixed.
+        Ia duduk tepat SETELAH kartu "Persetujuan SOP Keselamatan" dan hanya
+        terlihat bila pengguna menggulir sampai bawah. Shell sudah
+        menyediakan padding bawah untuk bottom nav (vendor `pb-24`, admin/
+        superadmin `pb-bottomnav`), jadi tidak perlu ruang cadangan `pb-28`.
       */}
-      <div className="sticky bottom-bottomnav z-30 mt-6 border-t border-border-light bg-surface px-4 py-4 lg:bottom-0">
+      <div className="border-t border-border-light pt-4">
         <Button type="submit" size="gate" fullWidth loading={isSubmitting}>
           Kirim Permohonan Kunjungan
         </Button>

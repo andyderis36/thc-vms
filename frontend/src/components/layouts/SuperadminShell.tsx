@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import {
   Clock,
@@ -14,7 +15,6 @@ import {
   X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
 import { NotificationsMenu } from '@/components/ui/NotificationsMenu'
 import { ProfileMenu } from '@/components/ui/ProfileMenu'
 import { Spinner } from '@/components/ui/Spinner'
@@ -29,36 +29,15 @@ export interface SuperadminShellProps {
   children: ReactNode
   /** Jumlah antrean approval lintas cabang — milik layar yang memilik datanya. */
   pendingCount?: number
-  /** Daftar cabang/POP untuk switcher; kosong = hanya "Semua Cabang / POP". */
+  /**
+   * Daftar lokasi (dipertahankan demi kompatibilitas pemanggil). Shell tidak
+   * lagi merender label "Kantor Pusat {kota}" - identitas di header sidebar
+   * kini cukup logo THC ukuran penuh.
+   */
   allLocations?: Location[]
   /** Rute aktif; default '/dashboard' (layar pemilik meneruskannya). */
   activeHref?: string
-  /** Dipanggil saat superadmin mengganti fokus cabang pada switcher. */
-  onBranchChange?: (locationId: string) => void
-  /**
-   * Nilai TERKENDALI (*controlled*) switcher cabang. Bila prop ini diberikan,
-   * nilai inilah yang tampil (menang atas state internal shell) sehingga
-   * halaman induk — mis. filter bar `/users` — bisa menyimpan & menyinkronkan
-   * `location_id`-nya sendiri. Bila TIDAK diberikan, shell memakai state
-   * internal (`'all'` saat render awal) → perilaku lama 100% dipertahankan.
-   */
-  branchId?: string
-  /**
-   * Sembunyikan switcher cabang PADA KEDUA header (desktop ~baris 336 dan
-   * mobile ~baris 364). Dipakai halaman yang filter cabangnya tidak relevan
-   * untuk konteks yang sedang aktif (mis. Peran ≠ Koordinator Wilayah di
-   * `/users`). Default `false` → switcher tampil seperti biasa (lazimnya
-   * pemanggilan lama yang tidak mengirim prop ini sama sekali).
-   */
-  hideBranchSwitcher?: boolean
 }
-
-const SELECT_CLASS =
-  'h-10 cursor-pointer rounded-control border border-border-mid bg-surface px-3 text-label text-ink focus-visible:ring-2 focus-visible:ring-brand focus-visible:border-brand'
-
-/** Select cabang mobile: tinggi 44px (target sentuh minimum §5.2). */
-const MOBILE_SELECT_CLASS =
-  'h-11 min-w-0 max-w-36 cursor-pointer rounded-control border border-border-mid bg-surface px-2 text-label text-ink focus-visible:ring-2 focus-visible:ring-brand focus-visible:border-brand'
 
 /**
  * Penyesuaian `ProfileMenu` untuk footer sidebar gelap (bawaan komponen untuk
@@ -68,25 +47,31 @@ const MOBILE_SELECT_CLASS =
  * luar layar; `mt-1` bawaan tetap jadi celah panel. Selector hanya menyasar
  * `button:first-child` (pemicu) dan `button:first-child + div` (panel);
  * panel terang sengaja tidak diubah.
+ * `:not(.status-badge)` mencegah lencana peran (pil) ikut dibalik — pil
+ * memakai tinta sendiri (mis. `danger-text`) dan tak boleh jadi terang.
  */
 const PROFILE_MENU_DARK_CLASS = [
-  '[&_button:first-child_span]:text-brand-contrast',
+  '[&_button:first-child_span:not(.status-badge)]:text-brand-contrast',
   '[&_button:first-child:hover]:bg-sidebar-dark-active',
   '[&_button:first-child+div]:top-auto',
   '[&_button:first-child+div]:bottom-full',
 ].join(' ')
 
-/** Logo mark THC (kotak merah) — dipakai header sidebar & topbar mobile. */
-const LOGO_CLASS =
-  'flex size-9 shrink-0 items-center justify-center rounded-control bg-brand text-label font-bold text-brand-contrast'
+/**
+ * Logo merek asli `public/thcw.png` (wordmark PUTIH, latar transparan) -
+ * dirender `h-10 w-auto`: tinggi TETAP 40px agar TIDAK PERNAH melebihi
+ * tinggi navbar (64px desktop / 56px ponsel) di shell mana pun.
+ */
+const LOGO_CLASS = 'flex items-center'
 
 /**
- * Tombol tutup laci: diposisikan absolut di atas header panel slide-over.
- * `min-h-touch` menaikkan target sentuh 36px → 44px (design system §5.2.1);
- * lebar bawaan `Button` (px-4 + ikon 20px = 52px) sudah ≥ 44px.
+ * Tombol tutup laci: elemen `<button>` polos dengan lebar EKSPLISIT
+ * `size-11` (44×44). Atom `Button` tak bisa dipakai di sini: ia anak flex
+ * kolom `flex-col`, jadi `align-self: stretch` melebarkannya jadi 260px dan
+ * `right-2` mendorong tepi kirinya ke -8px (8px di luar layar).
  */
 const DRAWER_CLOSE_CLASS =
-  'absolute right-2 top-4 z-10 min-h-touch text-ink-muted hover:bg-brand/15 hover:text-brand-contrast'
+  'absolute right-2 top-2 z-10 flex size-11 items-center justify-center rounded-control text-ink-muted hover:bg-brand/15 hover:text-brand-contrast'
 
 /**
  * Kandidat fokus keyboard di dalam laci — dipakai untuk penjaga fokus (Tab
@@ -97,24 +82,18 @@ const DRAWER_FOCUSABLE_SELECTOR =
 
 /**
  * SHELL-01 — Base layout Superadmin (Kantor Pusat).
- * Sidebar gelap 260px + switcher cabang INTERAKTIF (super_admin boleh
- * memfilter lintas cabang — lawan dari shell admin yang terkunci).
+ * Sidebar gelap 260px. Filter cabang/fasilitas TIDAK lagi dirender di topbar:
+ * setiap halaman pemilik sudah menyediakannya tepat SATU kali di filter bar
+ * halamannya sendiri (mencegah kontrol filter ganda pada satu layar).
  */
 export function SuperadminShell({
   children,
   pendingCount,
-  allLocations,
   activeHref = '/dashboard',
-  onBranchChange,
-  branchId,
-  hideBranchSwitcher = false,
 }: SuperadminShellProps) {
   const { user, status, signOut } = useSession()
   const router = useRouter()
   const [drawerOpen, setDrawerOpen] = useState(false)
-  // State internal hanya menjadi sumber nilai bila prop `branchId` tidak
-  // dikirim (pemanggilan lama) — lihat `branchValue` di bawah.
-  const [internalBranchId, setInternalBranchId] = useState('all')
 
   // Penjaga aksesibilitas laci: elemen dialog, latar yang dinonaktifkan, dan
   // fokus sebelum laci dibuka (dikembalikan ke tombol hamburger saat tutup).
@@ -123,10 +102,6 @@ export function SuperadminShell({
   const contentRef = useRef<HTMLDivElement>(null)
   const restoreFocusRef = useRef<HTMLElement | null>(null)
 
-  const locations = allLocations ?? []
-  // Label kantor pusat dinamis dari daftar lokasi (BE Kalbar);
-  // fallback Pontianak saat daftar belum terisi (render awal / tanpa props).
-  const pusatCity = locations.find((location) => location.type === 'pusat')?.city ?? 'Pontianak'
   const displayName = user !== null ? user.name : 'Pengguna'
   const closeDrawer = (): void => setDrawerOpen(false)
 
@@ -206,14 +181,6 @@ export function SuperadminShell({
     }
   }, [drawerOpen])
 
-  const branchValue = branchId ?? internalBranchId
-
-  const handleBranchChange = (event: ChangeEvent<HTMLSelectElement>): void => {
-    const next = event.target.value
-    setInternalBranchId(next)
-    onBranchChange?.(next)
-  }
-
   const handleSignOut = async (): Promise<void> => {
     const role = user !== null ? user.role : null
     await signOut()
@@ -262,51 +229,60 @@ export function SuperadminShell({
     { href: '/security', label: NAV_LABELS.security.mobile, icon: <Shield aria-hidden="true" className="size-5 shrink-0" /> },
   ]
 
-  const branchOptions = locations.map((location) => (
-    <option key={location.id} value={location.id}>{location.name}</option>
-  ))
-
   const logoMark = (
-    <span aria-hidden="true" className={LOGO_CLASS}>
-      THC
+    <span className={LOGO_CLASS}>
+      <Image src="/thcw.png" alt="THC" width={500} height={235} className="h-10 w-auto" />
     </span>
   )
 
   const sidebarHeader = (
     // `pr-16 lg:pr-5`: pada laci slide-over (< lg) ruang kanan disisakan untuk
-    // tombol X agar tidak menimpa judul; di sidebar desktop kembali sempit.
-    <div className="flex items-center gap-3 border-b border-sidebar-dark-active py-4 pl-5 pr-16 lg:pr-5">
+    // tombol X agar tidak menimpa logo. `lg:h-topbar` + `lg:items-center`
+    // menjaga tinggi pita sidebar = tinggi navbar (64px), dengan logo 40px
+    // di tengahnya. Identitas teks ("THC VMS PUSAT" / "Kantor Pusat ...")
+    // DIHAPUS.
+    <div className="flex flex-col border-b border-sidebar-dark-active py-4 pl-5 pr-16 lg:h-topbar lg:shrink-0 lg:flex-row lg:items-center lg:py-0 lg:pr-5">
       {logoMark}
-      <div className="min-w-0">
-        <p className="truncate text-sm font-bold text-brand-contrast">THC VMS PUSAT</p>
-        <p className="truncate text-badge text-ink-muted">Kantor Pusat {pusatCity}</p>
-      </div>
     </div>
   )
 
   const sidebarFooter = (
     <div className="border-t border-sidebar-dark-active px-5 py-4">
-      <Badge tone="info" className="gap-1">
+      {/* Konteks kantor — MATA SUBORDINAT: baris kecil redup yang menempel
+          rapat di atas blok akun (bukan lencana penuh terpisah), supaya kaki
+          sidebar terbaca sebagai SATU area akun, bukan tumpukan elemen
+          yang saling lepas. Permukaan gelap: `text-brand-contrast/60`
+          (6.1:1 di atas #09090b) — `text-ink-muted` hanya 4.12:1 di sini. */}
+      <p className="flex items-center gap-1.5 text-badge font-semibold text-brand-contrast/60">
         <Lock className="size-3 shrink-0" aria-hidden="true" />
-        KANTOR PUSAT
-      </Badge>
+        <span className="min-w-0 truncate" title="Kantor Pusat">Kantor Pusat</span>
+      </p>
       {status === 'loading' ? (
-        <div className="mt-3 flex items-center gap-2 text-label text-ink-muted">
+        <div className="mt-3 flex items-center gap-2 text-label text-brand-contrast/60">
           <Spinner size="sm" />
           Memuat…
         </div>
       ) : (
-        <div className="mt-3">
+        <div className="mt-2">
           {/* Pemicu menu akun — SATU per breakpoint: footer ini dipakai
               bersama `aside` desktop dan laci drawer, jadi menu akun langsung
               berlaku di keduanya; logout pindah ke dalam panel
-              (`onLogout` = `handleSignOut`). */}
+              (`onLogout` = `handleSignOut).
+              `roleSlot` menaruh lencana peran DI DALAM kolom nama
+              ProfileMenu, jadi lencana berdiri sejajar dengan nama dan tak
+              pernah melayang di baris sendiri. */}
           <div className={PROFILE_MENU_DARK_CLASS}>
-            <ProfileMenu user={{ name: displayName }} onLogout={handleSignOut} />
+            <ProfileMenu
+              user={{ name: displayName, role: 'SUPERADMIN' }}
+              onLogout={handleSignOut}
+              alwaysShowName
+              roleSlot={
+                <Badge tone="danger" className="text-badge font-semibold">
+                  SUPERADMIN
+                </Badge>
+              }
+            />
           </div>
-          <Badge tone="danger" className="mt-1.5 ml-2">
-            SUPERADMIN
-          </Badge>
         </div>
       )}
     </div>
@@ -322,14 +298,6 @@ export function SuperadminShell({
       </div>
       {sidebarFooter}
     </>
-  )
-
-  /** Switcher cabang interaktif — satu render, dua ukuran (desktop & mobile). */
-  const renderBranchSelect = (className: string) => (
-    <select value={branchValue} onChange={handleBranchChange} aria-label="Pilih cabang atau POP" className={className}>
-      <option value="all">Semua Cabang / POP</option>
-      {branchOptions}
-    </select>
   )
 
   return (
@@ -354,11 +322,9 @@ export function SuperadminShell({
             hanya punya SATU pemicu akun — Bell tetap koeksisten tanpa tumpang
             tindih (sidebar 260px, topbar mulai sesudahnya). */}
         <header className="sticky top-0 z-30 hidden h-topbar items-center gap-4 border-b border-border-light bg-surface px-6 lg:flex">
-          {/* Slot 1 — identitas/konteks: switcher cabang lintas pusat.
-              Ditiadakan bila halaman mengirim `hideBranchSwitcher`; Slot 2/3
-              di kanan tidak terpengaruh karena `ml-auto` miliknya sendiri. */}
-          {hideBranchSwitcher ? null : renderBranchSelect(SELECT_CLASS)}
-          {/* Slot 2 — aksi cepat: kosong (superadmin tanpa pintas aksi topbar). */}
+          {/* Slot 1 — aksi cepat: kosong (superadmin tanpa pintas aksi topbar).
+              Filter cabang/fasilitas sengaja TIDAK di sini — halaman pemilik
+              merendernya sendiri di filter bar agar tak ada kontrol ganda. */}
           <div className="ml-auto flex items-center gap-3">
             {/* Slot 3 — notifikasi: dropdown feed (bukan lompat ke /approvals).
                 Badge lonceng bersumber dari `unread_count` notifikasi sendiri;
@@ -368,28 +334,28 @@ export function SuperadminShell({
         </header>
 
         {/* Topbar mobile / tablet (< 1024px) */}
-        <header className="sticky top-0 z-30 flex h-topbar items-center gap-2 border-b border-border-light bg-surface px-4 lg:hidden">
-          {/* Tombol hamburger di urutan PERTAMA (paling kiri, sebelum logo)
-              agar searah dengan laci drawer yang meluncur dari kiri. */}
-          <Button
-            variant="ghost"
-            size="sm"
+        <header className="sticky top-0 z-30 flex h-bar-mobile items-center gap-2 border-b border-border-light bg-surface px-3 lg:hidden">
+          {/* Tombol hamburger di urutan PERTAMA (paling kiri) agar searah
+              dengan laci drawer yang meluncur dari kiri. Elemen polos 44px:
+              atom `Button` membawa `px-4` yang tak bisa dipatah tanpa
+              bentrok urutan utilitas padding Tailwind. */}
+          <button
+            type="button"
             aria-label="Buka menu navigasi"
             aria-expanded={drawerOpen}
-            className="min-h-touch shrink-0"
+            className="flex size-11 shrink-0 items-center justify-center rounded-control text-ink-secondary hover:bg-neutral-bg"
             onClick={() => setDrawerOpen(true)}
           >
             <Menu className="size-5" aria-hidden="true" />
-          </Button>
-          {logoMark}
-          <span className="truncate text-sm font-bold text-ink">THC VMS PUSAT</span>
-          {/* `ml-auto` tetap di sini: mendorong sisa konten (switcher cabang)
-              ke tepi kanan setelah tombol menu dipindah ke depan. Bila
-              switcher disembunyikan, `ml-auto` ikut hilang — tidak ada celah
-              yang bergantung padanya: ketiga anak tersisa (tombol menu, logo,
-              judul) semuanya tanpa `ml-auto` dan memang seharusnya menempel
-              rapi ke kiri. */}
-          {hideBranchSwitcher ? null : renderBranchSelect(`${MOBILE_SELECT_CLASS} ml-auto`)}
+          </button>
+          {/* Lonceng notifikasi DI AKHIR bar (paling kanan) — aksi global
+              aplikasi. Sebelumnya hanya ada di topbar desktop
+              (`hidden ... lg:flex`) sehingga tak terjangkau sama sekali
+              di HP; sekarang ada di kedua topbar. */}
+          {/* Wordmark "THC VMS" DIHAPUS dari topbar mobile (permintaan
+              pengguna). Lonceng digeser ke kanan dengan `ml-auto` karena
+              span `flex-1` yang dulu menjadi pendorongnya sudah tidak ada. */}
+          <NotificationsMenu className="ml-auto shrink-0" />
         </header>
 
         {/* Konten utama — min-w-0 (min-inline-size:0) menjamin tidak ada scroll
@@ -418,9 +384,9 @@ export function SuperadminShell({
               pointer, jalur keyboard memakai tombol X / Escape. */}
           <div aria-hidden="true" className="absolute inset-0 bg-ink/40" onClick={closeDrawer} />
           <div className="absolute inset-y-0 left-0 flex w-sidebar-wide max-w-[85vw] flex-col rounded-card bg-sidebar-dark shadow-modal">
-            <Button variant="ghost" size="sm" aria-label="Tutup menu navigasi" className={DRAWER_CLOSE_CLASS} onClick={closeDrawer}>
+            <button type="button" aria-label="Tutup menu navigasi" className={DRAWER_CLOSE_CLASS} onClick={closeDrawer}>
               <X className="size-5" aria-hidden="true" />
-            </Button>
+            </button>
             {sidebarInner}
           </div>
         </div>

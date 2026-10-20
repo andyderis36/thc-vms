@@ -192,6 +192,13 @@ function FacilitiesScreen() {
   const { pendingCount } = usePendingApprovalCount()
 
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data])
+  const locationOptions: SelectOption[] = useMemo(
+    () => [
+      { value: 'all', label: 'Semua Cabang / POP' },
+      ...locations.map((location) => ({ value: location.id, label: location.name })),
+    ],
+    [locations],
+  )
   const rows = useMemo(
     () => applyFacilityFilters(locations, { search, branchId, type: typeFilter, status: statusFilter }),
     [locations, search, branchId, typeFilter, statusFilter],
@@ -220,8 +227,7 @@ function FacilitiesScreen() {
 
   // Reset SEMUA state filter sekaligus — termasuk debounce `search` yang belum
   // tentu sinkron dengan `searchInput`, plus sentinel filter ke default-nya,
-  // DAN `branchId` supaya dropdown switcher cabang di SuperadminShell ikut
-  // kembali ke "Semua Cabang" (state-nya terkontrol dari halaman ini).
+  // termasuk `branchId` agar select "Cabang" kembali ke "Semua Cabang / POP".
   const handleResetFilters = (): void => {
     setSearchInput('')
     setSearch('')
@@ -252,8 +258,6 @@ function FacilitiesScreen() {
       pendingCount={pendingCount}
       allLocations={locations}
       activeHref="/facilities"
-      branchId={branchId}
-      onBranchChange={setBranchId}
     >
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
@@ -271,6 +275,14 @@ function FacilitiesScreen() {
       {/* Toolbar filter irisan SCR-02 — pola users benchmark: select berlabel
           + search ber-aria-label, wrap rapi di 375/768/1280 tanpa scroll. */}
       <div className="card flex flex-wrap items-end gap-3 p-4">
+        <div className="min-w-40 flex-1 sm:w-56 sm:flex-none">
+          <Select
+            label="Cabang"
+            options={locationOptions}
+            value={branchId}
+            onChange={(event) => setBranchId(event.target.value)}
+          />
+        </div>
         <div className="min-w-40 flex-1 sm:w-48 sm:flex-none">
           <Select
             label="Tipe"
@@ -295,7 +307,7 @@ function FacilitiesScreen() {
             onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
-        {/* Anak TERAKHIR toolbar: reset semua filter (termasuk switcher cabang). */}
+        {/* Anak TERAKHIR toolbar: reset semua filter (termasuk filter Cabang). */}
         <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
       </div>
 

@@ -335,12 +335,6 @@ function UsersScreen() {
       pendingCount={pendingCount}
       allLocations={locations}
       activeHref="/users"
-      onBranchChange={setLocationId}
-      // Switcher shell mengikuti filter Cabang baris: nilainya DIKENDALIKAN
-      // halaman (satu sumber kebenaran `locationId`) dan hanya tampil untuk
-      // Peran = Koordinator Wilayah — peran lain tidak punya makna cabang.
-      branchId={locationId}
-      hideBranchSwitcher={roleFilter !== 'admin'}
     >
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
+import { KioskStatusStrip } from '@/components/layouts/KioskStatusStrip'
 import { SecurityKioskShell, type KioskTabId } from '@/components/layouts/SecurityKioskShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { Button } from '@/components/ui/Button'
@@ -384,6 +385,12 @@ function GateContent() {
     setScanResetKey((key) => key + 1)
   }
 
+  // Jumlah teknisi on-site HANYA ada di tab "Sedang di Lokasi"; tab lain
+  // menampilkan 0. Nilai ini dipakai navbar kios — kolom tengahnya
+  // (jam live WIB + counter "X Teknisi On-Site", bertumpuk di ponsel dan
+  // sebaris di md+) — agar keduanya bicara dengan angka yang sama.
+  const onSiteCount = tab === 'on-site' ? (visitsQuery.data?.total ?? 0) : 0
+
   const gateContent = (
     <div className="flex flex-col gap-4 lg:flex-row">
       <div className="min-w-0 lg:w-[42%]">
@@ -521,9 +528,20 @@ function GateContent() {
     <SecurityKioskShell
       activeTab={tab}
       onTabChange={(id) => setTab(id as KioskTabId)}
-      onSiteCount={tab === 'on-site' ? (visitsQuery.data?.total ?? 0) : undefined}
+      onSiteCount={onSiteCount}
       onNotificationSelect={handleNotificationSelect}
     >
+      {/* Pita identitas ponsel: nama pengawas + shift dengan badge lokasi
+          tepat di bawahnya. Badge lokasi tidak lagi di navbar ponsel (di
+          320px ia terpangkas), sementara jam + counter on-site hidup di
+          kolom tengah navbar. Pita ini HANYA memuat identitas petugas +
+          lokasi. Hanya di /gate: shell kios juga dipakai
+          /visits/[id] yang tidak butuh pita ini. */}
+      <KioskStatusStrip
+        className="mb-3"
+        guardName={user?.name ?? 'Petugas Jaga'}
+        locationName={user?.location_name ?? 'Lokasi Terkunci'}
+      />
       {gateContent}
     </SecurityKioskShell>
   )

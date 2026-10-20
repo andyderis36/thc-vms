@@ -36,9 +36,11 @@ export interface TabsProps {
  *                 sentuh minimum WCAG §6.5) — padding & ukuran label dikompres
  *                 di layar < 640px agar scroll mendatar minim; label tetap
  *                 boleh menggulir bila melebihi lebar layar.
- *  - `gate`     : tab selebar-sempurna (50%+ target sentuh 52px) untuk
- *                 SCR-05. Ketiga tab PASTI muat di 375px tanpa scroll
- *                 mendatar — label boleh turun dua baris, tinggi tetap 52px.
+ *  - `gate`     : tab selebar-sempurna untuk SCR-05. Ketiga tab PASTI
+ *                 muat di 375px tanpa scroll mendatar — label boleh turun
+ *                 dua baris. Tinggi 56px di ponsel (bar bawah SHELL-03,
+ *                 `min-h-bar-mobile`) dan 52px mulai md+ (sub-bar desktop
+ *                 `md:min-h-touch-lg`) supaya pita desktop tak ikut menyusut.
  *
  * Aksesibilitas (pola APG Tabs penuh — WAI-ARIA Authoring Practices):
  *  - `role="tablist"` selalu bernama lewat `ariaLabel`.
@@ -59,7 +61,7 @@ export function Tabs({
   const isGate = size === 'gate'
   // Default 44px (min-h-touch) — bukan h-10/40px — agar filter dashboard
   // memenuhi target sentuh minimum 44px.
-  const height = isGate ? 'min-h-touch-lg' : 'min-h-touch'
+  const height = isGate ? 'min-h-bar-mobile md:min-h-touch-lg' : 'min-h-touch'
   /** Ref per tab — dipakai arrow navigation untuk memindahkan fokus. */
   const tabRefs = useRef(new Map<string, HTMLButtonElement | null>())
 

@@ -30,12 +30,15 @@ export interface SidebarNavProps {
  * Nada per varian: aktif = sorotan khas shell (gelap / brand-soft) + aksen
  * brand di tepi kiri; non-aktif = teks redup milik varian. Border kiri
  * selalu 3px (transparan saat non-aktif) supaya teks tidak melompat.
+ * Varian gelap: label non-aktif memakai `text-brand-contrast/60`
+ * (#e0e7ff 60% di atas #09090b = 6.1:1, WCAG AA) — `text-ink-muted`
+ * (#71717a) hanya 4.12:1 di atas latar sidebar gelap.
  */
 const STATE_CLASSES: Record<SidebarNavVariant, { active: string; inactive: string }> = {
   dark: {
     active: 'bg-brand/10 border-brand text-brand-contrast',
     inactive:
-      'border-transparent text-ink-muted hover:bg-brand/10 hover:text-brand-contrast',
+      'border-transparent text-brand-contrast/60 hover:bg-brand/10 hover:text-brand-contrast',
   },
   light: {
     active: 'bg-brand-soft border-brand text-brand',
@@ -118,15 +121,16 @@ export interface BottomNavProps {
 
 /**
  * Navigasi bawah mobile — pasangan dari `SidebarNav` untuk shell tanpa
- * akses sidebar di layar kecil. Item aktif ditandai warna brand +
- * `aria-current="page"`, label memakai skala `text-badge`. Link memakai
+ * akses sidebar di layar kecil. Tinggi bar 56px (`h-bar-mobile`) agar
+ * seragam dengan navbar ponsel seluruh shell. Item aktif ditandai warna
+ * brand + `aria-current="page"`, label memakai skala `text-badge`. Link memakai
  * `next/link` (navigasi SPA + prefetch default) dan jumlah kolom grid
  * mengikuti `items.length` secara dinamis sehingga tidak hardcode
  * `grid-cols-4` (§6.1/§6.2 kini 4 tab; kolom tetap benar bila berubah).
  */
 export function BottomNav({ items, activeHref, className }: BottomNavProps) {
   const classes = [
-    'fixed inset-x-0 bottom-0 z-30 grid h-bottomnav border-t border-border-light bg-surface',
+    'fixed inset-x-0 bottom-0 z-30 grid h-bar-mobile border-t border-border-light bg-surface',
     className ?? '',
   ]
     .filter(Boolean)

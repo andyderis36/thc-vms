@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, LogOut } from 'lucide-react'
 
 export interface ProfileMenuUser {
@@ -14,10 +14,32 @@ export interface ProfileMenuUser {
 export interface ProfileMenuProps {
   user: ProfileMenuUser
   onLogout: () => void
+  /**
+   * Slot opsional di bawah nama pada PEMICU (mis. lencana peran).
+   * Bila diisi, slot ini menggantikan baris `user.role` bawaan pada pemicu;
+   * header panel menu tetap menampilkan `user.role` sebagai teks.
+   * Dipakai shell sidebar agar lencana peran berdiri DI DALAM kolom nama —
+   * sejajar dengan nama, bukan melayang di baris sendiri.
+   */
+  roleSlot?: ReactNode
+  /**
+   * Tampilkan nama di samping avatar pada SEMUA lebar viewport.
+   * Bawaan `false`: nama disembunyikan di bawah `sm` (pemuai topbar sempit).
+   * Sidebar 250/260px punya lebar tetap, jadi nama wajib selalu terlihat agar
+   * blok akun (avatar + nama + peran) terbaca utuh di semua breakpoint.
+   */
+  alwaysShowName?: boolean
 }
 
+/*
+ * `max-w-full`: `<button>` dihitung shrink-to-fit, jadi lebarnya ikut
+ * lebar intrinsik isinya. Nama yang `truncate` (tanpa wrap) memaksa tombol
+ * selebar teks penuh dan meluber dari sidebar sempit. Rel ini menahan
+ * tombol pada lebar induknya; kolom nama (`min-w-0`) lalu menyusut dan nama
+ * dipotong elipsis.
+ */
 const TRIGGER_CLASS =
-  'flex min-h-touch items-center gap-2 rounded-control px-2 text-left transition hover:bg-neutral-bg cursor-pointer'
+  'flex max-w-full min-h-touch items-center gap-2 rounded-control px-2 text-left transition hover:bg-neutral-bg cursor-pointer'
 
 const AVATAR_CLASS =
   'flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand text-label font-bold text-brand-contrast'
@@ -41,11 +63,13 @@ function initialsOf(name: string): string {
 
 /**
  * Dropdown profil shared untuk semua shell (SHELL-01..04).
- * Pemicu avatar + panel menu berisi item "Keluar" (tanpa link settings —
+ * Pemicu avatar + nama + panel menu berisi item "Keluar" (tanpa link settings —
  * route belum ada). Interaksi meniru pola `PurposeDropdown` (klik-luar +
  * Escape + refocus pemicu) tanpa dependensi eksternal.
+ * Baris peran pada pemicu berasal dari `roleSlot` (bila ada) agar shell
+ * sidebar bisa menyejajarkan lencana peran dengan kolom nama.
  */
-export function ProfileMenu({ user, onLogout }: ProfileMenuProps) {
+export function ProfileMenu({ user, onLogout, roleSlot, alwaysShowName = false }: ProfileMenuProps) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -65,6 +89,14 @@ export function ProfileMenu({ user, onLogout }: ProfileMenuProps) {
     }
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== 'Escape') return
+      // Escape menutup LAPISAN TERATAS: menu akun di atas laci/drawer, jadi
+      // Escape pertama menutup menu saja. Pendengar shell laci ada di
+      // `window` (fase bubble), sedangkan pendengar ini di `document` — dan
+      // `document` berada SEBELUM `window` pada jalur perambusan, sehingga
+      // `stopPropagation()` di sini mencegah laci ikut tertutup. Escape kedua
+      // (menu sudah tertutup → pendengar ini sudah dilepas) menembus ke
+      // `window` dan menutup laci seperti biasa.
+      event.stopPropagation()
       setOpen(false)
       buttonRef.current?.focus()
     }
@@ -86,6 +118,7 @@ export function ProfileMenu({ user, onLogout }: ProfileMenuProps) {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
+        title={user.name}
         onClick={() => setOpen((previous) => !previous)}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -108,11 +141,17 @@ export function ProfileMenu({ user, onLogout }: ProfileMenuProps) {
             initialsOf(user.name)
           )}
         </span>
-        <span className="hidden flex-col items-start sm:flex">
-          <span className="text-sm font-semibold text-ink">{user.name}</span>
-          {user.role ? (
-            <span className="text-xs text-ink-muted">{user.role}</span>
-          ) : null}
+        {/* `min-w-0` + `truncate`: nama panjang dipotong dengan elipsis, tidak
+            pernah mendorong chevron keluar sidebar. */}
+        <span
+          className={
+            alwaysShowName
+              ? 'flex min-w-0 flex-col items-start gap-1'
+              : 'hidden min-w-0 flex-col items-start gap-1 sm:flex'
+          }
+        >
+          <span className="max-w-full truncate text-sm font-semibold text-ink">{user.name}</span>
+          {roleSlot ?? (user.role ? <span className="text-xs text-ink-muted">{user.role}</span> : null)}
         </span>
         <ChevronDown
           aria-hidden="true"

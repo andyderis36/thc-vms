@@ -140,7 +140,9 @@ function DashboardScreen() {
   const { user } = useSession()
   const router = useRouter()
 
-  // Filter fasilitas bersatu: sentinel 'all' sama dengan switcher SuperadminShell.
+  // Filter fasilitas bersatu: sentinel 'all' berarti semua cabang/POP.
+  // DIKENDALIKAN select "Fasilitas" di filter bar bawah — satu-satunya
+  // kontrol cabang di layar ini (topbar shell tak lagi punya switcher).
   // ATURAN default diekstrak menjadi satu konstanta → dipakai useState (nilai
   // awal), handleResetFilters, DAN isFiltered, sehingga ketiganya mustahil
   // menyimpang satu sama lain. (RequireAuth hanya me-mount layar ini saat sesi
@@ -544,8 +546,8 @@ function DashboardScreen() {
           </div>
         ) : null}
         {/* Reset Filter — anak TERAKHIR bar (flex-wrap menempelkan ke ujung
-            baris); mengembalikan seluruh kontrol bar plus switcher cabang
-            SuperadminShell (terhubung lewat branchId={facilityFilter}). */}
+            baris); mengembalikan seluruh kontrol bar termasuk filter
+            "Fasilitas" di atas. */}
         <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
       </div>
 
@@ -651,8 +653,6 @@ function DashboardScreen() {
         pendingCount={pendingCount}
         allLocations={locationsQuery.data ?? []}
         activeHref="/dashboard"
-        branchId={facilityFilter}
-        onBranchChange={setFacilityFilter}
       >
         {content}
       </SuperadminShell>

@@ -10,15 +10,18 @@ import { VendorMobileShell } from '@/components/layouts/VendorMobileShell'
 import { useVisitsQuery } from '@/lib/api/hooks'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 import { RequireRole } from '@/lib/auth/guards'
+import { selectActiveQrVisit } from '@/lib/visits/active-qr-ticket'
 
 /**
- * SCR-04 entry — "Tiket QR Aktif" milik Vendor/Mitra (desain 02-design-system §6.4).
+ * SCR-04 entry — "Tiket QR Aktif" milik Vendor/Mitra (desain 02-design-system 6.4).
  *
- * Halaman resolver (bukan daftar): memilih tiket paling relevan — sedang
- * `visiting`, lalu `approved`, lalu pengajuan terbaru — dan menggantikannya
- * ke `/visits/[id]` (kartu QR above-the-fold, AGENTS §6.5). Tanpa tiket sama
- * sekali → empty state jujur + ajakan mengajukan. Hanya peran `vendor`; peran
- * lain dipulangkan ke home-nya oleh `RequireRole`.
+ * Halaman resolver (bukan daftar): memilih tiket yang BENAR-BENAR menampilkan
+ * kartu QR — sedang `visiting`, lalu `approved` — dan menggantikannya ke
+ * `/visits/[id]` (kartu QR above-the-fold, AGENTS 6.5). Kunjungan yang belum
+ * disetujui TIDAK pernah dijadikan tujuan: tab "Tiket QR" akan berakhir
+ * menyala sebagai "Kunjungan Saya" di halaman detail. Tanpa tiket aktif →
+ * empty state jujur + ajakan mengajukan. Hanya peran `vendor`; peran lain
+ * dipulangkan ke home-nya oleh `RequireRole`.
  */
 export default function QrTicketPage() {
   return (
@@ -35,14 +38,7 @@ function QrResolver() {
   const visitsQuery = useVisitsQuery({ limit: 50 })
   const items = useMemo(() => visitsQuery.data?.items ?? [], [visitsQuery.data])
 
-  const active = useMemo(
-    () =>
-      items.find((visit) => visit.status === 'visiting') ??
-      items.find((visit) => visit.status === 'approved') ??
-      items[0] ??
-      null,
-    [items],
-  )
+  const active = useMemo(() => selectActiveQrVisit(items), [items])
 
   useEffect(() => {
     if (active !== null) {

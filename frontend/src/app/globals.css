@@ -97,6 +97,7 @@
   --spacing-bottomnav: 64px; /* SHELL-04 bottom nav */
   --spacing-touch: 44px; /* target sentuh minimum */
   --spacing-touch-lg: 52px; /* target sentuh aksi gate */
+  --spacing-bar-mobile: 56px; /* navbar & bottom bar ponsel (semua shell) - 56px = tinggi app bar standar, memberi ruang untuk logo 40px + kontrol sentuh 44px tanpa sempit */
 }
 
 /* =============================================================================

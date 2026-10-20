@@ -9,8 +9,8 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Tabs, type TabItem } from '@/components/ui/Tabs'
 
 /**
- * SCR-05 — Panel Pemindai Triple-Mode (kamera langsung, gambar galeri/chat,
- * input Visit ID manual).
+ * SCR-05 — Panel Pemindai Dua-Tab: kamera langsung (dengan tombol unggah
+ * gambar tepat di bawah bingkai) dan input Visit ID manual.
  *
  * Aturan html5-qrcode (v2.3.8, mebjas/html5-qrcode):
  * - Pustaka menyentuh `window`/`navigator.mediaDevices` saat konstruksi, jadi
@@ -28,18 +28,17 @@ const SCANNER_VIEW_ID = 'thc-gate-scanner-view'
 /** ID tabpanel mode — dipasangkan dgn `panelId` Tabs (asosiasi aria APG). */
 const SCANNER_PANEL_ID = 'thc-gate-scanner-mode-panel'
 
-type ScanMode = 'camera' | 'image' | 'manual'
+type ScanMode = 'camera' | 'manual'
 /** Arah kamera — tombol balik (SCR-05:130) men-toggle di antara keduanya. */
 type FacingMode = 'environment' | 'user'
 
 const MODE_TABS: TabItem[] = [
-  { id: 'camera', label: 'Kamera Langsung' },
-  { id: 'image', label: 'Galeri / Chat' },
+  { id: 'camera', label: 'Kamera' },
   { id: 'manual', label: 'Input Manual' },
 ]
 
 function isScanMode(value: string): value is ScanMode {
-  return value === 'camera' || value === 'image' || value === 'manual'
+  return value === 'camera' || value === 'manual'
 }
 
 /** Status proses pindai yang dimiliki layar gerbang, bukan panel ini. */
@@ -147,6 +146,14 @@ export function ScannerPanel({
   const [imageBusy, setImageBusy] = useState(false)
   const [imageError, setImageError] = useState<string | null>(null)
   const [facing, setFacing] = useState<FacingMode>('environment')
+  /**
+   * Penanda restart kamera: dinaikkan setiap selesai memindai gambar unggahan.
+   * html5-qrcode menuliskan pratinjau gambar ke elemen viewfinder yang SAMA
+   * dengan video kamera dan `clear()` mengosongkan seluruh isinya - tanpa
+   * restart, bingkai tetap gelap walau `cameraReady` masih true. Perubahan
+   * nilai ini menjalankan ulang effect kamera (pola sama dengan `facing`).
+   */
+  const [cameraRestartKey, setCameraRestartKey] = useState(0)
 
   /** Kunci anti-duplikat: `onSuccess` html5-qrcode membara tiap frame. */
   const lockRef = useRef(false)
@@ -283,7 +290,7 @@ export function ScannerPanel({
         } catch {
           if (!cancelled) {
             setCameraError(
-              'Kamera tidak dapat diakses. Izinkan akses kamera atau gunakan mode Galeri / Input Manual.'
+              'Kamera tidak dapat diakses. Izinkan akses kamera, unggah gambar QR, atau gunakan Input Manual.'
             )
           }
         }
@@ -300,10 +307,11 @@ export function ScannerPanel({
       cancelled = true
       if (startFinished) scheduleTeardown()
     }
-  }, [mode, facing, handleCameraDecode])
+  }, [mode, facing, cameraRestartKey, handleCameraDecode])
 
   // ---------------------------------------------------------------------------
-  // Mode 2 — pindai dari gambar galeri / tangkapan layar chat WhatsApp
+  // Mode 2 - pindai dari gambar galeri / tangkapan layar chat WhatsApp
+  // (dipicu tombol unggah di bawah bingkai kamera, bukan tab tersendiri)
   // ---------------------------------------------------------------------------
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>): void => {
     const input = event.target
@@ -350,6 +358,11 @@ export function ScannerPanel({
       } catch {
         setImageError('Modul pemindai gagal dimuat. Muat ulang halaman atau gunakan mode lain.')
       } finally {
+        // Kamera sudah dihentikan dan/atau DOM viewfinder dikosongkan oleh
+        // `scanFile`/`clear` - naikkan penanda agar effect kamera membangun
+        // ulang viewfinder. Tanpa ini bingkai tetap gelap (`cameraReady`
+        // masih true) sampai halaman dimuat ulang atau kamera dibalik.
+        setCameraRestartKey((key) => key + 1)
         setImageBusy(false)
       }
     })()
@@ -401,9 +414,9 @@ export function ScannerPanel({
         <div className="flex items-start gap-2">
           <ScanLine aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-brand" />
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-ink">Pindai Pas Masuk</h2>
+            <h2 className="text-base font-semibold text-ink">Scan Barcode</h2>
             <p className="text-label text-ink-muted">
-              Triple-mode: kamera langsung, gambar galeri, atau Visit ID manual.
+              Pindai QR lewat kamera, unggah gambar, atau ketik Visit ID manual.
             </p>
           </div>
         </div>
@@ -415,6 +428,7 @@ export function ScannerPanel({
           size="gate"
           ariaLabel="Mode pemindaian"
           panelId={SCANNER_PANEL_ID}
+          className="[&_[role=tab]]:min-h-[42px]"
         />
 
         <div
@@ -450,36 +464,55 @@ export function ScannerPanel({
                 Rasio berubah per breakpoint: persegi di ponsel (patroli) &
                 desktop, pita 16:10 di tablet 768px agar tab + tombol tetap
                 terlihat tanpa scroll (design-system §5.1).
+                Video dipaksa MENGISI wadah lewat `object-cover`: umpan
+                kamera 16:9 di wadah persegi akan letterbox, dan
+                html5-qrcode lalu meregangkan kotak pindai secara vertikal
+                sehingga border sudutnya jadi persegi panjang (bukan 1:1).
+                Dengan video terisi 1:1, kotak pindai = 70% sisi = persegi.
               */}
               <div className="relative">
                 <div
                   id={SCANNER_VIEW_ID}
-                  className="aspect-square w-full overflow-hidden rounded-control bg-sidebar-dark md:aspect-[16/10] lg:aspect-square"
+                  className="aspect-square w-full overflow-hidden rounded-control bg-sidebar-dark [&_video]:h-full [&_video]:object-cover md:aspect-[16/10] lg:aspect-square"
                 />
 
                 {/*
-                  Tombol balik kamera (SCR-05) — diselipkan sebagai saudara
-                  viewfinder (bukan anaknya) karena html5-qrcode menguasai
-                  seluruh anak DOM wadah SCANNER_VIEW_ID.
+                  Tombol balik kamera (SCR-05) — di pojok TENGAH BAWAH
+                  viewfinder, mengambang di atas video. Posisinya dipasang di
+                  WRAPPER `div`, bukan di Button: kelas `relative` bawaan
+                  Button mengalahkan `absolute` (urutan utility position
+                  Tailwind: static, fixed, absolute, relative, sticky)
+                  sehingga `absolute` di Button diam dan tombolnya tak pernah
+                  mengambang. `left-1/2 -translate-x-1/2` memusatkannya.
+                  Warna: `text-brand-contrast` + `border-brand-contrast/60`
+                  menimpa `text-brand`/`border-brand` bawaan varian `secondary`
+                  (urutan utilitas warna Tailwind mengikuti urutan key @theme).
+                  `hover:bg-brand-contrast/15!` WAJIB memakai modifier `!`:
+                  `hover:bg-brand-soft` bawaan `secondary` muncul LEBIH AWAL
+                  di CSS sehingga tanpa `!` utilitas kita kalah — dan
+                  `--color-brand-soft` = `--color-brand-contrast` = #e0e7ff,
+                  artinya ikon putih lenyap saat hover (bg jadi putih solid).
                 */}
                 {mode === 'camera' &&
                 cameraReady &&
                 cameraError === null &&
                 !showFeedback ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    aria-label={
-                      facing === 'environment'
-                        ? 'Balik ke kamera depan'
-                        : 'Balik ke kamera belakang'
-                    }
-                    title="Balik kamera"
-                    className="absolute right-2 top-2 z-20 min-h-touch px-3"
-                    onClick={flipCamera}
-                  >
-                    <SwitchCamera aria-hidden="true" className="size-5 shrink-0" />
-                  </Button>
+                  <div className="absolute bottom-2 left-1/2 z-20 -translate-x-1/2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      aria-label={
+                        facing === 'environment'
+                          ? 'Balik ke kamera depan'
+                          : 'Balik ke kamera belakang'
+                      }
+                      title="Balik kamera"
+                      className="border-brand-contrast/60 text-brand-contrast hover:bg-brand-contrast/15! min-h-touch px-3"
+                      onClick={flipCamera}
+                    >
+                      <SwitchCamera aria-hidden="true" className="size-5 shrink-0" />
+                    </Button>
+                  </div>
                 ) : null}
 
                 {showFeedback ? (
@@ -498,22 +531,10 @@ export function ScannerPanel({
                     <Spinner size="md" label="Mengaktifkan kamera…" />
                     <p className="text-label">Mengaktifkan kamera…</p>
                   </div>
-                ) : mode === 'image' && !imageBusy ? (
-                  <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
-                    <p className="text-label text-ink-muted">
-                      Pratinjau gambar QR akan tampil di sini.
-                    </p>
-                  </div>
                 ) : null}
               </div>
 
               {mode === 'camera' && !showFeedback ? (
-                <p className="text-label text-ink-secondary">
-                  Arahkan kamera ke QR Code pas masuk teknisi. Pemindaian aktif otomatis.
-                </p>
-              ) : null}
-
-              {mode === 'image' && !showFeedback ? (
                 <div className="flex flex-col gap-2">
                   <input
                     ref={fileInputRef}
@@ -533,11 +554,8 @@ export function ScannerPanel({
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload aria-hidden="true" className="size-4 shrink-0" />
-                    Pilih Gambar dari Galeri / Chat
+                    Unggah QR Code
                   </Button>
-                  <p className="text-label text-ink-secondary">
-                    Untuk QR yang dikirim teknisi lewat WhatsApp, unduh gambarnya lalu pilih di sini.
-                  </p>
                   {imageError !== null ? (
                     <p
                       role="alert"

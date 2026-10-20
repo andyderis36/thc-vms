@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { getLoginRedirect, getRoleLabel } from '@/lib/auth/capabilities'
-import { useSession } from '@/lib/auth/session'
+import { SessionNetworkError, useSession } from '@/lib/auth/session'
 
 /**
  * SCR-01 — Layar Masuk terpadu untuk keempat peran RBAC.
@@ -167,6 +167,12 @@ function LoginScreen() {
       const signedIn = await signIn(values.email, values.password)
       router.replace(getLoginRedirect(signedIn.role))
     } catch (err: unknown) {
+      // Permintaan tidak pernah sampai ke server -> pesan koneksi, BUKAN
+      // klaim kesalahan server.
+      if (err instanceof SessionNetworkError) {
+        setError('password', { type: 'network', message: err.message })
+        return
+      }
       // 401 membalas "Kredensial tidak valid" (backend & mock) -> error inline.
       const message =
         err instanceof Error && err.message !== ''
@@ -257,7 +263,11 @@ function LoginScreen() {
             noValidate
             className="flex flex-col gap-3 max-[399px]:gap-2 min-[380px]:gap-3 min-[400px]:gap-4"
           >
+            {/* Registrasi RHF disebar DULU, lalu props semantik eksplisit:
+                field ini wajib tetap textbox email biasa (tanpa list /
+                role=combobox / aria-haspopup yang dibaca sebagai combobox). */}
             <Input
+              {...register('email')}
               label="Email"
               type="email"
               inputMode="email"
@@ -266,7 +276,6 @@ function LoginScreen() {
               fieldSize="gate"
               required
               error={errors.email?.message}
-              {...register('email')}
             />
             <Input
               label="Kata Sandi"
@@ -293,7 +302,7 @@ function LoginScreen() {
                   className="h-5 w-5 shrink-0 text-brand transition-transform duration-200 group-open:rotate-180"
                 />
               </summary>
-              <div className="flex flex-col gap-2 bg-surface px-3 pb-3">
+              <div className="hidden w-full min-w-0 flex-col gap-2 bg-surface px-3 pb-3 group-open:flex">
                 {DEMO_GROUPS.map((group) => (
                   <Select
                     key={group.role}

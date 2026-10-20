@@ -357,6 +357,14 @@ describe('NotificationsMenu', () => {
     expect(screen.getByText('Menampilkan 1 dari 126 notifikasi')).toBeInTheDocument()
   })
 
+  it('memakai tinta kontras pada permukaan brand saat nada "brand" dipakai', async () => {
+    listNotifications.mockResolvedValue(result([]))
+    renderMenu({ tone: 'brand' })
+
+    const trigger = await screen.findByRole('button', { name: 'Notifikasi' })
+    expect(trigger.className).toContain('text-brand-contrast')
+  })
+
   it('menutup panel saat Escape ditekan', async () => {
     listNotifications.mockResolvedValue(result([REQUESTED]))
     renderMenu()

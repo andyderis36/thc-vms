@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import {
   Clock,
@@ -13,7 +14,7 @@ import {
   Shield,
   X,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
 import { NotificationsMenu } from '@/components/ui/NotificationsMenu'
 import { ProfileMenu } from '@/components/ui/ProfileMenu'
 import { Spinner } from '@/components/ui/Spinner'
@@ -33,11 +34,15 @@ export interface AdminBranchShellProps {
 
 /**
  * Tombol tutup laci: diposisikan absolut di atas header panel slide-over (varian terang).
- * `min-h-touch` menaikkan target sentuh 36px → 44px (design system §5.2.1);
- * lebar bawaan `Button` (px-4 + ikon 20px = 52px) sudah ≥ 44px.
+ * Ukuran sisi WAJIB eksplisit (`size-11` = 44×44, target sentuh §5.2.1): sebagai anak
+ * langsung `flex flex-col`, `align-self: stretch` bawaan meregangkan LEBAR tombol
+ * hingga selebar panel (250px), sehingga `right-2` mendorong tepi kirinya keluar layar
+ * (terukur x:-8). Elemen `<button>` polos dipakai agar padding bawaan atom `Button`
+ * (`px-4`) — utilitas numerik yang selalu menang atas padding lain di kelas yang sama —
+ * tidak ikut terbawa.
  */
 const DRAWER_CLOSE_CLASS =
-  'absolute right-2 top-4 z-10 min-h-touch text-ink-muted hover:bg-neutral-bg hover:text-ink'
+  'absolute right-2 top-2 z-10 flex size-11 items-center justify-center rounded-control text-ink-muted hover:bg-brand/15 hover:text-brand-contrast'
 
 /**
  * Kandidat fokus keyboard di dalam laci — dipakai untuk penjaga fokus (Tab
@@ -70,7 +75,6 @@ export function AdminBranchShell({
 
   // Fallback netral bila `location_name` null — tidak pernah menghasilkan kontrol editabel.
   const locationName = user !== null && user.location_name !== null ? user.location_name : null
-  const branchLabel = locationName !== null ? `Cabang ${locationName}` : 'Cabang'
   const displayName = user !== null ? user.name : 'Pengguna'
   const roleLabel = user !== null ? getRoleLabel(user.role) : undefined
   const closeDrawer = (): void => setDrawerOpen(false)
@@ -192,38 +196,41 @@ export function AdminBranchShell({
     { href: '/security', label: NAV_LABELS.security.mobile, icon: <Shield aria-hidden="true" className="size-5 shrink-0" /> },
   ]
 
+  // Aset brand asli `public/thcw.png` adalah wordmark PUTIH transparan. Header
+  // sidebar/laci berlatar `bg-sidebar-dark` (#09090b) jadi gambar berdiri
+  // sendiri tanpa alas chip. Logo dirender `h-10 w-auto`: tinggi TETAP 40px
+  // agar TIDAK PERNAH melebihi tinggi navbar (64px desktop / 56px ponsel).
   const logoMark = (
-    <span
-      aria-hidden="true"
-      className="flex size-9 shrink-0 items-center justify-center rounded-control bg-brand text-label font-bold text-brand-contrast"
-    >
-      THC
+    <span className="flex items-center">
+      <Image src="/thcw.png" alt="THC" width={500} height={235} className="h-10 w-auto" />
     </span>
   )
 
   const sidebarHeader = (
     // `pr-16 lg:pr-5`: pada laci slide-over (< lg) ruang kanan disisakan untuk
-    // tombol X agar tidak menimpa judul cabang; di sidebar desktop kembali sempit.
-    <div className="flex items-center gap-3 border-b border-border-light py-4 pl-5 pr-16 lg:pr-5">
+    // tombol X agar tidak menimpa logo; di sidebar desktop kembali sempit.
+    // `lg:h-topbar` + `lg:items-center` menjaga tinggi pita sidebar = tinggi
+    // navbar (64px), dengan logo 40px di tengahnya. Identitas teks ("THC VMS"
+    // + "Cabang ...") DIHAPUS karena selalu tampil di topbar (desktop & mobile).
+    <div className="flex flex-col border-b border-sidebar-dark-active bg-sidebar-dark py-4 pl-5 pr-16 lg:h-topbar lg:shrink-0 lg:flex-row lg:items-center lg:py-0 lg:pr-5">
       {logoMark}
-      <div className="min-w-0">
-        <p className="truncate text-sm font-bold text-ink">THC VMS</p>
-        <p className="flex items-center gap-1 truncate text-badge text-ink-secondary">
-          <MapPin className="size-3 shrink-0" aria-hidden="true" />
-          {branchLabel}
-        </p>
-      </div>
     </div>
   )
 
   const sidebarFooter = (
     <div className="border-t border-border-light px-5 py-4">
-      {/* Penugasan terkunci: ikon + TEKS selalu berpasangan (tanpa emoji sebagai satu-satunya penanda). */}
-      <p className="flex items-start gap-1.5 text-badge font-semibold text-ink-secondary">
+      {/* Penugasan terkunci: ikon + TEKS selalu berpasangan (tanpa emoji sebagai
+          satu-satunya penanda). Satu baris kecil redup di atas blok akun —
+          konteks tak boleh bersaing dengan profil. Teks panjang dipotong
+          `truncate` dan disimpan utuh di `title` supaya tak pernah meluber
+          dari sidebar 250px. Sifat hanya-baca dinyatakan lewat ikon gembok
+          dan awalan "Penugasan:", tanpa anotasi akses tambahan yang dicetak. */}
+      <p
+        className="flex items-center gap-1.5 text-badge font-semibold text-ink-muted"
+        title={`Penugasan: ${locationName ?? 'Cabang'}`}
+      >
         <Lock className="mt-px size-3 shrink-0" aria-hidden="true" />
-        <span>
-          Penugasan: {locationName ?? 'Cabang'} (Read-Only)
-        </span>
+        <span className="min-w-0 truncate">Penugasan: {locationName ?? 'Cabang'}</span>
       </p>
       {status === 'loading' ? (
         <div className="mt-3 flex items-center gap-2 text-label text-ink-muted">
@@ -238,9 +245,22 @@ export function AdminBranchShell({
          * Varian `[&_[role=menu]]` membalik panel `top-full` bawaan ProfileMenu
          * menjadi terbuka ke atas: pemicu menempel di tepi bawah viewport,
          * sehingga panel ke bawah akan terpotong layar.
+         * `roleSlot` menaruh lencana peran DI DALAM kolom nama ProfileMenu,
+         * jadi lencana berdiri sejajar dengan nama, bukan baris terpisah.
          */
-        <div className="mt-3 [&_[role=menu]]:top-auto [&_[role=menu]]:bottom-full [&_[role=menu]]:mt-0 [&_[role=menu]]:mb-1">
-          <ProfileMenu user={{ name: displayName, role: roleLabel }} onLogout={handleSignOut} />
+        <div className="mt-2 [&_[role=menu]]:top-auto [&_[role=menu]]:bottom-full [&_[role=menu]]:mt-0 [&_[role=menu]]:mb-1">
+          <ProfileMenu
+            user={{ name: displayName, role: roleLabel }}
+            onLogout={handleSignOut}
+            alwaysShowName
+            roleSlot={
+              roleLabel !== undefined ? (
+                <Badge tone="info" className="text-badge font-semibold">
+                  {roleLabel}
+                </Badge>
+              ) : undefined
+            }
+          />
         </div>
       )}
     </div>
@@ -286,7 +306,9 @@ export function AdminBranchShell({
             className="inline-flex max-w-72 cursor-not-allowed items-center gap-1.5 rounded-control border border-border-light bg-neutral-bg px-3 py-2 text-label font-semibold text-ink-secondary"
           >
             <MapPin className="size-4 shrink-0" aria-hidden="true" />
-            <span className="truncate">{locationName !== null ? locationName : 'Cabang'}</span>
+            <span className="truncate" title={locationName !== null ? locationName : 'Cabang'}>
+              {locationName !== null ? locationName : 'Cabang'}
+            </span>
             <Lock className="size-3 shrink-0" aria-hidden="true" />
             <span className="sr-only">(terkunci, tidak dapat diubah)</span>
           </span>
@@ -302,34 +324,40 @@ export function AdminBranchShell({
         </header>
 
         {/* Topbar mobile / tablet (< 1024px) */}
-        <header className="sticky top-0 z-30 flex h-topbar items-center gap-3 border-b border-border-light bg-surface px-4 lg:hidden">
-          {/* Tombol hamburger di urutan PERTAMA (paling kiri, sebelum logo)
-              agar searah dengan laci drawer yang meluncur dari kiri. */}
-          <Button
-            variant="ghost"
-            size="sm"
+        <header className="sticky top-0 z-30 flex h-bar-mobile items-center gap-2 border-b border-border-light bg-surface px-3 lg:hidden">
+          {/* Tombol hamburger di urutan PERTAMA (paling kiri)
+              agar searah dengan laci drawer yang meluncur dari kiri. Dipakai
+              `<button>` polos + `size-11` (44×44) agar target sentuh penuh dan
+              padding atom `Button` (`px-4`) tidak menambah lebar. */}
+          <button
+            type="button"
             aria-label="Buka menu navigasi"
             aria-expanded={drawerOpen}
-            className="min-h-touch shrink-0"
+            className="flex size-11 shrink-0 items-center justify-center rounded-control text-ink-secondary hover:bg-neutral-bg"
             onClick={() => setDrawerOpen(true)}
           >
             <Menu className="size-5" aria-hidden="true" />
-          </Button>
-          {logoMark}
-          <span className="truncate text-sm font-bold text-ink">THC VMS</span>
+          </button>
           {/* Chip cabang terkunci di mobile — tetap statis, tidak interaktif.
-              `ml-auto` mendorongnya ke tepi kanan (peran lama span avatar).
+              Berbatas `max-w-40` + `shrink-0` agar nama cabang panjang TIDAK memakan
+              bar (leluhur masalah yang sama dengan <select> bawaan); sisa ruang
+              diserap `ml-auto` pada chip sehingga lonceng terdorong ke tepi kanan.
               Avatar header sengaja TIDAK dirender: satu-satunya avatar di
-              breakpoint mobile ada di footer laci (ProfileMenu) — tanpa ini
-              avatar dobel saat laci terbuka. */}
+              breakpoint mobile ada di footer laci (ProfileMenu). */}
           <span
             aria-disabled="true"
-            className="ml-auto inline-flex min-w-0 items-center gap-1 rounded-badge bg-brand-soft px-2.5 py-1 text-badge font-bold text-brand"
+            className="ml-auto inline-flex min-w-0 max-w-40 shrink-0 items-center gap-1 rounded-badge bg-brand-soft px-2.5 py-1 text-badge font-bold text-brand"
           >
             <MapPin className="size-3 shrink-0" aria-hidden="true" />
-            <span className="truncate">{locationName !== null ? locationName : 'Cabang'}</span>
+            <span className="truncate" title={locationName !== null ? locationName : 'Cabang'}>
+              {locationName !== null ? locationName : 'Cabang'}
+            </span>
             <span className="sr-only">(terkunci)</span>
           </span>
+          {/* Lonceng notifikasi DI AKHIR bar (paling kanan) — aksi global
+              aplikasi; tersedia di mobile DAN desktop agar fitur ini tidak
+              hanya terjangkau saat layar lebar. */}
+          <NotificationsMenu className="shrink-0" />
         </header>
 
         {/* Konten utama — min-w-0 (min-inline-size:0) menjamin tidak ada scroll
@@ -355,9 +383,9 @@ export function AdminBranchShell({
               pointer, jalur keyboard memakai tombol X / Escape. */}
           <div aria-hidden="true" className="absolute inset-0 bg-ink/40" onClick={closeDrawer} />
           <div className="absolute inset-y-0 left-0 flex w-sidebar max-w-[85vw] flex-col border-r border-border-light bg-surface shadow-modal">
-            <Button variant="ghost" size="sm" aria-label="Tutup menu navigasi" className={DRAWER_CLOSE_CLASS} onClick={closeDrawer}>
+            <button type="button" aria-label="Tutup menu navigasi" className={DRAWER_CLOSE_CLASS} onClick={closeDrawer}>
               <X className="size-5" aria-hidden="true" />
-            </Button>
+            </button>
             {sidebarInner}
           </div>
         </div>

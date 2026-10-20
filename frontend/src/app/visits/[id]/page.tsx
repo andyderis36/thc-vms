@@ -3,6 +3,7 @@
 import { use, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import {
+  ArrowLeft,
   CalendarClock,
   CheckCircle2,
   FileText,
@@ -37,10 +38,15 @@ import { VisitFilePhoto } from '@/features/visits/detail/VisitFilePhoto'
 import { ApiError } from '@/lib/api/fetcher'
 import { useDeleteVisitMutation, useVisitQuery } from '@/lib/api/hooks'
 import type { Role, VisitDetail, VisitStatus } from '@/lib/api/types'
-import { can } from '@/lib/auth/capabilities'
+import { can, getLoginRedirect } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
-import { isApprovableStatus, isRejectableStatus } from '@/lib/visits/visit-status'
+import {
+  isApprovableStatus,
+  isCancelableStatus,
+  isRejectableStatus,
+  isReschedulableStatus,
+} from '@/lib/visits/visit-status'
 import { visitVendorUser } from '@/lib/visits/vendor-user'
 import { toast } from 'sonner'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
@@ -58,14 +64,6 @@ interface VisitDetailPageProps {
    */
   params: Promise<{ id: string }>
 }
-
-/** Kunjungan yang statusnya sudah berakhir tidak lagi bisa diubah/dibatalkan. */
-const TERMINAL_STATUSES: ReadonlySet<VisitStatus> = new Set<VisitStatus>([
-  'completed',
-  'rejected',
-  'cancelled',
-  'not_visit',
-])
 
 /**
  * SCR-04 — Detail Kunjungan & Pas Masuk QR.
@@ -288,13 +286,16 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
   const deleteMutation = useDeleteVisitMutation()
   const showDelete = can(role, 'deleteRecords')
 
-  const isTerminal = TERMINAL_STATUSES.has(visit.status)
   // Pengaju Vendor/Mitra via helper transisi Fase 1 (fallback `pic_user`).
   const vendorUser = visitVendorUser(visit)
   // Kontrol aksi mengikuti matriks kapabilitas — Vendor/Mitra tidak pernah melihat
   // kontrol approval, dan pengawas tidak bisa mengubah jadwal/membatalkan.
-  const canReschedule = !isTerminal && can(role, 'rescheduleVisit')
-  const canCancel = !isTerminal && can(role, 'cancelVisit')
+  // Ubah Jadwal & Batal hanya dirender bila status sumbernya legal di backend:
+  // `requested`, `approved`, atau `rescheduled`. `visiting` dikecualikan karena
+  // backend hanya mengizinkan `visiting→completed` (check-out), sehingga tombol
+  // di sana selalu gagal 409 INVALID_TRANSITION.
+  const canReschedule = isReschedulableStatus(visit.status) && can(role, 'rescheduleVisit')
+  const canCancel = isCancelableStatus(visit.status) && can(role, 'cancelVisit')
   // Persetujuan di SCR-04 (inventaris §3: modal approve/reject ada di SCR-02
   // & SCR-04): status requested ATAU rescheduled + peran berhak — backend
   // mengizinkan `rescheduled→approved` (perlu persetujuan ulang setelah jadwal
@@ -326,8 +327,28 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
       '—'
     )
 
+  // Tombol kembali: peran `security` TIDAK mendapatkannya di sini karena
+  // `SecurityKioskShell` sudah merender "Kembali ke Pos Check-in" di topbar
+  // (teks di desktop, ikon di ponsel) - tombol kedua berarti aksi ganda.
+  // Peran lain tidak punya tautan kembali di shell-nya.
+  const backTarget = getLoginRedirect(role)
+
   return (
     <>
+      {role !== 'security' ? (
+        <div className="mb-4 flex flex-col gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-touch self-start"
+            onClick={() => router.push(backTarget)}
+          >
+            <ArrowLeft aria-hidden="true" className="size-4 shrink-0" />
+            Kembali ke Dashboard
+          </Button>
+        </div>
+      ) : null}
       {/*
         GRID DUA KOLOM DESKTOP (>= 1024px): detail kiri ~65% (8/12),
         QR kanan ~35% (4/12) dan sticky. Kartu QR sengaja PALING AWAL pada
@@ -337,6 +358,8 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
         ada header/banner yang bisa mendorong kartu QR ke bawah lipatan.
         Jangan pakai `items-start`: sel grid harus setinggi dua barisnya
         agar `lg:sticky` pada kartu QR punya ruang untuk menempel.
+        Tombol kembali berada DI LUAR grid (saudara sebelumnya), jadi kartu QR
+        tetap anak PERTAMA grid dan penempatan kolom `lg:*`-nya tidak berubah.
       */}
       <div className="grid gap-4 sm:gap-5 lg:grid-cols-12 lg:gap-6">
         <div className="min-w-0 lg:col-span-4 lg:col-start-9 lg:row-span-2 lg:row-start-1">

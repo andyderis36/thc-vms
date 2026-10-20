@@ -808,6 +808,13 @@ export const handlers: RequestHandler[] = [
           400,
         );
       }
+      if (
+        visit.status !== 'requested' &&
+        visit.status !== 'approved' &&
+        visit.status !== 'rescheduled'
+      ) {
+        return fail('CONFLICT', INVALID_TRANSITION_MESSAGE, 409);
+      }
       visit.status = 'rescheduled';
       visit.start_date = new Date(startMs).toISOString();
       visit.end_date = new Date(endMs).toISOString();
@@ -849,6 +856,13 @@ export const handlers: RequestHandler[] = [
     }
     const body = await readJsonBody(request);
     const reason = stringField(body, 'reason');
+    if (
+      visit.status !== 'requested' &&
+      visit.status !== 'approved' &&
+      visit.status !== 'rescheduled'
+    ) {
+      return fail('CONFLICT', INVALID_TRANSITION_MESSAGE, 409);
+    }
     visit.status = 'cancelled';
     if (reason !== undefined && reason.trim() !== '') {
       visit.notes = reason;

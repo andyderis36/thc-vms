@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { House, LogOut, Plus, QrCode, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useSession } from '@/lib/auth/session'
@@ -126,25 +127,35 @@ export function VendorMobileShell({
       {/* Pintas keyboard pertama: lompat langsung ke konten utama. */}
       <SkipToContentLink />
 
-      {/* Header sticky: logo + nama produk, nav desktop, lonceng notifikasi,
-          vendor + logout. `overflow-visible` WAJIB: panel notifikasi membuka
-          ke bawah di luar kotak header, jadi ancestor `overflow-hidden` akan
-          memotong dropdownnya. Overflow kini dicegah di dalam lewat
-          `min-w-0` + `truncate` pada grup logo, bukan lewat clipping header. */}
-      <header className="sticky top-0 z-30 h-14 overflow-visible border-b border-border-light bg-surface lg:h-topbar">
+      {/* Header sticky: logo + nav desktop + lonceng notifikasi, vendor +
+          logout. Wordmark "Visitor Portal" DIHAPUS dari navbar (instruksi
+          pengguna) — logo THC 40px sudah menjadi penanda. Permukaan header
+          BIRU (`bg-brand` #422ad5) sebagai penanda peran Vendor/Mitra, jadi
+          seluruh isinya memakai tinta kontras `text-brand-contrast` (#e0e7ff) —
+          bukan tinta netral gelap.
+          `overflow-visible` WAJIB: panel notifikasi membuka ke bawah di luar
+          kotak header, jadi ancestor `overflow-hidden` akan memotong
+          dropdownnya. Overflow kini dicegah di dalam lewat `min-w-0` +
+          `truncate` pada grup logo, bukan lewat clipping header. */}
+      <header className="sticky top-0 z-30 h-bar-mobile overflow-visible border-b border-brand-dark bg-brand text-brand-contrast lg:h-topbar">
         <div className="flex h-full items-center justify-between gap-3 px-4">
           {/* Tanpa `shrink-0`: modifier itu menetralkan `min-w-0` sehingga label
               nowrap tak pernah menyusut dan header meluber di 375px. */}
           <div className="flex min-w-0 items-center gap-2">
-            <span
-              aria-hidden="true"
-              className="flex size-8 shrink-0 items-center justify-center rounded-badge bg-brand text-badge font-black text-brand-contrast"
-            >
-              THC
+            {/* Logo brand THC asli (wordmark-nya putih) berdiri SENDIRI di
+                atas header biru: alas chip ungu `bg-brand` DIHAPUS karena
+                warnanya identik dengan latar header sehingga chip tak
+                terlihat. Aset logo TIDAK boleh dihapus (instruksi pengguna)
+                — hanya alasnya yang dibuang; pola sama dipakai
+                SecurityKioskShell & AdminBranchShell. */}
+            <span className="flex shrink-0 items-center">
+              <Image src="/thcw.png" alt="THC" width={500} height={235} className="h-10 w-auto shrink-0" />
             </span>
-            <span className="truncate text-sm font-bold text-ink">Visitor Portal</span>
           </div>
 
+          {/* Nav desktop di atas permukaan biru: item aktif memakai pil
+              `bg-brand-dark` (lebih gelap dari header) + tinta kontras,
+              item non-aktif memakai tinta 80% yang tetap AA (4.85:1). */}
           <nav aria-label="Navigasi utama" className="hidden items-center gap-1 lg:flex">
             {VENDOR_NAV.map((item) => {
               const active = currentHref === item.href
@@ -155,7 +166,9 @@ export function VendorMobileShell({
                   aria-current={active ? 'page' : undefined}
                   className={[
                     'inline-flex min-h-touch items-center gap-2 rounded-control px-3 text-label font-semibold transition-colors',
-                    active ? 'text-brand' : 'text-ink-secondary hover:bg-neutral-bg hover:text-ink',
+                    active
+                      ? 'bg-brand-dark text-brand-contrast'
+                      : 'text-brand-contrast/80 hover:bg-brand-dark hover:text-brand-contrast',
                   ].join(' ')}
                 >
                   <item.Icon aria-hidden="true" className="size-4 shrink-0" />
@@ -165,23 +178,30 @@ export function VendorMobileShell({
             })}
           </nav>
 
-          {/* Tanpa `shrink-0`: modifier itu menetralkan `min-w-0` sehingga
-              label vendor tak pernah bisa menyusut dan header meluber di
-              375px. `max-w-*` memberi batas atas; `truncate` memotongnya. */}
+          {/* Nama vendor disembunyikan di bawah 640px (`hidden sm:block`):
+              pada 320px header sudah penuh (logo + wordmark + lonceng +
+              logout) sehingga nama vendor hanya jadi potongan sampah;
+              dari 640px ruang cukup dan nama tampil lagi sebagai penanda
+              akun. Halaman dashboard sudah memuat kartu identitas vendor,
+              jadi nama tidak perlu diulang dua kali di sana. */}
           <div className="flex min-w-0 items-center gap-1">
-            <span className="min-w-0 max-w-28 truncate text-label font-semibold text-ink-secondary sm:max-w-72 lg:max-w-40">
+            <span
+              className="hidden min-w-0 max-w-72 truncate text-label font-semibold text-brand-contrast/80 sm:block lg:max-w-40"
+              title={vendorLabel}
+            >
               {vendorLabel}
             </span>
             {/* Lonceng notifikasi tersimpan milik vendor (approved/rejected/
                 reminder/auto_cancelled) — shell ini satu-satunya entitlement
-                vendor, jadi panelnya WAJIB tersedia di SHELL-04. */}
-            <NotificationsMenu className="shrink-0" />
+                vendor, jadi panelnya WAJIB tersedia di SHELL-04. `tone="brand"`
+                karena loncengnya duduk di atas navbar biru. */}
+            <NotificationsMenu tone="brand" className="shrink-0" />
             <button
               type="button"
               onClick={handleSignOut}
               aria-label="Keluar dari akun"
               title="Keluar dari akun"
-              className="inline-flex size-11 shrink-0 items-center justify-center rounded-control text-ink-secondary transition-colors hover:bg-neutral-bg hover:text-brand"
+              className="inline-flex size-11 shrink-0 items-center justify-center rounded-control text-brand-contrast transition-colors hover:bg-brand-dark"
             >
               <LogOut aria-hidden="true" className="size-4 shrink-0" />
             </button>
@@ -189,7 +209,8 @@ export function VendorMobileShell({
         </div>
       </header>
 
-      {/* Konten: p-4; pb-24 memberi ruang bottom nav 64px + tonjolan tombol bundar.
+      {/* Konten: p-4; pb-24 memberi ruang bottom nav 56px + tonjolan tombol bundar
+          (`size-14 -translate-y-6`). Padding ini sengaja tidak ikut menyusut.
           overflow-x-clip mengunci scroll horizontal tanpa mematikan elemen sticky
           (action bar SCR-03). min-w-0 = min-inline-size:0; id+tabIndex = skip-to-content. */}
       <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-x-clip p-4 pb-24 lg:pb-8">
@@ -199,7 +220,7 @@ export function VendorMobileShell({
       {/* Bottom navigation tetap (ponsel/tablet), diganti top nav di >= 1024px. */}
       <nav
         aria-label="Navigasi utama"
-        className="fixed inset-x-0 bottom-0 z-30 h-bottomnav border-t border-border-light bg-surface shadow-dropdown lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 h-bar-mobile border-t border-border-light bg-surface shadow-dropdown lg:hidden"
       >
         <div className="flex h-full items-stretch">
           {VENDOR_NAV.map((item) => {

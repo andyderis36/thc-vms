@@ -18,6 +18,21 @@ import type { User } from '@/lib/api/types';
 /** Status sesi client-side. `loading` hanya saat hidrasi awal berjalan. */
 export type SessionStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
+/**
+ * Permintaan tidak PERNAH sampai ke server (fetch melempar; tanpa respons
+ * HTTP sama sekali — backend mati / koneksi putus / CORS gagal).
+ * Kelas khusus (bukan `Error` biasa) agar UI membedakan "koneksi gagal"
+ * dari "respons HTTP error" (401/500) yang pesannya wajib dipertahankan
+ * verbatim dari backend. Membawa pesan koneksi dari `ApiError` `NETWORK_ERROR`
+ * yang TIDAK mengklaim kesalahan server.
+ */
+export class SessionNetworkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SessionNetworkError';
+  }
+}
+
 export interface SessionValue {
   user: User | null;
   status: SessionStatus;
@@ -174,6 +189,11 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
       return result.user;
     } catch (err: unknown) {
       // Jangan lempar ApiError mentah ke UI; bungkus jadi Error biasa.
+      // Kegagalan jaringan (tanpa respons HTTP) dibungkus ke kelas khusus
+      // agar layar masuk TIDAK pernah menampilkan klaim "kesalahan server".
+      if (err instanceof ApiError && err.code === 'NETWORK_ERROR') {
+        throw new SessionNetworkError(err.message);
+      }
       throw new Error(toDisplayMessage(err));
     }
   }, [queryClient]);

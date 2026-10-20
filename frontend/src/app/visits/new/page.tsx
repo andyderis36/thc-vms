@@ -11,7 +11,7 @@ import { usePendingApprovalCount } from '@/lib/api/hooks'
 
 /**
  * Pemilih shell berdasar peran sesi — SETIAP peran memakai shellnya sendiri
- * (superadmin = gelap + switcher, admin = putih terkunci, vendor = mobile):
+ * (superadmin = gelap, admin = putih terkunci, vendor = mobile):
  * `vendor` -> SHELL-04 (VendorMobileShell), `super_admin` -> SHELL-01
  * (SuperadminShell), `admin` -> SHELL-02 (AdminBranchShell). Guard
  * `RequireRole` di bawah sudah menahan `security`.
