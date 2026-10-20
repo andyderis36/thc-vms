@@ -32,6 +32,11 @@ docker_cli() {
     docker "$@"
     return
   fi
+  if command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+    echo "==> akses docker lewat 'sudo -n'"
+    sudo -n docker "$@"
+    return
+  fi
   local runner=""
   if command -v sg >/dev/null 2>&1; then
     runner="sg"
@@ -55,6 +60,32 @@ docker_cli() {
 compose() {
   docker_cli compose "$@"
 }
+
+# Diagnostik runner — selalu dicetak supaya log CI menjawab "kenapa docker
+# socket denied" tanpa perlu akses SSH ke VPS.
+echo "==> runner diagnostics"
+echo "    uid=$(id -u) gid=$(id -g) user=$(id -un)"
+echo "    groups=$(id -Gn 2>/dev/null || echo '?')"
+if [ -e /var/run/docker.sock ]; then
+  echo "    docker.sock: $(ls -l /var/run/docker.sock)"
+  echo "    docker.sock gid=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo '?') mode=$(stat -c '%a' /var/run/docker.sock 2>/dev/null || echo '?')"
+else
+  echo "    docker.sock: MISSING"
+fi
+echo "    sg=$(command -v sg || echo none) newgrp=$(command -v newgrp || echo none) sudo=$(command -v sudo || echo none)"
+if [ -e /.dockerenv ]; then
+  echo "    container: YA (/.dockerenv ada)"
+else
+  echo "    container: tidak terdeteksi"
+fi
+echo "    cgroup: $(head -c 160 /proc/1/cgroup 2>/dev/null | tr '\n' ' ')"
+echo "    docker info direct: $(docker info >/dev/null 2>&1 && echo OK || echo FAIL)"
+if command -v sg >/dev/null 2>&1; then
+  echo "    docker info via sg: $(sg docker -c "docker info" >/dev/null 2>&1 && echo OK || echo FAIL)"
+fi
+if command -v sudo >/dev/null 2>&1; then
+  echo "    docker info via sudo -n: $(sudo -n docker info >/dev/null 2>&1 && echo OK || echo FAIL)"
+fi
 
 echo "==> sync repo ($BRANCH)"
 git fetch origin
