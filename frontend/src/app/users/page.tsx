@@ -233,7 +233,7 @@ function UsersScreen() {
   const [createOpen, setCreateOpen] = useState(false)
   const [deleting, setDeleting] = useState<User | null>(null)
   const [editing, setEditing] = useState<User | null>(null)
-  const { user: currentUser } = useSession()
+  const { user: currentUser, refresh: refreshSession } = useSession()
   const deleteMutation = useDeleteManagedUserMutation()
   const updateUser = useUpdateManagedUserMutation()
   const currentUserId = currentUser !== null ? currentUser.id : null
@@ -502,8 +502,11 @@ function UsersScreen() {
               { userId: editing.id, body },
               {
                 onSuccess: () => {
-                  toast.success(`Perubahan ${editing.name} tersimpan`)
+                  toast.success(`Perubahan ${body.name ?? editing.name} tersimpan`)
                   setEditing(null)
+                  if (currentUserId !== null && editing.id === currentUserId) {
+                    void refreshSession()
+                  }
                 },
                 onError: (error) => {
                   toast.error(apiErrorMessage(error))
