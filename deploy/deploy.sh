@@ -21,6 +21,26 @@ READY_URL="http://127.0.0.1:8080/api/v1/ready"
 
 cd "$REPO_DIR"
 
+# Akses docker. Runner Gitea Actions = systemd user-service: user yang
+# ditambahkan ke group `docker` SETELAH service start tidak mewarisi group
+# itu -> CLI docker gagal "permission denied ... /var/run/docker.sock".
+# `sg docker` membuka shell baru dengan group dari /etc/group (tanpa password).
+compose() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+    return
+  fi
+  if command -v sg >/dev/null 2>&1; then
+    sg docker -c "docker compose $(printf '%q ' "$@")"
+    return
+  fi
+  echo "ABORT: tidak bisa mengakses docker API (/var/run/docker.sock)." >&2
+  echo "       Tambahkan user runner ke group 'docker', lalu restart runner:" >&2
+  echo "         sudo usermod -aG docker <user-runner>" >&2
+  echo "         systemctl --user restart act_runner" >&2
+  exit 1
+}
+
 echo "==> sync repo ($BRANCH)"
 git fetch origin
 git reset --hard "origin/$BRANCH"
@@ -37,7 +57,7 @@ if grep -q 'CHANGEME' "$ENV_FILE"; then
 fi
 
 echo "==> build + up"
-docker compose -f "$COMPOSE_FILE" up -d --build
+compose -f "$COMPOSE_FILE" up -d --build
 
 echo "==> wait backend ready ($READY_URL)"
 for i in $(seq 1 60); do
@@ -47,7 +67,7 @@ for i in $(seq 1 60); do
   fi
   if [ "$i" -eq 60 ]; then
     echo "ABORT: backend not ready; recent logs:"
-    docker compose -f "$COMPOSE_FILE" logs --tail=50 backend migrate
+    compose -f "$COMPOSE_FILE" logs --tail=50 backend migrate
     exit 1
   fi
   sleep 2
@@ -57,5 +77,5 @@ echo "==> prune dangling images"
 docker image prune -f >/dev/null
 
 echo "==> status"
-docker compose -f "$COMPOSE_FILE" ps
+compose -f "$COMPOSE_FILE" ps
 echo "DEPLOY OK"
