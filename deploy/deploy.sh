@@ -18,6 +18,7 @@ COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE="$REPO_DIR/.env"
 TEMPLATE="$REPO_DIR/.env.prod.example"
 READY_URL="http://127.0.0.1:8080/api/v1/ready"
+SCRIPT_SELF="$(readlink -f "$0")"
 
 cd "$REPO_DIR"
 
@@ -88,8 +89,23 @@ if command -v sudo >/dev/null 2>&1; then
 fi
 
 echo "==> sync repo ($BRANCH)"
-git fetch origin
-git reset --hard "origin/$BRANCH"
+sync_repo() {
+  local before after
+  before="$(sha256sum "$SCRIPT_SELF" | awk '{print $1}')"
+  git fetch origin
+  git reset --hard "origin/$BRANCH"
+  after="$(sha256sum "$SCRIPT_SELF" | awk '{print $1}')"
+  # `git reset --hard` mengganti file lewat temp-file+rename, jadi bash yang
+  # sedang berjalan tetap membaca inode LAMA. Efeknya: script versi lama yang
+  # dieksekusi walau repo sudah di-sync ke commit terbaru. Kalau isi script
+  # berubah saat sync, jalankan ulang versi yang baru.
+  if [ "$before" != "$after" ] && [ -z "${DEPLOY_RESYNCED:-}" ]; then
+    export DEPLOY_RESYNCED=1
+    echo "==> script berubah setelah sync; eksekusi ulang versi terbaru"
+    exec bash "$SCRIPT_SELF" "$@"
+  fi
+}
+sync_repo "$@"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "==> no .env — creating from template (FILL SECRETS, then re-run)"
@@ -142,7 +158,11 @@ EOF
 echo "    legacy containers removed: $orphan_count"
 
 echo "==> build + up"
-compose -f "$COMPOSE_FILE" up -d --build
+if ! compose -f "$COMPOSE_FILE" up -d --build; then
+  echo "ABORT: compose up gagal. Log container:" >&2
+  compose -f "$COMPOSE_FILE" logs --tail=60 backend migrate minio postgres >&2 || true
+  exit 1
+fi
 
 echo "==> wait backend ready ($READY_URL)"
 for i in $(seq 1 60); do
