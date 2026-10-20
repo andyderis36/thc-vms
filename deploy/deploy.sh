@@ -6,7 +6,7 @@
 # an existing .env (root /.env is gitignored, so `git reset --hard`
 # cannot touch it either).
 #
-# Stack deployed (docker-compose.prod.yml): postgres + rustfs (object storage
+# Stack deployed (docker-compose.prod.yml): postgres + minio (object storage
 # S3-compatible) + migrate (one-shot) + backend + frontend + caddy (reverse
 # proxy tunggal pada :80). Backend/frontend images are built from
 # backend/Dockerfile and frontend/Dockerfile in this repo.
@@ -101,6 +101,45 @@ if grep -q 'CHANGEME' "$ENV_FILE"; then
   echo "ABORT: $ENV_FILE still contains CHANGEME placeholders — fill real secrets first"
   exit 1
 fi
+
+# --- Bersihkan container orphan dari stack lama -----------------------------
+# Stack lama (compose versi sebelumnya / compose dev) bisa masih jalan lalu
+# merebut port 80 atau 8080, sehingga `up` gagal "port is already allocated".
+# ATURAN KERAS: yang dihapus HANYA container. Volume & data TIDAK PERNAH
+# dihapus di sini — data produksi hanya boleh dihapus oleh operator explicit.
+PROD_PROJECT="$(grep -E '^name:[[:space:]]+' "$COMPOSE_FILE" | head -n1 | awk '{print $2}')"
+PROD_PROJECT="${PROD_PROJECT:-thc-vms-prod}"
+
+echo "==> cleaning legacy containers (volumes & data are NOT touched)"
+legacy_rows="$(
+  docker_cli ps -a \
+    --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Ports}}|{{.Label "com.docker.compose.project"}}'
+)"
+orphan_count=0
+while IFS='|' read -r cid cname cimage cports cproject; do
+  [ -z "$cid" ] && continue
+  # Container yang bukan milik compose project produksi kita = kandidat.
+  # Container non-compose (label kosong) TIDAK boleh disentuh.
+  [ -z "$cproject" ] && continue
+  [ "$cproject" = "$PROD_PROJECT" ] && continue
+  # Hanya container yang jelas milik stack THC-VMS (image atau port produksi).
+  is_ours=0
+  case "$cimage" in
+    postgres:*|minio/*|rustfs/*|redis*|pgbouncer*|golang:*|node:*|caddy:*|nginx:*|thc-vms-*) is_ours=1 ;;
+  esac
+  # `->` tidak boleh dipakai di pattern `case` (bentrok dengan arrow), jadi
+  # pencocokan port lewat grep -E.
+  if printf '%s' "$cports" | grep -Eq ':(80|8080|3210|5432)->'; then
+    is_ours=1
+  fi
+  [ "$is_ours" -eq 1 ] || continue
+  echo "    removing legacy container: $cname (image=$cimage project=$cproject)"
+  docker_cli rm -f "$cid" >/dev/null
+  orphan_count=$((orphan_count + 1))
+done <<EOF
+$legacy_rows
+EOF
+echo "    legacy containers removed: $orphan_count"
 
 echo "==> build + up"
 compose -f "$COMPOSE_FILE" up -d --build

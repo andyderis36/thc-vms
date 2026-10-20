@@ -25,33 +25,27 @@ services:
       timeout: 5s
       retries: 10
 
-  # Object storage S3-compatible. RustFS menggantikan MinIO karena image
-  # minio/minio + minio/mc tidak bisa ditarik (tag upstream hilang), sedangkan
-  # RustFS menyajikan API S3 yang kompatibel dengan minio-go (backend tidak
-  # berubah sama sekali). Kredensial memakai variabel MINIO_* yang SUDAH ada
-  # di .env supaya S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY backend tetap cocok.
-  # Alias jaringan `minio` dipertahankan agar S3_ENDPOINT=minio:9000 pada .env
-  # lama tetap resolve; S3_ENDPOINT=rustfs:9000 juga resolve.
-  # Bucket TIDAK di-seed lewat container inisialisasi: backend memanggil
-  # EnsureBucket saat boot (backend/internal/infrastructure/storage).
-  rustfs:
-    image: rustfs/rustfs:latest
+  # Object storage S3-compatible. MinIO = stack yang sama dengan local dev
+  # (AGENTS.md §4) dan image-nya sudah proven di cache lokal.
+  # Tag bisa di-override lewat MINIO_IMAGE di .env bila registry sedang
+  # bermasalah (known-good: RELEASE.2025-09-07T16-13-09Z).
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:latest}
+    pull_policy: missing
     restart: always
     mem_limit: 512M
     cpus: 1.0
     environment:
-      RUSTFS_ADDRESS: ":9000"
-      RUSTFS_CONSOLE_ADDRESS: ":9001"
-      RUSTFS_CONSOLE_ENABLE: "true"
-      RUSTFS_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
-      RUSTFS_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
-    command: /data
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    command: server /data --console-address ":9001"
     volumes:
-      - rustfsdata_prod:/data
-    networks:
-      default:
-        aliases:
-          - minio
+      - miniodata_prod:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   # One-shot: migrasi embedded (backend/cmd/migrate). Wajib sebelum backend
   # karena server production (APP_ENV=production) tidak auto-migrate.
@@ -85,8 +79,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      rustfs:
-        condition: service_started
+      minio:
+        condition: service_healthy
     # Dipublikasikan ke host supaya deploy.sh bisa unhealthy-check backend di
     # 127.0.0.1:8080 (siap-otsel di dalam jaringan compose saja).
     ports:
@@ -118,6 +112,10 @@ services:
     restart: always
     mem_limit: 256M
     cpus: 0.5
+    environment:
+      # Alamat site Caddy. Kosong = catch-all ":80" (akses LAN via IP).
+      # Isi domain (mis. vms.thc.co.id) untuk TLS otomatis + redirect HTTPS.
+      SITE_ADDRESS: ${SITE_ADDRESS:-}
     depends_on:
       backend:
         condition: service_healthy
@@ -125,9 +123,18 @@ services:
         condition: service_started
     ports:
       - "80:80"
+      # 443 hanya dilayani bila SITE_ADDRESS diisi (ACME). Tanpa domain,
+      # port ini tidak ada listener — Harmless.
+      - "443:443"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Sertifikat ACME & konfigurasi Caddy harus persisten; kalau tidak,
+      # tiap `up --build` meminta sertifikat baru (bisa kena rate limit).
+      - caddy_data:/data
+      - caddy_config:/config
 
 volumes:
   pgdata_prod:
-  rustfsdata_prod:
+  miniodata_prod:
+  caddy_data:
+  caddy_config:

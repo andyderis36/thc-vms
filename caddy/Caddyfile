@@ -3,10 +3,15 @@
 # tidak perlu build ulang saat pindah dari IP LAN ke domain (atau sebaliknya).
 #
 #   /api/*  -> backend   (prefix DIJAGA; backend menyajikan route di /api/v1)
-#   /s3/*   -> rustfs    (prefix DIPOTONG; bucket disajikan di root S3)
+#   /s3/*   -> minio     (prefix DIPOTONG; bucket disajikan di root S3)
 #   lainnya -> frontend  (Next.js standalone, :3210)
-
-:80 {
+#
+# Alamat site diambil dari env SITE_ADDRESS (diisi di .env VPS):
+#   - kosong (default) -> ":80" catch-all HTTP, aman untuk akses LAN via IP.
+#   - diisi domain      -> satu host dengan TLS otomatis (ACME) + redirect
+#     HTTP->HTTPS. Syarat: DNS A/AAAA -> IP publik VPS, port 80 & 443 terbuka.
+#     Tanpa IP publik, HTTP-01 tidak akan lolos, jadi biarkan default dulu.
+{$SITE_ADDRESS::80} {
 	encode zstd gzip
 
 	handle /api/* {
@@ -14,7 +19,7 @@
 	}
 
 	handle_path /s3/* {
-		reverse_proxy rustfs:9000
+		reverse_proxy minio:9000
 	}
 
 	handle {
