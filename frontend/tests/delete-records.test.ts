@@ -7,6 +7,7 @@ import {
   canShowDeleteUser,
   deleteUserConfirmMessage,
   isDeletableUser,
+  isProtectedUser,
 } from '@/app/users/page'
 import { deleteVisitConfirmMessage } from '@/app/visits/[id]/page'
 
@@ -89,6 +90,37 @@ describe('canShowDeleteUser', () => {
         'me-id',
       ),
     ).toBe(false)
+  })
+})
+
+describe('isProtectedUser', () => {
+  it('melindungi akun sendiri dari aksi status maupun hapus', () => {
+    const me = userStub()
+    expect(isProtectedUser(me, me.id)).toBe(true)
+  })
+
+  it('melindungi akun super_admin lain dari aksi status maupun hapus', () => {
+    expect(
+      isProtectedUser(userStub({ id: 'other', role: 'super_admin' }), 'me-id'),
+    ).toBe(true)
+  })
+
+  it('tidak melindungi akun admin/vendor biasa', () => {
+    expect(isProtectedUser(userStub({ id: 'u-1' }), 'me-id')).toBe(false)
+    expect(
+      isProtectedUser(userStub({ id: 'u-2', role: 'vendor' }), 'me-id'),
+    ).toBe(false)
+  })
+
+  it('menyelaraskan isDeletableUser sebagai kebalikannya', () => {
+    const me = userStub()
+    const other = userStub({ id: 'u-1' })
+    const peerSuperAdmin = userStub({ id: 'u-9', role: 'super_admin' })
+    expect(isDeletableUser(me, me.id)).toBe(!isProtectedUser(me, me.id))
+    expect(isDeletableUser(other, 'me-id')).toBe(!isProtectedUser(other, 'me-id'))
+    expect(isDeletableUser(peerSuperAdmin, 'me-id')).toBe(
+      !isProtectedUser(peerSuperAdmin, 'me-id'),
+    )
   })
 })
 
