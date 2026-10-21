@@ -1,31 +1,40 @@
 <#
 .SYNOPSIS
-  Simpan & verifikasi token Gitea untuk push ke repo (rotasi PAT).
+  Simpan, verifikasi & rotasi token Gitea untuk push ke repo (PAT).
 
 .DESCRIPTION
   Usage:
       vms-git-auth                      # prompted: tempel token baru
       vms-git-auth -Token <token>       # non-interaktif (JANGAN lewat argumen di mesin bersama)
-      vms-git-auth -Check               # hanya verifikasi token yang tersimpan
+      vms-git-auth -Check               # hanya verifikasi token yang sudah tersimpan
+      vms-git-auth -RevokeOld 12,13     # cabut token lama dengan id tsb (id dari daftar)
 
   Alur:
     1. Gitea -> Settings -> Applications -> Generate New Token
-       scope minimal: read:repository + write:repository
+       Scope: read:repository + write:repository  (WAJIB untuk push)
+              read:user + write:user              (opsional tapi disarankan:
+              supaya skrip bisa mencabut token lama sendiri)
+       Beri masa berlaku pendek bila Gitea menawarkannya.
     2. Tempel token ke prompt (tidak dicetak ke layar/riwayat).
     3. Token disimpan di Git Credential Manager untuk host git.thckalbar.com
        (TIDAK pernah ditulis ke file repo atau URL remote).
     4. Token diverifikasi terhadap API repo.
-    5. Remote diperiksa: HTTPS + tanpa kredensial yang tertanam di URL.
+    5. Kalau token punya scope read:user, skrip mencetak daftar token lain
+       milik akun itu + perintah cabut siap pakai, sehingga token yang pernah
+       bocor bisa dicabut tanpa ganggu repo.
+    6. Remote diperiksa: HTTPS + tanpa kredensial yang tertanam di URL.
 
-  Token dipakai hanya untuk push. Itu sebabnya rotasi cukup: revoke token
-  lama di Gitea, generate yang baru, lalu jalankan skrip ini lagi.
+  Catatan: token dipakai hanya untuk push. Rotasi karena itu cukup: revoke
+  token lama, generate yang baru, jalankan skrip ini lagi.
 #>
 [CmdletBinding()]
 param(
     # Token Gitea. Kalau kosong, skrip menanya lewat prompt aman.
     [string]$Token,
     # Hanya verifikasi token yang sudah tersimpan.
-    [switch]$Check
+    [switch]$Check,
+    # Id token lama yang harus dicabut (pisahkan dengan koma).
+    [string]$RevokeOld
 )
 
 $ErrorActionPreference = 'Stop'
@@ -56,15 +65,37 @@ function Save-Token([string]$value, [string]$user) {
     $credentialInput | git credential approve 2>$null
 }
 
-function Test-Token([string]$value) {
+function Invoke-Gitea([string]$method, [string]$path, [string]$value) {
+    $headers = @{ Authorization = "token $value" }
     try {
-        $r = Invoke-WebRequest -Uri "$ApiBase/repos/thckalbar/vms" -Headers @{ Authorization = "token $value" } -TimeoutSec 20 -UseBasicParsing -ErrorAction Stop
-        return @{ ok = ($r.StatusCode -eq 200); status = $r.StatusCode; login = $null }
+        return Invoke-WebRequest -Method $method -Uri "$ApiBase$path" -Headers $headers -TimeoutSec 20 -UseBasicParsing -ErrorAction Stop
     }
     catch {
-        $status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
-        return @{ ok = $false; status = $status; login = $null }
+        $status = 0
+        if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+        return @{ StatusCode = $status; Content = '' }
     }
+}
+
+function Get-TokenList([string]$value, [string]$login) {
+    $r = Invoke-Gitea 'GET' "/users/$login/tokens?limit=100" $value
+    if ($r.StatusCode -ne 200) { return $null }
+    try { return ($r.Content | ConvertFrom-Json) } catch { return $null }
+}
+
+function Get-AccountLogin([string]$value) {
+    $r = Invoke-Gitea 'GET' '/user' $value
+    if ($r.StatusCode -ne 200) { return $null }
+    try { return (($r.Content | ConvertFrom-Json).login) } catch { return $null }
+}
+
+function Remove-Token([string]$value, [string]$login, [string]$id) {
+    $r = Invoke-Gitea 'DELETE' "/users/$login/tokens/$id" $value
+    if ($r.StatusCode -eq 404) {
+        # Sebagian versi Gitea mencabut lewat NAMA token, bukan id.
+        $r = Invoke-Gitea 'DELETE' "/users/$login/tokens/$id" $value
+    }
+    return $r.StatusCode
 }
 
 Write-Step "menyiapkan token Gitea untuk $GitHost"
@@ -82,23 +113,18 @@ if (-not $Check) {
     }
     $Token = $Token.Trim()
 
-    # Username = pemilik token. API /user butuh scope read:user; kalau tidak
-    # diizinkan, token tetap sah untuk push dengan username sembarang.
-    $login = 'oauth2'
-    try {
-        $u = Invoke-WebRequest -Uri "$ApiBase/user" -Headers @{ Authorization = "token $Token" } -TimeoutSec 15 -UseBasicParsing -ErrorAction Stop
-        $login = (($u.Content | ConvertFrom-Json).login)
-    }
-    catch {
-        Write-Info "scope read:user tidak ada pada token; pakai username default '$login'."
+    $login = Get-AccountLogin $Token
+    if (-not $login) {
+        $login = 'oauth2'
+        Write-Info 'scope read:user tidak ada pada token; pakai username default.'
     }
 
-    $probe = Test-Token $Token
-    if (-not $probe.ok) {
-        Write-Err2 "token ditolak server (HTTP $($probe.status)). Cek scope: read:repository + write:repository, dan belum dicabut."
+    $r = Invoke-Gitea 'GET' '/repos/thckalbar/vms' $Token
+    if ($r.StatusCode -ne 200) {
+        Write-Err2 "token ditolak server (HTTP $($r.StatusCode)). Cek scope: read:repository + write:repository, dan belum dicabut."
         exit 1
     }
-    Write-Ok "token valid (HTTP $($probe.status))"
+    Write-Ok "token valid (HTTP $($r.StatusCode))"
 
     Save-Token $Token $login
     Write-Ok "token disimpan di Git Credential Manager untuk $GitHost"
@@ -111,12 +137,43 @@ if (-not $stored) {
     Write-Err2 "tidak ada token tersimpan untuk $GitHost. Jalankan 'vms-git-auth' lalu tempel token."
     exit 1
 }
-$probe = Test-Token $stored
-if (-not $probe.ok) {
-    Write-Err2 "token tersimpan ditolak server (HTTP $($probe.status)). Buat token baru lalu jalankan ulang."
+$r = Invoke-Gitea 'GET' '/repos/thckalbar/vms' $stored
+if ($r.StatusCode -ne 200) {
+    Write-Err2 "token tersimpan ditolak server (HTTP $($r.StatusCode)). Buat token baru lalu jalankan ulang."
     exit 1
 }
-Write-Ok "token tersimpan valid (HTTP $($probe.status))"
+Write-Ok "token tersimpan valid (HTTP $($r.StatusCode))"
+
+$login = Get-AccountLogin $stored
+if (-not $login) { $login = 'oauth2' }
+
+# ---- daftar token lain milik akun (kalau scope read:user ada) ----
+$tokenList = Get-TokenList $stored $login
+if ($null -eq $tokenList) {
+    Write-Info 'scope read:user tidak ada -> daftar token tidak bisa dibaca.'
+    Write-Info 'cabut token lama manual di Gitea (Settings -> Applications).'
+}
+else {
+    Write-Ok "daftar token akun terbaca ($(@($tokenList).Count) token)"
+    foreach ($t in $tokenList) {
+        Write-Info ("  id={0}  nama='{1}'  dibuat={2}" -f $t.id, $t.name, $t.created_at)
+    }
+    if ($RevokeOld) {
+        $ids = $RevokeOld -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+        foreach ($id in $ids) {
+            $code = Remove-Token $stored $login $id
+            if ($code -eq 204 -or $code -eq 200) { Write-Ok "token id=$id dicabut" }
+            else { Write-Warn2 "token id=$id gagal dicabut (HTTP $code)" }
+        }
+    }
+    else {
+        $others = @($tokenList | ForEach-Object { $_.id })
+        if ($others.Count -gt 0) {
+            Write-Info 'Untuk mencabut token lama (mis. yang pernah bocor di chat):'
+            Write-Info ("  vms-git-auth -RevokeOld " + ($others -join ','))
+        }
+    }
+}
 
 # ---- remote harus HTTPS & tanpa kredensial di URL ----
 $remote = (git remote get-url origin 2>$null)
