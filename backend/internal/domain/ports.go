@@ -53,13 +53,16 @@ type IStorageService interface {
 	// PresignedURL mints a time-boxed direct link to one stored object.
 	PresignedURL(ctx context.Context, objectKey string, expiry time.Duration) (string, error)
 	// ObjectKeyFromStoredURL reverses a stored absolute file URL back to its
-	// bucket object key. It accepts ONLY URLs under the adapter's own public
-	// base (bucket privat: FE tidak boleh memakai URL mentah dari DB, backend
-	// menukar tiap URL menjadi presigned saat serialisasi). A foreign, empty
-	// or traversal-carrying URL is refused with ErrValidation so callers blank
-	// it instead of leaking a third-party address. Parsing lives on the
-	// adapter (SRP): only the storage owner knows the base URL and the key
-	// layout; usecases never split URLs themselves.
+	// bucket object key. The host is a deployment detail and is ignored: what
+	// binds a URL to our bucket is the bucket name appearing as a full path
+	// segment, so a URL stored under an earlier host keeps resolving and the
+	// key is always read from OUR OWN bucket (bucket privat: FE tidak boleh
+	// memakai URL mentah dari DB, backend menukar tiap URL menjadi presigned
+	// saat serialisasi). An empty URL, a URL that does not expose our bucket
+	// segment, or a traversal-carrying URL is refused with ErrValidation so
+	// callers blank it instead of leaking a third-party address. Parsing lives
+	// on the adapter (SRP): only the storage owner knows the bucket name and
+	// the key layout; usecases never split URLs themselves.
 	ObjectKeyFromStoredURL(rawURL string) (string, error)
 }
 
@@ -76,12 +79,15 @@ type ObjectContent struct {
 
 // ObjectReader is the read half of object storage behind the scoped
 // GET /visits/:id/file endpoint. It reuses the IStorageService key reversal
-// (own-bucket prefix rule) and adds the byte fetch, so a usecase composed
+// (own-bucket segment rule) and adds the byte fetch, so a usecase composed
 // with one adapter can resolve a stored URL to a key and stream it without
 // ever handing a raw private-bucket URL to the frontend.
 type ObjectReader interface {
 	// ObjectKeyFromStoredURL reverses a stored absolute file URL back to its
-	// bucket object key, refusing foreign, empty or traversal-carrying URLs.
+	// bucket object key. The host is ignored and the bucket name in the path
+	// decides, so the key always points into our own bucket. An empty URL, a
+	// URL that does not expose our bucket segment, or a traversal-carrying URL
+	// is refused.
 	ObjectKeyFromStoredURL(rawURL string) (string, error)
 	// OpenObject streams one stored object for inline serving. A missing key
 	// is ErrNotFound.
