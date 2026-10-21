@@ -35,3 +35,10 @@ dummy-assets/
 node_modules/
 .vite/
 thc-vms-acc.pdf
+
+# Artefak sinkronisasi data dev -> VPS (CSV domain + dump bucket + dump DB).
+# Berisi data operasional; dump DB pernah memuat hash password - tidak boleh
+# masuk repo. Dihasilkan oleh vms-export-sync.ps1.
+*.dump
+*.tar.gz
+thc-vms-sync/
