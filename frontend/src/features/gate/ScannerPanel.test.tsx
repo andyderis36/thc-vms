@@ -77,6 +77,9 @@ describe('ScannerPanel - dua tab + unggah gambar di bawah bingkai', () => {
     fireEvent.change(input)
 
     await waitFor(() => expect(onScan).toHaveBeenCalledWith('VST-2026090001'))
-    await waitFor(() => expect(startMock).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    // 8s (bukan 3s): kamera dibangun ulang lewat import() modul html5-qrcode,
+    // jadi saat suite paralel penuh proses build-nya bisa melebihi 3 detik dan
+    // test jadi flaky. Niatnya tetap "kamera hidup lagi setelah pindai gambar".
+    await waitFor(() => expect(startMock).toHaveBeenCalledTimes(2), { timeout: 8000 })
   })
 })

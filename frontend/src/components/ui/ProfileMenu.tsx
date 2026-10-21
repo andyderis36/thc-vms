@@ -38,8 +38,14 @@ export interface ProfileMenuProps {
  * tombol pada lebar induknya; kolom nama (`min-w-0`) lalu menyusut dan nama
  * dipotong elipsis.
  */
+/*
+ * State tekan: satu langkah lebih pekat dari hover (`bg-ink/10` di atas
+ * `bg-neutral-bg`), hanya lewat background — tidak ada perubahan geometri,
+ * jadi tidak ada layout shift. `active:` mengalahkan `hover:` karena
+ * urutan varian CSS Tailwind v4 (lihat blok aturan di `Button.tsx`).
+ */
 const TRIGGER_CLASS =
-  'flex max-w-full min-h-touch items-center gap-2 rounded-control px-2 text-left transition hover:bg-neutral-bg cursor-pointer'
+  'flex max-w-full min-h-touch items-center gap-2 rounded-control px-2 text-left transition hover:bg-neutral-bg active:bg-ink/10 cursor-pointer'
 
 const AVATAR_CLASS =
   'flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand text-label font-bold text-brand-contrast'
@@ -48,7 +54,7 @@ const PANEL_CLASS =
   'absolute right-0 top-full z-40 mt-1 w-56 rounded-control border border-border-mid bg-surface p-1 shadow-dropdown'
 
 const ITEM_CLASS =
-  'flex min-h-touch w-full items-center gap-2 rounded-control px-3 text-sm text-ink transition hover:bg-neutral-bg cursor-pointer'
+  'flex min-h-touch w-full items-center gap-2 rounded-control px-3 text-sm text-ink transition hover:bg-neutral-bg active:bg-ink/10 cursor-pointer'
 
 /** Inisial maksimal 2 huruf — aman terhadap nama kosong. */
 function initialsOf(name: string): string {

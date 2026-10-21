@@ -47,7 +47,7 @@ func (s *Service) CheckIn(ctx context.Context, actor Actor, visitIDOrCode string
 	// Gate photo is optional, but a supplied photo_url travels the same
 	// upload allowlist as the visit payload (https, or http for dev MinIO).
 	if in.PhotoURL != nil {
-		if err := visituc.ValidatePhotoURL(*in.PhotoURL); err != nil {
+		if err := visituc.ValidatePhotoURL(*in.PhotoURL, s.trustedFileOrigins); err != nil {
 			return domain.CheckIn{}, err
 		}
 	}

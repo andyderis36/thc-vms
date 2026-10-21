@@ -1262,6 +1262,10 @@ components:
           type: string
           format: password
           description: Kosong/absen = biarkan; terisi = reset hash baru
+        location_id:
+          type: [string, "null"]
+          format: uuid
+          description: Cabang penugasan baru untuk akun security (mutasi lokasi). Absen/null = biarkan cabang saat ini (PATCH yang hanya berisi member ini tetap dianggap tanpa perubahan dan dijawab 400). Hanya Superadmin yang boleh mengisinya; Admin Cabang yang mengirim member ini mendapat 403.
 
     Location:
       type: object

@@ -412,22 +412,25 @@ func (h *UserHandler) DeleteSecurity(c *gin.Context) {
 }
 
 // updateSecurityBody mirrors the PATCH /users/security/:id body: every
-// member is optional (nil keeps the column). Location assignment has no
-// member — branch moves go through the super_admin console — and role,
-// type and status keep their own flows. nik is accepted ONLY to refuse it,
-// mirroring createSecurityBody.
+// member is optional (nil keeps the column). location_id memindahkan akun
+// security ke cabang penugasan lain dan HANYA boleh diisi super_admin
+// (admin cabang ditolak 403); role, type and status keep their own flows.
+// nik is accepted ONLY to refuse it, mirroring createSecurityBody.
 type updateSecurityBody struct {
-	Name     *string `json:"name"`
-	Email    *string `json:"email"`
-	Phone    *string `json:"phone"`
-	Password *string `json:"password"`
-	NIK      *string `json:"nik"`
+	Name       *string `json:"name"`
+	Email      *string `json:"email"`
+	Phone      *string `json:"phone"`
+	Password   *string `json:"password"`
+	LocationID *string `json:"location_id"`
+	NIK        *string `json:"nik"`
 }
 
 // UpdateSecurity serves PATCH /users/security/:id with 200 for the branch
 // admin's own security officer (and any for super_admin). Guards mirror
 // DeleteSecurity: non-security targets 404, cross-branch admins 403, blank
 // name/email 400, duplicate email 409. A non-empty password resets the hash.
+// location_id memindahkan akun ke cabang lain: hanya super_admin yang boleh
+// mengirimnya (admin cabang 403), dan cabang tujuan harus ada di katalog.
 func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 	id, ok := deliveryhttp.IdentityFrom(c)
 	if !ok {
@@ -445,6 +448,11 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 	}
 	if body.NIK != nil && strings.TrimSpace(*body.NIK) != "" {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "NIK hanya untuk role admin dan vendor.")
+		return
+	}
+	locationID, err := superadmin.ValidateSecurityLocationMove(id.Role, body.LocationID)
+	if err != nil {
+		response.Fail(c, err)
 		return
 	}
 	ctx := c.Request.Context()
@@ -470,6 +478,16 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 	} else if id.Role != domain.RoleSuperAdmin {
 		response.FailWith(c, http.StatusForbidden, "FORBIDDEN_BRANCH", "Tidak berhak mengubah akun security dari cabang lain.")
 		return
+	}
+	if locationID != nil {
+		if _, err := h.locations.FindLocationByID(ctx, *locationID); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				response.Fail(c, domain.NotFoundEntity("Fasilitas"))
+				return
+			}
+			response.Fail(c, err)
+			return
+		}
 	}
 	patch := domain.ManagedUserPatch{}
 	if body.Name != nil {
@@ -497,9 +515,12 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 		hashed := string(hash)
 		patch.PasswordHash = &hashed
 	}
+	if locationID != nil {
+		patch.LocationID = locationID
+	}
 	if err := superadmin.ValidateManagedUserUpdate(superadmin.ManagedUserPatchInput{
 		Role: domain.RoleSecurity, Name: patch.Name, Email: patch.Email, Phone: patch.Phone,
-		Password: body.Password,
+		Password: body.Password, LocationID: patch.LocationID,
 	}); err != nil {
 		response.Fail(c, err)
 		return

@@ -111,6 +111,42 @@ describe('VendorMobileShell — navbar biru & ringkas (SHELL-04)', () => {
 
     const navs = screen.getAllByRole('navigation', { name: 'Navigasi utama' })
     const last = navs[navs.length - 1]
-    expect(classTokens(last)).toContain('h-bar-mobile')
+    if (!last) {
+      throw new Error('bottom nav ponsel tidak ditemukan')
+    }
+    // Bar TIDAK lagi memakai `height` tetap: `min-h-bar-mobile` +
+    // padding bawah safe area iOS → bar tumbuh sebesar
+    // `env(safe-area-inset-bottom)` tanpa terjepit.
+    expect(classTokens(last)).toContain('min-h-bar-mobile')
+    expect(classTokens(last)).not.toContain('h-bar-mobile')
+    expect(classTokens(last)).toContain('pb-[env(safe-area-inset-bottom)]')
+    // Isi bar dikunci 56px → ikon & label tetap setinggi/terpusat sama
+    // seperti sebelumnya (grow by inset, bukan squash).
+    expect(classTokens(last.firstElementChild)).toContain('h-bar-mobile')
+  })
+
+  it('ruang bawah konten ikut tumbuh sebesar inset safe area', () => {
+    renderShell()
+
+    const main = document.querySelector('main')
+    // Padding bawah = 96px (bar 56px + tonjolan tombol bundar 24px + sisa)
+    // PLUS inset home indicator, supaya konten tak pernah tertutup bar.
+    expect(classTokens(main)).toContain('pb-[calc(6rem_+_env(safe-area-inset-bottom))]')
+  })
+
+  it('tombol keluar adalah elemen TERAKHIR di cluster kanan (paling kanan)', () => {
+    renderShell()
+
+    const bell = screen.getByTestId('notif-menu')
+    const cluster = bell.parentElement
+    const children = Array.from(cluster?.children ?? [])
+    const logout = screen.getByRole('button', { name: 'Keluar dari akun' })
+
+    // Aksi "keluar" harus selalu di posisi paling kanan: jauh lebih mudah
+    // dijangkau ibu jari, dan posisinya tidak berubah-ubah. Lonceng notifikasi
+    // ada SEBELUM logout.
+    expect(children[children.length - 1]).toBe(logout)
+    expect(children.indexOf(bell)).toBeLessThan(children.indexOf(logout))
+    expect(logout.className).toContain('size-11')
   })
 })

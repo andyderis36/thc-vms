@@ -23,8 +23,9 @@ export interface EditUserModalProps {
   /** Tombol simpan menampilkan spinner saat mutasi pemilik berjalan. */
   saving: boolean
   /**
-   * select = dropdown cabang (konsol superadmin); locked = label terkunci
-   * (panel pengawas — pindah cabang lewat konsol); hidden = tanpa cabang
+   * select = dropdown cabang (konsol superadmin, dan panel pengawas ketika
+   * pemanggilnya superadmin); locked = label terkunci (panel pengawas untuk
+   * Admin Cabang — cabang satpam ditetapkan pusat); hidden = tanpa cabang
    * (Vendor/Mitra/superadmin tanpa lokasi).
    */
   locationMode: 'select' | 'locked' | 'hidden'

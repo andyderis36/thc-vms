@@ -18,6 +18,10 @@ export interface CheckboxProps {
  * Checkbox persetujuan SOP keselamatan pada formulir pengajuan.
  * Memakai `<input type="checkbox">` sungguhan agar keyboard dan screen reader
  * bekerja; baris entirety setinggi 44px agar ramah jempol di lapangan.
+ *
+ * Tidak diberi state tekan buatan: checkbox native sudah merender
+ * tekanannya sendiri (platform), dan `active:opacity-*` pada kotak yang
+ * sudah tercentang membuat kontrol terlihat nonaktif saat ditekan.
  */
 export function Checkbox({
   id,

@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { AlertTriangle, Building2, Inbox, MapPin, Pencil, Plus, Power, Trash2 } from 'lucide-react'
+import { AlertTriangle, Building2, Eye, Inbox, MapPin, Pencil, Plus, Power, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
+import { DetailModal, type DetailField } from '@/components/ui/DetailModal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
@@ -173,6 +174,7 @@ function FacilitiesScreen() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<Location | null>(null)
   const [deleting, setDeleting] = useState<Location | null>(null)
+  const [detail, setDetail] = useState<Location | null>(null)
   const { user } = useSession()
   const deleteMutation = useDeleteLocationMutation()
   const role = user !== null ? user.role : null
@@ -340,8 +342,18 @@ function FacilitiesScreen() {
           </div>
         ) : (
           <>
-            <FacilityTable locations={pageRows} onEdit={setEditing} onDelete={showDelete ? setDeleting : undefined} />
-            <FacilityCards locations={pageRows} onEdit={setEditing} onDelete={showDelete ? setDeleting : undefined} />
+            <FacilityTable
+              locations={pageRows}
+              onEdit={setEditing}
+              onDelete={showDelete ? setDeleting : undefined}
+              onView={setDetail}
+            />
+            <FacilityCards
+              locations={pageRows}
+              onEdit={setEditing}
+              onDelete={showDelete ? setDeleting : undefined}
+              onView={setDetail}
+            />
             {rows.length > 0 ? (
               <Pagination
                 ariaLabel="Paginasi daftar fasilitas"
@@ -390,6 +402,14 @@ function FacilitiesScreen() {
           onClose={() => setCreateOpen(false)}
         />
       ) : null}
+      {detail !== null ? (
+        <DetailModal
+          title="Detail Fasilitas"
+          subtitle={detail.name}
+          fields={facilityDetailFields(detail)}
+          onClose={() => setDetail(null)}
+        />
+      ) : null}
       {editing !== null ? (
         <LocationFormModal
           title={`Ubah ${editing.name}`}
@@ -412,6 +432,27 @@ interface FacilityListProps {
   locations: Location[]
   onEdit: (location: Location) => void
   onDelete?: (location: Location) => void
+  onView: (location: Location) => void
+}
+
+/**
+ * Baris detail satu fasilitas — dibaca dari record yang sudah dimuat di
+ * tabel (tanpa fetch tambahan). Nilai kosong dibiarkan apa adanya agar
+ * `DetailModal` menampilkannya sebagai strip.
+ */
+function facilityDetailFields(location: Location): DetailField[] {
+  const active = isLocationActive(location)
+  return [
+    { label: 'NAMA', value: location.name },
+    { label: 'TIPE', value: LOCATION_TYPE_LABEL[location.type] },
+    { label: 'ALAMAT', value: location.address },
+    { label: 'KOTA', value: location.city },
+    { label: 'ZONA WAKTU', value: location.timezone },
+    {
+      label: 'STATUS',
+      value: <Badge tone={active ? 'success' : 'neutral'}>{active ? 'Aktif' : 'Nonaktif'}</Badge>,
+    },
+  ]
 }
 
 function useToggleLocation() {
@@ -436,7 +477,7 @@ function useToggleLocation() {
   return { toggle, isPending: update.isPending, activeId: update.variables?.locationId }
 }
 
-function FacilityTable({ locations, onEdit, onDelete }: FacilityListProps) {
+function FacilityTable({ locations, onEdit, onDelete, onView }: FacilityListProps) {
   const { toggle, isPending, activeId } = useToggleLocation()
 
   return (
@@ -467,6 +508,13 @@ function FacilityTable({ locations, onEdit, onDelete }: FacilityListProps) {
           {locations.map((location) => {
             const active = isLocationActive(location)
             const actions: ActionMenuItem[] = [
+              {
+                id: 'view',
+                label: 'Lihat detail',
+                icon: <Eye aria-hidden="true" className="size-4" />,
+                onSelect: () => onView(location),
+                tone: 'default',
+              },
               {
                 id: 'edit',
                 label: 'Ubah',
@@ -541,7 +589,7 @@ function FacilityTable({ locations, onEdit, onDelete }: FacilityListProps) {
   )
 }
 
-function FacilityCards({ locations, onEdit, onDelete }: FacilityListProps) {
+function FacilityCards({ locations, onEdit, onDelete, onView }: FacilityListProps) {
   const { toggle, isPending, activeId } = useToggleLocation()
 
   return (
@@ -549,6 +597,13 @@ function FacilityCards({ locations, onEdit, onDelete }: FacilityListProps) {
       {locations.map((location) => {
         const active = isLocationActive(location)
         const actions: ActionMenuItem[] = [
+          {
+            id: 'view',
+            label: 'Lihat detail',
+            icon: <Eye aria-hidden="true" className="size-4" />,
+            onSelect: () => onView(location),
+            tone: 'default',
+          },
           {
             id: 'edit',
             label: 'Ubah',

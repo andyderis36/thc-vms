@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { AlertTriangle, Building2, Inbox, Pencil, Plus, Power, Trash2, UserRound } from 'lucide-react'
+import { AlertTriangle, Building2, Eye, Inbox, Pencil, Plus, Power, Trash2, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
+import { DetailModal, type DetailField } from '@/components/ui/DetailModal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
@@ -64,11 +65,16 @@ export function requiresManagedLocation(role: ManagedRoleFilter | ManagedUserRol
   return role === 'admin'
 }
 
-/** Kolom Cabang/Vendor: nama cabang, atau nama vendor, atau strip. */
-export function userAffiliationLabel(user: User): string {
+/** Afiliasi mentah: nama cabang, atau nama vendor, atau `null` (tanpa afiliasi). */
+export function userAffiliationValue(user: User): string | null {
   if (user.location_name !== null && user.location_name !== '') return user.location_name
   if (user.vendor_name !== null && user.vendor_name !== '') return user.vendor_name
-  return '—'
+  return null
+}
+
+/** Kolom Cabang/Vendor: nama cabang, atau nama vendor, atau strip. */
+export function userAffiliationLabel(user: User): string {
+  return userAffiliationValue(user) ?? '—'
 }
 
 export interface ManagedListFilter {
@@ -242,6 +248,7 @@ function UsersScreen() {
   const [createOpen, setCreateOpen] = useState(false)
   const [deleting, setDeleting] = useState<User | null>(null)
   const [editing, setEditing] = useState<User | null>(null)
+  const [detail, setDetail] = useState<User | null>(null)
   const { user: currentUser, refresh: refreshSession } = useSession()
   const deleteMutation = useDeleteManagedUserMutation()
   const updateUser = useUpdateManagedUserMutation()
@@ -454,8 +461,22 @@ function UsersScreen() {
           </div>
         ) : (
           <>
-            <UserTable users={pageRows} currentUserId={currentUserId} viewerRole={viewerRole} onDelete={setDeleting} onEdit={setEditing} />
-            <UserCards users={pageRows} currentUserId={currentUserId} viewerRole={viewerRole} onDelete={setDeleting} onEdit={setEditing} />
+            <UserTable
+              users={pageRows}
+              currentUserId={currentUserId}
+              viewerRole={viewerRole}
+              onDelete={setDeleting}
+              onEdit={setEditing}
+              onView={setDetail}
+            />
+            <UserCards
+              users={pageRows}
+              currentUserId={currentUserId}
+              viewerRole={viewerRole}
+              onDelete={setDeleting}
+              onEdit={setEditing}
+              onView={setDetail}
+            />
             <Pagination
               page={safePage}
               totalPages={totalPages}
@@ -498,6 +519,15 @@ function UsersScreen() {
         <CreateUserModal locations={locations} onClose={() => setCreateOpen(false)} />
       ) : null}
 
+      {detail !== null ? (
+        <DetailModal
+          title="Detail User"
+          subtitle={detail.name}
+          fields={userDetailFields(detail)}
+          onClose={() => setDetail(null)}
+        />
+      ) : null}
+
       {editing !== null ? (
         <EditUserModal
           user={editing}
@@ -527,6 +557,28 @@ function UsersScreen() {
       ) : null}
     </SuperadminShell>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Modal detail (read-only) — permukaan bersama, data dari record yang SUDAH
+// dimuat di tabel (tanpa fetch tambahan).
+// ---------------------------------------------------------------------------
+
+/**
+ * Baris detail satu akun user. Nilai kosong dibiarkan `null`/kosong agar
+ * `DetailModal` yang menampilkannya sebagai strip (bukan sel kosong).
+ */
+function userDetailFields(user: User): DetailField[] {
+  return [
+    { label: 'NAMA', value: user.name },
+    { label: 'EMAIL', value: user.email },
+    { label: 'TELEPON', value: user.phone },
+    { label: 'NIK', value: user.nik },
+    { label: 'PERAN', value: getRoleLabel(user.role) },
+    { label: 'CABANG / VENDOR', value: userAffiliationValue(user) },
+    { label: 'STATUS', value: <StatusCell status={user.status} /> },
+    { label: 'TIPE AKUN', value: user.type === 'internal' ? 'Internal' : 'Eksternal' },
+  ]
 }
 
 // ---------------------------------------------------------------------------
@@ -560,7 +612,7 @@ function StatusCell({ status, className }: { status: User['status']; className?:
   return <Badge tone="neutral" className={className}>Nonaktif</Badge>
 }
 
-function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { users: User[]; currentUserId: string | null; viewerRole: Role | null; onDelete: (user: User) => void; onEdit: (user: User) => void }) {
+function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit, onView }: { users: User[]; currentUserId: string | null; viewerRole: Role | null; onDelete: (user: User) => void; onEdit: (user: User) => void; onView: (user: User) => void }) {
   const { toggle, isPending, activeId } = useToggleManagedStatus()
 
   return (
@@ -592,6 +644,13 @@ function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
     !isProtectedUser(user, currentUserId) &&
     (user.status === 'active' || user.status === 'inactive')
             const actions: ActionMenuItem[] = [
+              {
+                id: 'view',
+                label: 'Lihat detail',
+                icon: <Eye aria-hidden="true" className="size-4" />,
+                onSelect: () => onView(user),
+                tone: 'default',
+              },
               {
                 id: 'edit',
                 label: 'Ubah',
@@ -662,7 +721,7 @@ function UserTable({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
   )
 }
 
-function UserCards({ users, currentUserId, viewerRole, onDelete, onEdit }: { users: User[]; currentUserId: string | null; viewerRole: Role | null; onDelete: (user: User) => void; onEdit: (user: User) => void }) {
+function UserCards({ users, currentUserId, viewerRole, onDelete, onEdit, onView }: { users: User[]; currentUserId: string | null; viewerRole: Role | null; onDelete: (user: User) => void; onEdit: (user: User) => void; onView: (user: User) => void }) {
   const { toggle, isPending, activeId } = useToggleManagedStatus()
 
   return (
@@ -672,6 +731,13 @@ function UserCards({ users, currentUserId, viewerRole, onDelete, onEdit }: { use
     !isProtectedUser(user, currentUserId) &&
     (user.status === 'active' || user.status === 'inactive')
         const actions: ActionMenuItem[] = [
+          {
+            id: 'view',
+            label: 'Lihat detail',
+            icon: <Eye aria-hidden="true" className="size-4" />,
+            onSelect: () => onView(user),
+            tone: 'default',
+          },
           {
             id: 'edit',
             label: 'Ubah',

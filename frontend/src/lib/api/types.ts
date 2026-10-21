@@ -296,14 +296,20 @@ export interface UpdateUserStatusRequest {
 
 /**
  * `PATCH /users/security/:id` — admin cabang terkunci + superadmin.
- * Parsial seperti managed; lokasi tak punya member (pindah cabang lewat
- * konsol superadmin).
+ * Parsial seperti managed; `location_id` memindahkan akun ke cabang lain
+ * (absen/null = biarkan cabang saat ini) dan HANYA superadmin yang boleh
+ * mengirimnya — admin cabang yang mengirimnya mendapat 403.
  */
 export interface UpdateSecurityUserRequest {
   name?: string;
   email?: string;
   phone?: string | null;
   password?: string;
+  /**
+   * Cabang penugasan baru (mutasi lokasi). Absen/null = biarkan cabang
+   * saat ini; terisi = pindah ke cabang itu (superadmin saja).
+   */
+  location_id?: string | null;
 }
 
 export interface CreateVisitRequest {

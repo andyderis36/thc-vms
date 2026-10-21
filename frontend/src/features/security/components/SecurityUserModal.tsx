@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { AlertTriangle, Inbox, Lock, Pencil, Plus, Power, Trash2 } from 'lucide-react'
+import { AlertTriangle, Eye, Inbox, Lock, Pencil, Plus, Power, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
+import { DetailModal, type DetailField } from '@/components/ui/DetailModal'
 import { EditUserModal } from '@/features/users/components/EditUserModal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
@@ -153,6 +154,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
   const deleteUser = useDeleteSecurityUserMutation()
   const [deleting, setDeleting] = useState<User | null>(null)
   const [editing, setEditing] = useState<User | null>(null)
+  const [detail, setDetail] = useState<User | null>(null)
   const updateSecurity = useUpdateSecurityUserMutation()
 
   // Lokasi cabang penugasan: super_admin memilih; admin terkunci ke cabangnya.
@@ -321,6 +323,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
                 onEdit={setEditing}
                 onDelete={setDeleting}
                 onToggle={handleToggleFor}
+                onView={setDetail}
               />
             ) : null}
             {/* Kartu: di mode page dibatasi `lg:hidden` (tabel mengambil alih);
@@ -334,6 +337,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
               onEdit={setEditing}
               onDelete={setDeleting}
               onToggle={handleToggleFor}
+              onView={setDetail}
               className={variant === 'page' ? 'lg:hidden' : undefined}
             />
             <Pagination
@@ -379,7 +383,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
           user={editing}
           locations={locationsQuery.data ?? []}
           saving={updateSecurity.isPending}
-          locationMode="locked"
+          locationMode={canPickLocation ? 'select' : 'locked'}
           isSelf={false}
           onClose={() => setEditing(null)}
           onSubmit={(body) => {
@@ -391,6 +395,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
                   email: body.email,
                   phone: body.phone,
                   ...(body.password !== undefined ? { password: body.password } : {}),
+                  ...(body.location_id !== undefined ? { location_id: body.location_id } : {}),
                 },
               },
               {
@@ -406,6 +411,15 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
           }}
         />
       ) : null}
+
+      {detail !== null ? (
+        <DetailModal
+          title="Detail Pengawas"
+          subtitle={detail.name}
+          fields={securityUserDetailFields(detail)}
+          onClose={() => setDetail(null)}
+        />
+      ) : null}
     </div>
   )
 }
@@ -419,12 +433,30 @@ interface SecurityListProps {
   onEdit: (member: User) => void
   onDelete: (member: User) => void
   onToggle: (member: User) => void
+  onView: (member: User) => void
+}
+
+/**
+ * Baris detail satu pengawas — dibaca dari record yang sudah dimuat di
+ * daftar (tanpa fetch tambahan). Nilai kosong dibiarkan apa adanya agar
+ * `DetailModal` menampilkannya sebagai strip.
+ */
+function securityUserDetailFields(member: User): DetailField[] {
+  return [
+    { label: 'NAMA', value: member.name },
+    { label: 'EMAIL', value: member.email },
+    { label: 'TELEPON', value: member.phone },
+    { label: 'CABANG', value: member.location_name },
+    { label: 'STATUS', value: <SecurityStatusBadge status={member.status} /> },
+  ]
 }
 
 /**
  * Susunan item `ActionMenu` tunggal untuk tabel DAN kartu — satu tempat guard
  * aksi (`toggleable` / `showDelete`) sehingga kedua tampilan tak pernah
  * menyimpang. Guard hapus persis `canShowDeleteSecurityUser` (ada unit test).
+ *
+ * "Lihat detail" selalu PERTAWA (baca sebelum tulis).
  */
 function buildSecurityActionItems(
   member: User,
@@ -433,9 +465,16 @@ function buildSecurityActionItems(
   onEdit: (member: User) => void,
   onToggle: (member: User) => void,
   onDelete: (member: User) => void,
+  onView: (member: User) => void,
 ): ActionMenuItem[] {
   const isActive = member.status === 'active'
   const items: ActionMenuItem[] = [
+    {
+      id: 'view',
+      label: 'Lihat detail',
+      icon: <Eye aria-hidden="true" className="size-4" />,
+      onSelect: () => onView(member),
+    },
     {
       id: 'edit',
       label: 'Ubah',
@@ -472,6 +511,7 @@ function SecurityUserActionMenu({
   onEdit,
   onDelete,
   onToggle,
+  onView,
 }: {
   member: User
   role: Role
@@ -481,17 +521,18 @@ function SecurityUserActionMenu({
   onEdit: (member: User) => void
   onDelete: (member: User) => void
   onToggle: (member: User) => void
+  onView: (member: User) => void
 }) {
   return (
     <ActionMenu
       label={`Aksi untuk ${member.name}`}
-      items={buildSecurityActionItems(member, role, ownLocationId, onEdit, onToggle, onDelete)}
+      items={buildSecurityActionItems(member, role, ownLocationId, onEdit, onToggle, onDelete, onView)}
       busy={togglePending && toggleUserId === member.id}
     />
   )
 }
 
-function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUserId, onEdit, onDelete, onToggle }: SecurityListProps) {
+function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUserId, onEdit, onDelete, onToggle, onView }: SecurityListProps) {
   return (
     <div className={TABLE_WRAPPER_CLASS}>
       <table className={TABLE_CLASS}>
@@ -548,6 +589,7 @@ function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUs
                   onEdit={onEdit}
                   onDelete={onDelete}
                   onToggle={onToggle}
+                  onView={onView}
                 />
               </td>
             </tr>
@@ -558,7 +600,7 @@ function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUs
   )
 }
 
-function SecurityUserCards({ users, role, ownLocationId, togglePending, toggleUserId, onEdit, onDelete, onToggle, className }: SecurityListProps & { className?: string }) {
+function SecurityUserCards({ users, role, ownLocationId, togglePending, toggleUserId, onEdit, onDelete, onToggle, onView, className }: SecurityListProps & { className?: string }) {
   return (
     <ul className={`grid grid-cols-1 gap-2 md:grid-cols-2 ${className ?? ''}`}>
       {users.map((member) => {
@@ -589,6 +631,7 @@ function SecurityUserCards({ users, role, ownLocationId, togglePending, toggleUs
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggle={onToggle}
+                onView={onView}
               />
             </div>
           </li>

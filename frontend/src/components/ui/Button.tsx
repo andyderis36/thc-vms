@@ -14,18 +14,40 @@ export type ButtonVariant =
   | 'soft'
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'gate'
 
+/**
+ * Status TEKAN (`:active`) — umpan balik tekan untuk perangkat sentuh.
+ *
+ * Aturan main untuk SELURUH primitif interaktif di folder ini:
+ *  1. Tekan harus TERLIHAT BERBEDA dari hover, bukan mengulanginya:
+ *     hover = wash terang → tekan = satu langkah lebih pekat di keluarga
+ *     warna yang sama (`bg-neutral-bg` → `bg-ink/10`, `bg-brand-soft` →
+ *     `bg-brand/20`). Varian isi solid memakai `active:opacity-*` karena
+ *     palet tidak punya langkah pekat ketiga untuk brand.
+ *  2. HANYA background/warna/opacity yang boleh berubah — border-width,
+ *     padding, dan ukuran tidak, karena itu = layout shift saat ditekan.
+ *  3. Di Tailwind v4 urutan varian CSS yang dicetak: `hover` → `focus` →
+ *     `focus-visible` → `active` → `enabled` → `disabled`. Maka `active:`
+ *     mengalahkan `hover:` saat ditekan, dan `disabled:opacity-60` tetap
+ *     mengalahkan `active:opacity-*`.
+ *  4. Di layar sentuh `hover:` dibungkus `@media (hover: hover)` sehingga
+ *     tidak pernah aktif di ponsel; bersama `-webkit-tap-highlight-color:
+ *     transparent` (globals.css) itu membuat tekan tanpa umpan balik sama
+ *     sekali. Karena itu `active:` wajib ada.
+ */
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'bg-brand text-brand-contrast hover:bg-brand-dark',
-  secondary: 'border border-brand text-brand hover:bg-brand-soft',
-  danger: 'bg-checkout text-brand-contrast hover:opacity-90',
-  ghost: 'text-ink-secondary hover:bg-neutral-bg',
-  success: 'bg-checkin text-brand-contrast hover:opacity-90',
+  primary: 'bg-brand text-brand-contrast hover:bg-brand-dark active:bg-brand-dark active:opacity-90',
+  secondary:
+    'border border-brand text-brand hover:bg-brand-soft active:bg-brand-soft active:opacity-90',
+  danger: 'bg-checkout text-brand-contrast hover:opacity-90 active:opacity-70',
+  ghost: 'text-ink-secondary hover:bg-neutral-bg active:bg-ink/10',
+  success: 'bg-checkin text-brand-contrast hover:opacity-90 active:opacity-70',
   /* --- Varian Jokoui (palet THC biru) --- */
-  gradient: 'bg-gradient-to-r from-brand via-brand-dark to-brand text-brand-contrast hover:from-brand-dark hover:to-brand-dark',
-  glass: 'bg-brand/10 backdrop-blur-sm border border-brand/20 text-brand hover:bg-brand/20',
-  outline: 'border border-brand text-brand hover:bg-brand/10',
-  soft: 'bg-brand/10 text-brand-dark hover:bg-brand/20',
-  icon: 'px-2',
+  gradient:
+    'bg-gradient-to-r from-brand via-brand-dark to-brand text-brand-contrast hover:from-brand-dark hover:to-brand-dark active:opacity-90',
+  glass: 'bg-brand/10 backdrop-blur-sm border border-brand/20 text-brand hover:bg-brand/20 active:bg-brand/30',
+  outline: 'border border-brand text-brand hover:bg-brand/10 active:bg-brand/20',
+  soft: 'bg-brand/10 text-brand-dark hover:bg-brand/20 active:bg-brand/30',
+  icon: 'px-2 active:bg-ink/10',
 }
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {

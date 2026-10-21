@@ -9,6 +9,7 @@ import (
 	"log/slog"
 
 	"thc-vms/backend/internal/domain"
+	visituc "thc-vms/backend/internal/usecase/visit"
 )
 
 // Actor is the authenticated caller of a gate operation: the staff id, the
@@ -27,6 +28,10 @@ type Dependencies struct {
 	CheckIns domain.CheckInOutRepository
 	Clock    domain.Clock
 	Logger   *slog.Logger
+	// TrustedFileOrigins lists the deployment's own object-storage hosts so the
+	// check-in photo allowlist accepts the plain-HTTP URLs the storage adapter
+	// hands out on a LAN deployment without TLS.
+	TrustedFileOrigins visituc.FileOriginAllowlist
 }
 
 // Service executes gate operations against the injected ports.
@@ -35,6 +40,9 @@ type Service struct {
 	checkIns domain.CheckInOutRepository
 	clock    domain.Clock
 	logger   *slog.Logger
+	// trustedFileOrigins is the deployment's own object-storage hosts, used by
+	// the shared uploaded-file URL allowlist.
+	trustedFileOrigins visituc.FileOriginAllowlist
 }
 
 // NewService builds a gate service, defaulting a nil clock to the wall clock
@@ -49,10 +57,11 @@ func NewService(deps Dependencies) *Service {
 		logger = slog.Default()
 	}
 	return &Service{
-		visits:   deps.Visits,
-		checkIns: deps.CheckIns,
-		clock:    clock,
-		logger:   logger,
+		visits:             deps.Visits,
+		checkIns:           deps.CheckIns,
+		clock:              clock,
+		logger:             logger,
+		trustedFileOrigins: deps.TrustedFileOrigins,
 	}
 }
 

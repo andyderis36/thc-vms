@@ -360,9 +360,15 @@ export function SuperadminShell({
 
         {/* Konten utama — min-w-0 (min-inline-size:0) menjamin tidak ada scroll
             horizontal; id+tabIndex menjadi sasan skip-to-content.
-            `pb-bottomnav lg:pb-6`: padding bawah ikut rentang BottomNav (lg),
-            selaras dengan AdminBranchShell. */}
-        <main id="main-content" tabIndex={-1} className="min-w-0 overflow-x-clip p-6 pb-bottomnav lg:pb-6">
+            Padding bawah menyisakan ruang BottomNav (56px + inset safe area
+            iOS) — bar tumbuh sebesar `env(safe-area-inset-bottom)` jadi ruang
+            kosong konten ikut tumbuh sama besar; `lg:pb-6` mengembalikan
+            padding normal saat bar bawah disembunyikan. */}
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="min-w-0 overflow-x-clip p-6 pb-[calc(var(--spacing-bottomnav)_+_env(safe-area-inset-bottom))] lg:pb-6"
+        >
           <div className="mx-auto w-full max-w-7xl">{children}</div>
         </main>
 

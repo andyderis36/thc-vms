@@ -120,4 +120,41 @@ describe('SecurityKioskShell — topbar kios satu baris di semua breakpoint', ()
 
     expect(screen.queryByTestId('kiosk-status-strip')).toBeNull()
   })
+
+  it('tombol keluar adalah elemen TERAKHIR di cluster kanan (paling kanan)', () => {
+    render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    const bell = screen.getByTestId('notif-menu')
+    const cluster = bell.parentElement
+    const children = Array.from(cluster?.children ?? [])
+    const logout = screen.getByRole('button', { name: 'Ganti Shift / Logout' })
+
+    // Aksi "ganti shift / keluar" paling kanan, lonceng notifikasi
+    // SEBELUMNYA — posisi logout konsisten & mudah dijangkau ibu jari.
+    expect(children[children.length - 1]).toBe(logout)
+    expect(children.indexOf(bell)).toBeLessThan(children.indexOf(logout))
+    expect(cluster?.textContent).toContain('Joko Susilo')
+  })
+
+  it('bottom bar ponsel reservasi safe area iOS tanpa terjepit', () => {
+    render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    const bar = Array.from(document.querySelectorAll('div')).find(
+      (node) => node.className.includes('fixed') && node.className.includes('bottom-0'),
+    )
+    const classes = (bar?.getAttribute('class') ?? '').split(/\s+/)
+    expect(classes).toContain('min-h-bar-mobile')
+    expect(classes).toContain('pb-[env(safe-area-inset-bottom)]')
+    // Isi bar tetap 56px (min-h-bar-mobile pada tab gerbang).
+    expect(screen.getAllByRole('tab')[0]?.className).toContain('min-h-bar-mobile')
+  })
+
+  it('ruang bawah konten ikut tumbuh sebesar inset safe area', () => {
+    render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    const main = document.querySelector('main')
+    const classes = (main?.getAttribute('class') ?? '').split(/\s+/)
+    // Padding bawah 96px (bar 56px + sisanya) PLUS inset home indicator.
+    expect(classes).toContain('pb-[calc(6rem_+_env(safe-area-inset-bottom))]')
+  })
 })

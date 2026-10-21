@@ -7,6 +7,11 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Spinner } from '@/components/ui/Spinner'
 import { Tabs, type TabItem } from '@/components/ui/Tabs'
+import {
+  cameraFailureMessage,
+  classifyCameraFailure,
+  type CameraSupport,
+} from '@/features/gate/camera-support'
 
 /**
  * SCR-05 — Panel Pemindai Dua-Tab: kamera langsung (dengan tombol unggah
@@ -287,11 +292,20 @@ export function ScannerPanel({
             undefined,
           )
           if (!cancelled) setCameraReady(true)
-        } catch {
+        } catch (error) {
           if (!cancelled) {
-            setCameraError(
-              'Kamera tidak dapat diakses. Izinkan akses kamera, unggah gambar QR, atau gunakan Input Manual.'
+            const support: CameraSupport = {
+              secureContext: typeof window !== 'undefined' && window.isSecureContext,
+              mediaDevicesAvailable:
+                typeof navigator !== 'undefined' &&
+                !!navigator.mediaDevices &&
+                typeof navigator.mediaDevices.getUserMedia === 'function',
+            }
+            const failure = classifyCameraFailure(
+              support,
+              error instanceof Error ? error.name : undefined,
             )
+            setCameraError(cameraFailureMessage(failure))
           }
         }
       } catch {

@@ -67,11 +67,22 @@ function getPageItems(currentPage: number, totalPages: number): PageItem[] {
   return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages]
 }
 
+/**
+ * `BUTTON_BASE` sengaja TIDAK membawa state tekan: ia hanya memuat
+ * geometri + tipografi (tanpa fill sendiri), jadi tidak ada "permukaan"
+ * yang bisa DiveGet lebih pekat. Setiap varian warna yang memiliki fill
+ * sendiri membawa tekannya sendiri (lihat di bawah) — pola yang sama
+ * dipakai `Button.tsx` (base = geometri, `VARIANT_CLASSES` = warna).
+ *
+ * Kontrak tekan (lihat blok aturan di `Button.tsx`): tekan = satu langkah
+ * lebih pekat dari hover, hanya lewat background/warna/opacity; `active:`
+ * mengalahkan `hover:` karena urutan varian CSS Tailwind v4.
+ */
 const BUTTON_BASE =
   'inline-flex items-center justify-center gap-2 rounded-control min-h-touch px-3 text-label font-semibold tracking-normal transition duration-150'
-const PAGE_INACTIVE = `${BUTTON_BASE} cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 border border-brand text-brand hover:bg-brand-soft`
-const PAGE_ACTIVE = `${BUTTON_BASE} bg-brand text-brand-contrast hover:bg-brand-dark cursor-default`
-const CONTROL = `${BUTTON_BASE} cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 border border-border-light text-ink-secondary hover:bg-neutral-bg hover:text-ink`
+const PAGE_INACTIVE = `${BUTTON_BASE} cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 border border-brand text-brand hover:bg-brand-soft active:bg-brand/20`
+const PAGE_ACTIVE = `${BUTTON_BASE} bg-brand text-brand-contrast hover:bg-brand-dark active:bg-brand-dark cursor-default`
+const CONTROL = `${BUTTON_BASE} cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 border border-border-light text-ink-secondary hover:bg-neutral-bg hover:text-ink active:bg-ink/10`
 const ELLIPSIS = 'text-xs font-semibold px-2 text-ink-muted'
 
 export function Pagination({

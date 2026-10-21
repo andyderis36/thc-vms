@@ -119,7 +119,8 @@ export function SecurityKioskShell({
             di bawahnya (ponsel: kolom bertumpuk di antara logo dan lonceng;
             md+: jam + counter sebaris);
           - kanan: tautan kembali (ikon di ponsel), lonceng notifikasi,
-            nama petugas (lg+), dan tombol logout ringkas.
+            nama petugas (lg+), dan tombol logout ringkas (logout paling
+            kanan supaya aksi keluar selalu di posisi yang konsisten).
           Tinggi bar: 56px di ponsel (`h-bar-mobile`), 70px mulai md
           (`md:h-topbar-kiosk`). Grid 3 kolom hanya mulai xl (1280px); di
           768-1023px baris tetap flex + justify-between (§5.1). */}
@@ -231,16 +232,26 @@ export function SecurityKioskShell({
 
       {/* Konten layar; overflow-x-clip mengunci scroll horizontal TANPA membuat
           scroll container (clip ≠ hidden) sehingga elemen sticky di dalamnya tetap
-          bekerja. min-w-0 = min-inline-size:0; id+tabIndex = sasan skip-to-content. */}
-      <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-x-clip p-4 pb-24 md:p-6 lg:p-8">
+          bekerja. min-w-0 = min-inline-size:0; id+tabIndex = sasan skip-to-content.
+          Padding bawah menyisakan ruang untuk bottom bar ponsel 56px PLUS inset
+          safe area iOS (`env(safe-area-inset-bottom)`) — bar tumbuh sebesar
+          inset, jadi ruang kosong konten ikut tumbuh sama besar. */}
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="min-w-0 flex-1 overflow-x-clip p-4 pb-[calc(6rem_+_env(safe-area-inset-bottom))] md:p-6 lg:p-8"
+      >
         {children}
       </main>
 
       {/* Ponsel (< 768px): 3 tab yang sama sebagai bottom bar tetap 56px
           (`min-h-bar-mobile`), sama seperti navbar ponsel 56px.
           `px-4` = gutter yang sama dengan sub-bar desktop (tanpa gutter,
-          pil tab aktif menempel di x≈0 dan terbaca terpotong). */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border-light bg-surface shadow-dropdown md:hidden">
+          pil tab aktif menempel di x≈0 dan terbaca terpotong).
+          Safe area: `min-h-bar-mobile` + `pb-[env(safe-area-inset-bottom)]` →
+          bar tumbuh sebesar inset home indicator tanpa menjepit isi (tinggi
+          tab tetap `min-h-bar-mobile`). */}
+      <div className="fixed inset-x-0 bottom-0 z-30 min-h-bar-mobile border-t border-border-light bg-surface pb-[env(safe-area-inset-bottom)] shadow-dropdown md:hidden">
         <Tabs
           tabs={mobileTabs}
           value={selectedTab}
