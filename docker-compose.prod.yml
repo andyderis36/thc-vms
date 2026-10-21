@@ -26,11 +26,12 @@ services:
       retries: 10
 
   # Object storage S3-compatible. MinIO = stack yang sama dengan local dev
-  # (AGENTS.md §4) dan image-nya sudah proven di cache lokal.
-  # Tag bisa di-override lewat MINIO_IMAGE di .env bila registry sedang
-  # bermasalah (known-good: RELEASE.2025-09-07T16-13-09Z).
+  # (AGENTS.md §4). Default di-pin ke digest: repo minio/minio di Docker Hub
+  # sudah dihapus, dan ghcr.io/netvark/minio@sha256:14cea493... adalah image
+  # yang identik byte-per-byte dengan minio/minio:latest (RepoDigest & Image ID
+  # sama). Naikkan versinya lewat MINIO_IMAGE di .env.
   minio:
-    image: ${MINIO_IMAGE:-minio/minio:latest}
+    image: ${MINIO_IMAGE:-ghcr.io/netvark/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}
     pull_policy: missing
     restart: always
     mem_limit: 512M
@@ -113,9 +114,13 @@ services:
     mem_limit: 256M
     cpus: 0.5
     environment:
-      # Alamat site Caddy. Kosong = catch-all ":80" (akses LAN via IP).
+      # Alamat site Caddy. Default ":80" (catch-all HTTP, akses LAN via IP).
+      # PENTING: default-nya harus berisi nilai, BUKAN string kosong. Placeholder
+      # Caddy `{$SITE_ADDRESS::80}` hanya memakai default bila env TIDAK di-set;
+      # env yang di-set string kosong membuat blok site jadi "global options" dan
+      # Caddy gagal parse ("unrecognized global option: encode") lalu restart-loop.
       # Isi domain (mis. vms.thc.co.id) untuk TLS otomatis + redirect HTTPS.
-      SITE_ADDRESS: ${SITE_ADDRESS:-}
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     depends_on:
       backend:
         condition: service_healthy
