@@ -361,8 +361,16 @@ export function AdminBranchShell({
         </header>
 
         {/* Konten utama — min-w-0 (min-inline-size:0) menjamin tidak ada scroll
-            horizontal; id+tabIndex menjadi sasan skip-to-content. */}
-        <main id="main-content" tabIndex={-1} className="min-w-0 overflow-x-clip p-6 pb-bottomnav lg:pb-6">
+            horizontal; id+tabIndex menjadi sasan skip-to-content.
+            Padding bawah `pb-bottomnav` + inset safe area iOS: bar bawah
+            tumbuh sebesar `env(safe-area-inset-bottom)`, jadi ruang kosong
+            konten ikut tumbuh sama besar (home indicator tak pernah menutupi
+            isi). */}
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="min-w-0 overflow-x-clip p-6 pb-[calc(var(--spacing-bottomnav)_+_env(safe-area-inset-bottom))] lg:pb-6"
+        >
           <div className="mx-auto w-full max-w-7xl">{children}</div>
         </main>
 

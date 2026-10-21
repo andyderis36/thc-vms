@@ -196,6 +196,9 @@ export function VendorMobileShell({
                 vendor, jadi panelnya WAJIB tersedia di SHELL-04. `tone="brand"`
                 karena loncengnya duduk di atas navbar biru. */}
             <NotificationsMenu tone="brand" className="shrink-0" />
+            {/* Tombol keluar paling kanan: aksi "keluar" harus selalu di
+                posisi yang sama & paling mudah dijangkau ibu jari, jadi
+                logout TIDAK digeser oleh lonceng. */}
             <button
               type="button"
               onClick={handleSignOut}
@@ -209,20 +212,32 @@ export function VendorMobileShell({
         </div>
       </header>
 
-      {/* Konten: p-4; pb-24 memberi ruang bottom nav 56px + tonjolan tombol bundar
-          (`size-14 -translate-y-6`). Padding ini sengaja tidak ikut menyusut.
-          overflow-x-clip mengunci scroll horizontal tanpa mematikan elemen sticky
-          (action bar SCR-03). min-w-0 = min-inline-size:0; id+tabIndex = skip-to-content. */}
-      <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-x-clip p-4 pb-24 lg:pb-8">
+      {/* Konten: p-4; pb bawah menyisakan ruang untuk bottom nav 56px +
+          tonjolan tombol bundar (`size-14 -translate-y-6`) PLUS inset safe
+          area iOS (`env(safe-area-inset-bottom)`) — bar tetap tumbuh sebesar
+          inset, jadi ruang kosong konten ikut tumbuh sama besar dan konten
+          tak pernah tertutup home indicator. Padding ini sengaja tidak
+          ikut menyusut.
+          overflow-x-clip mengunci scroll horizontal tanpa mematikan elemen
+          sticky (action bar SCR-03). min-w-0 = min-inline-size:0;
+          id+tabIndex = skip-to-content. */}
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="min-w-0 flex-1 overflow-x-clip p-4 pb-[calc(6rem_+_env(safe-area-inset-bottom))] lg:pb-8"
+      >
         {children}
       </main>
 
-      {/* Bottom navigation tetap (ponsel/tablet), diganti top nav di >= 1024px. */}
+      {/* Bottom navigation tetap (ponsel/tablet), diganti top nav di >= 1024px.
+          Safe area: `min-h-bar-mobile` + `pb-[env(safe-area-inset-bottom)]`
+          → bar tumbuh sebesar inset home indicator TANPA terjepit, karena
+          tinggi isi dikunci `h-bar-mobile` pada baris di bawah. */}
       <nav
         aria-label="Navigasi utama"
-        className="fixed inset-x-0 bottom-0 z-30 h-bar-mobile border-t border-border-light bg-surface shadow-dropdown lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 min-h-bar-mobile border-t border-border-light bg-surface pb-[env(safe-area-inset-bottom)] shadow-dropdown lg:hidden"
       >
-        <div className="flex h-full items-stretch">
+        <div className="flex h-bar-mobile items-stretch">
           {VENDOR_NAV.map((item) => {
             const active = currentHref === item.href
 

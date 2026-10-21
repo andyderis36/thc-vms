@@ -129,4 +129,18 @@ describe('AdminBranchShell — topbar mobile & laci', () => {
     const mobileHeader = document.querySelectorAll('header')[1]
     expect(classTokens(mobileHeader)).toContain('h-bar-mobile')
   })
+
+  it('item sidebar aktif tanpa aksen garis tepi (varian terang)', () => {
+    renderShell()
+
+    const active = document.querySelector('aside nav a[aria-current="page"]')
+    const classes = classTokens(active)
+
+    // Tidak boleh ada border aksen (3px kiri) pada status mana pun.
+    expect(classes).not.toContain('border-l-[3px]')
+    expect(classes.filter((token) => token.startsWith('border-'))).toHaveLength(0)
+    // Identitas aktif tetap lewat permukaan ber-tint + tinta brand.
+    expect(classes).toContain('bg-brand-soft')
+    expect(classes).toContain('text-brand')
+  })
 })

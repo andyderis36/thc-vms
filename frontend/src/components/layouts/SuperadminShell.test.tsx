@@ -125,6 +125,20 @@ describe('SuperadminShell — regresi defek mobile', () => {
     const bells = screen.getAllByTestId('notif-menu')
     expect(bells[1]?.className).toContain('ml-auto')
   })
+
+  it('item sidebar aktif tanpa aksen garis tepi (varian gelap)', () => {
+    renderShell()
+
+    const active = document.querySelector('aside nav a[aria-current="page"]')
+    const classes = (active?.getAttribute('class') ?? '').split(/\s+/)
+
+    // Tidak boleh ada border aksen (3px kiri) pada status mana pun.
+    expect(classes).not.toContain('border-l-[3px]')
+    expect(classes.filter((token) => token.startsWith('border-'))).toHaveLength(0)
+    // Identitas aktif tetap lewat permukaan ber-tint + tinta brand.
+    expect(classes).toContain('bg-brand/10')
+    expect(classes).toContain('text-brand-contrast')
+  })
 })
 
 /**
