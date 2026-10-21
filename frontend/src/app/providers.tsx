@@ -8,9 +8,16 @@
  * kunjungan antar cabang.
  */
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  MutationCache,
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Toaster } from 'sonner'
+
+import { clearNetworkFailure, reportNetworkFailure } from '@/lib/api/connectivity'
 
 /** Batas atas jeda retry eksponensial (ms) — jeda tidak tumbuh tanpa batas. */
 const MAX_RETRY_DELAY_MS = 30_000
@@ -48,9 +55,33 @@ function exponentialRetryDelay(retryAttempt: number): number {
  * jadi kita tidak menambah dependensi baru dan tidak memasang persist untuk
  * master query (locations/purposes). Bila paket itu kelak terpasang, persist
  * master 24 jam + `buster=APP_VERSION` boleh diaktifkan.
+ *
+ * `queryCache`/`mutationCache` global mendeteksi kegagalan JARINGAN (request
+ * tak pernah sampai ke server) dan meneruskannya ke store konektivitas
+ * (`lib/api/connectivity`) yang dibaca banner global. Ini TIDAK mengubah
+ * semantik retry: `networkMode: 'online'` tetap menjeda query saat offline
+ * (jadi tidak pernah ada "server tidak dapat dihubungi" palsu), dan retry
+ * query/mutasi tetap seperti di bawah. Galat HTTP 401/403/404/500 TIDAK
+ * pernah menyentuh store — hanya `NETWORK_ERROR`/`status: 0`.
  */
 export function makeQueryClient(): QueryClient {
   return new QueryClient({
+    queryCache: new QueryCache({
+      onError: (error: unknown) => {
+        reportNetworkFailure(error)
+      },
+      onSuccess: () => {
+        clearNetworkFailure()
+      },
+    }),
+    mutationCache: new MutationCache({
+      onError: (error: unknown) => {
+        reportNetworkFailure(error)
+      },
+      onSuccess: () => {
+        clearNetworkFailure()
+      },
+    }),
     defaultOptions: {
       queries: {
         staleTime: Number.POSITIVE_INFINITY,

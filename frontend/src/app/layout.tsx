@@ -4,6 +4,7 @@ import './globals.css'
 import MswProvider from './msw-provider'
 import { Providers } from './providers'
 import { SessionProvider } from '@/lib/auth/session'
+import { ConnectivityBanner } from '@/components/ui/ConnectivityBanner'
 
 /**
  * Inter is the mandated typeface (AGENTS.md §3.1; docs/stitch-ui is STALE).
@@ -54,10 +55,18 @@ export default function RootLayout({
              `getMe()` milik SessionProvider akan menembak API sebelum mock siap.
           2. Providers - satu QueryClient per sesi browser.
           3. SessionProvider - hidrasi user dari token yang tersimpan.
+          4. ConnectivityBanner - SATU-SATUNYA indikator konektivitas global,
+             dipasang DI DALAM provider tree sehingga hidup di semua halaman
+             (termasuk /login) tanpa perlu di-mount ulang per halaman.
+             Saat koneksi sehat komponen ini tidak merender apa pun, jadi
+             tidak ada node DOM maupun pergeseran tata letak.
         */}
         <MswProvider>
           <Providers>
-            <SessionProvider>{children}</SessionProvider>
+            <SessionProvider>
+              <ConnectivityBanner />
+              {children}
+            </SessionProvider>
           </Providers>
         </MswProvider>
       </body>
