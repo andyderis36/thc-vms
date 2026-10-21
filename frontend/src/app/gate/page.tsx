@@ -31,6 +31,7 @@ import type {
   VisitStatus,
 } from '@/lib/api/types'
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination'
+import { countOnSiteTechnicians, ON_SITE_COUNT_PARAMS } from '@/lib/visits/on-site-count'
 import { isCheckinWindowOpen, mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
 import { ScannerPanel, type ScanPhase } from '@/features/gate/ScannerPanel'
 import { GateQueue } from '@/features/gate/GateQueue'
@@ -170,6 +171,14 @@ function GateContent() {
   const rescheduledQuery = useVisitsQuery(
     toGateListParams(filter, 'rescheduled'),
     isUpcoming,
+  )
+  // Badge "X Teknisi On-Site": query KHUSUS (bukan query tab) supaya angka
+  // teknisi di lokasi tetap tampil di tab mana pun. Hanya untuk role kios —
+  // badge-nya hanya dirender di SecurityKioskShell.
+  const onSiteQuery = useVisitsQuery(ON_SITE_COUNT_PARAMS, role === 'security')
+  const onSiteCount = useMemo(
+    () => countOnSiteTechnicians(onSiteQuery.data?.items ?? []),
+    [onSiteQuery.data],
   )
   const checkIn = useCheckInVisitMutation()
   const checkOut = useCheckOutVisitMutation()
@@ -385,12 +394,9 @@ function GateContent() {
     setScanResetKey((key) => key + 1)
   }
 
-  // Jumlah teknisi on-site HANYA ada di tab "Sedang di Lokasi"; tab lain
-  // menampilkan 0. Nilai ini dipakai navbar kios — kolom tengahnya
-  // (jam live WIB + counter "X Teknisi On-Site", bertumpuk di ponsel dan
-  // sebaris di md+) — agar keduanya bicara dengan angka yang sama.
-  const onSiteCount = tab === 'on-site' ? (visitsQuery.data?.total ?? 0) : 0
-
+  // Jumlah teknisi on-site dihitung dari query badge (lihat ON_SITE_COUNT_PARAMS),
+  // bukan dari query tab — supaya navbar kios selalu bicara dengan angka yang
+  // sama apa pun tab yang aktif.
   const gateContent = (
     <div className="flex flex-col gap-4 lg:flex-row">
       <div className="min-w-0 lg:w-[42%]">
