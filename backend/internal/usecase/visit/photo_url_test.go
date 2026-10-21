@@ -38,7 +38,7 @@ func TestValidatePhotoURL(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := ValidatePhotoURL(tc.raw)
+			err := ValidatePhotoURL(tc.raw, nil)
 			if !tc.wantErr {
 				if err != nil {
 					t.Fatalf("ValidatePhotoURL(%q) = %v, want nil", tc.raw, err)
@@ -50,6 +50,47 @@ func TestValidatePhotoURL(t *testing.T) {
 			}
 			if !errors.Is(err, domain.ErrValidation) {
 				t.Fatalf("ValidatePhotoURL(%q) = %v, want validation failure", tc.raw, err)
+			}
+		})
+	}
+}
+
+// TestValidatePhotoURL_TrustedStorageOrigin pins the LAN-deployment case: a
+// plain-http URL on the deployment's own object-storage host is accepted
+// (that is the URL the storage adapter itself hands out), while the same
+// scheme on any other host stays refused.
+func TestValidatePhotoURL_TrustedStorageOrigin(t *testing.T) {
+	t.Parallel()
+	allow := NewFileOriginAllowlist(
+		"http://10.11.6.110/s3/thc-vms-bucket",
+		"minio:9000",
+		"https://vms.thckalbar.com",
+		"",
+	)
+	cases := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{"trusted host from public base accepted", "http://10.11.6.110/s3/thc-vms-bucket/id_cards/pending-1/ktp.jpg", false},
+		{"trusted host from bare endpoint accepted", "http://minio:9000/thc-vms-bucket/x.jpg", false},
+		{"other plain-http host still refused", "http://example.com/x.jpg", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidatePhotoURL(tc.raw, allow)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ValidatePhotoURL(%q) = nil, want validation failure", tc.raw)
+				}
+				if !errors.Is(err, domain.ErrValidation) {
+					t.Fatalf("ValidatePhotoURL(%q) = %v, want validation failure", tc.raw, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidatePhotoURL(%q) = %v, want nil", tc.raw, err)
 			}
 		})
 	}

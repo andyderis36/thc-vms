@@ -70,6 +70,25 @@ type Service struct {
 	// existing NewService callers keep compiling; a nil reader fails reads
 	// closed (404) rather than leaking raw private-bucket addresses.
 	objectReader domain.ObjectReader
+	// trustedFileOrigins lists the hosts whose plain-HTTP file URLs the
+	// payload allowlist accepts. It is wired after construction via
+	// WithTrustedFileOrigins so existing NewService callers keep compiling;
+	// an empty list keeps the strict rule (https only, plus the dev hosts).
+	trustedFileOrigins FileOriginAllowlist
+}
+
+// WithTrustedFileOrigins records the deployment's own object-storage hosts so
+// the file-URL allowlist accepts the plain-HTTP URLs the storage adapter
+// hands out on a LAN deployment without TLS.
+func (s *Service) WithTrustedFileOrigins(allow FileOriginAllowlist) *Service {
+	s.trustedFileOrigins = allow
+	return s
+}
+
+// validatePhotoURL applies the shared uploaded-file URL allowlist with this
+// service's trusted origins.
+func (s *Service) validatePhotoURL(raw string) error {
+	return validatePhotoURL(raw, s.trustedFileOrigins)
 }
 
 // NewService wires the visit usecase to its domain ports. checkIns may be nil

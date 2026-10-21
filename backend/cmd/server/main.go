@@ -111,11 +111,18 @@ func run(ctx context.Context) error {
 	// S3_PRESIGN_TTL_MINUTES and is guaranteed positive by config. The object
 	// reader powers the scoped GET /visits/:id/file stream (bytes, not links).
 	notificationSvc := notification.NewService(notifications)
+	// The uploaded-file URL allowlist must accept the URLs this deployment's
+	// own object storage hands out. On a LAN install without TLS the public
+	// base is a plain-http IP (Caddy same-origin /s3 path), so the trusted
+	// hosts are derived from the very config the storage adapter reads.
+	fileOrigins := visit.NewFileOriginAllowlist(cfg.Storage.PublicBaseURL, cfg.Storage.Endpoint)
 	visitSvc := visit.NewService(visits, master, clock, checkins, repository.NewVendorRepository(pool)).
 		WithFileLinks(store, cfg.Storage.PresignTTL()).
-		WithObjectReader(store)
+		WithObjectReader(store).
+		WithTrustedFileOrigins(fileOrigins)
 	gateSvc := gate.NewService(gate.Dependencies{
 		Visits: visits, CheckIns: checkins, Clock: clock, Logger: logger,
+		TrustedFileOrigins: fileOrigins,
 	})
 	workerSvc := worker.NewService(worker.Dependencies{
 		Visits: visits, Rules: autorules, CheckIns: checkins, Notifications: notifications, Clock: clock, Logger: logger,

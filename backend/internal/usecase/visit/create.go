@@ -2,6 +2,7 @@ package visit
 
 import (
 	"context"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -93,7 +94,7 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 		return domain.VisitRequest{}, domain.ValidationFailure("Persetujuan NDA wajib disetujui sebagai bentuk kepatuhan K3/SOP sebelum mengajukan kunjungan.")
 	}
 	for i, visitor := range in.Visitors {
-		if err := validateVisitor(visitor, i+1); err != nil {
+		if err := validateVisitor(visitor, i+1, s.trustedFileOrigins); err != nil {
 			return domain.VisitRequest{}, err
 		}
 	}
@@ -103,7 +104,7 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 	if strings.TrimSpace(textOrEmpty(in.AssignmentLetterURL)) == "" {
 		return domain.VisitRequest{}, domain.ValidationFailure("Surat Tugas / SPK wajib diunggah.")
 	}
-	if err := ValidatePhotoURL(textOrEmpty(in.AssignmentLetterURL)); err != nil {
+	if err := s.validatePhotoURL(textOrEmpty(in.AssignmentLetterURL)); err != nil {
 		return domain.VisitRequest{}, err
 	}
 
@@ -221,7 +222,7 @@ func validateWindow(start time.Time, end time.Time) error {
 	return nil
 }
 
-func validateVisitor(v VisitorInput, n int) error {
+func validateVisitor(v VisitorInput, n int, allow FileOriginAllowlist) error {
 	if strings.TrimSpace(v.Name) == "" {
 		return domain.ValidationFailure("Nama pengunjung ke-" + itoa(n) + " wajib diisi.")
 	}
@@ -231,10 +232,10 @@ func validateVisitor(v VisitorInput, n int) error {
 	if strings.TrimSpace(v.Phone) == "" {
 		return domain.ValidationFailure("Nomor telepon pengunjung ke-" + itoa(n) + " wajib diisi.")
 	}
-	if err := validatePhotoURL(textOrEmpty(v.IDCardPhotoURL)); err != nil {
+	if err := validatePhotoURL(textOrEmpty(v.IDCardPhotoURL), allow); err != nil {
 		return err
 	}
-	if err := validatePhotoURL(textOrEmpty(v.PhotoURL)); err != nil {
+	if err := validatePhotoURL(textOrEmpty(v.PhotoURL), allow); err != nil {
 		return err
 	}
 	if len([]rune(strings.TrimSpace(textOrEmpty(v.VendorName)))) > maxManualVendorNameLen {
@@ -243,16 +244,63 @@ func validateVisitor(v VisitorInput, n int) error {
 	return nil
 }
 
+// FileOriginAllowlist holds the hosts whose plain-HTTP file URLs the app
+// accepts. It is derived from the deployment's own object-storage origins
+// (S3_PUBLIC_BASE_URL / S3_ENDPOINT), so the URLs the storage adapter itself
+// hands out are always accepted — including a LAN-IP deployment that serves
+// objects over plain HTTP because it has no TLS certificate. Everything else
+// keeps the strict rule: https for any host, http only for the dev hosts.
+type FileOriginAllowlist map[string]struct{}
+
+// NewFileOriginAllowlist builds the allowlist from raw origins. A full URL
+// contributes its hostname; a bare host or host:port contributes its host
+// part (the S3 endpoint is often configured without a scheme). Blank or
+// unparsable entries are skipped.
+func NewFileOriginAllowlist(rawOrigins ...string) FileOriginAllowlist {
+	allow := FileOriginAllowlist{}
+	for _, raw := range rawOrigins {
+		host := hostFromOrigin(raw)
+		if host == "" {
+			continue
+		}
+		allow[host] = struct{}{}
+	}
+	return allow
+}
+
+// hostFromOrigin extracts the lowercase hostname of an origin that may be a
+// full URL, a host, or a host:port pair.
+func hostFromOrigin(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if !strings.Contains(trimmed, "://") {
+		if host, _, err := net.SplitHostPort(trimmed); err == nil {
+			return strings.ToLower(host)
+		}
+		return strings.ToLower(trimmed)
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname())
+}
+
 // ValidatePhotoURL is the central allowlist for every uploaded-file URL that
 // travels through a visit payload (visitor id_card_photo_url, visitor
 // photo_url selfie, assignment_letter_url) and the gate check-in photo_url.
 // Empty (absent) is allowed; a non-empty value must be an https URL, or an
-// http URL only for the dev MinIO hosts (localhost/127.0.0.1), at most 2048
-// characters, and never a javascript:/data:/blob:/vbscript: payload. It lives
-// in package visit so the gate usecase reuses the same gate.
-func ValidatePhotoURL(raw string) error { return validatePhotoURL(raw) }
+// http URL only for the dev MinIO hosts (localhost/127.0.0.1) and for the
+// deployment's own configured object-storage hosts, at most 2048 characters,
+// and never a javascript:/data:/blob:/vbscript: payload. It lives in package
+// visit so the gate usecase reuses the same gate.
+func ValidatePhotoURL(raw string, allow FileOriginAllowlist) error {
+	return validatePhotoURL(raw, allow)
+}
 
-func validatePhotoURL(raw string) error {
+func validatePhotoURL(raw string, allow FileOriginAllowlist) error {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil
@@ -277,11 +325,15 @@ func validatePhotoURL(raw string) error {
 		}
 		return nil
 	case "http":
-		switch strings.ToLower(u.Hostname()) {
+		hostname := strings.ToLower(u.Hostname())
+		switch hostname {
 		case "localhost", "127.0.0.1":
 			return nil
 		default:
-			return domain.ValidationFailure("Tautan berkas tidak valid: http hanya diizinkan untuk localhost.")
+			if _, trusted := allow[hostname]; trusted {
+				return nil
+			}
+			return domain.ValidationFailure("Tautan berkas tidak valid: http hanya diizinkan untuk localhost atau host object storage yang dikonfigurasi.")
 		}
 	default:
 		return domain.ValidationFailure("Tautan berkas tidak valid.")
