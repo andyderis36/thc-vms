@@ -130,9 +130,12 @@ export function Tabs({
               isGate
                 ? 'min-w-0 flex-1 whitespace-normal px-2 text-center leading-tight'
                 : 'shrink-0 whitespace-nowrap px-2 sm:px-4 max-sm:text-xs',
+              // State tekan: satu langkah lebih pekat dari hover (kontrak
+              // tekan ada di `Button.tsx`) — tanpa ini tab di layar sentuh
+              // tidak memberi umpan balik sama sekali.
               selected
-                ? 'bg-brand-soft text-brand'
-                : 'text-ink-secondary hover:bg-neutral-bg/50 hover:text-ink',
+                ? 'bg-brand-soft text-brand active:bg-brand/20'
+                : 'text-ink-secondary hover:bg-neutral-bg/50 hover:text-ink active:bg-ink/10',
             ].join(' ')}
           >
             {tab.label}

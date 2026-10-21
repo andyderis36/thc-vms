@@ -20,6 +20,12 @@ export const FIELD_HEIGHT: Record<FieldSize, string> = {
  * Tailwind, supaya seragam dengan `Button` dan pill kontrol lain.
  * `py-2` hanya berlaku pada field ber-tinggi-otomatis; `FIELD_HEIGHT` tetap
  * menang karena preflight memakai `box-sizing: border-box`.
+ *
+ * Sengaja TIDAK ada state tekan di sini: field teks tidak boleh berubah
+ * latar saat ditekan (terbaca sebagai "field terpilih", bukan umpan balik
+ * tekan) dan kelas ini dipakai bersama oleh Input, Select, Textarea, dan
+ * SearchInput. Kontrol yang benar-benar ditekan (tombol, item menu, tab)
+ * membawa `active:` masing-masing di primitifnya.
  */
 export const FIELD_BASE_CLASS =
   'w-full rounded-control border border-border-mid bg-surface px-3 py-2 text-sm text-ink transition-colors placeholder:text-ink-muted focus:border-brand focus:ring-4 focus:ring-brand/12 focus:outline-none disabled:cursor-not-allowed disabled:bg-border-light'

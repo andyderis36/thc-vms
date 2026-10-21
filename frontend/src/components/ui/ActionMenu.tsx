@@ -37,16 +37,29 @@ export interface ActionMenuProps {
   className?: string
 }
 
+/*
+ * Status TEKAN: lihat blok aturan di `Button.tsx` (satu kontrak untuk semua
+ * primitif). Ringkasnya: tekan = satu langkah lebih pekat dari hover, hanya
+ * lewat background/warna/opacity, dan `active:` mengalahkan `hover:` karena
+ * urutan varian CSS Tailwind v4 (hover → focus → active → disabled).
+ */
 const TRIGGER_CLASS =
-  'inline-flex min-h-touch min-w-touch items-center justify-center rounded-control border border-border-light text-ink-secondary transition hover:bg-neutral-bg disabled:cursor-not-allowed disabled:opacity-60'
+  'inline-flex min-h-touch min-w-touch items-center justify-center rounded-control border border-border-light text-ink-secondary transition hover:bg-neutral-bg active:bg-ink/10 disabled:cursor-not-allowed disabled:opacity-60'
 
 const PANEL_CLASS =
   'fixed z-[60] w-56 rounded-control border border-border-mid bg-surface p-1 shadow-dropdown'
 
 const ITEM_CLASS =
-  'flex min-h-touch w-full items-center gap-2 rounded-control px-3 text-sm transition hover:bg-neutral-bg cursor-pointer'
+  'flex min-h-touch w-full items-center gap-2 rounded-control px-3 text-sm transition hover:bg-neutral-bg active:bg-ink/10 cursor-pointer'
 
-const DANGER_ITEM_CLASS = 'text-danger-text hover:bg-danger-bg'
+/**
+ * Item danger memakai veil merah sendiri (`danger-text/15`) supaya tekan
+ * tetap terasa "merah" — bukan jatuh ke netral. Utilitas `active:bg-*` milik
+ * `ITEM_CLASS` dan milik sini berada di varian yang sama, jadi yang menang
+ * ditentukan urutan nama utilitas di CSS Tailwind v4 (`danger-text` < `ink`).
+ * `!` dipakai agar intent ini tidak bergantung pada urutan tersebut.
+ */
+const DANGER_ITEM_CLASS = 'text-danger-text hover:bg-danger-bg active:bg-danger-text/15!'
 
 const MENU_ITEM_HEIGHT = 44
 const MENU_VERTICAL_PADDING = 10

@@ -77,6 +77,10 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
             justify-end`, sehingga ikon X tetap di posisi visual semula dan
             sorotan hover rapat/konsentris di sekelilingnya - bukan kotak 44px
             yang membuat sudutnya tampak tidak presisi.
+            `group-active:` memberi status tekan pada span yang sama: satu
+            langkah lebih pekat dari `group-hover:bg-neutral-bg` (kontrak tekan
+            ada di `Button.tsx`). Tanpa ini, di layar sentuh tombol tutup tidak
+            bereaksi sama sekali.
           */}
           <button
             type="button"
@@ -84,7 +88,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
             aria-label="Tutup"
             className="group -m-1 flex size-11 items-start justify-end rounded-control p-1 text-ink-secondary"
           >
-            <span className="flex size-7 items-center justify-center rounded-control transition-colors group-hover:bg-neutral-bg">
+            <span className="flex size-7 items-center justify-center rounded-control transition-colors group-hover:bg-neutral-bg group-active:bg-ink/10">
               <X aria-hidden="true" className="size-5 shrink-0" />
             </span>
           </button>

@@ -61,15 +61,25 @@ const PANEL_CLASS =
 const ITEM_CLASS =
   'flex w-full items-start gap-3 rounded-control px-3 py-2 text-left transition cursor-pointer'
 
-/** Baris belum dibaca: wash tint lembut + ikon brand (bukan garis aksen samping). */
-const ITEM_UNREAD_CLASS = 'bg-brand-soft/60'
-const ITEM_READ_CLASS = 'hover:bg-neutral-bg'
+/**
+ * Baris belum dibaca: wash tint lembut + ikon brand (bukan garis aksen samping).
+ * State tekan satu langkah lebih pekat dari wash unread (kontrak tekan ada di
+ * `Button.tsx`).
+ */
+const ITEM_UNREAD_CLASS = 'bg-brand-soft/60 active:bg-brand/20'
+const ITEM_READ_CLASS = 'hover:bg-neutral-bg active:bg-ink/10'
 
-/** Ikon tipe pada topbar gelap perlu tinta terang, bukanabu netral. */
+/**
+ * Ikon tipe pada topbar gelap perlu tinta terang, bukanabu netral.
+ *
+ * State tekan mengikuti nada yang sama: `light`/`dark` memakai lapisan tinta
+ * yang lebih pekat dari wash hover-nya, `brand` memakai `!` karena `hover:`
+ * pada nada ini sudah ber-`!important` (lihat catatan `tone` di atas).
+ */
 const TRIGGER_TONE_CLASS = {
-  light: 'text-ink-secondary hover:bg-neutral-bg',
-  dark: 'text-brand-contrast hover:bg-sidebar-dark-active',
-  brand: 'text-brand-contrast! hover:bg-brand-dark!',
+  light: 'text-ink-secondary hover:bg-neutral-bg active:bg-ink/10',
+  dark: 'text-brand-contrast hover:bg-sidebar-dark-active active:bg-sidebar-dark',
+  brand: 'text-brand-contrast! hover:bg-brand-dark! active:bg-ink/25!',
 } as const
 
 /**
