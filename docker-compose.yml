@@ -24,10 +24,12 @@ services:
       retries: 5
 
   minio:
-    # Pakai :latest yang sudah ada lokal & terbukti jalan. Pin RELEASE
-    # dihapus karena memaksa pull tiap start (rapuh saat registry batuk).
-    # Versi known-good terakhir: RELEASE.2025-09-07T16-13-09Z.
-    image: minio/minio:latest
+    # Repo minio/minio di Docker Hub sudah dihapus, jadi tag minio/minio:latest
+    # tidak bisa di-pull lagi. Image ini sudah ada di cache lokal (pull_policy:
+    # missing = offline-friendly). Untuk mesin baru, set di .env lokal:
+    #   MINIO_IMAGE=ghcr.io/netvark/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    # (digest yang sama persis dengan minio/minio:latest, hanya mirror-nya beda)
+    image: ${MINIO_IMAGE:-minio/minio:latest}
     pull_policy: missing
     container_name: thc-vms-minio
     restart: always
