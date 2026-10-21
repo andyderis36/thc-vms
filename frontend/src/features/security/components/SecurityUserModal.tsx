@@ -379,7 +379,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
           user={editing}
           locations={locationsQuery.data ?? []}
           saving={updateSecurity.isPending}
-          locationMode="locked"
+          locationMode={canPickLocation ? 'select' : 'locked'}
           isSelf={false}
           onClose={() => setEditing(null)}
           onSubmit={(body) => {
@@ -391,6 +391,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
                   email: body.email,
                   phone: body.phone,
                   ...(body.password !== undefined ? { password: body.password } : {}),
+                  ...(body.location_id !== undefined ? { location_id: body.location_id } : {}),
                 },
               },
               {

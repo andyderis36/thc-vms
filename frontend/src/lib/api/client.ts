@@ -189,7 +189,11 @@ export function deleteSecurityUser(id: string): Promise<void> {
   return apiFetch<void>(`/users/security/${id}`, { method: 'DELETE' });
 }
 
-/** `PATCH /users/security/:id` — admin cabang terkunci + superadmin; parsial + reset password. */
+/**
+ * `PATCH /users/security/:id` — admin cabang terkunci + superadmin; parsial + reset password.
+ * `location_id` ikut diteruskan apa adanya di body (mutasi cabang: superadmin
+ * saja; absen/null berarti "biarkan cabang saat ini").
+ */
 export function updateSecurityUser(id: string, body: UpdateSecurityUserRequest): Promise<User> {
   return apiFetch<User>(`/users/security/${id}`, {
     method: 'PATCH',
