@@ -18,6 +18,7 @@ COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE="$REPO_DIR/.env"
 TEMPLATE="$REPO_DIR/.env.prod.example"
 READY_URL="http://127.0.0.1:8080/api/v1/ready"
+FRONTEND_URL="http://127.0.0.1/"
 SCRIPT_SELF="$(readlink -f "$0")"
 
 cd "$REPO_DIR"
@@ -171,8 +172,28 @@ for i in $(seq 1 60); do
     break
   fi
   if [ "$i" -eq 60 ]; then
-    echo "ABORT: backend not ready; recent logs:"
-    compose -f "$COMPOSE_FILE" logs --tail=50 backend migrate
+    echo "ABORT: backend not ready; recent logs:" >&2
+    compose -f "$COMPOSE_FILE" logs --tail=50 backend migrate >&2 || true
+    echo "       Bila log menyebut role/seed (mis. 'resolve security role id')," >&2
+    echo "       DB-nya belum ter-seed. Bootstrap manual (lihat docs/7. DEPLOY_VPS.md):" >&2
+    echo "         compose -f $COMPOSE_FILE up -d postgres minio" >&2
+    echo "         compose -f $COMPOSE_FILE run --rm --no-deps migrate" >&2
+    echo "         compose -f $COMPOSE_FILE run --rm --no-deps backend ./seeds" >&2
+    echo "         compose -f $COMPOSE_FILE up -d" >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+echo "==> wait frontend via caddy ($FRONTEND_URL)"
+for i in $(seq 1 30); do
+  if curl -fsS --max-time 5 "$FRONTEND_URL" >/dev/null 2>&1; then
+    echo "frontend reachable after ~$((i * 2))s"
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    echo "ABORT: frontend not reachable through caddy; recent logs:" >&2
+    compose -f "$COMPOSE_FILE" logs --tail=50 caddy frontend >&2 || true
     exit 1
   fi
   sleep 2
