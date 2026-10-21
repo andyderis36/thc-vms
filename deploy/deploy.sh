@@ -118,6 +118,10 @@ if grep -q 'CHANGEME' "$ENV_FILE"; then
   echo "ABORT: $ENV_FILE still contains CHANGEME placeholders — fill real secrets first"
   exit 1
 fi
+# Opsi bootstrap untuk database yang benar-benar kosong (tabel role belum ada
+# isi). Seed WAJIB diaktifkan eksplisit di .env dan hanya boleh jalan saat DB
+# kosong - di DB yang sudah berisi data, seed akan me-reset password akun demo.
+BOOTSTRAP_SEED="$(grep -E '^BOOTSTRAP_SEED=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"[:space:]' || true)"
 
 # --- Bersihkan container orphan dari stack lama -----------------------------
 # Stack lama (compose versi sebelumnya / compose dev) bisa masih jalan lalu
@@ -159,6 +163,39 @@ EOF
 echo "    legacy containers removed: $orphan_count"
 
 echo "==> build + up"
+# Infrastruktur dulu: postgres & minio harus hidup sebelum DB bisa diperiksa, dan
+# backend butuh role `security` saat boot (backend/cmd/server/main.go). Kalau DB
+# masih kosong, backend exit 1 dan `up` gagal - jadi bootstrap harus lebih dulu.
+compose -f "$COMPOSE_FILE" up -d postgres minio
+
+role_count() {
+  compose -f "$COMPOSE_FILE" exec -T postgres \
+    sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select count(*) from role"' 2>/dev/null \
+    | tr -dc '0-9'
+}
+
+roles="$(role_count || true)"
+[ -z "$roles" ] && roles=0
+if [ "$roles" = "0" ]; then
+  echo "==> DB belum berisi master data: migrasi lalu bootstrap"
+  compose -f "$COMPOSE_FILE" run --rm --no-deps --build migrate
+  roles="$(role_count || true)"
+  [ -z "$roles" ] && roles=0
+  if [ "$roles" != "0" ]; then
+    echo "ABORT: jumlah role tidak terduga setelah migrasi ($roles)" >&2
+    exit 1
+  fi
+  if [ "$BOOTSTRAP_SEED" != "1" ]; then
+    echo "ABORT: DB kosong dan BOOTSTRAP_SEED != 1 di .env." >&2
+    echo "       Bootstrap manual (sekali):" >&2
+    echo "         compose -f $COMPOSE_FILE run --rm --no-deps --build backend ./seeds" >&2
+    exit 1
+  fi
+  echo "==> bootstrap seed (BOOTSTRAP_SEED=1)"
+  compose -f "$COMPOSE_FILE" run --rm --no-deps --build backend ./seeds
+  echo "PERINGATAN: seed membuat akun demo dengan password demo. Segera rotasi atau hapus sebelum produksi nyata." >&2
+fi
+
 if ! compose -f "$COMPOSE_FILE" up -d --build; then
   echo "ABORT: compose up gagal. Log container:" >&2
   compose -f "$COMPOSE_FILE" logs --tail=60 backend migrate minio postgres >&2 || true

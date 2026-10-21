@@ -227,7 +227,7 @@ thc-vms/
 2. **JANGAN** deploy production dengan `docker-compose.yml` (dev); SELALU `docker-compose.prod.yml`.
 3. **JANGAN** menambahkan trigger deploy kedua (webhook dilarang — port `9000` tabrakan dengan MinIO dan memicu deploy ganda). Satu-satunya trigger: `.gitea/workflows/deploy.yml` via Gitea Actions.
 4. **JANGAN** membuka bucket storage ke publik (`mc anonymous` dilarang); berkas selalu via presigned URL / endpoint backend.
-5. **JANGAN** menjalankan seed ke production; migrasi prod HANYA via service `migrate` (`backend/cmd/migrate`), karena server production tidak auto-migrate.
+5. **JANGAN** menjalankan seed ke production; migrasi prod HANYA via service `migrate` (`backend/cmd/migrate`), karena server production tidak auto-migrate. Satu-satunya pengecualian: bootstrap pada database yang benar-benar kosong (tabel `role` masih 0 baris) dan HANYA bila operator conscious mengaktifkan `BOOTSTRAP_SEED=1` di `.env` VPS. `deploy.sh` memeriksa jumlah baris `role` lebih dulu, jadi seed tidak akan pernah me-reset password akun yang sudah ada.
 6. `deploy.sh` WAJIB menolak deploy bila `.env` hilang atau masih mengandung placeholder `CHANGEME`.
 7. `NEXT_PUBLIC_*` frontend dibakar saat build (`--build-arg`); JANGAN mengandalkannya sebagai runtime `environment:`.
 8. `main` adalah branch produksi dan satu-satunya branch yang men-deploy. Satu-satunya cara `main` maju adalah merge dari `dev` (§1.1); push ke `dev` tidak pernah memicu deploy.
