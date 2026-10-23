@@ -16,6 +16,7 @@ export const queryKeys = {
   locations: (activeOnly?: boolean) => ['locations', activeOnly ?? null] as const,
   purposes: () => ['purposes'] as const,
   vendors: () => ['vendors'] as const,
+  jabatan: () => ['jabatan'] as const,
   securityUsers: (locationId?: string) => ['security-users', locationId ?? null] as const,
   managedUsers: (params?: ManagedUserListParams) =>
     ['managed-users', params ?? null] as const,
