@@ -143,3 +143,14 @@ volumes:
   miniodata_prod:
   caddy_data:
   caddy_config:
+
+networks:
+  # Jangan dinaikkan ke 1500. Path-MTU dari reverse proxy 58.147.187.14 ke VPS
+  # lebih kecil dari 1500, dan segmen 1460 byte dibuang diam-diam di arah itu:
+  # body request >~1,3 KB tiba terpotong dan ditolak 400 setelah 60 s. MTU 1400
+  # membuat SYN-ACK mengiklankan MSS 1360 sehingga proxy mengirim segmen kecil.
+  # Hanya berlaku untuk stack produksi; dev lokal tetap MTU default 1500 karena
+  # trafiknya tidak melewati hop proxy tersebut.
+  default:
+    driver_opts:
+      com.docker.network.driver.mtu: "1400"
