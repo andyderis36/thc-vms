@@ -37,6 +37,7 @@ import {
   getVisit,
   getVisitQr,
   listAuditLogs,
+  listJabatan,
   listLocations,
   listManagedUsers,
   listNotifications,
@@ -233,6 +234,19 @@ export const vendorsQueryOptions = queryOptions({
   retry: shouldRetry,
 })
 
+/**
+ * Saran jabatan: nilai yang pernah tersimpan pada baris visitor — berubah
+ * jarang dan dipakai bersama semua pengajuan, jadi diet data yang sama
+ * dengan master data lain.
+ */
+export const jabatanQueryOptions = queryOptions({
+  queryKey: queryKeys.jabatan(),
+  queryFn: () => listJabatan(),
+  staleTime: MASTER_STALE_TIME,
+  gcTime: MASTER_GC_TIME,
+  retry: shouldRetry,
+})
+
 export function visitsQueryOptions(params: VisitListParams) {
   return queryOptions({
     queryKey: queryKeys.visits.list(params),
@@ -340,6 +354,10 @@ export function usePurposesQuery() {
 
 export function useVendorsQuery(enabled = true) {
   return useQuery({ ...vendorsQueryOptions, enabled })
+}
+
+export function useJabatanQuery(enabled = true) {
+  return useQuery({ ...jabatanQueryOptions, enabled })
 }
 
 export function useVisitsQuery(params: VisitListParams, enabled = true) {

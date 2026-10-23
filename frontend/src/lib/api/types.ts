@@ -152,12 +152,19 @@ export interface Purpose {
 
 /**
  * Vendor mitra (`GET /vendors` → `[{id, name}]`).
- * Dropdown relasi Vendor/Mitra pada modal create/edit `/users`.
+ * Dropdown relasi Vendor/Mitra pada modal create/edit akun terkelola.
  */
 export interface Vendor {
   id: string;
   name: string;
 }
+
+/**
+ * `GET /jabatan` → daftar nilai `jabatan` yang PERNAH tersimpan pada baris
+ * visitor (distinct, urut A-Z, maksimal 50 entri; bisa kosong `[]`).
+ * HANYA saran untuk `<datalist>` — pengguna tetap bebas mengetik jabatan baru.
+ */
+export type JabatanList = string[];
 
 export interface VisitorItem {
   /**
@@ -183,6 +190,12 @@ export interface VisitorItem {
   photo_url?: string | null;
   vendor_id?: string | null;
   vendor_name?: string | null;
+  /**
+   * Jabatan/peran pengunjung di lokasi (mis. Teknisi, Mandor, Supervisor) —
+   * teks bebas ≤120 karakter. Absen/null = belum diisi. Saran isian berasal
+   * dari `GET /jabatan`; nilainya TIDAK divalidasi terhadap daftar itu.
+   */
+  jabatan?: string | null;
 }
 
 /**

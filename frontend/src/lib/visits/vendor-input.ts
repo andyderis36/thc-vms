@@ -1,7 +1,7 @@
 /**
  * Pemetaan isian "Perusahaan Vendor" bebas-teks ke kontrak BE.
  *
- * Field vendor pada form SCR-03 dan `/users` menerima teks bebas (bukan hanya
+ * Field vendor pada form SCR-03 dan layar akun terkelola menerima teks bebas (bukan hanya
  * pilihan dropdown): pengguna boleh memilih nama dari katalog terdaftar
  * (`GET /vendors`) ATAU mengetik nama manual. Aturan kontrak (sudah dikunci):
  *

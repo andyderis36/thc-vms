@@ -1,10 +1,10 @@
 /**
- * Autosave lokal (browser, per-akun) untuk daftar tim teknisi SCR-03.
+ * Autosave lokal (browser, per-akun) untuk daftar anggota/pengunjung SCR-03.
  *
- * Setelah permohonan berhasil dikirim, HANYA 3 field teks per baris —
- * **nama, No. HP, dan nama vendor** — disimpan ke `localStorage` di bawah
- * kunci `thc-vms:technicians:<userId>` agar pengajuan berikutnya oleh akun
- * yang sama bisa pre-fill roster tanpa mengetik ulang. Field yang TIDAK
+ * Setelah permohonan berhasil dikirim, HANYA 4 field teks per baris —
+ * **nama, No. HP, nama vendor, dan jabatan** — disimpan ke `localStorage` di
+ * bawah kunci `thc-vms:technicians:<userId>` agar pengajuan berikutnya oleh
+ * akun yang sama bisa pre-fill roster tanpa mengetik ulang. Field yang TIDAK
  * PERNAH disimpan:
  *
  * - `id_number` (Nomor KTP/SIM) — data PII; tidak pernah dipersist, tidak
@@ -26,12 +26,13 @@
  *   atau dibersihkan `clearTechnicianRoster`). Baris dalam envelope versi 2
  *   yang kebetulan masih memuat kunci `id_number` TIDAK membuang roster:
  *   field asing di-strip zod, field yang tersisa tetap dimuat.
- * - Validasi bentuk pakai zod; hanya 3 field teks yang dikenal skema
+ * - Validasi bentuk pakai zod; hanya 4 field teks yang dikenal skema
  *   (field foto/identitas tidak pernah).
  */
 
 import { z } from 'zod'
 
+import { JABATAN_MAX_LENGTH } from './jabatan-input'
 import { isBlank, MAX_TECHNICIANS, VENDOR_NAME_MAX_LENGTH } from './vendor-input'
 
 /** Prefiks kunci storage — userId selalu diikat agar antar-akun terisolasi. */
@@ -45,13 +46,15 @@ const KEY_PREFIX = 'thc-vms:technicians:'
 const ROSTER_VERSION = 2
 
 /**
- * Satu baris roster tersimpan: HANYA nama, No. HP, dan nama vendor.
+ * Satu baris roster tersimpan: HANYA nama, No. HP, nama vendor, dan jabatan.
  * `id_number` (PII) dan foto/URL tidak pernah ikut.
  */
 export interface SavedTechnicianRow {
   name: string
   phone: string
   vendor_name: string
+  /** Jabatan — opsional agar roster lama (tanpa kunci ini) tetap termuat. */
+  jabatan?: string
 }
 
 /**
@@ -66,10 +69,11 @@ export interface TechnicianRosterInputRow {
   id_number: string
   phone: string
   vendor_name?: string | null
+  jabatan?: string | null
 }
 
 /**
- * Skema baris tersimpan — hanya 3 field teks. Kunci apa pun di luar ini
+ * Skema baris tersimpan — hanya 4 field teks. Kunci apa pun di luar ini
  * (sisa `id_number` dari format lama, potongan foto, dll.) di-strip zod,
  * sehingga field yang tersisa tetap terbaca tanpa membuang roster.
  */
@@ -77,6 +81,7 @@ const savedRowSchema = z.object({
   name: z.string(),
   phone: z.string(),
   vendor_name: z.string().max(VENDOR_NAME_MAX_LENGTH).optional(),
+  jabatan: z.string().max(JABATAN_MAX_LENGTH).optional(),
 })
 
 /**
@@ -110,14 +115,20 @@ function getStorage(): Storage | null {
 
 /**
  * True bila SEMUA field teks yang ikut dipersist (nama, No. HP, nama
- * vendor) kosong / hanya spasi. `id_number` tidak dihitung — field itu
- * tidak pernah persist sehingga tidak boleh menentukan "ada isi".
+ * vendor, jabatan) kosong / hanya spasi. `id_number` tidak dihitung — field
+ * itu tidak pernah persist sehingga tidak boleh menentukan "ada isi".
  */
 function rowHasNoText(
-  row: Pick<TechnicianRosterInputRow, 'name' | 'phone' | 'vendor_name'>,
+  row: Pick<
+    TechnicianRosterInputRow,
+    'name' | 'phone' | 'vendor_name' | 'jabatan'
+  >,
 ): boolean {
   return (
-    isBlank(row.name) && isBlank(row.phone) && isBlank(row.vendor_name)
+    isBlank(row.name) &&
+    isBlank(row.phone) &&
+    isBlank(row.vendor_name) &&
+    isBlank(row.jabatan)
   )
 }
 
@@ -134,13 +145,13 @@ export function areTechnicianRowsBlank(
 /**
  * Simpan roster teks milik `userId` (menimpa kunci akun tersebut).
  *
- * Hanya 3 field teks yang dipersist — nama, No. HP, nama vendor — di-trim;
- * `id_number` dari baris form sengaja TIDAK ikut dipetakan (dipangkas di
- * sini, bukan sekadar disembunyikan saat load). Baris yang seluruhnya
- * kosong dilewati dan jumlah baris dibatasi `MAX_TECHNICIANS`. Bila tak ada
- * satu pun baris ber-teks, kunci dihapus (dianggap tidak ada roster).
- * Kegagalan storage (kuota / mode privat) diam-diam no-op: TIDAK PERNAH
- * melempar.
+ * Hanya 4 field teks yang dipersist — nama, No. HP, nama vendor, jabatan —
+ * di-trim; `id_number` dari baris form sengaja TIDAK ikut dipetakan
+ * (dipangkas di sini, bukan sekadar disembunyikan saat load). Baris yang
+ * seluruhnya kosong dilewati dan jumlah baris dibatasi `MAX_TECHNICIANS`.
+ * Bila tak ada satu pun baris ber-teks, kunci dihapus (dianggap tidak ada
+ * roster). Kegagalan storage (kuota / mode privat) diam-diam no-op: TIDAK
+ * PERNAH melempar.
  */
 export function saveTechnicianRoster(
   userId: string,
@@ -154,10 +165,14 @@ export function saveTechnicianRoster(
   for (const row of rows) {
     if (rowHasNoText(row)) continue
     // Pemetaan sadar-PII: `id_number` tidak pernah masuk payload storage.
+    const jabatan = (row.jabatan ?? '').trim()
     kept.push({
       name: row.name.trim(),
       phone: row.phone.trim(),
       vendor_name: (row.vendor_name ?? '').trim(),
+      // Jabatan kosong TIDAK ikut disimpan — roster lama (tanpa kunci ini)
+      // tetap terbaca apa adanya.
+      ...(jabatan !== '' ? { jabatan } : {}),
     })
     if (kept.length >= MAX_TECHNICIANS) break
   }
@@ -183,7 +198,7 @@ export function saveTechnicianRoster(
  * `null` bila: tidak ada data, JSON rusak, versi lama/tak dikenal (termasuk
  * envelope versi 1 yang menyimpan PII), bentuk tidak sah, storage tidak
  * tersedia, atau tidak ada satu pun baris ber-teks — semuanya dibuang
- * diam-diam. Baris yang lolos sudah di-trim, hanya 3 field teks (kunci
+ * diam-diam. Baris yang lolos sudah di-trim, hanya 4 field teks (kunci
  * `id_number` yang tersisa di envelope versi 2 di-strip, baris tetap
  * dimuat), dan dibatasi `MAX_TECHNICIANS`.
  */
@@ -220,6 +235,9 @@ export function loadTechnicianRoster(
       name: result.data.name.trim(),
       phone: result.data.phone.trim(),
       vendor_name: (result.data.vendor_name ?? '').trim(),
+      ...(result.data.jabatan !== undefined && result.data.jabatan.trim() !== ''
+        ? { jabatan: result.data.jabatan.trim() }
+        : {}),
     }
     if (rowHasNoText(saved)) continue
     rows.push(saved)

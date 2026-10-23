@@ -61,7 +61,7 @@ import { visitFormSchema, type VisitFormValues } from './visit-schema'
 
 /** Pernyataan wajib SOP keselamatan — teks persis dari spesifikasi SCR-03. */
 const SOP_STATEMENT =
-  'Saya menyatakan seluruh data teknisi akurat dan menyetujui seluruh Standar Operasional Prosedur (SOP) dan keselamatan kerja fasilitas jaringan THC.'
+  'Saya menyatakan seluruh data anggota akurat dan menyetujui seluruh Standar Operasional Prosedur (SOP) dan keselamatan kerja fasilitas jaringan THC.'
 
 /**
  * SCR-03 — Formulir Pengajuan Kunjungan.
@@ -100,7 +100,15 @@ export function VisitForm() {
       assignment_letter: null,
       notes: '',
       technicians: [
-        { name: '', id_number: '', phone: '', id_card_photo: null, selfie: { url: '', name: '' }, vendor_name: '' },
+        {
+          name: '',
+          id_number: '',
+          phone: '',
+          id_card_photo: { url: '', name: '' },
+          selfie: { url: '', name: '' },
+          jabatan: '',
+          vendor_name: '',
+        },
       ],
       is_nda_accepted: false,
     },
@@ -123,7 +131,7 @@ export function VisitForm() {
     isVendor && prefillRequested,
   )
 
-  // Prefill TEKS vendor milik pengguna yang sedang masuk pada baris teknisi
+  // Prefill TEKS vendor milik pengguna yang sedang masuk pada baris anggota
   // pertama, bila baris itu masih kosong. Katalog vendor TIDAK dipakai untuk
   // mencocokkan nama di sini — pemetaan ke vendor_id/vendor_name terjadi saat
   // submit lewat `resolveVendorInput`.
@@ -132,7 +140,7 @@ export function VisitForm() {
 
   /*
    * Autosave roster per-akun (`localStorage` kunci
-   * `thc-vms:technicians:<userId>`): muat daftar teknisi terakhir yang
+   * `thc-vms:technicians:<userId>`): muat daftar anggota terakhir yang
    * berhasil dikirim akun ini, hanya bila SEMUA baris awal masih kosong —
    * ketikan pengguna tidak pernah ditimpa. Foto sengaja TIDAK pernah
    * dipulihkan; berkas wajib dipilih ulang tiap pengajuan. Nomor KTP/SIM
@@ -155,17 +163,18 @@ export function VisitForm() {
     const saved = loadTechnicianRoster(userId)
     if (saved === null) return
     // `loadTechnicianRoster` sudah membatasi MAX_TECHNICIANS dan hanya
-    // mengembalikan 3 field teks (nama, No. HP, nama vendor); Nomor KTP/SIM
-    // selalu dikosongkan (PII tidak pernah dipersist) dan foto dikosongkan
-    // (unduh ulang wajib).
+    // mengembalikan 4 field teks (nama, No. HP, nama vendor, jabatan); Nomor
+    // KTP/SIM selalu dikosongkan (PII tidak pernah dipersist) dan foto
+    // dikosongkan (unduh ulang wajib).
     setValue(
       'technicians',
       saved.map((row) => ({
         name: row.name,
         id_number: '',
         phone: row.phone,
-        id_card_photo: null,
+        id_card_photo: { url: '', name: '' },
         selfie: { url: '', name: '' },
+        jabatan: row.jabatan ?? '',
         vendor_name: row.vendor_name,
       })),
       { shouldDirty: false },
@@ -183,7 +192,7 @@ export function VisitForm() {
   /*
    * Penerapan prefill — berjalan HANYA setelah tombol ditekan (tidak pernah
    * otomatis), sehingga tidak pernah bertarung dengan efek autosave roster /
-   * prefill nama vendor akun di atas. HANYA baris roster teknisi yang
+   * prefill nama vendor akun di atas. HANYA baris roster anggota yang
    * ditimpa; fasilitas, tujuan, jadwal, SPK, catatan, dan SOP tetap pada
    * nilai awal kosong (data itu bervariasi tiap kunjungan, hanya kru yang
    * stabil).
@@ -285,12 +294,16 @@ export function VisitForm() {
         // (case-insensitive) → `vendor_id`; selain itu → `vendor_name` manual;
         // kosong → tanpa field. Nama ketikan manual TIDAK masuk katalog.
         const resolvedVendor = resolveVendorInput(technician.vendor_name, vendors)
+        // Jabatan: teks bebas; kosong = field tidak dikirim sama sekali
+        // (backend memperlakukan string kosong sebagai absen).
+        const jabatan = (technician.jabatan ?? '').trim()
         return {
           name: technician.name,
           id_number: technician.id_number,
           phone: technician.phone,
-          id_card_photo_url: technician.id_card_photo?.url ?? null,
+          id_card_photo_url: technician.id_card_photo.url,
           photo_url: technician.selfie.url,
+          ...(jabatan !== '' ? { jabatan } : {}),
           ...resolvedVendor,
         }
       }),
@@ -302,8 +315,8 @@ export function VisitForm() {
     try {
       const created = await createVisit.mutateAsync({ body })
       // Autosave roster teks per-akun TEPAT SEBELUM navigasi: agar pengajuan
-      // berikutnya bisa pre-fill. Hanya 3 field teks (nama, HP, vendor);
-      // nomor identitas (PII) dan foto tidak pernah disimpan. Tanpa user id
+      // berikutnya bisa pre-fill. Hanya 4 field teks (nama, HP, vendor,
+      // jabatan); nomor identitas (PII) dan foto tidak pernah disimpan. Tanpa user id
       // → lewati (tanpa autosave, bukan galat).
       if (user?.id !== undefined && user.id !== '') {
         saveTechnicianRoster(user.id, values.technicians)
@@ -362,8 +375,8 @@ export function VisitForm() {
           Pengajuan Akses Fasilitas Jaringan THC
         </h1>
         <p className="text-sm text-ink-secondary">
-          Isi formulir berikut untuk mengajukan izin kunjungan teknisi ke
-          fasilitas THC.
+          Isi formulir berikut untuk mengajukan izin kunjungan ke fasilitas
+          THC.
         </p>
         {/* Prefill riwayat — hanya untuk vendor; admin/superadmin tak melihatnya. */}
         {isVendor ? (
@@ -501,7 +514,7 @@ export function VisitForm() {
         </CardBody>
       </Card>
 
-      {/* 3. Daftar Tim Teknisi */}
+      {/* 3. Daftar Anggota/Pengunjung */}
       <TechnicianList
         control={control}
         register={register}
@@ -509,15 +522,15 @@ export function VisitForm() {
         errors={errors}
         defaultVendorName={ownVendorName}
       />
-      {/* Petunjuk halus: hanya nama, No. HP, dan nama vendor dari pengiriman
-          terakhir yang tersimpan lokal per-akun di peramban ini; nomor
-          identitas (PII) dan foto tidak ikut. */}
+      {/* Petunjuk halus: hanya nama, No. HP, nama vendor, dan jabatan dari
+          pengiriman terakhir yang tersimpan lokal per-akun di peramban ini;
+          nomor identitas (PII) dan foto tidak ikut. */}
       <p className="-mt-2 px-1 text-xs text-ink-secondary">
-        Nama, No. HP, dan nama vendor dari pengisian terakhir tersimpan
-        otomatis di peramban ini dan terisi kembali saat formulir dibuka —
-        semuanya masih bisa diedit. Nomor KTP/SIM tidak disimpan (kolomnya
-        selalu terisi kosong), dan foto (KTP / selfie) tidak disimpan serta
-        wajib diunggah ulang setiap kali.
+        Nama, No. HP, nama vendor, dan jabatan dari pengisian terakhir
+        tersimpan otomatis di peramban ini dan terisi kembali saat formulir
+        dibuka — semuanya masih bisa diedit. Nomor KTP/SIM tidak disimpan
+        (kolomnya selalu terisi kosong), dan foto (KTP / selfie) tidak disimpan
+        serta wajib diunggah ulang setiap kali.
       </p>
 
       {/* 4. Surat Tugas / SPK Vendor */}

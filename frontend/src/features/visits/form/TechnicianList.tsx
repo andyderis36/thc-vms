@@ -15,7 +15,8 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { UploadBox } from './UploadBox'
 import { technicianAnchorId } from './invalid-fields'
-import { useVendorsQuery } from '@/lib/api/hooks'
+import { useJabatanQuery, useVendorsQuery } from '@/lib/api/hooks'
+import { JABATAN_MAX_LENGTH } from '@/lib/visits/jabatan-input'
 import { VENDOR_NAME_MAX_LENGTH } from '@/lib/visits/vendor-input'
 import {
   MAX_TECHNICIANS,
@@ -26,9 +27,16 @@ import {
 /** id <datalist> bersama — hanya berisi nama vendor TERDAFTAR dari katalog. */
 const VENDOR_DATALIST_ID = 'visit-vendor-datalist'
 
+/** id <datalist> bersama — jabatan yang PERNAH terdaftar (bukan katalog). */
+const JABATAN_DATALIST_ID = 'visit-jabatan-datalist'
+
 /** Helper teks untuk isian vendor bebas-teks (bahasa Indonesia). */
 const VENDOR_HINT =
   'Pilih dari daftar atau ketik manual. Nama yang diketik manual tidak masuk daftar vendor.'
+
+/** Helper teks untuk isian jabatan bebas-teks (bahasa Indonesia). */
+const JABATAN_HINT =
+  'Pilih dari daftar atau ketik manual. Jabatan yang diketik manual tidak masuk daftar saran.'
 
 export interface TechnicianListProps {
   control: Control<VisitFormValues>
@@ -49,6 +57,8 @@ interface TechnicianRowProps {
   onRemove: () => void
   vendorsPending: boolean
   vendorsError: boolean
+  jabatanPending: boolean
+  jabatanError: boolean
 }
 
 function emptyTechnician(defaultVendorName?: string): TechnicianFormValues {
@@ -56,9 +66,10 @@ function emptyTechnician(defaultVendorName?: string): TechnicianFormValues {
     name: '',
     id_number: '',
     phone: '',
-    id_card_photo: null,
     // Sentinel kosong = belum diunggah; refine skema menolak saat submit.
+    id_card_photo: { url: '', name: '' },
     selfie: { url: '', name: '' },
+    jabatan: '',
     vendor_name: defaultVendorName ?? '',
   }
 }
@@ -73,6 +84,8 @@ function TechnicianRow({
   onRemove,
   vendorsPending,
   vendorsError,
+  jabatanPending,
+  jabatanError,
 }: TechnicianRowProps) {
   const photo = useWatch({
     control,
@@ -83,7 +96,7 @@ function TechnicianRow({
     name: `technicians.${index}.selfie`,
   })
   const rowError = errors.technicians?.[index]
-  const removeLabel = `Hapus teknisi ${index + 1}`
+  const removeLabel = `Hapus anggota ${index + 1}`
 
   return (
     <div className="card p-4">
@@ -92,7 +105,7 @@ function TechnicianRow({
           <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-bold text-brand-dark">
             {index + 1}
           </span>
-          Teknisi {index + 1}
+          Anggota {index + 1}
         </span>
         <Button
           type="button"
@@ -102,14 +115,18 @@ function TechnicianRow({
           onClick={onRemove}
           disabled={!canRemove}
           aria-label={removeLabel}
-          title={canRemove ? removeLabel : 'Minimal satu teknisi harus tetap terdaftar'}
+          title={
+            canRemove
+              ? removeLabel
+              : 'Minimal satu anggota harus tetap terdaftar'
+          }
         >
           <Trash aria-hidden="true" className="size-4 shrink-0" />
         </Button>
       </div>
 
       {/* 1 kolom di ponsel (kartu ringkas), 2 kolom >= sm:
-          Nama | No. KTP/SIM, lalu No. HP | Foto KTP */}
+          Nama | No. KTP/SIM, lalu No. HP | Jabatan, Foto KTP | Foto Selfie */}
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <Input
           label="Nama Lengkap"
@@ -144,22 +161,55 @@ function TechnicianRow({
           id={technicianAnchorId(index, 'phone')}
           {...register(`technicians.${index}.phone`)}
         />
+        {/* Jabatan: teks bebas + saran jabatan yang pernah terdaftar. */}
+        <Input
+          label="Jabatan"
+          fieldSize="gate"
+          list={JABATAN_DATALIST_ID}
+          autoComplete="off"
+          maxLength={JABATAN_MAX_LENGTH}
+          placeholder={
+            jabatanPending
+              ? 'Memuat jabatan…'
+              : 'Pilih dari daftar atau ketik jabatan'
+          }
+          hint={JABATAN_HINT}
+          error={
+            rowError?.jabatan?.message ??
+            (jabatanError
+              ? 'Gagal memuat daftar jabatan. Silakan muat ulang halaman.'
+              : undefined)
+          }
+          id={technicianAnchorId(index, 'jabatan')}
+          {...register(`technicians.${index}.jabatan`)}
+        />
         <UploadBox
           compact
-          label="Foto KTP (opsional)"
+          label="Foto KTP"
+          hint="Wajib diunggah — maksimal 5 MB (JPG/PNG)."
           category="id_card"
-          value={photo ?? null}
+          id={technicianAnchorId(index, 'id_card_photo')}
+          value={photo.url === '' ? null : photo}
           error={rowError?.id_card_photo?.message}
           onChange={(next) =>
-            setValue(`technicians.${index}.id_card_photo`, next, {
-              shouldDirty: true,
-            })
+              setValue(
+                `technicians.${index}.id_card_photo`,
+                // Hapus berkas = kembali ke sentinel kosong (wajib isi ulang).
+                next ?? { url: '', name: '' },
+                {
+                  shouldDirty: true,
+                  // Galat "Foto KTP wajib diunggah." harus hilang begitu
+                  // foto terunggah - tanpa ini pesan lama nempel sampai
+                  // percobaan kirim berikutnya (pola sama di PurposeDropdown).
+                  shouldValidate: true,
+                },
+              )
           }
         />
         <UploadBox
           compact
-          label="Foto Selfie Teknisi"
-          hint="Wajah teknisi terlihat jelas — maksimal 5 MB (JPG/PNG)."
+          label="Foto Selfie"
+          hint="Wajah anggota terlihat jelas — maksimal 5 MB (JPG/PNG)."
           idleButtonLabel="Unggah Foto Selfie"
           changeButtonLabel="Ganti Foto Selfie"
           category="id_card"
@@ -167,14 +217,17 @@ function TechnicianRow({
           value={selfie.url === '' ? null : selfie}
           error={rowError?.selfie?.message}
           onChange={(next) =>
-            setValue(
-              `technicians.${index}.selfie`,
-              // Hapus berkas = kembali ke sentinel kosong (wajib isi ulang).
-              next ?? { url: '', name: '' },
-              {
-                shouldDirty: true,
-              },
-            )
+              setValue(
+                `technicians.${index}.selfie`,
+                // Hapus berkas = kembali ke sentinel kosong (wajib isi ulang).
+                next ?? { url: '', name: '' },
+                {
+                  shouldDirty: true,
+                  // Sama seperti foto KTP: galat wajib hilang begitu berkas
+                  // terunggah, bukan nempel sampai percobaan kirim berikutnya.
+                  shouldValidate: true,
+                },
+              )
           }
         />
         {/* Input bebas-teks + <datalist>: saran HANYA dari katalog vendor
@@ -205,7 +258,7 @@ function TechnicianRow({
 }
 
 /**
- * Daftar tim teknisi dinamis (1..10 baris) untuk SCR-03.
+ * Daftar anggota/pengunjung dinamis (1..10 baris) untuk SCR-03.
  * Setiap baris berupa kartu ringkas; tombol tambah dinonaktifkan di batas
  * atas dengan alasan berbahasa Indonesia yang selalu terlihat.
  */
@@ -222,6 +275,8 @@ export function TechnicianList({
   })
   const vendorsQuery = useVendorsQuery()
   const vendors = vendorsQuery.data ?? []
+  const jabatanQuery = useJabatanQuery()
+  const jabatan = jabatanQuery.data ?? []
   const atLimit = fields.length >= MAX_TECHNICIANS
   const listError = errors.technicians?.message
 
@@ -230,7 +285,7 @@ export function TechnicianList({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Users aria-hidden="true" className="size-4 shrink-0 text-brand" />
-          Daftar Tim Teknisi
+          Daftar Anggota/Pengunjung
         </CardTitle>
         <Badge tone="neutral">
           {fields.length} / {MAX_TECHNICIANS}
@@ -238,7 +293,7 @@ export function TechnicianList({
       </CardHeader>
       <CardBody className="flex flex-col gap-4">
         <p className="text-xs text-ink-secondary">
-          Minimal 1 orang dan maksimal {MAX_TECHNICIANS} orang teknisi. Data
+          Minimal 1 orang dan maksimal {MAX_TECHNICIANS} orang anggota. Data
           identitas wajib sesuai KTP/SIM yang masih berlaku.
         </p>
 
@@ -256,6 +311,14 @@ export function TechnicianList({
           ))}
         </datalist>
 
+        {/* Saran jabatan — HANYA nilai yang pernah tersimpan di backend;
+            pengguna tetap bebas mengetik jabatan baru. */}
+        <datalist id={JABATAN_DATALIST_ID}>
+          {jabatan.map((value) => (
+            <option key={value} value={value} />
+          ))}
+        </datalist>
+
         <div id="visit-technicians" tabIndex={-1} className="flex flex-col gap-4">
           {fields.map((field, index) => (
             <TechnicianRow
@@ -269,6 +332,8 @@ export function TechnicianList({
               onRemove={() => remove(index)}
               vendorsPending={vendorsQuery.isPending}
               vendorsError={vendorsQuery.isError}
+              jabatanPending={jabatanQuery.isPending}
+              jabatanError={jabatanQuery.isError}
             />
           ))}
         </div>
@@ -283,17 +348,16 @@ export function TechnicianList({
             onClick={() => append(emptyTechnician(defaultVendorName))}
           >
             <Plus aria-hidden="true" className="size-4 shrink-0" />
-            Tambah Anggota Teknisi
+            Tambah Anggota
           </Button>
           {atLimit ? (
             <p className="text-xs text-warning-text">
-              Maksimal {MAX_TECHNICIANS} teknisi per permohonan. Hapus salah
-              satu teknisi bila ingin menambah anggota baru.
+              Maksimal {MAX_TECHNICIANS} anggota per permohonan. Hapus salah
+              satu anggota bila ingin menambah anggota baru.
             </p>
           ) : (
             <p className="text-xs text-ink-secondary">
-              Tekan untuk menambah anggota tim (maksimal {MAX_TECHNICIANS}{' '}
-              orang).
+              Tekan untuk menambah anggota (maksimal {MAX_TECHNICIANS} orang).
             </p>
           )}
         </div>

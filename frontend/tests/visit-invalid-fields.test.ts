@@ -23,7 +23,7 @@ const LABELS = [
   'Fasilitas Tujuan',
   'Waktu Mulai',
   'Waktu Selesai',
-  'Daftar Teknisi',
+  'Daftar Anggota/Pengunjung',
   'Catatan Tambahan',
 ] as const
 
@@ -71,14 +71,14 @@ describe('collectInvalidFields — manifest berurutan', () => {
     ])
   })
 
-  it('mengurutkan galat baris teknisi naik per indeks lalu per sub-kunci', () => {
+  it('mengurutkan galat baris anggota naik per indeks lalu per sub-kunci', () => {
     const result = collectInvalidFields(
       errorsOf({
         technicians: [
-          { phone: { message: 'Nomor HP teknisi wajib diisi.' } },
+          { phone: { message: 'Nomor HP anggota wajib diisi.' } },
           {
-            name: { message: 'Nama lengkap teknisi wajib diisi.' },
-            selfie: { message: 'Foto selfie teknisi wajib diunggah.' },
+            name: { message: 'Nama lengkap anggota wajib diisi.' },
+            selfie: { message: 'Foto selfie anggota wajib diunggah.' },
           },
         ],
       }),
@@ -87,34 +87,52 @@ describe('collectInvalidFields — manifest berurutan', () => {
     expect(result).toEqual([
       {
         path: 'technicians.0.phone',
-        label: 'Nomor HP teknisi (Teknisi 1)',
+        label: 'Nomor HP anggota (Anggota 1)',
         anchorId: 'visit-tech-0-phone',
       },
       {
         path: 'technicians.1.name',
-        label: 'Nama lengkap teknisi (Teknisi 2)',
+        label: 'Nama lengkap anggota (Anggota 2)',
         anchorId: 'visit-tech-1-name',
       },
       {
         path: 'technicians.1.selfie',
-        label: 'Foto selfie teknisi (Teknisi 2)',
+        label: 'Foto selfie anggota (Anggota 2)',
         anchorId: 'visit-tech-1-selfie',
       },
     ])
     expect(technicianAnchorId(0, 'phone')).toBe('visit-tech-0-phone')
   })
 
-  it('menghasilkan entri Daftar Teknisi untuk galat level array tanpa melempar', () => {
+  it('memлови galat foto KTP (kini wajib) di baris yang sama', () => {
     const result = collectInvalidFields(
       errorsOf({
-        technicians: { message: 'Minimal satu teknisi wajib didaftarkan.' },
+        technicians: [
+          { id_card_photo: { message: 'Foto KTP wajib diunggah.' } },
+        ],
+      }),
+    )
+
+    expect(result).toEqual([
+      {
+        path: 'technicians.0.id_card_photo',
+        label: 'Foto KTP anggota (Anggota 1)',
+        anchorId: 'visit-tech-0-id_card_photo',
+      },
+    ])
+  })
+
+  it('menghasilkan entri Daftar Anggota/Pengunjung untuk galat level array tanpa melempar', () => {
+    const result = collectInvalidFields(
+      errorsOf({
+        technicians: { message: 'Minimal satu anggota wajib didaftarkan.' },
       }),
     )
 
     expect(result).toEqual([
       {
         path: 'technicians',
-        label: 'Daftar Teknisi',
+        label: 'Daftar Anggota/Pengunjung',
         anchorId: 'visit-technicians',
       },
     ])

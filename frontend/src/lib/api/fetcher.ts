@@ -22,7 +22,13 @@ export function resolveApiBase(): string {
     const isLocalDev = host === 'localhost' || host === '127.0.0.1' || host === '::1';
     if (!isLocalDev) {
       try {
-        const path = new URL(configured, window.location.origin).pathname.replace(/\/+$/, '');
+        const url = new URL(configured, window.location.origin);
+        // Tunnel/demo lintas-origin: bila env menunjuk backend di host lain
+        // (mis. tunnel BE terpisah), pakai URL absolut itu apa adanya.
+        if (url.origin !== window.location.origin) {
+          return configured;
+        }
+        const path = url.pathname.replace(/\/+$/, '');
         return path || '/api/v1';
       } catch {
         return '/api/v1';

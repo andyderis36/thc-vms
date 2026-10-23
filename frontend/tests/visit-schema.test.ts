@@ -21,11 +21,14 @@ function baseForm(overrides: Record<string, unknown> = {}) {
     notes: '',
     technicians: [
       {
-        name: 'Teknisi Satu',
+        name: 'Anggota Satu',
         id_number: '3201234567890001',
         phone: '081200000000',
-        id_card_photo: null,
+        // Foto KTP WAJIB (keputusan produk): baris valid selalu menyertakan
+        // foto KTP — kasus tanpa foto diuji di `VisitForm.test.tsx`.
+        id_card_photo: { url: 's3://bucket/ktp.jpg', name: 'ktp.jpg' },
         selfie: { url: 's3://bucket/selfie.jpg', name: 'selfie.jpg' },
+        jabatan: 'Mandor',
         vendor_name: '',
       },
     ],
