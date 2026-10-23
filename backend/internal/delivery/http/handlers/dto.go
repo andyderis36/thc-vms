@@ -26,6 +26,9 @@ type visitorDTO struct {
 	PhotoURL       *string `json:"photo_url,omitempty"`
 	VendorID       *string `json:"vendor_id,omitempty"`
 	VendorName     *string `json:"vendor_name,omitempty"`
+	// Jabatan is the optional free-text position (migration 000012); it is
+	// never a catalogue member and renders omitted when absent.
+	Jabatan *string `json:"jabatan,omitempty"`
 }
 
 // locationDTO mirrors Location. Name/type ride along from the usecase join
@@ -144,6 +147,9 @@ type createVisitBody struct {
 		// honoured only when vendor_id is absent; it never enters the
 		// vendor catalogue.
 		VendorName *string `json:"vendor_name"`
+		// Jabatan is the optional free-text position (migration 000012); the
+		// usecase trims it, caps it at 120 and maps a blank input to absent.
+		Jabatan *string `json:"jabatan"`
 	} `json:"visitors"`
 }
 
@@ -199,6 +205,7 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 		dto := visitorDTO{
 			Name: w.Name, IDNumber: w.IDNumber, Phone: w.Phone,
 			IDCardPhotoURL: w.IDCardPhotoURL, PhotoURL: w.PhotoURL,
+			Jabatan: w.Jabatan,
 		}
 		if w.ID != "" {
 			id := string(w.ID)
@@ -285,6 +292,12 @@ func toCreateInput(body createVisitBody, start, end time.Time) visit.CreateVisit
 		if w.VendorName != nil {
 			name := *w.VendorName
 			visitor.VendorName = &name
+		}
+		// The position travels as-is; the usecase trims it, caps it and
+		// stores a blank input as absent, so the echo cannot carry whitespace.
+		if w.Jabatan != nil {
+			jabatan := *w.Jabatan
+			visitor.Jabatan = &jabatan
 		}
 		in.Visitors = append(in.Visitors, visitor)
 	}

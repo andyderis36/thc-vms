@@ -206,6 +206,7 @@ func run(ctx context.Context) error {
 			List: visitHandler.List, Create: visitHandler.Create, Get: visitHandler.Get,
 			QR: visitHandler.QR, Reschedule: visitHandler.Reschedule, Cancel: visitHandler.Cancel,
 			Approve: visitHandler.Approve, Reject: visitHandler.Reject,
+			Jabatan: visitHandler.ListJabatan,
 		},
 		Gate: deliveryhttp.GateRoutes{
 			CheckIn: gateHandler.CheckIn, CheckOut: gateHandler.CheckOut,

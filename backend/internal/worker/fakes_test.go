@@ -85,6 +85,11 @@ func (f *fakeVisitRepo) Reschedule(_ context.Context, _ domain.UUID, _, _ time.T
 	return nil
 }
 
+// ListVisitorJabatan satisfies domain.VisitRepository; the worker never uses it.
+func (f *fakeVisitRepo) ListVisitorJabatan(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+
 // DeleteVisit removes one visit from the fake roster. The worker never calls
 // it; it exists only so the fake keeps satisfying domain.VisitRepository.
 func (f *fakeVisitRepo) DeleteVisit(_ context.Context, id domain.UUID) error {

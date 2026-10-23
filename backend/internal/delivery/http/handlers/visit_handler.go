@@ -27,6 +27,7 @@ type VisitService interface {
 	Reject(ctx context.Context, actor visit.Actor, visitID domain.UUID, reason string) error
 	Cancel(ctx context.Context, actor visit.Actor, visitID domain.UUID, note string) error
 	Reschedule(ctx context.Context, actor visit.Actor, visitID domain.UUID, start, end time.Time, reason string) error
+	ListJabatan(ctx context.Context) ([]string, error)
 }
 
 // Compile-time proof that the production service wires into the handler.
@@ -138,6 +139,22 @@ func (h *VisitHandler) List(c *gin.Context) {
 		details = append(details, toVisitDetail(item))
 	}
 	response.OK(c, visitListDTO{Items: details, Total: total, Page: page, Limit: limit})
+}
+
+// ListJabatan serves GET /jabatan: the distinct Jabatan values already entered
+// on visitor rows, alphabetically sorted, as combobox suggestions. The list is
+// not scoped by role or branch — it carries only free-text position labels —
+// and an empty result answers `"data": []`, never null.
+func (h *VisitHandler) ListJabatan(c *gin.Context) {
+	values, err := h.visits.ListJabatan(c.Request.Context())
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	if values == nil {
+		values = []string{}
+	}
+	response.OK(c, values)
 }
 
 // Create serves POST /visits. Binds CreateVisitRequest field for field and

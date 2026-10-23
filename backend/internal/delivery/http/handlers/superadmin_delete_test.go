@@ -59,6 +59,10 @@ func (s *stubVisitRepos) Reschedule(_ context.Context, _ domain.UUID, _, _ time.
 	return nil
 }
 
+func (s *stubVisitRepos) ListVisitorJabatan(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+
 func (s *stubVisitRepos) DeleteVisit(_ context.Context, id domain.UUID) error {
 	if s.deleteErr != nil {
 		return s.deleteErr

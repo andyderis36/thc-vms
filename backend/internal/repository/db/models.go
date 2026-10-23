@@ -156,4 +156,6 @@ type Visitor struct {
 	VendorID pgtype.UUID `json:"vendor_id"`
 	// Nama perusahaan vendor yang diketik manual per teknisi; TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor (hanya dipakai sebagai vendor_name tampilan bila vendor_id absen)
 	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	// Jabatan anggota pengunjung yang diketik bebas (mis. Teknisi, Mandor, Supervisor); TIDAK terdaftar di katalog dan hanya dipakai sebagai saran isian (bukan enumerasi)
+	Jabatan pgtype.Text `json:"jabatan"`
 }

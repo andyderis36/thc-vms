@@ -26,6 +26,7 @@ func fullyWiredDeps() Deps {
 	visits := VisitRoutes{
 		List: wired(), Create: wired(), Get: wired(), QR: wired(),
 		Reschedule: wired(), Cancel: wired(), Approve: wired(), Reject: wired(),
+		Jabatan: wired(),
 	}
 	gate := GateRoutes{CheckIn: wired(), CheckOut: wired()}
 	upload := UploadRoutes{Upload: wired()}

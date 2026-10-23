@@ -190,6 +190,11 @@ type VisitRepository interface {
 	FindByID(ctx context.Context, id UUID) (VisitRequest, error)
 	FindByVisitCode(ctx context.Context, code string) (VisitRequest, error)
 	List(ctx context.Context, filter VisitFilter) (visits []VisitRequest, total int64, err error)
+	// ListVisitorJabatan returns the distinct, alphabetically sorted Jabatan
+	// values already registered on visitor rows, with blanks dropped and the
+	// list capped. The values are free text, never catalogue rows: the result
+	// only feeds the roster combobox as suggestions.
+	ListVisitorJabatan(ctx context.Context) ([]string, error)
 	// UpdateStatus moves one visit to status and appends the history row in the
 	// same transaction. It must lock the visit row first (SELECT ... FOR UPDATE)
 	// so two concurrent approvals cannot both succeed, and it must translate

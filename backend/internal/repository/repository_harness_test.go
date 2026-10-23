@@ -117,7 +117,7 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 // yields no error, because a re-applied file raises only "already there"
 // SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationSinglePusatSQL} {
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL} {
 		if err := applyOne(ctx, pool, sql); err != nil {
 			return err
 		}
@@ -271,6 +271,19 @@ var migrationVendorUserRenameSQL = func() string {
 // the repository write paths depend on.
 var migrationSinglePusatSQL = func() string {
 	path := filepath.Join("..", "..", "migrations", "000011_single_head_office_location.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationVisitorJabatanSQL is the visitor.jabatan follow-up (migration 000012),
+// loaded the same way so the scratch schema tracks the nullable free-text
+// position column the visit write and read paths now use.
+var migrationVisitorJabatanSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000012_visitor_jabatan.up.sql")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)

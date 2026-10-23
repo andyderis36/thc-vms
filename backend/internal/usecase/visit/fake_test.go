@@ -2,6 +2,8 @@ package visit
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +56,10 @@ type fakeVisitRepo struct {
 	lastFilter      domain.VisitFilter
 	listResult      []domain.VisitRequest
 	listTotal       int64
+	// jabatanRows holds raw stored Jabatan values (blanks and duplicates
+	// included) so ListVisitorJabatan can model the SQL contract.
+	jabatanRows []string
+	jabatanErr  error
 }
 
 func newFakeVisitRepo(t *testing.T) *fakeVisitRepo {
@@ -129,6 +135,33 @@ func (f *fakeVisitRepo) Reschedule(_ context.Context, id domain.UUID, start time
 	visit.Status = domain.VisitStatusRescheduled
 	f.byID[id] = visit
 	return nil
+}
+
+// ListVisitorJabatan mirrors the domain.VisitRepository contract over the raw
+// stored values: blank rows are dropped, duplicates collapse, the remainder is
+// sorted ascending and the list is capped at 50.
+func (f *fakeVisitRepo) ListVisitorJabatan(_ context.Context) ([]string, error) {
+	if f.jabatanErr != nil {
+		return nil, f.jabatanErr
+	}
+	seen := make(map[string]struct{}, len(f.jabatanRows))
+	values := make([]string, 0, len(f.jabatanRows))
+	for _, raw := range f.jabatanRows {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		values = append(values, trimmed)
+	}
+	sort.Strings(values)
+	if len(values) > 50 {
+		values = values[:50]
+	}
+	return values, nil
 }
 
 // DeleteVisit removes one visit from the fake roster, mirroring the
