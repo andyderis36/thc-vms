@@ -37,7 +37,7 @@ export interface EditUserModalProps {
 }
 
 /**
- * Modal ubah user terkelola — dipakai ulang halaman `/users` (endpoint
+ * Modal ubah user terkelola — dipakai ulang halaman `/coordinators` (endpoint
  * PATCH /users/:id, superadmin) dan panel pengawas (endpoint
  * PATCH /users/security/:id, admin cabang terkunci + superadmin).
  * Prefill dari baris; peran read-only; kata sandi opsional (kosong =

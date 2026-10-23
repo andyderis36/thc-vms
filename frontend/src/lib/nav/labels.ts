@@ -30,8 +30,10 @@ export const NAV_LABELS = {
   facilities: { desktop: 'Fasilitas', mobile: 'Fasilitas' },
   /** `/security` — panel kelola pengawas/pengawas; kedua role. */
   security: { desktop: getRoleLabel('security'), mobile: getRoleLabel('security') },
-  /** `/users` — manajemen admin cabang & mitra vendor; hanya SHELL-01. */
-  users: { desktop: 'Users', mobile: 'Users' },
+  /** `/coordinators` — akun Koordinator Wilayah (`admin`) + akun tingkat atas (`super_admin`); hanya SHELL-01. */
+  coordinators: { desktop: 'Koordinator Wilayah', mobile: 'Koordinator' },
+  /** `/vendor-registrations` — akun Vendor/Mitra (`vendor`); hanya SHELL-01. */
+  vendorRegistrations: { desktop: 'Pendaftaran Vendor/Mitra', mobile: 'Vendor' },
   /** `/gate` — konsol SCR-05; item SHELL-02, bernaung di alias Dashboard SHELL-01. */
   gate: { desktop: 'Pos Check-in Gerbang', mobile: 'Check-in' },
   /** `/visits/new` — SCR-03; item desktop SHELL-02 (tak punya tab mobile). */

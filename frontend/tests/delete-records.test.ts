@@ -8,7 +8,7 @@ import {
   deleteUserConfirmMessage,
   isDeletableUser,
   isProtectedUser,
-} from '@/app/users/page'
+} from '@/features/users/managed-user-filters'
 import { deleteVisitConfirmMessage } from '@/app/visits/[id]/page'
 
 function userStub(overrides: Partial<User> = {}): User {

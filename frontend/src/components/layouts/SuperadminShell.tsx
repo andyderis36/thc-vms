@@ -4,14 +4,15 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import {
+  Building2,
   Clock,
   LayoutDashboard,
   Lock,
   MapPin,
+  MapPinned,
   Menu,
   ScrollText,
   Shield,
-  Users,
   X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
@@ -203,8 +204,12 @@ export function SuperadminShell({
   /**
    * Menu superadmin setia desain §6.1: item desktop, semua halaman mandiri.
    * Antrean = `/approvals` (irisan requested + aksi); Security = `/security`
-   * (panel kelola pengawas); Fasilitas & Users halaman penuh; `/audit` jejak
-   * audit lintas cabang (desktop saja — drawer ikut memakai `navItems`).
+   * (panel kelola pengawas); Koordinator Wilayah (`/coordinators`) memuat
+   * akun Koordinator Wilayah BERSAMA akun tingkat atas (Superadmin) —
+   * dibedakan lewat filter peran di kolom "Peran"; Pendaftaran Vendor/Mitra
+   * (`/vendor-registrations`) punya halaman sendiri; Fasilitas halaman penuh;
+   * `/audit` jejak audit lintas cabang (desktop saja — drawer ikut memakai
+   * `navItems`).
    * Badge approval dipertahankan. `?focus=` dashboard tetap sebagai
    * entry-point kompatibel.
    * Label menu SEMUA diambil dari `NAV_LABELS` — sumber kebenaran tunggal
@@ -217,7 +222,8 @@ export function SuperadminShell({
     { href: '/approvals', label: NAV_LABELS.approvals.desktop, icon: <Clock aria-hidden="true" className="size-5 shrink-0" />, badge: pendingCount ?? 0 },
     { href: '/facilities', label: NAV_LABELS.facilities.desktop, icon: <MapPin aria-hidden="true" className="size-5 shrink-0" /> },
     { href: '/security', label: NAV_LABELS.security.desktop, icon: <Shield aria-hidden="true" className="size-5 shrink-0" /> },
-    { href: '/users', label: NAV_LABELS.users.desktop, icon: <Users aria-hidden="true" className="size-5 shrink-0" /> },
+    { href: '/coordinators', label: NAV_LABELS.coordinators.desktop, icon: <MapPinned aria-hidden="true" className="size-5 shrink-0" /> },
+    { href: '/vendor-registrations', label: NAV_LABELS.vendorRegistrations.desktop, icon: <Building2 aria-hidden="true" className="size-5 shrink-0" /> },
     { href: '/audit', label: NAV_LABELS.auditLogs.desktop, icon: <ScrollText aria-hidden="true" className="size-5 shrink-0" /> },
   ]
 
