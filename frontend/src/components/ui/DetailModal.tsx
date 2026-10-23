@@ -50,7 +50,7 @@ const FOCUSABLE_SELECTOR =
 
 /**
  * Modal detail READ-ONLY — satu permukaan generik untuk "lihat seluruh
- * field" di halaman back-office (/users, /facilities, /security).
+ * field" di halaman back-office (/coordinators, /vendor-registrations, /facilities, /security).
  *
  * Dibangun di atas primitif `Modal` yang sudah ada (bukan dialog kedua):
  *  - `Modal` menangani Escape, klik overlay, dan `role="dialog"` +

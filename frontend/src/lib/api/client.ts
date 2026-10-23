@@ -16,6 +16,7 @@ import type {
   CreateManagedUserRequest,
   CreateSecurityUserRequest,
   CreateVisitRequest,
+  JabatanList,
   Location,
   LoginRequest,
   LoginResult,
@@ -86,6 +87,15 @@ export function listPurposes(): Promise<Purpose[]> {
  */
 export function listVendors(): Promise<Vendor[]> {
   return apiFetch<Vendor[]>('/vendors');
+}
+
+/**
+ * `GET /jabatan` → `["Mandor", "Teknisi"]` — nilai jabatan yang pernah
+ * tersimpan pada baris visitor (distinct, A-Z, maks 50; bisa kosong `[]`).
+ * HANYA saran isian: pengguna tetap bebas mengetik jabatan baru.
+ */
+export function listJabatan(): Promise<JabatanList> {
+  return apiFetch<JabatanList>('/jabatan');
 }
 
 // ---------------------------------------------------------------------------

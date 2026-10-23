@@ -3,7 +3,7 @@
  *
  * Kontrak BE: `users.nik TEXT NULL UNIQUE`, tepat 16 digit angka.
  * NIK wajib untuk `admin`/`vendor`, ditolak untuk `security`/`super_admin`.
- * Dipakai modal create/edit `/users`; diuji di `tests/nik.test.ts`.
+ * Dipakai modal create/edit akun terkelola; diuji di `tests/nik.test.ts`.
  */
 
 /** Panjang NIK sesuai kontrak BE (tepat 16 digit). */

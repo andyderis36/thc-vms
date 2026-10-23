@@ -81,7 +81,13 @@ type Visitor struct {
 	VendorID           UUID
 	VendorName         string
 	VendorNameOverride *string
-	CreatedAt          time.Time
+	// Jabatan is the optional free-text position of this visiting member
+	// (migration 000012), e.g. "Teknisi", "Mandor", "Supervisor". It is NEVER a
+	// catalogue entry: a *string so a blank input stays nil, and the values
+	// typed earlier are offered back only as a suggestion list (GET /jabatan)
+	// while the field stays freely editable.
+	Jabatan   *string
+	CreatedAt time.Time
 }
 
 // VisitPurpose mirrors the VISIT_PURPOSE table: the composite link between a

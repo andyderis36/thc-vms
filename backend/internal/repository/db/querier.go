@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -261,9 +262,11 @@ type Querier interface {
 	// VISIT-05). vendor_id is the technician's own company (openapi VisitorItem);
 	// NULL for internal staff. vendor_name_override is the manually typed company
 	// (migration 000005), stored ONLY when vendor_id is absent: a sent vendor_id
-	// wins and the Go caller passes NULL for the override. Cascades to nothing on
-	// insert; the visit FK is ON DELETE CASCADE so deleting a visit removes its
-	// roster.
+	// wins and the Go caller passes NULL for the override. jabatan is the optional
+	// free-text position (migration 000012); the Go caller has already trimmed it
+	// and passes NULL for a blank input, so it never enters a catalogue. Cascades
+	// to nothing on insert; the visit FK is ON DELETE CASCADE so deleting a visit
+	// removes its roster.
 	InsertVisitor(ctx context.Context, arg InsertVisitorParams) (Visitor, error)
 	// =============================================================================
 	// master.sql - Master data for the pickers on SCR-03 plus the super_admin
@@ -338,6 +341,13 @@ type Querier interface {
 	// Status timeline on SCR-04 (openapi L832+, PRD L232).
 	ListStatusHistory(ctx context.Context, arg ListStatusHistoryParams) ([]ListStatusHistoryRow, error)
 	ListVisitPurposes(ctx context.Context, arg ListVisitPurposesParams) ([]ListVisitPurposesRow, error)
+	// Suggestion source for the roster "Jabatan" combobox (openapi GET /jabatan).
+	// Jabatan is free text, never a catalogue: the distinct values actually typed
+	// so far, blanks dropped and ordered alphabetically, are offered back to the
+	// form while staying freely editable. The LIMIT keeps an unbounded DISTINCT
+	// scan from drifting into a huge payload; the list is short by nature because
+	// real-world positions repeat.
+	ListVisitorJabatan(ctx context.Context) ([]pgtype.Text, error)
 	// Roster for SCR-04 / SCR-05. Batched per page with a single IN (...) by the
 	// repository to avoid an N+1 over the visit list. The vendor name rides along
 	// for the openapi VisitorItem vendor_name member.

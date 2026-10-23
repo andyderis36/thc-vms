@@ -32,7 +32,7 @@ interface ScalarFieldSpec {
   anchorId: string
 }
 
-/** Field manifest sebelum blok teknisi (urutan visual 1–5). */
+/** Field manifest sebelum blok anggota (urutan visual 1–5). */
 const SCALAR_FIELDS_BEFORE_TECHNICIANS: readonly ScalarFieldSpec[] = [
   { path: 'location_id', label: 'Fasilitas Tujuan', anchorId: 'visit-location' },
   { path: 'purpose_ids', label: 'Tujuan Kunjungan', anchorId: 'visit-purpose' },
@@ -41,7 +41,7 @@ const SCALAR_FIELDS_BEFORE_TECHNICIANS: readonly ScalarFieldSpec[] = [
   { path: 'end_date', label: 'Waktu Selesai', anchorId: 'visit-end-date' },
 ]
 
-/** Field manifest setelah blok teknisi (urutan visual 7–9). */
+/** Field manifest setelah blok anggota (urutan visual 7–9). */
 const SCALAR_FIELDS_AFTER_TECHNICIANS: readonly ScalarFieldSpec[] = [
   {
     path: 'assignment_letter',
@@ -57,9 +57,10 @@ const SCALAR_FIELDS_AFTER_TECHNICIANS: readonly ScalarFieldSpec[] = [
 ]
 
 /**
- * Sub-kunci baris teknisi yang DAPAT galat — urutannya persis urutan DOM di
- * dalam satu kartu teknisi. `id_card_photo` dan `vendor_name` sengaja
- * dikecualikan: keduanya opsional dan tidak pernah wajib.
+ * Sub-kunci baris anggota yang DAPAT galat — urutannya persis urutan DOM di
+ * dalam satu kartu anggota. `vendor_name` dan `jabatan` hanya bisa galat
+ * melebihi batas panjang; keduanya tetap punya anchor supaya fokus tidak
+ * meleset.
  */
 interface TechnicianSubkeySpec {
   key: string
@@ -67,16 +68,27 @@ interface TechnicianSubkeySpec {
 }
 
 const TECHNICIAN_SUBKEYS: readonly TechnicianSubkeySpec[] = [
-  { key: 'name', label: (index) => `Nama lengkap teknisi (Teknisi ${index + 1})` },
+  { key: 'name', label: (index) => `Nama lengkap anggota (Anggota ${index + 1})` },
   {
     key: 'id_number',
-    label: (index) => `Nomor KTP/SIM teknisi (Teknisi ${index + 1})`,
+    label: (index) => `Nomor KTP/SIM anggota (Anggota ${index + 1})`,
   },
-  { key: 'phone', label: (index) => `Nomor HP teknisi (Teknisi ${index + 1})` },
-  { key: 'selfie', label: (index) => `Foto selfie teknisi (Teknisi ${index + 1})` },
+  { key: 'phone', label: (index) => `Nomor HP anggota (Anggota ${index + 1})` },
+  {
+    key: 'jabatan',
+    label: (index) => `Jabatan (Anggota ${index + 1})`,
+  },
+  {
+    key: 'id_card_photo',
+    label: (index) => `Foto KTP anggota (Anggota ${index + 1})`,
+  },
+  {
+    key: 'selfie',
+    label: (index) => `Foto selfie anggota (Anggota ${index + 1})`,
+  },
 ]
 
-/** `id` anchor elemen input pada baris teknisi (stabil & dapat diprediksi). */
+/** `id` anchor elemen input pada baris anggota (stabil & dapat diprediksi). */
 export function technicianAnchorId(index: number, key: string): string {
   return `visit-tech-${index}-${key}`
 }
@@ -94,7 +106,8 @@ function readMessage(value: unknown): string | undefined {
 
 /**
  * Mengumpulkan galat pada blok `technicians`:
- * - galat tingkat array (`{ message }`, BUKAN array) → satu entri `Daftar Teknisi`;
+ * - galat tingkat array (`{ message }`, BUKAN array) → satu entri
+ *   `Daftar Anggota/Pengunjung`;
  * - galat per baris (array, mungkin sparse, `row` mungkin `undefined`) → per
  *   sub-kunci sesuai urutan DOM.
  */
@@ -109,7 +122,7 @@ function collectTechnicianFields(value: unknown): InvalidField[] {
     if (readMessage(value) !== undefined) {
       fields.push({
         path: 'technicians',
-        label: 'Daftar Teknisi',
+        label: 'Daftar Anggota/Pengunjung',
         anchorId: 'visit-technicians',
       })
     }

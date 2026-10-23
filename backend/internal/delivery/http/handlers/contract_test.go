@@ -16,7 +16,7 @@ import (
 var openapiKeys = map[string]map[string]bool{
 	"VisitorItem": {
 		"id": true, "name": true, "id_number": true, "phone": true, "id_card_photo_url": true,
-		"photo_url": true, "vendor_id": true, "vendor_name": true,
+		"photo_url": true, "vendor_id": true, "vendor_name": true, "jabatan": true,
 	},
 	"Location": {
 		"id": true, "name": true, "type": true, "address": true,

@@ -25,6 +25,7 @@ func textOrEmpty(s *string) string {
 const (
 	maxManualVendorNameLen = 120
 	maxPurposeNoteLen      = 200
+	maxJabatanLen          = 120
 )
 
 type VisitorInput struct {
@@ -47,6 +48,11 @@ type VisitorInput struct {
 	// discarded, never stored alongside it. It never enters the vendor
 	// catalogue, so the dropdown keeps showing registered vendors only.
 	VendorName *string
+	// Jabatan is the optional free-text position of this visiting member
+	// (migration 000012), e.g. "Teknisi", "Mandor", "Supervisor". It is
+	// trimmed and capped; a blank input becomes absent (NULL). It is NEVER a
+	// catalogue lookup: values typed earlier are suggestions only.
+	Jabatan *string
 }
 
 // CreateVisitInput is the data needed to file a new visit request.
@@ -193,6 +199,9 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 			visitor.VendorNameOverride = &name
 			visitor.VendorName = name
 		}
+		if jabatan := strings.TrimSpace(textOrEmpty(v.Jabatan)); jabatan != "" {
+			visitor.Jabatan = &jabatan
+		}
 		visitors = append(visitors, visitor)
 	}
 	created, err := s.visits.Create(ctx, visit, visitors, in.PurposeIDs)
@@ -240,6 +249,9 @@ func validateVisitor(v VisitorInput, n int, allow FileOriginAllowlist) error {
 	}
 	if len([]rune(strings.TrimSpace(textOrEmpty(v.VendorName)))) > maxManualVendorNameLen {
 		return domain.ValidationFailure("Nama perusahaan vendor pengunjung ke-" + itoa(n) + " maksimal 120 karakter.")
+	}
+	if len([]rune(strings.TrimSpace(textOrEmpty(v.Jabatan)))) > maxJabatanLen {
+		return domain.ValidationFailure("Jabatan pengunjung ke-" + itoa(n) + " maksimal 120 karakter.")
 	}
 	return nil
 }

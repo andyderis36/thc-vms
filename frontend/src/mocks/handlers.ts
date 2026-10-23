@@ -419,6 +419,13 @@ export const handlers: RequestHandler[] = [
     return ok(vendors);
   }),
 
+  // Saran jabatan (distinct, A-Z, maks 50) — mock statis: cukup untuk
+  // mengisi <datalist> pada form pengajuan.
+  http.get(`${API_BASE}/jabatan`, async () => {
+    await delay(150);
+    return ok(['Mandor', 'Supervisor', 'Teknisi']);
+  }),
+
   // -- Visits: list ---------------------------------------------------------
   http.get(`${API_BASE}/visits`, async ({ request }) => {
     const auth = getAuthUser(request);

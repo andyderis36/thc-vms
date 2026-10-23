@@ -609,9 +609,9 @@ func (q *Queries) InsertVisitPurpose(ctx context.Context, arg InsertVisitPurpose
 }
 
 const insertVisitor = `-- name: InsertVisitor :one
-INSERT INTO visitor (visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, vendor_id, vendor_name_override)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, created_at, vendor_id, vendor_name_override
+INSERT INTO visitor (visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, vendor_id, vendor_name_override, jabatan)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, created_at, vendor_id, vendor_name_override, jabatan
 `
 
 type InsertVisitorParams struct {
@@ -623,15 +623,18 @@ type InsertVisitorParams struct {
 	PhotoUrl           pgtype.Text `json:"photo_url"`
 	VendorID           pgtype.UUID `json:"vendor_id"`
 	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	Jabatan            pgtype.Text `json:"jabatan"`
 }
 
 // POST /visits visitors[] (openapi L816-822), up to 10 rows per visit (QA
 // VISIT-05). vendor_id is the technician's own company (openapi VisitorItem);
 // NULL for internal staff. vendor_name_override is the manually typed company
 // (migration 000005), stored ONLY when vendor_id is absent: a sent vendor_id
-// wins and the Go caller passes NULL for the override. Cascades to nothing on
-// insert; the visit FK is ON DELETE CASCADE so deleting a visit removes its
-// roster.
+// wins and the Go caller passes NULL for the override. jabatan is the optional
+// free-text position (migration 000012); the Go caller has already trimmed it
+// and passes NULL for a blank input, so it never enters a catalogue. Cascades
+// to nothing on insert; the visit FK is ON DELETE CASCADE so deleting a visit
+// removes its roster.
 func (q *Queries) InsertVisitor(ctx context.Context, arg InsertVisitorParams) (Visitor, error) {
 	row := q.db.QueryRow(ctx, insertVisitor,
 		arg.VisitRequestID,
@@ -642,6 +645,7 @@ func (q *Queries) InsertVisitor(ctx context.Context, arg InsertVisitorParams) (V
 		arg.PhotoUrl,
 		arg.VendorID,
 		arg.VendorNameOverride,
+		arg.Jabatan,
 	)
 	var i Visitor
 	err := row.Scan(
@@ -655,6 +659,7 @@ func (q *Queries) InsertVisitor(ctx context.Context, arg InsertVisitorParams) (V
 		&i.CreatedAt,
 		&i.VendorID,
 		&i.VendorNameOverride,
+		&i.Jabatan,
 	)
 	return i, err
 }
@@ -754,8 +759,42 @@ func (q *Queries) ListVisitPurposes(ctx context.Context, arg ListVisitPurposesPa
 	return items, nil
 }
 
+const listVisitorJabatan = `-- name: ListVisitorJabatan :many
+SELECT DISTINCT jabatan
+FROM visitor
+WHERE jabatan IS NOT NULL AND btrim(jabatan) <> ''
+ORDER BY jabatan ASC
+LIMIT 50
+`
+
+// Suggestion source for the roster "Jabatan" combobox (openapi GET /jabatan).
+// Jabatan is free text, never a catalogue: the distinct values actually typed
+// so far, blanks dropped and ordered alphabetically, are offered back to the
+// form while staying freely editable. The LIMIT keeps an unbounded DISTINCT
+// scan from drifting into a huge payload; the list is short by nature because
+// real-world positions repeat.
+func (q *Queries) ListVisitorJabatan(ctx context.Context) ([]pgtype.Text, error) {
+	rows, err := q.db.Query(ctx, listVisitorJabatan)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.Text{}
+	for rows.Next() {
+		var jabatan pgtype.Text
+		if err := rows.Scan(&jabatan); err != nil {
+			return nil, err
+		}
+		items = append(items, jabatan)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVisitors = `-- name: ListVisitors :many
-SELECT v.id, v.visit_request_id, v.name, v.id_number, v.phone, v.id_card_photo_url, v.photo_url, v.created_at, v.vendor_id, v.vendor_name_override,
+SELECT v.id, v.visit_request_id, v.name, v.id_number, v.phone, v.id_card_photo_url, v.photo_url, v.created_at, v.vendor_id, v.vendor_name_override, v.jabatan,
     vn.name AS vendor_name
 FROM visitor v
 LEFT JOIN vendor vn ON vn.id = v.vendor_id
@@ -778,6 +817,7 @@ type ListVisitorsRow struct {
 	CreatedAt          time.Time   `json:"created_at"`
 	VendorID           pgtype.UUID `json:"vendor_id"`
 	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	Jabatan            pgtype.Text `json:"jabatan"`
 	VendorName         pgtype.Text `json:"vendor_name"`
 }
 
@@ -804,6 +844,7 @@ func (q *Queries) ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]L
 			&i.CreatedAt,
 			&i.VendorID,
 			&i.VendorNameOverride,
+			&i.Jabatan,
 			&i.VendorName,
 		); err != nil {
 			return nil, err

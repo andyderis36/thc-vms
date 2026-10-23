@@ -106,6 +106,7 @@ func (r *visitRepository) Create(
 					PhotoUrl:           pgText(v.PhotoURL),
 					VendorID:           vendorID,
 					VendorNameOverride: pgText(v.VendorNameOverride),
+					Jabatan:            pgText(v.Jabatan),
 				}); err != nil {
 					return MapError(err)
 				}
@@ -193,6 +194,27 @@ func (r *visitRepository) withVisitors(ctx context.Context, visit domain.VisitRe
 		visit.Purposes = append(visit.Purposes, purposeModelToDomain(row))
 	}
 	return visit, nil
+}
+
+// ListVisitorJabatan serves the roster combobox suggestion list: the distinct,
+// alphabetically ordered Jabatan values already stored on visitor rows. The
+// query drops NULL/blanks and caps the result at 50; the generated column stays
+// pgtype.Text because the database type is nullable, so the valid rows are
+// projected onto plain strings here. An empty result is a non-nil empty slice
+// so the handler renders `"data": []`, never null.
+func (r *visitRepository) ListVisitorJabatan(ctx context.Context) ([]string, error) {
+	rows, err := db.New(r.pool).ListVisitorJabatan(ctx)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	values := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if !row.Valid {
+			continue
+		}
+		values = append(values, row.String)
+	}
+	return values, nil
 }
 
 // genVisitCode mints a VST- + 10 digits code with crypto randomness.

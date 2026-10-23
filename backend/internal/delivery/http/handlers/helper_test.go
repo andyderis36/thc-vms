@@ -110,6 +110,7 @@ func cannedVisit() domain.VisitRequest {
 				ID: "visitor-1", VisitRequestID: "visit-1",
 				Name: "Andi", IDNumber: "ID123", Phone: "0811", PhotoURL: &selfie,
 				VendorID: "vendor-1", VendorName: "PT Lintas Fiber",
+				Jabatan: strPtr("Teknisi"),
 			},
 		},
 	}
@@ -147,6 +148,9 @@ type fakeVisitService struct {
 	lastStart        time.Time
 	lastEnd          time.Time
 	lastResReason    string
+
+	jabatan    []string
+	jabatanErr error
 }
 
 func (f *fakeVisitService) ListVisits(_ context.Context, _ visit.Actor, in visit.ListVisitsInput) ([]domain.VisitRequest, int64, error) {
@@ -209,6 +213,13 @@ func (f *fakeVisitService) Reschedule(_ context.Context, _ visit.Actor, id domai
 	f.lastEnd = end
 	f.lastResReason = reason
 	return f.rescheduleErr
+}
+
+func (f *fakeVisitService) ListJabatan(_ context.Context) ([]string, error) {
+	if f.jabatanErr != nil {
+		return nil, f.jabatanErr
+	}
+	return f.jabatan, nil
 }
 
 // fakeGateService is a hand-written fake for handlers.GateService.

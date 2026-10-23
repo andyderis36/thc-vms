@@ -54,6 +54,7 @@ function makeVisit(overrides: Partial<VisitDetail> = {}): VisitDetail {
         photo_url:
           'https://minio.local/bucket/id_cards/1/selfie%20budi.jpg?X-Amz-Signature=selfie',
         vendor_name: 'PT Lintas Fiber',
+        jabatan: 'Mandor',
       },
       {
         name: 'Siti Aminah',
@@ -62,6 +63,7 @@ function makeVisit(overrides: Partial<VisitDetail> = {}): VisitDetail {
         id_card_photo_url: null,
         photo_url: null,
         vendor_name: null,
+        jabatan: null,
       },
     ],
     created_at: '2026-09-20T10:00:00Z',
@@ -80,6 +82,7 @@ describe('toTechnicianRows', () => {
     expect(first?.id_number).toBe('3273010501900001')
     expect(first?.phone).toBe('081234567890')
     expect(first?.vendor_name).toBe('PT Lintas Fiber')
+    expect(first?.jabatan).toBe('Mandor')
     // Foto: URL VERBATIM (query presigned ikut; backend yang membersihkan).
     expect(first?.id_card_photo).toEqual({
       url: visit.visitors[0]?.id_card_photo_url,
@@ -92,13 +95,16 @@ describe('toTechnicianRows', () => {
 
     const second = rows[1]
     expect(second?.name).toBe('Siti Aminah')
-    expect(second?.id_card_photo).toBeNull()
+    // Tanpa foto lama → sentinel kosong (bukan null): foto KTP wajib, jadi
+    // baris harus tetap bisa dirender sambil ditandai belum diunggah.
+    expect(second?.id_card_photo).toEqual({ url: '', name: '' })
     // Tanpa foto lama → selfie sentinel kosong (bukan nama berkas).
     expect(second?.selfie).toEqual({ url: '', name: '' })
     expect(second?.vendor_name).toBe('')
+    expect(second?.jabatan).toBe('')
   })
 
-  it('foto hilang → null & string kosong; selfie pakai sentinel kosong', () => {
+  it('foto hilang → sentinel kosong; selfie pakai sentinel kosong', () => {
     const rows = toTechnicianRows(
       makeVisit({
         visitors: [
@@ -115,7 +121,7 @@ describe('toTechnicianRows', () => {
     )
 
     expect(rows).toHaveLength(1)
-    expect(rows[0]?.id_card_photo).toBeNull()
+    expect(rows[0]?.id_card_photo).toEqual({ url: '', name: '' })
     expect(rows[0]?.selfie).toEqual({ url: '', name: '' })
     expect(rows[0]?.vendor_name).toBe('')
   })

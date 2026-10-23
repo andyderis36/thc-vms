@@ -11,13 +11,20 @@ import {
 import {
   USER_FILTER_DEP_KEYS,
   applyManagedUserFilters,
+  effectiveManagedRoles,
+  filterManagedUsersByRoles,
+  managedCreateRole,
+  managedLocationFilterApplies,
+  managedRoleFilterOptions,
+  managedServerRoleParam,
   managedVendorOptions,
+  parseManagedRoleFilter,
   requiresManagedLocation,
   shouldResetUserPage,
   toManagedUserListParams,
   userAffiliationLabel,
   type UserFilterSnapshot,
-} from '@/app/users/page'
+} from '@/features/users/managed-user-filters'
 
 function locationStub(overrides: Partial<Location> = {}): Location {
   return {
@@ -165,6 +172,88 @@ describe('requiresManagedLocation', () => {
   })
 })
 
+describe('filter peran di kolom "Peran"', () => {
+  const COORDINATOR_ROLES = ['admin', 'super_admin'] as const
+
+  it('opsi filter = "Semua Peran" + satu entri per peran halaman', () => {
+    expect(managedRoleFilterOptions([...COORDINATOR_ROLES])).toEqual([
+      { value: '', label: 'Semua Peran' },
+      { value: 'admin', label: 'Koordinator Wilayah' },
+      { value: 'super_admin', label: 'Superadmin' },
+    ])
+  })
+
+  it('opsi filter peran vendor memakai label aplikasi', () => {
+    expect(managedRoleFilterOptions(['vendor'])).toEqual([
+      { value: '', label: 'Semua Peran' },
+      { value: 'vendor', label: 'Vendor/Mitra' },
+    ])
+  })
+
+  it('nilai select tak dikenal jatuh ke "Semua Peran"', () => {
+    expect(parseManagedRoleFilter('')).toBe('')
+    expect(parseManagedRoleFilter('admin')).toBe('admin')
+    expect(parseManagedRoleFilter('vendor')).toBe('vendor')
+    expect(parseManagedRoleFilter('super_admin')).toBe('super_admin')
+    expect(parseManagedRoleFilter('security')).toBe('')
+    expect(parseManagedRoleFilter('nonsense')).toBe('')
+  })
+
+  it('peran efektif = seluruh peran halaman saat filter "Semua Peran"', () => {
+    expect(effectiveManagedRoles([...COORDINATOR_ROLES], '')).toEqual(['admin', 'super_admin'])
+  })
+
+  it('peran efektif = satu peran saat superadmin memfilter', () => {
+    expect(effectiveManagedRoles([...COORDINATOR_ROLES], 'super_admin')).toEqual(['super_admin'])
+    expect(effectiveManagedRoles([...COORDINATOR_ROLES], 'admin')).toEqual(['admin'])
+  })
+
+  it('peran di luar halaman tak pernah jadi peran efektif', () => {
+    expect(effectiveManagedRoles(['vendor'], 'admin')).toEqual(['vendor'])
+  })
+
+  it('halaman satu peran yang bisa difilter server meminta ?role=-nya', () => {
+    expect(managedServerRoleParam(['vendor'])).toBe('vendor')
+    expect(managedServerRoleParam(['admin'])).toBe('admin')
+  })
+
+  it('halaman >1 peran requesting TANPA ?role= (backend menolak super_admin)', () => {
+    expect(managedServerRoleParam([...COORDINATOR_ROLES])).toBe('')
+    expect(managedServerRoleParam(['super_admin'])).toBe('')
+    expect(
+      toManagedUserListParams({ role: managedServerRoleParam([...COORDINATOR_ROLES]), search: '', locationId: 'all' }),
+    ).toEqual({})
+  })
+
+  it('menyaring baris ke set peran efektif dan membuang security', () => {
+    const rows = [
+      userStub({ id: 'u-admin', role: 'admin' }),
+      userStub({ id: 'u-super', role: 'super_admin', location_id: null, location_name: null }),
+      userStub({ id: 'u-vendor', role: 'vendor', vendor_name: 'PT Lintas Fiber' }),
+      userStub({ id: 'u-security', role: 'security' }),
+    ]
+    expect(filterManagedUsersByRoles(rows, [...COORDINATOR_ROLES]).map((u) => u.id)).toEqual([
+      'u-admin',
+      'u-super',
+    ])
+    expect(filterManagedUsersByRoles(rows, ['super_admin']).map((u) => u.id)).toEqual(['u-super'])
+  })
+
+  it('tombol tambah memakai peran yang bisa dibuat backend', () => {
+    expect(managedCreateRole([...COORDINATOR_ROLES], '')).toBe('admin')
+    expect(managedCreateRole([...COORDINATOR_ROLES], 'admin')).toBe('admin')
+    expect(managedCreateRole([...COORDINATOR_ROLES], 'super_admin')).toBeNull()
+    expect(managedCreateRole(['vendor'], '')).toBe('vendor')
+  })
+
+  it('filter cabang hanya berlaku bila peran efektif memuat admin', () => {
+    expect(managedLocationFilterApplies([...COORDINATOR_ROLES])).toBe(true)
+    expect(managedLocationFilterApplies(['admin'])).toBe(true)
+    expect(managedLocationFilterApplies(['super_admin'])).toBe(false)
+    expect(managedLocationFilterApplies(['vendor'])).toBe(false)
+  })
+})
+
 describe('userAffiliationLabel', () => {
   it('mengutamakan nama cabang', () => {
     expect(userAffiliationLabel(userStub())).toBe('Kantor Cabang Malang')
@@ -267,6 +356,7 @@ describe('shouldResetUserPage (kontrak reset halaman)', () => {
 
   it('mengubah salah satu nilai penentu mensinyalkan reset ke halaman 1', () => {
     expect(shouldResetUserPage(base, { ...base, roleFilter: 'vendor' })).toBe(true)
+    expect(shouldResetUserPage(base, { ...base, roleFilter: '' })).toBe(true)
     expect(shouldResetUserPage(base, { ...base, locationId: 'all' })).toBe(true)
     expect(shouldResetUserPage(base, { ...base, search: 'santoso' })).toBe(true)
     expect(shouldResetUserPage(base, { ...base, statusFilter: 'blacklisted' })).toBe(true)

@@ -5,7 +5,7 @@
  * efek autosave roster / prefill nama vendor akun di `VisitForm`.
  *
  * Kontrak pemetaan (`VisitDetail` → `TechnicianFormValues[]`) ROSTER SAJA:
- * data teknisi stabil antar-pengajuan (kru yang sama), sedangkan fasilitas,
+ * data anggota stabil antar-pengajuan (kru yang sama), sedangkan fasilitas,
  * tujuan, jadwal, surat tugas, dan catatan selalu bervariasi per kunjungan
  * sehingga TIDAK PERNAH diwarisi — field dinamis itu tetap pada nilai awal
  * kosong formulir.
@@ -61,7 +61,7 @@ export function selectLatestVisit(
 }
 
 /**
- * Petakan satu `VisitDetail` menjadi baris-baris roster teknisi SCR-03.
+ * Petakan satu `VisitDetail` menjadi baris-baris roster anggota SCR-03.
  * HANYA roster yang diwarisi (nama, nomor identitas, No. HP, teks vendor,
  * foto KTP + selfie VERBATIM) dan SEMUANYA tetap bisa diedit — pemanggil
  * wajib menerapkan hasilnya lewat `setValue('technicians', …)` bertarget
@@ -73,17 +73,20 @@ export function toTechnicianRows(visit: VisitDetail): TechnicianFormValues[] {
     name: visitor.name,
     id_number: visitor.id_number,
     phone: visitor.phone,
+    // Foto KTP wajib di skema — tanpa foto lama pakai sentinel kosong agar
+    // error tampil per-baris saat dikirim tanpa foto baru.
     id_card_photo: visitor.id_card_photo_url
       ? {
           url: visitor.id_card_photo_url,
           name: fileNameFromUrl(visitor.id_card_photo_url),
         }
-      : null,
+      : { url: '', name: '' },
     // Selfie wajib di skema — tanpa foto lama pakai sentinel kosong agar
     // error tampil per-baris saat dikirim tanpa selfie baru.
     selfie: visitor.photo_url
       ? { url: visitor.photo_url, name: fileNameFromUrl(visitor.photo_url) }
       : { url: '', name: '' },
+    jabatan: visitor.jabatan ?? '',
     vendor_name: visitor.vendor_name ?? '',
   }))
 }

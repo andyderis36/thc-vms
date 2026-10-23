@@ -144,7 +144,7 @@ describe('SuperadminShell — regresi defek mobile', () => {
 /**
  * Switcher cabang TIDAK lagi hidup di shell: setiap halaman pemilik
  * menyediakannya tepat SATU kali di filter bar halamannya sendiri
- * (`/dashboard` → "Fasilitas", `/facilities` → "Cabang", `/users` → "Cabang",
+ * (`/dashboard` → "Fasilitas", `/facilities` → "Cabang", `/coordinators` → "Cabang",
  * `/approvals` → "Cabang"). Shell yang memuat switcher kedua kali berarti
  * kontrol filter ganda pada satu layar.
  */

@@ -324,11 +324,13 @@ ORDER BY sh.changed_at ASC, sh.id ASC;
 -- VISIT-05). vendor_id is the technician's own company (openapi VisitorItem);
 -- NULL for internal staff. vendor_name_override is the manually typed company
 -- (migration 000005), stored ONLY when vendor_id is absent: a sent vendor_id
--- wins and the Go caller passes NULL for the override. Cascades to nothing on
--- insert; the visit FK is ON DELETE CASCADE so deleting a visit removes its
--- roster.
-INSERT INTO visitor (visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, vendor_id, vendor_name_override)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+-- wins and the Go caller passes NULL for the override. jabatan is the optional
+-- free-text position (migration 000012); the Go caller has already trimmed it
+-- and passes NULL for a blank input, so it never enters a catalogue. Cascades
+-- to nothing on insert; the visit FK is ON DELETE CASCADE so deleting a visit
+-- removes its roster.
+INSERT INTO visitor (visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, vendor_id, vendor_name_override, jabatan)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: ListVisitors :many
@@ -341,6 +343,19 @@ FROM visitor v
 LEFT JOIN vendor vn ON vn.id = v.vendor_id
 WHERE v.visit_request_id = ANY(sqlc.arg('visit_request_ids')::uuid[])
 ORDER BY v.created_at ASC, v.id ASC;
+
+-- name: ListVisitorJabatan :many
+-- Suggestion source for the roster "Jabatan" combobox (openapi GET /jabatan).
+-- Jabatan is free text, never a catalogue: the distinct values actually typed
+-- so far, blanks dropped and ordered alphabetically, are offered back to the
+-- form while staying freely editable. The LIMIT keeps an unbounded DISTINCT
+-- scan from drifting into a huge payload; the list is short by nature because
+-- real-world positions repeat.
+SELECT DISTINCT jabatan
+FROM visitor
+WHERE jabatan IS NOT NULL AND btrim(jabatan) <> ''
+ORDER BY jabatan ASC
+LIMIT 50;
 
 -- name: InsertVisitPurpose :exec
 -- visit_purpose is a pure join table (ERD L107-110) whose composite primary key

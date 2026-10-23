@@ -66,6 +66,7 @@ type VisitRoutes struct {
 	Cancel     gin.HandlerFunc
 	Approve    gin.HandlerFunc
 	Reject     gin.HandlerFunc
+	Jabatan    gin.HandlerFunc
 }
 
 // GateRoutes carries the bound gate handler methods.
@@ -212,6 +213,9 @@ func New(d Deps) *gin.Engine {
 	authed.GET("/locations", withFallback(d.Master.Locations))
 	authed.GET("/purposes", withFallback(d.Master.Purposes))
 	authed.GET("/vendors", withFallback(d.Master.Vendors))
+	// Suggestion list for the roster "Jabatan" combobox: every authenticated
+	// role may read it because it carries only free-text position labels.
+	authed.GET("/jabatan", withFallback(d.Visits.Jabatan))
 
 	authed.GET("/visits", withFallback(d.Visits.List))
 	authed.POST("/visits", withFallback(d.Visits.Create))

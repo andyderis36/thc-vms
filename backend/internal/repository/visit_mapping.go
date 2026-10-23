@@ -137,6 +137,7 @@ func visitorModelToDomain(row db.ListVisitorsRow) domain.Visitor {
 		VendorID:           nullUUIDToDomain(row.VendorID),
 		VendorName:         resolveVendorDisplayName(row.VendorNameOverride, row.VendorName),
 		VendorNameOverride: textPtr(row.VendorNameOverride),
+		Jabatan:            textPtr(row.Jabatan),
 		CreatedAt:          row.CreatedAt,
 	}
 }
