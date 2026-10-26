@@ -19,7 +19,7 @@ func TestCreateVisit_RequiresAssignmentLetterURL(t *testing.T) {
 			"start_date": "2026-10-01T09:00:00Z",
 			"end_date": "2026-10-01T17:00:00Z",
 			"is_nda_accepted": true,
-			"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
+			"visitors": [{"name": "Andi", "id_number": "ID12345678", "phone": "081234567890"}]
 		}`,
 		"empty SPK": `{
 			"location_id": "11111111-1111-1111-1111-111111111111",
@@ -28,7 +28,7 @@ func TestCreateVisit_RequiresAssignmentLetterURL(t *testing.T) {
 			"end_date": "2026-10-01T17:00:00Z",
 			"is_nda_accepted": true,
 			"assignment_letter_url": "",
-			"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
+			"visitors": [{"name": "Andi", "id_number": "ID12345678", "phone": "081234567890"}]
 		}`,
 		"whitespace SPK": `{
 			"location_id": "11111111-1111-1111-1111-111111111111",
@@ -37,7 +37,7 @@ func TestCreateVisit_RequiresAssignmentLetterURL(t *testing.T) {
 			"end_date": "2026-10-01T17:00:00Z",
 			"is_nda_accepted": true,
 			"assignment_letter_url": "   ",
-			"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
+			"visitors": [{"name": "Andi", "id_number": "ID12345678", "phone": "081234567890"}]
 		}`,
 	}
 	for name, payload := range cases {

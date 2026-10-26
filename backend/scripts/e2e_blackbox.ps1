@@ -26,7 +26,16 @@
 param(
   [string]$BaseUrl    = 'http://127.0.0.1:8080/api/v1',   # 127.0.0.1, bukan localhost (hindari ::1)
   [string]$Password   = '',   # TIDAK di-hardcode: diisi runtime dari docs / env / argumen
-  [string]$FixtureDir = "$env:TEMP\e2e-bb"
+  [string]$FixtureDir = "$env:TEMP\e2e-bb",
+  # Prefix URL objek storage yang dikembalikan API. Lokal memakai MinIO langsung;
+  # produksi memakai URL publik Caddy (mis. https://vms.thckalbar.com/s3/thc-vms-bucket).
+  [string]$StorageUrlPrefix = 'http://localhost:9000',
+  # Jeda antar-login. Produksi membatasi 5 login/menit/IP (AUTH_RATE_LIMIT=5), jadi
+  # 9 akun seed + login negatif butuh >=16 detik agar tidak kena 429.
+  [int]$LoginPacingSeconds = 3,
+  # CL-05 memeriksa dua baris kunjungan manual yang HANYA ada di dev; produksi
+  # tidak memilikinya, jadi lewati alih-alih melaporkan FAIL palsu.
+  [switch]$SkipLegacyVisitCheck
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +51,10 @@ $script:CreatedUsers     = New-Object System.Collections.ArrayList
 $script:CreatedLocations = New-Object System.Collections.ArrayList
 $script:Tokens = @{}
 $script:Me     = @{}
+$script:SPK_URL = ''
+$script:KTP_URL = ''
+$script:SELFIE_URL = ''
+$script:CHECKIN_PHOTO_URL = ''
 $TAG = '[E2E-BB]'
 
 $script:Http = New-Object System.Net.Http.HttpClient
@@ -215,7 +228,7 @@ function Check-Pre {
 function Login {
   param([string]$Key, [string]$Email)
   if ($script:Tokens.ContainsKey($Key)) { return $script:Tokens[$Key] }
-  Start-Sleep -Seconds 3   # jeda rate-limit login
+  Start-Sleep -Seconds $LoginPacingSeconds   # jeda rate-limit login
   $r = Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = $Email; password = $Password })
   if ($r.Status -ne 200 -or -not $r.Json.data.token) {
     throw "LOGIN GAGAL $Email => $($r.Status) $($r.Body)"
@@ -244,6 +257,42 @@ function New-Visitor {
   if ($IdCard)     { $v['id_card_photo_url'] = $IdCard }
   return $v
 }
+function Get-SpkUrl {
+  if ($script:SPK_URL) { return $script:SPK_URL }
+  $r = Upload-File -Token $script:Tokens['vendor1'] -FilePath "$FixtureDir\spk.pdf" -Category 'assignment_letter' -OwnerId 'e2ebb-staging'
+  if ($r.Status -ne 201 -or -not $r.Json.data.file_url) {
+    throw "GAGAL upload SPK fixture: $($r.Status) $($r.Body)"
+  }
+  $script:SPK_URL = [string]$r.Json.data.file_url
+  return $script:SPK_URL
+}
+function Get-KtpUrl {
+  if ($script:KTP_URL) { return $script:KTP_URL }
+  $r = Upload-File -Token $script:Tokens['vendor1'] -FilePath "$FixtureDir\ktp.png" -Category 'id_card' -OwnerId 'e2ebb-staging'
+  if ($r.Status -ne 201 -or -not $r.Json.data.file_url) {
+    throw "GAGAL upload KTP fixture: $($r.Status) $($r.Body)"
+  }
+  $script:KTP_URL = [string]$r.Json.data.file_url
+  return $script:KTP_URL
+}
+function Get-SelfieUrl {
+  if ($script:SELFIE_URL) { return $script:SELFIE_URL }
+  $r = Upload-File -Token $script:Tokens['vendor1'] -FilePath "$FixtureDir\selfie.jpg" -Category 'id_card' -OwnerId 'e2ebb-staging'
+  if ($r.Status -ne 201 -or -not $r.Json.data.file_url) {
+    throw "GAGAL upload selfie fixture: $($r.Status) $($r.Body)"
+  }
+  $script:SELFIE_URL = [string]$r.Json.data.file_url
+  return $script:SELFIE_URL
+}
+function Get-CheckinPhotoUrl {
+  if ($script:CHECKIN_PHOTO_URL) { return $script:CHECKIN_PHOTO_URL }
+  $r = Upload-File -Token $script:Tokens['vendor1'] -FilePath "$FixtureDir\selfie.jpg" -Category 'checkin_photo' -OwnerId 'e2ebb-staging'
+  if ($r.Status -ne 201 -or -not $r.Json.data.file_url) {
+    throw "GAGAL upload bukti check-in fixture: $($r.Status) $($r.Body)"
+  }
+  $script:CHECKIN_PHOTO_URL = [string]$r.Json.data.file_url
+  return $script:CHECKIN_PHOTO_URL
+}
 function New-VisitBody {
   param(
     [string]$LocationId, [string[]]$PurposeIds,
@@ -257,6 +306,7 @@ function New-VisitBody {
     location_id = $LocationId; purpose_ids = $PurposeIds
     start_date = $start; end_date = $end; is_multi_day = $false
     is_nda_accepted = $Nda; notes = $Notes; visitors = $Visitors
+    assignment_letter_url = (Get-SpkUrl)
   }
 }
 function Track-Visit    { param([string]$Id) if ($Id) { [void]$script:CreatedVisits.Add($Id) } }
@@ -333,7 +383,10 @@ function New-Fixtures {
   }
   $pdf = "%PDF-1.4`n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj`n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj`n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj`ntrailer<</Root 1 0 R>>`n%%EOF"
   [IO.File]::WriteAllBytes("$FixtureDir\spk.pdf", [Text.Encoding]::ASCII.GetBytes($pdf))
-  $big = New-Object byte[] (6 * 1024 * 1024); $png.CopyTo($big, 0)
+  # I-05 butuh > 5 MB TETAPI tidak boleh bisa didekode gambar: bila byte-nya
+  # PNG valid yang dipad dengan nol, kompresi server-side bisa mengecilkannya
+  # ~67 byte dan I-05 berubah jadi 201. Karena itu isinya ASCII sampah murni.
+  $big = [Text.Encoding]::ASCII.GetBytes(("A" * 1024) * 6144)
   [IO.File]::WriteAllBytes("$FixtureDir\big.png", $big)
   $exe = New-Object byte[] 2048; $exe[0] = 0x4D; $exe[1] = 0x5A
   [IO.File]::WriteAllBytes("$FixtureDir\evil.exe", $exe)
@@ -484,18 +537,28 @@ if ($r.Status -eq 201) { Track-Visit ([string]$r.Json.data.id) }
 # Freshness probe: echo visitors[].photo_url + vendor_id (indikator binary baru).
 $r = Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) `
   -Visitors @((New-Visitor -N 1 -VendorId $VDA -VendorName "$TAG Manual Corp" `
-    -Photo 'http://localhost:9000/thc-vms-bucket/id_card/pending/probe.jpg' `
-    -IdCard 'http://localhost:9000/thc-vms-bucket/id_card/pending/probe_ktp.jpg')))
+    -Photo (Get-SelfieUrl) `
+    -IdCard (Get-KtpUrl))))
 if ($r.Status -eq 201) { Track-Visit ([string]$r.Json.data.id) }
 $okFresh = Check 'B-08' 'P0' 'Freshness probe: visitors[].vendor_id + photo_url + id_card_photo_url -> 201' 201 $r
 if ($okFresh) {
   $vv = $r.Json.data.visitors[0]; $f = New-Object System.Collections.ArrayList
   if ([string]$vv.vendor_id -ne $VDA) { [void]$f.Add("vendor_id='$($vv.vendor_id)'") }
   if ([string]$vv.vendor_name -ne 'PT Lintas Fiber') { [void]$f.Add("vendor_name='$($vv.vendor_name)' (katalog harus menang)") }
-  if ([string]$vv.photo_url -notlike 'http://localhost:9000/*') { [void]$f.Add("photo_url='$($vv.photo_url)'") }
-  if ([string]$vv.id_card_photo_url -notlike 'http://localhost:9000/*') { [void]$f.Add("id_card_photo_url='$($vv.id_card_photo_url)'") }
-  Add-R 'B-09' 'P0' 'Echo visitors[] utuh: vendor_id katalog + photo_url + id_card_photo_url (FRESH binary)' `
-    ($f.Count -eq 0) 'echo utuh' $(if ($f.Count) { 'gagal: ' + ($f -join '; ') } else { 'utuh' }) ($vv | ConvertTo-Json -Compress)
+  # Echo create boleh raw atau presigned -> cukup host storage yang dikonfigurasi.
+  if ([string]$vv.photo_url -notlike "$StorageUrlPrefix/*") { [void]$f.Add("photo_url='$($vv.photo_url)'") }
+  if ([string]$vv.id_card_photo_url -notlike "$StorageUrlPrefix/*") { [void]$f.Add("id_card_photo_url='$($vv.id_card_photo_url)'") }
+  # Baca ulang: URL objek NYATA (id_cards/...) wajib dipresign saat dibaca.
+  $bd = Invoke-Api -Method GET -Path "/visits/$($r.Json.data.id)" -Token $VENDOR1
+  if ($bd.Status -ne 200 -or -not $bd.Json.data) {
+    [void]$f.Add("GET /visits/{id} => $($bd.Status)")
+  } else {
+    $bdv = @($bd.Json.data.visitors)[0]
+    if ([string]$bdv.photo_url -notlike '*X-Amz-Signature=*') { [void]$f.Add("detail photo_url bukan presigned: '$($bdv.photo_url)'") }
+    if ([string]$bdv.id_card_photo_url -notlike '*X-Amz-Signature=*') { [void]$f.Add("detail id_card_photo_url bukan presigned: '$($bdv.id_card_photo_url)'") }
+  }
+  Add-R 'B-09' 'P0' 'Echo + detail visitors[] presigned: vendor_id katalog + photo_url/id_card_photo_url X-Amz-Signature (FRESH binary)' `
+    ($f.Count -eq 0) 'echo utuh + detail presigned' $(if ($f.Count) { 'gagal: ' + ($f -join '; ') } else { 'utuh + presigned' }) ($vv | ConvertTo-Json -Compress)
 }
 $r = Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) `
   -Visitors @((New-Visitor -N 1 -VendorName "$TAG PT Manual Corp")))
@@ -648,9 +711,18 @@ if (Check-Pre 'E-01' 'P1' 'Visit untuk reschedule' $vRs) {
   Write-Host ("  E-01 visit = " + $vRs.visit_id)
   [void](Check 'E-02' 'P1' 'Reschedule oleh vendor pemilik -> 200' 200 `
     (Invoke-Api -Method POST -Path "/visits/$($vRs.id)/reschedule" -Token $VENDOR1 -Body @{ start_date = $s1; end_date = $e1; reason = "$TAG reschedule" }))
-  [void](Check 'E-03' 'P1' 'Reschedule kedua kali -> 409 INVALID_TRANSITION' 409 `
-    (Invoke-Api -Method POST -Path "/visits/$($vRs.id)/reschedule" -Token $ADM1 -Body @{ start_date = $s1; end_date = $e1; reason = "$TAG kedua" }) `
-    'Transisi status kunjungan tidak diizinkan.' -ExpectEnvelopeFail)
+  # SSOT: docs/0. PRD - THC Visitor App.md:140,153 dan docs/4. openapi.yaml:1023 -> reschedule berulang DIIZINKAN dan tidak ada 409.
+  $r3 = Invoke-Api -Method POST -Path "/visits/$($vRs.id)/reschedule" -Token $ADM1 -Body @{ start_date = $s1; end_date = $e1; reason = "$TAG kedua" }
+  $r3Status = ''
+  if ($r3.Json -and $r3.Json.data) { $r3Status = [string]$r3.Json.data.status }
+  if ($r3.Status -eq 200 -and -not $r3Status) {
+    # Respons 200 reschedule membawa data=null; status persisted dibaca lewat detail.
+    $r3d = Invoke-Api -Method GET -Path "/visits/$($vRs.id)" -Token $ADM1
+    if ($r3d.Json -and $r3d.Json.data) { $r3Status = [string]$r3d.Json.data.status }
+  }
+  Add-R 'E-03' 'P1' 'Reschedule kedua kali diizinkan -> 200, kunjungan tetap rescheduled' `
+    (($r3.Status -eq 200) -and ($r3Status -eq 'rescheduled')) '200 + status=rescheduled' `
+    "$($r3.Status) + status=$r3Status" $r3.Body
 }
 $vRs2 = New-Approved -Loc $LOC1
 if (Check-Pre 'E-04' 'P1' 'Visit untuk reschedule oleh security' $vRs2) {
@@ -779,7 +851,7 @@ if (Check-Pre 'G-15' 'P0' 'Visit approved cabang2 untuk cross-branch gate' $vCx)
 $vPhoto = New-Approved -Loc $LOC1 -S 30 -E 180
 if (Check-Pre 'G-17' 'P1' 'Visit approved untuk check-in bukti foto' $vPhoto) {
   [void](Check 'G-18' 'P1' 'Check-in dengan photo_url MinIO valid -> 200' 200 `
-    (Invoke-Api -Method POST -Path "/visits/$($vPhoto.id)/checkin" -Token $SEC1 -Body @{ photo_url = "http://localhost:9000/thc-vms-bucket/checkin_photo/$($TAG -replace '[\[\]]','')/evidence.jpg" }))
+    (Invoke-Api -Method POST -Path "/visits/$($vPhoto.id)/checkin" -Token $SEC1 -Body @{ photo_url = (Get-CheckinPhotoUrl) }))
 }
 
 # ═════════════════════════ H. CHECK-OUT (P0) ═════════════════════════
@@ -826,8 +898,8 @@ $r = Upload-File -Token $VENDOR1 -FilePath "$FixtureDir\spk.pdf" -Category 'assi
 $okU = Check 'I-01' 'P1' 'Upload SPK PDF asli (assignment_letter) -> 201' 201 $r
 if ($okU) {
   $u = [string]$r.Json.data.file_url
-  Add-R 'I-02' 'P1' 'Respons upload mengembalikan file_url absolut MinIO' `
-    ($u -like 'http://localhost:9000/*') 'http://localhost:9000/...' $u `
+  Add-R 'I-02' 'P1' 'Respons upload mengembalikan file_url absolut storage' `
+    ($u -like "$StorageUrlPrefix/*") "$StorageUrlPrefix/..." $u `
     "file_name=$($r.Json.data.file_name) size=$($r.Json.data.file_size) mime=$($r.Json.data.mime_type)"
 }
 [void](Check 'I-03' 'P1' 'Upload foto KTP PNG asli (id_card) -> 201' 201 `
@@ -1078,18 +1150,70 @@ $afterItems = @(Get-AllVisits -Token $SA)
 $afterCount = (Invoke-Api -Method GET -Path '/visits?limit=1' -Token $SA)
 $PROTECTED = @('3523808258', '7087842281')
 $protFound = @()
-foreach ($p in $PROTECTED) {
-  $hit = @($afterItems | Where-Object { [string]$_.visit_id -eq "VST-$p" })
-  if ($hit.Count -gt 0) { $protFound += "$($hit[0].visit_id)($($hit[0].status))" }
+if ($SkipLegacyVisitCheck) {
+  Write-Host '  CL-05 dilewati: -SkipLegacyVisitCheck (baris manual hanya ada di dev).' -ForegroundColor DarkYellow
+} else {
+  foreach ($p in $PROTECTED) {
+    $hit = @($afterItems | Where-Object { [string]$_.visit_id -eq "VST-$p" })
+    if ($hit.Count -gt 0) { $protFound += "$($hit[0].visit_id)($($hit[0].status))" }
+  }
+  Add-R 'CL-05' 'P0' 'Baris manual user lain utuh (VST-3523808258 / VST-7087842281)' `
+    ($protFound.Count -eq 2) '2 dari 2 utuh' "$($protFound.Count) dari 2" `
+    "baris_terbaca=$($afterItems.Count) " + ($protFound -join ' ')
 }
-Add-R 'CL-05' 'P0' 'Baris manual user lain utuh (VST-3523808258 / VST-7087842281)' `
-  ($protFound.Count -eq 2) '2 dari 2 utuh' "$($protFound.Count) dari 2" `
-  "baris_terbaca=$($afterItems.Count) " + ($protFound -join ' ')
 $AFTER_TOTAL = [int]$afterCount.Json.data.total
 Add-R 'CL-06' 'P0' 'Total kunjungan kembali ke baseline (tidak ada sisa/baris baru)' `
   ($AFTER_TOTAL -eq $BASELINE) "baseline=$BASELINE" "after=$AFTER_TOTAL" "dibuat=$($script:CreatedVisits.Count) dihapus=$($cleanup.Visits)"
 
 # ═════════════════════════ LAPORAN ═════════════════════════
+# V. BATAS VALIDASI (docs/4 openapi x-limits)
+Write-Host "`n=== V. BATAS VALIDASI ===" -ForegroundColor Cyan
+function Bad-Visitor {
+  param([string]$Phone = '081200000001', [string]$IdNum = '3578010200000001')
+  return @(@{ name = "$TAG Teknisi V"; id_number = $IdNum; phone = $Phone })
+}
+[void](Check 'V-01' 'P0' 'POST /visits phone 16 digit -> 400' 400 `
+  (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors (Bad-Visitor -Phone '0812000000012345'))) `
+  'Nomor telepon pengunjung ke-1 tidak valid.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
+[void](Check 'V-02' 'P0' 'POST /visits phone 8 digit -> 400' 400 `
+  (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors (Bad-Visitor -Phone '08120000'))) `
+  'Nomor telepon pengunjung ke-1 tidak valid.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
+[void](Check 'V-03' 'P0' 'POST /visits id_number 5 karakter -> 400' 400 `
+  (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors (Bad-Visitor -IdNum 'ID123'))) `
+  'Nomor identitas pengunjung ke-1 tidak valid.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
+[void](Check 'V-04' 'P1' 'POST /visits notes 1001 karakter -> 400' 400 `
+  (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Notes ('x' * 1001))) `
+  'Catatan kunjungan maksimal 1000 karakter.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
+$eleven = @(); for ($i = 1; $i -le 11; $i++) { $eleven += @{ name = "$TAG Teknisi $i"; id_number = ('3578010200000{0:d3}' -f $i); phone = '081200000001' } }
+[void](Check 'V-05' 'P1' 'POST /visits 11 pengunjung -> 400' 400 `
+  (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors $eleven)) `
+  'Jumlah pengunjung maksimal 10 orang.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
+[void](Check 'V-06' 'P0' 'POST /users password 73 byte -> 400' 400 `
+  (Invoke-Api -Method POST -Path '/users' -Token $SA -Body @{ name = "$TAG Pwd Panjang"; email = "e2ebbv6$stamp@thc.local"; password = ('a' * 73); role = 'vendor'; nik = '3578010200007776'; vendor_id = $VDA }) `
+  'Kata sandi terlalu panjang (maksimal 72 byte).' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
+[void](Check 'V-07' 'P0' 'POST /users password 7 karakter -> 400' 400 `
+  (Invoke-Api -Method POST -Path '/users' -Token $SA -Body @{ name = "$TAG Pwd Pendek"; email = "e2ebbv7$stamp@thc.local"; password = 'Ab1!xyz'; role = 'vendor'; nik = '3578010200007777'; vendor_id = $VDA }) `
+  'Kata sandi minimal 8 karakter.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
+[void](Check 'V-08' 'P1' 'POST /users nama 101 karakter -> 400' 400 `
+  (Invoke-Api -Method POST -Path '/users' -Token $SA -Body @{ name = ('n' * 101); email = "e2ebbv8$stamp@thc.local"; password = 'E2eBb123!'; role = 'vendor'; nik = '3578010200007778'; vendor_id = $VDA }) `
+  'Nama maksimal 100 karakter.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
+[void](Check 'V-09' 'P0' 'POST /users NIK 15 digit -> 400' 400 `
+  (Invoke-Api -Method POST -Path '/users' -Token $SA -Body @{ name = "$TAG Nik Pendek"; email = "e2ebbv9$stamp@thc.local"; password = 'E2eBb123!'; role = 'vendor'; nik = '357801020000777'; vendor_id = $VDA }) `
+  'NIK harus 16 digit numerik.' -ExpectEnvelopeFail -Code 'VALIDATION_ERROR')
+[void](Check 'V-10' 'P1' 'POST /visits body > 1 MiB -> 413 PAYLOAD_TOO_LARGE' 413 `
+  (Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Notes ('x' * 1200000))) `
+  '' -ExpectEnvelopeFail -Code 'PAYLOAD_TOO_LARGE')
+$vr = Invoke-Api -Method POST -Path '/visits' -Token $VENDOR1 -Body (New-VisitBody -LocationId $LOC1 -PurposeIds @($PURP) -Visitors (Bad-Visitor -Phone '+62 812-3456-7890'))
+$vid = ''
+$vPhone = ''
+if ($vr.Status -eq 201 -and $vr.Json.data) {
+  $vid = [string]$vr.Json.data.id
+  Track-Visit $vid
+  $vPhone = [string]((Invoke-Api -Method GET -Path "/visits/$vid" -Token $VENDOR1).Json.data.visitors[0].phone)
+}
+Add-R 'V-11' 'P1' 'Phone +62 diformat disimpan kanonik 081234567890' `
+  ($vr.Status -eq 201 -and $vPhone -eq '081234567890') '201 + 081234567890' "$($vr.Status) phone=$vPhone" "visit=$vid"
+
 $pass = @($script:Results | Where-Object { $_.Ok }).Count
 $fail = @($script:Results | Where-Object { -not $_.Ok }).Count
 $script:Http.Dispose()
@@ -1105,5 +1229,6 @@ foreach ($r in $script:Results) {
 Write-Host ('=' * 120)
 Write-Host ("CLEANUP  : dibuat(hapus)=($($script:CreatedVisits.Count))($($cleanup.Visits)) | pengawas=($($script:CreatedSecUsers.Count))($($cleanup.SecUsers)) | user=($($script:CreatedUsers.Count))($($cleanup.Users)) | lokasi=($($script:CreatedLocations.Count))($($cleanup.Locations))")
 Write-Host ("SISA     : kunjungan=$REMAIN_VISIT pengawas=$REMAIN_SEC user=$REMAIN_USER lokasi=$REMAIN_LOC")
-Write-Host ("BASELINE : total sebelum=$BASELINE total sesudah=$AFTER_TOTAL | baris manual terlindungi utuh=$($protFound.Count)/2")
+$protSummary = if ($SkipLegacyVisitCheck) { 'dilewati' } else { "$($protFound.Count)/2" }
+Write-Host ("BASELINE : total sebelum=$BASELINE total sesudah=$AFTER_TOTAL | baris manual terlindungi utuh=$protSummary")
 if ($fail -gt 0) { exit 1 } else { exit 0 }

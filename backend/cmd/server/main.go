@@ -32,6 +32,7 @@ import (
 	"thc-vms/backend/internal/usecase/gate"
 	"thc-vms/backend/internal/usecase/notification"
 	"thc-vms/backend/internal/usecase/visit"
+	"thc-vms/backend/internal/validation"
 	"thc-vms/backend/internal/worker"
 )
 
@@ -157,7 +158,7 @@ func run(ctx context.Context) error {
 		visits,
 		adminRoleID, vendorRoleID,
 	)
-	uploadHandler := handlers.NewUploadHandler(store, cfg.Upload.MaxSizeBytes)
+	uploadHandler := handlers.NewUploadHandler(store, cfg.Upload.MaxIngestBytes)
 	fileHandler := handlers.NewFileHandler(visitSvc)
 	auditHandler := handlers.NewAuditHandler(audit)
 	notificationHandler := handlers.NewNotificationHandler(notificationSvc)
@@ -226,6 +227,7 @@ func run(ctx context.Context) error {
 			// lewat CORS_ALLOWED_ORIGINS (koma-dipisah di backend/.env); kosong =
 			// default lokal middleware (localhost:3210).
 			CORS:         middleware.CORS(envList("CORS_ALLOWED_ORIGINS")...),
+			BodyLimit:    middleware.BodyLimit(validation.JSONBodyMaxBytes, deliveryhttp.UploadPath),
 			LoginLimiter: loginLimiter,
 			Authenticate: middleware.JWT(jwtSvc, authSvc),
 			AdminOnly: middleware.RequireRoles(

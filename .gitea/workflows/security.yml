@@ -1,0 +1,65 @@
+# Advisory security scans. This is deliberately NOT a merge gate: the current
+# baseline has known findings, so blocking on it would freeze the dev -> main
+# flow. Run manually, or let the weekly schedule report drift. Promote these
+# steps into ci.yml only after the dependency baseline is clean.
+name: security
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: [self-hosted, linux, vps]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Govulncheck
+        working-directory: backend
+        run: |
+          timeout 600 go install golang.org/x/vuln/cmd/govulncheck@latest
+          timeout 600 "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - name: npm audit
+        working-directory: frontend
+        run: timeout 300 npm audit --omit=dev --audit-level=high
+
+      - name: Trivy filesystem scan
+        run: |
+          touch .trivyignore
+          timeout 900 docker run --rm -v "$PWD:/src" -w /src aquasec/trivy:latest \
+            fs --scanners vuln,secret,misconfig \
+            --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed \
+            --ignorefile .trivyignore \
+            --skip-dirs node_modules --skip-dirs .next .
+
+      - name: Syft SBOM
+        run: |
+          timeout 900 docker run --rm -v "$PWD:/src" -w /src anchore/syft:latest \
+            dir:. -o cyclonedx-json=sbom.cyclonedx.json
+
+      - name: Upload SBOM
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cyclonedx.json
+          retention-days: 30

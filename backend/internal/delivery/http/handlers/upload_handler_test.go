@@ -3,7 +3,10 @@ package handlers_test
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"net/textproto"
 	"strings"
 	"testing"
@@ -13,6 +16,28 @@ import (
 	"thc-vms/backend/internal/delivery/http/handlers"
 	"thc-vms/backend/internal/domain"
 )
+
+// countingReadCloser records how many bytes were consumed and reports EOF on
+// every read after the source is exhausted.
+type countingReadCloser struct {
+	src  io.Reader
+	read int
+	eof  bool
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	if r.eof {
+		return 0, io.EOF
+	}
+	n, err := r.src.Read(p)
+	r.read += n
+	if err != nil {
+		r.eof = true
+	}
+	return n, err
+}
+
+func (r *countingReadCloser) Close() error { return nil }
 
 func newUploadEngine(storage *fakeStorage, maxBytes int64) *gin.Engine {
 	engine := gin.New()
@@ -61,6 +86,85 @@ func TestUpload_RejectsOversizeBodyWith413(t *testing.T) {
 	if storage.uploadCalls != 0 {
 		t.Fatalf("oversized body reached storage (%d calls): it must be refused before buffering", storage.uploadCalls)
 	}
+}
+
+// TestUpload_OversizeBodyOfCapPlusOneIsDrained pins the boundary case: a body
+// exactly one byte past the ingest ceiling is a 413 and the reader ends
+// exhausted.
+func TestUpload_OversizeBodyOfCapPlusOneIsDrained(t *testing.T) {
+	const maxIngest = 1024
+	storage := &fakeStorage{}
+	engine := newUploadEngine(storage, maxIngest)
+
+	body, contentType := multipartUploadOfSize(t, maxIngest+1)
+	rec, counting := serveCountingUpload(engine, body, contentType)
+
+	mustStatus(t, rec, http.StatusRequestEntityTooLarge)
+	env := decodeEnvelope(t, rec)
+	if env.Error == nil || env.Error.Code != "FILE_TOO_LARGE" {
+		t.Fatalf("error = %+v, want code FILE_TOO_LARGE", env.Error)
+	}
+	if counting.read != len(body) {
+		t.Fatalf("drained %d of %d bytes: the 413 must consume the whole body", counting.read, len(body))
+	}
+	if storage.uploadCalls != 0 {
+		t.Fatalf("oversized body reached storage (%d calls)", storage.uploadCalls)
+	}
+}
+
+// TestUpload_DrainsRemainderBeyondMaxBytesReaderBefore413 is the I-05
+// regression guard. MaxBytesReader stops after cap+1 bytes, so only the
+// handler's bounded drain can consume the rest; without it this reader stays
+// partially unread and net/http would reset the connection.
+func TestUpload_DrainsRemainderBeyondMaxBytesReaderBefore413(t *testing.T) {
+	const maxIngest = 1024
+	storage := &fakeStorage{}
+	engine := newUploadEngine(storage, maxIngest)
+
+	// Total ≤ 2*cap+1 so one bounded drain of cap bytes is enough to exhaust it.
+	body, contentType := multipartUploadOfSize(t, 1600)
+	rec, counting := serveCountingUpload(engine, body, contentType)
+
+	mustStatus(t, rec, http.StatusRequestEntityTooLarge)
+	env := decodeEnvelope(t, rec)
+	if env.Error == nil || env.Error.Code != "FILE_TOO_LARGE" {
+		t.Fatalf("error = %+v, want code FILE_TOO_LARGE", env.Error)
+	}
+	if counting.read != len(body) {
+		t.Fatalf("drained %d of %d bytes: the 413 must consume the whole body", counting.read, len(body))
+	}
+	if storage.uploadCalls != 0 {
+		t.Fatalf("oversized body reached storage (%d calls)", storage.uploadCalls)
+	}
+}
+
+func serveCountingUpload(engine *gin.Engine, body []byte, contentType string) (*httptest.ResponseRecorder, *countingReadCloser) {
+	counting := &countingReadCloser{src: bytes.NewReader(body)}
+	req := httptest.NewRequest(http.MethodPost, "/uploads", http.NoBody)
+	req.Body = counting
+	req.ContentLength = int64(len(body))
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	return rec, counting
+}
+
+// multipartUploadOfSize builds a one-file multipart body that is exactly size
+// bytes long, so the oversize test can pin body length to the cap+1 boundary.
+func multipartUploadOfSize(t *testing.T, size int) ([]byte, string) {
+	t.Helper()
+	fields := map[string]string{"category": "assignment_letter"}
+	framing, _ := multipartUpload(t, "spk.pdf", "application/pdf", nil, fields)
+	contentLen := size - len(framing)
+	if contentLen < 1 {
+		t.Fatalf("target size %d is below the multipart framing of %d bytes", size, len(framing))
+	}
+	body, contentType := multipartUpload(t, "spk.pdf", "application/pdf",
+		bytes.Repeat([]byte("A"), contentLen), fields)
+	if len(body) != size {
+		t.Fatalf("multipart body = %d bytes, want exactly %d", len(body), size)
+	}
+	return body, contentType
 }
 
 func TestUpload_RejectsUnknownCategory(t *testing.T) {

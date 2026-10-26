@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApproveModal } from './ApproveModal'
 import type { VisitDetail } from '@/lib/api/types'
+import { TEXT_MAX_LENGTH } from '@/lib/limits'
 
 interface ApproveVariables {
   visitId: string
@@ -173,5 +174,14 @@ describe('ApproveModal', () => {
     const variables = approveMutate.mock.calls[0]?.[0]
     expect(variables?.visitId).toBe(visitA.id)
     expect(variables?.body).toEqual({ notes: 'Bawa helm proyek' })
+  })
+
+  it('membatasi catatan persetujuan dengan maxLength TEXT_MAX_LENGTH', () => {
+    renderHarness(visitA)
+
+    expect(notesTextarea()).toHaveAttribute(
+      'maxlength',
+      String(TEXT_MAX_LENGTH),
+    )
   })
 })

@@ -31,13 +31,13 @@ func TestValidateLocationCreate(t *testing.T) {
 	for _, locType := range []domain.LocationType{
 		domain.LocationPusat, domain.LocationCabang, domain.LocationPOP, domain.LocationMiniPOP,
 	} {
-		if err := superadmin.ValidateLocationCreate("Cabang Baru", locType); err != nil {
+		if err := superadmin.ValidateLocationCreate(superadmin.LocationCreateInput{Name: "Cabang Baru", Type: locType}); err != nil {
 			t.Fatalf("type %s must be accepted: %v", locType, err)
 		}
 	}
-	mustAppError(t, superadmin.ValidateLocationCreate("  ", domain.LocationCabang), 400, "VALIDATION_ERROR")
-	mustAppError(t, superadmin.ValidateLocationCreate("X", "head_office"), 400, "VALIDATION_ERROR")
-	mustAppError(t, superadmin.ValidateLocationCreate("X", ""), 400, "VALIDATION_ERROR")
+	mustAppError(t, superadmin.ValidateLocationCreate(superadmin.LocationCreateInput{Name: "  ", Type: domain.LocationCabang}), 400, "VALIDATION_ERROR")
+	mustAppError(t, superadmin.ValidateLocationCreate(superadmin.LocationCreateInput{Name: "X", Type: "head_office"}), 400, "VALIDATION_ERROR")
+	mustAppError(t, superadmin.ValidateLocationCreate(superadmin.LocationCreateInput{Name: "X"}), 400, "VALIDATION_ERROR")
 }
 
 func TestNormalizeLocationTimezone(t *testing.T) {

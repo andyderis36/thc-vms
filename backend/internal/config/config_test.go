@@ -21,7 +21,7 @@ var configEnvKeys = []string{
 	"JWT_SECRET", "JWT_EXPIRATION_HOURS",
 	"STORAGE_DRIVER", "S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY",
 	"S3_BUCKET_NAME", "S3_USE_SSL", "S3_REGION", "S3_PUBLIC_BASE_URL",
-	"MAX_UPLOAD_SIZE_MB", "ALLOWED_MIME_TYPES",
+	"MAX_UPLOAD_SIZE_MB", "MAX_UPLOAD_INGEST_MB", "ALLOWED_MIME_TYPES",
 }
 
 // clearEnv removes a variable for the duration of the test. t.Setenv registers
@@ -146,13 +146,16 @@ func TestLoad_RequiresJWTSecret(t *testing.T) {
 }
 
 func TestLoad_UploadLimits(t *testing.T) {
-	// Given: MAX_UPLOAD_SIZE_MB=5 and the three permitted MIME types.
+	// Given: MAX_UPLOAD_SIZE_MB=5, MAX_UPLOAD_INGEST_MB=20 and the three
+	//        permitted MIME types.
 	// When:  the configuration is loaded.
-	// Then:  the megabyte value is converted to bytes and the allow-list is
-	//        split into the three exact entries.
+	// Then:  both megabyte values are converted to bytes, the transport ceiling
+	//        stays above the stored ceiling, and the allow-list is split into
+	//        the three exact entries.
 	clearEnv(t, configEnvKeys...)
 	t.Setenv("JWT_SECRET", "unit-test-secret")
 	t.Setenv("MAX_UPLOAD_SIZE_MB", "5")
+	t.Setenv("MAX_UPLOAD_INGEST_MB", "20")
 	t.Setenv("ALLOWED_MIME_TYPES", "application/pdf,image/jpeg,image/png")
 
 	cfg, err := config.Load()
@@ -165,6 +168,12 @@ func TestLoad_UploadLimits(t *testing.T) {
 	}
 	if cfg.Upload.MaxSizeBytes != 5*1024*1024 {
 		t.Errorf("Upload.MaxSizeBytes = %d, want %d", cfg.Upload.MaxSizeBytes, 5*1024*1024)
+	}
+	if cfg.Upload.MaxIngestMB != 20 {
+		t.Errorf("Upload.MaxIngestMB = %d, want 20", cfg.Upload.MaxIngestMB)
+	}
+	if cfg.Upload.MaxIngestBytes != 20*1024*1024 {
+		t.Errorf("Upload.MaxIngestBytes = %d, want %d", cfg.Upload.MaxIngestBytes, 20*1024*1024)
 	}
 	want := []string{"application/pdf", "image/jpeg", "image/png"}
 	if !slices.Equal(cfg.Upload.AllowedMIMETypes, want) {
@@ -206,6 +215,7 @@ func TestLoad_ParsesEveryTypedValue(t *testing.T) {
 		"S3_REGION":                   "ap-southeast-1",
 		"S3_PUBLIC_BASE_URL":          "https://cdn.example.internal/vms-bucket",
 		"MAX_UPLOAD_SIZE_MB":          "12",
+		"MAX_UPLOAD_INGEST_MB":        "40",
 		"ALLOWED_MIME_TYPES":          "application/pdf",
 	} {
 		t.Setenv(key, value)
@@ -249,6 +259,38 @@ func TestLoad_ParsesEveryTypedValue(t *testing.T) {
 	if cfg.Upload.MaxSizeBytes != 12*1024*1024 {
 		t.Errorf("Upload.MaxSizeBytes = %d, want %d", cfg.Upload.MaxSizeBytes, 12*1024*1024)
 	}
+	if cfg.Upload.MaxIngestBytes != 40*1024*1024 {
+		t.Errorf("Upload.MaxIngestBytes = %d, want %d", cfg.Upload.MaxIngestBytes, 40*1024*1024)
+	}
+}
+
+func TestLoad_IngestCeilingNeverBelowStoredCeiling(t *testing.T) {
+	// Given: MAX_UPLOAD_SIZE_MB=10 but MAX_UPLOAD_INGEST_MB=2, a transport cap
+	//        below the stored cap that would make a legal 10 MB file
+	//        unuploadable.
+	// When:  the configuration is loaded.
+	// Then:  the ingest ceiling is raised to the stored ceiling (10 MB) instead
+	//        of being silently left below it, and Load still succeeds.
+	clearEnv(t, configEnvKeys...)
+	t.Setenv("JWT_SECRET", "unit-test-secret")
+	t.Setenv("MAX_UPLOAD_SIZE_MB", "10")
+	t.Setenv("MAX_UPLOAD_INGEST_MB", "2")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+
+	if cfg.Upload.MaxIngestMB != 10 {
+		t.Errorf("Upload.MaxIngestMB = %d, want 10 (raised to the stored cap)", cfg.Upload.MaxIngestMB)
+	}
+	if cfg.Upload.MaxIngestBytes < cfg.Upload.MaxSizeBytes {
+		t.Errorf(
+			"Upload.MaxIngestBytes = %d, want >= MaxSizeBytes %d",
+			cfg.Upload.MaxIngestBytes,
+			cfg.Upload.MaxSizeBytes,
+		)
+	}
 }
 
 func TestLoad_RejectsMalformedValues(t *testing.T) {
@@ -265,6 +307,7 @@ func TestLoad_RejectsMalformedValues(t *testing.T) {
 		{"acquire timeout is not a duration", "DB_ACQUIRE_TIMEOUT", "5 seconds"},
 		{"expiration is not a number", "JWT_EXPIRATION_HOURS", "a day"},
 		{"upload size is not a number", "MAX_UPLOAD_SIZE_MB", "big"},
+		{"upload ingest size is not a number", "MAX_UPLOAD_INGEST_MB", "huge"},
 		{"debug flag is not a boolean", "APP_DEBUG", "yes-please"},
 		{"use ssl is not a boolean", "S3_USE_SSL", "sure"},
 	} {

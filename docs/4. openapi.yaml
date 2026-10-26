@@ -14,6 +14,40 @@ info:
     - Tag `[MVP]`: Endpoint prioritas wajib diimplementasikan untuk prototype siap operasional.
     - Tag `[Phase 2]`: Endpoint pelengkap untuk fase ekspansi mendatang.
 
+# Batas input kanonik (SSOT). Nilai di sini WAJIB sama dengan
+# backend/internal/validation/limits.go dan frontend/src/lib/limits.ts.
+# Nomor telepon disimpan kanonik: hanya digit, awalan 62 diganti 0
+# ("+62 812-3456-7890" -> "081234567890") sebelum pattern di bawah dicek.
+# Dua plafon unggah bersifat sengaja: upload_ingest_max_bytes adalah plafon
+# TRANSPORT (berkas mentah sebelum kompresi, env MAX_UPLOAD_INGEST_MB), sedangkan
+# upload_stored_max_bytes adalah plafon PENYIMPANAN (hasil akhir setelah kompresi).
+x-limits:
+  name_max_length: 100
+  id_number_pattern: "^[A-Za-z0-9]{8,20}$"
+  id_number_max_length: 20
+  phone_pattern: "^(?:62|0)[0-9]{8,13}$"
+  phone_max_length: 15
+  password_min_length: 8
+  password_max_bytes: 72
+  email_max_length: 254
+  text_max_length: 1000
+  reject_reason_min_length: 5
+  facility_name_max_length: 100
+  facility_address_max_length: 255
+  facility_city_max_length: 255
+  visit_id_input_max_length: 64
+  badge_code_max_length: 64
+  checkin_notes_max_length: 500
+  search_query_max_length: 100
+  vendor_name_max_length: 120
+  jabatan_max_length: 120
+  purpose_note_max_length: 200
+  nik_length: 16
+  technicians_max: 10
+  json_body_max_bytes: 1048576
+  upload_stored_max_bytes: 5242880
+  upload_ingest_max_bytes: 20971520
+
 servers:
   - url: http://localhost:8080/api/v1
     description: Local Development Server
@@ -157,6 +191,10 @@ paths:
           description: Format data tidak valid
         '403':
           description: Admin cabang mencoba mendaftarkan security untuk cabang lain
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. email sudah dipakai atau location_id tidak sah). Amplop galat: { success: false, error: { code, message } }.'
 
   /users/security/{id}/status:
     patch:
@@ -217,6 +255,10 @@ paths:
           description: Akses ditolak (vendor/security dilarang; Admin lintas cabang dilarang)
         '404':
           description: Akun security tidak ditemukan (termasuk non-security)
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. lokasi tujuan di luar wewenang). Amplop galat: { success: false, error: { code, message } }.'
         '409':
           description: Email sudah dipakai akun lain
     delete:
@@ -283,6 +325,10 @@ paths:
           description: Akses ditolak (hanya untuk Superadmin)
         '409':
           description: Kantor Pusat sudah terdaftar. Hanya boleh ada satu Kantor Pusat.
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. kombinasi tipe/timezone tidak sah). Amplop galat: { success: false, error: { code, message } }.'
 
   /locations/{id}:
     patch:
@@ -314,6 +360,10 @@ paths:
           description: Akses ditolak (hanya untuk Superadmin)
         '404':
           description: Fasilitas lokasi tidak ditemukan
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. menonaktifkan lokasi yang masih dipakai). Amplop galat: { success: false, error: { code, message } }.'
         '409':
           description: Kantor Pusat sudah terdaftar. Hanya boleh ada satu Kantor Pusat.
 
@@ -352,6 +402,7 @@ paths:
           description: Pencarian nama atau email
           schema:
             type: string
+            maxLength: 100
         - name: location_id
           in: query
           description: Filter cabang penugasan
@@ -390,6 +441,10 @@ paths:
           description: Akses ditolak (hanya untuk Superadmin)
         '409':
           description: Email sudah terdaftar
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. pasangan peran/lokasi tidak sah). Amplop galat: { success: false, error: { code, message } }.'
 
   /users/{id}:
     patch:
@@ -425,6 +480,10 @@ paths:
           description: Akun pengguna tidak ditemukan
         '409':
           description: Email sudah dipakai akun lain
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. target peran tidak konsisten dengan lokasi). Amplop galat: { success: false, error: { code, message } }.'
     delete:
       tags: [UserManagement]
       summary: 'Hapus permanen akun pengguna (Superadmin; larangan: akun sendiri & super_admin)'
@@ -653,6 +712,22 @@ paths:
     post:
       tags: [Storage]
       summary: Unggah dokumen surat tugas (PDF/gambar) atau foto identitas ke MinIO/S3
+      description: |
+        Kebijakan unggah DUA LANGKAH (`x-limits.upload_ingest_max_bytes` dan
+        `x-limits.upload_stored_max_bytes`):
+
+        1. Kompresi sebelum penyimpanan: gambar diperkecil hingga sisi terpanjang
+           <= 1600 px lalu di-encode ulang (JPEG kualitas 82; PNG tetap PNG).
+           PDF yang lebih besar dari 5 MB dioptimasi (struktur, xref, resource
+           duplikat) dan HANYA byte hasil optimasi yang disimpan; bila optimasi
+           tidak memperkecil berkas, PDF asli TIDAK disimpan.
+        2. Plafon PENYIMPANAN 5 MB (5242880 byte): bila hasil akhir setelah
+           kompresi masih melebihi 5 MB, permintaan ditolak dengan HTTP 413
+           `FILE_TOO_LARGE` dan tidak ada berkas yang disimpan.
+        3. Plafon TRANSPORT 20 MB (20971520 byte, env `MAX_UPLOAD_INGEST_MB`):
+           batas berkas mentah yang boleh dikirim klien sebelum kompresi.
+        4. Respons 201 memuat `file_size` = jumlah byte yang benar-benar
+           disimpan (hasil kompresi), bukan ukuran berkas mentah.
       requestBody:
         required: true
         content:
@@ -664,7 +739,7 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: File dokumen surat tugas (PDF/DOCX/PNG/JPG) atau foto identitas (maks 5MB)
+                  description: Berkas PDF/JPG/PNG. Plafon transport 20MB untuk berkas mentah; hasil akhir setelah kompresi wajib <= 5MB.
                 category:
                   type: string
                   enum: [assignment_letter, id_card, checkin_photo]
@@ -681,9 +756,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/UploadFileResponse'
         '400':
-          description: Format berkas tidak didukung atau ukuran melebihi batas 5MB
+          description: Format berkas tidak didukung (MIME di luar allow-list) atau berkas kosong (STORAGE_REJECTED)
         '413':
-          description: Ukuran file terlalu besar
+          description: Berkas melebihi plafon transport 20MB, atau hasil kompresi masih melebihi plafon penyimpanan 5MB (FILE_TOO_LARGE; tidak ada berkas tersimpan)
 
   # ============================================================
   # VISITS CORE MANAGEMENT
@@ -707,6 +782,7 @@ paths:
           description: Pencarian bebas (ILIKE, kosong = tanpa filter) atas nama vendor, nama lokasi, nama vendor, nama teknisi (visitor), nama tujuan (purpose), dan Visit ID
           schema:
             type: string
+            maxLength: 100
         - name: date_from
           in: query
           description: Batas bawah window jadwal (inklusif, vr.start_date >= date_from). RFC3339 penuh (offset dipertahankan) atau date-only YYYY-MM-DD (midnight UTC). Kosong = tanpa filter.
@@ -769,6 +845,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VisitDetailResponse'
+        '400':
+          description: 'Validasi lapisan HTTP gagal (body JSON rusak atau tidak valid, field wajib hilang, panjang/format melanggar x-limits). Amplop galat: { success: false, error: { code, message } }.'
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. urutan jadwal, NDA belum diterima, purpose atau lokasi tidak dikenal, URL berbahaya). Amplop galat: { success: false, error: { code, message } }.'
 
   /visits/{id}:
     get:
@@ -887,9 +969,16 @@ paths:
               properties:
                 notes:
                   type: string
+                  maxLength: 1000
       responses:
         '200':
           description: Kunjungan disetujui (Status -> approved)
+        '400':
+          description: 'Validasi lapisan HTTP gagal (body JSON rusak atau tidak valid, panjang catatan melanggar x-limits). Amplop galat: { success: false, error: { code, message } }.'
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. status kunjungan tidak mengizinkan approve). Amplop galat: { success: false, error: { code, message } }.'
 
   /visits/{id}/reject:
     post:
@@ -912,9 +1001,16 @@ paths:
                 reason:
                   type: string
                   minLength: 5
+                  maxLength: 1000
       responses:
         '200':
           description: Kunjungan ditolak (Status -> rejected)
+        '400':
+          description: 'Validasi lapisan HTTP gagal (body JSON rusak atau tidak valid, alasan kurang dari 5 atau melebihi 1000 karakter). Amplop galat: { success: false, error: { code, message } }.'
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. status kunjungan tidak mengizinkan reject). Amplop galat: { success: false, error: { code, message } }.'
 
   /visits/{id}/reschedule:
     post:
@@ -942,9 +1038,16 @@ paths:
                   format: date-time
                 reason:
                   type: string
+                  maxLength: 1000
       responses:
         '200':
           description: Kunjungan dijadwalkan ulang (Status -> rescheduled). Jadwal dapat digeser berulang kali, tetapi kunjungan harus disetujui kembali oleh admin sebelum check-in.
+        '400':
+          description: 'Validasi lapisan HTTP gagal (body JSON rusak atau tidak valid, field wajib hilang, alasan melebihi 1000 karakter, tanggal tidak berformat date-time). Amplop galat: { success: false, error: { code, message } }.'
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. start_date setelah end_date, jadwal sudah lewat). Amplop galat: { success: false, error: { code, message } }.'
 
   /visits/{id}/cancel:
     post:
@@ -964,9 +1067,16 @@ paths:
               properties:
                 reason:
                   type: string
+                  maxLength: 1000
       responses:
         '200':
           description: Kunjungan dibatalkan (Status -> cancelled)
+        '400':
+          description: 'Validasi lapisan HTTP gagal (body JSON rusak atau tidak valid, alasan melebihi 1000 karakter). Amplop galat: { success: false, error: { code, message } }.'
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. pembatalan melewati batas hari-H). Amplop galat: { success: false, error: { code, message } }.'
 
   /visits/{id}/qr:
     get:
@@ -1019,8 +1129,10 @@ paths:
                   type: string
                 badge_code:
                   type: string
+                  maxLength: 64
                 notes:
                   type: string
+                  maxLength: 500
       responses:
         '200':
           description: Check-in berhasil (Status approved -> visiting; dicatat atas id pelaksana, superadmin lintas cabang saat darurat)
@@ -1028,6 +1140,10 @@ paths:
           description: Di luar rentang toleransi waktu jadwal (±2 jam) atau QR tidak valid
         '403':
           description: Petugas tidak berwenang mengelola cabang kunjungan ini
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. status kunjungan bukan approved). Amplop galat: { success: false, error: { code, message } }.'
 
   /visits/{id}/checkout:
     post:
@@ -1042,8 +1158,12 @@ paths:
       responses:
         '200':
           description: Check-out berhasil (Status -> completed; dicatat atas id pelaksana, superadmin lintas cabang saat darurat)
+        '400':
+          description: 'Validasi lapisan HTTP gagal (ID kunjungan tidak valid). Amplop galat: { success: false, error: { code, message } }.'
         '403':
           description: Petugas tidak berwenang mengelola cabang kunjungan ini
+        '422':
+          description: 'Validasi semantik usecase gagal (mis. status kunjungan bukan visiting). Amplop galat: { success: false, error: { code, message } }.'
 
   # ============================================================
   # PHASE 2 EXTENSION ENDPOINTS
@@ -1177,10 +1297,15 @@ components:
           format: uuid
         name:
           type: string
+          maxLength: 100
         email:
           type: string
+          format: email
+          maxLength: 254
         phone:
           type: string
+          pattern: "^(?:62|0)[0-9]{8,13}$"
+          maxLength: 15
         nik:
           type: [string, "null"]
           pattern: ^\d{16}$
@@ -1205,6 +1330,7 @@ components:
           enum: [internal, external]
         vendor_name:
           type: [string, "null"]
+          maxLength: 120
           description: Nama perusahaan vendor akun ini (override ketikan manual bila ada, kalau tidak nama katalog vendor; TIDAK terdaftar di katalog bila diketik manual dan TIDAK pernah tampil di dropdown vendor)
 
     UserResponse:
@@ -1221,17 +1347,23 @@ components:
       properties:
         name:
           type: string
+          maxLength: 100
           example: Budi Santoso
         email:
           type: string
           format: email
+          maxLength: 254
           example: security.surabaya1@thc.local
         phone:
           type: string
+          pattern: "^(?:62|0)[0-9]{8,13}$"
+          maxLength: 15
           example: 081234567890
         password:
           type: string
           format: password
+          minLength: 8
+          maxLength: 72
           example: Password123!
         location_id:
           type: string
@@ -1270,14 +1402,20 @@ components:
       properties:
         name:
           type: string
+          maxLength: 100
         email:
           type: string
           format: email
+          maxLength: 254
         phone:
           type: [string, "null"]
+          pattern: "^(?:62|0)[0-9]{8,13}$"
+          maxLength: 15
         password:
           type: string
           format: password
+          minLength: 8
+          maxLength: 72
           description: Kosong/absen = biarkan; terisi = reset hash baru
         location_id:
           type: [string, "null"]
@@ -1292,6 +1430,7 @@ components:
           format: uuid
         name:
           type: string
+          maxLength: 100
           example: Kantor Cabang Surabaya
         type:
           type: string
@@ -1299,8 +1438,10 @@ components:
           example: cabang
         address:
           type: string
+          maxLength: 255
         city:
           type: string
+          maxLength: 255
         timezone:
           type: string
           enum: [WIB, WITA, WIT]
@@ -1332,6 +1473,7 @@ components:
       properties:
         name:
           type: string
+          maxLength: 100
           example: Kantor Cabang Malang
         type:
           type: string
@@ -1339,8 +1481,10 @@ components:
           example: cabang
         address:
           type: string
+          maxLength: 255
         city:
           type: string
+          maxLength: 255
         timezone:
           type: string
           enum: [WIB, WITA, WIT]
@@ -1350,13 +1494,16 @@ components:
       properties:
         name:
           type: string
+          maxLength: 100
         type:
           type: string
           enum: [pusat, cabang, pop, minipop]
         address:
           type: string
+          maxLength: 255
         city:
           type: string
+          maxLength: 255
         timezone:
           type: string
           enum: [WIB, WITA, WIT]
@@ -1370,15 +1517,21 @@ components:
       properties:
         name:
           type: string
+          maxLength: 100
           example: Bayu Santoso
         email:
           type: string
           format: email
+          maxLength: 254
         password:
           type: string
           format: password
+          minLength: 8
+          maxLength: 72
         phone:
           type: string
+          pattern: "^(?:62|0)[0-9]{8,13}$"
+          maxLength: 15
         nik:
           type: string
           pattern: ^\d{16}$
@@ -1405,11 +1558,15 @@ components:
       properties:
         name:
           type: string
+          maxLength: 100
         email:
           type: string
           format: email
+          maxLength: 254
         phone:
           type: [string, "null"]
+          pattern: "^(?:62|0)[0-9]{8,13}$"
+          maxLength: 15
           description: String kosong dibersihkan menjadi null
         nik:
           type: [string, "null"]
@@ -1418,6 +1575,8 @@ components:
         password:
           type: string
           format: password
+          minLength: 8
+          maxLength: 72
           description: Kosong/absen = biarkan; terisi = reset hash baru (superadmin)
         current_password:
           type: string
@@ -1642,11 +1801,16 @@ components:
           description: ID baris visitor (UUID); diisi pada respons baca (list/detail), absen pada echo create. Wajib dipakai sebagai visitor_id pada GET /visits/{id}/file — id_number (nomor KTP) DITOLAK endpoint berkas.
         name:
           type: string
+          maxLength: 100
         id_number:
           type: string
+          pattern: "^[A-Za-z0-9]{8,20}$"
+          maxLength: 20
           description: KTP / SIM / Passport
         phone:
           type: string
+          pattern: "^(?:62|0)[0-9]{8,13}$"
+          maxLength: 15
         id_card_photo_url:
           type: [string, "null"]
           format: uri
@@ -1704,6 +1868,7 @@ components:
           description: Persetujuan digital terhadap ketentuan keamanan THC
         notes:
           type: string
+          maxLength: 1000
         visitors:
           type: array
           minItems: 1
@@ -1750,6 +1915,7 @@ components:
           description: URL bertanda tangan (presigned) berumur pendek untuk berkas surat tugas / SPK vendor di bucket privat MinIO/S3, bukan URL stabil — muat ulang detail kunjungan untuk tautan baru; null bila tidak ada berkas milik bucket
         notes:
           type: string
+          maxLength: 1000
         purpose_note:
           type: [string, "null"]
           maxLength: 200

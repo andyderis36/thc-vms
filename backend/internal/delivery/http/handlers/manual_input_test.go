@@ -33,8 +33,8 @@ func visitBodyJSON(locationID string, purposeIDs []string, purposeNote string, e
 		"notes": "splicing FO",
 		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
 		"visitors": [
-			{"name":"Andi","id_number":"3578010100000001","phone":"0811"%s},
-			{"name":"Budi","id_number":"3578010200000002","phone":"0812"}
+			{"name":"Andi","id_number":"3578010100000001","phone":"081234567890"%s},
+			{"name":"Budi","id_number":"3578010200000002","phone":"081234567891"}
 		]
 	}`, locationID, purposes, purposeNote, extra)
 }

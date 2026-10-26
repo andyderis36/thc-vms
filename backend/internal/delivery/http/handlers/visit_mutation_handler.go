@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"thc-vms/backend/internal/delivery/http/response"
 	"thc-vms/backend/internal/domain"
 	"thc-vms/backend/internal/usecase/visit"
+	"thc-vms/backend/internal/validation"
 )
 
 // Approve serves POST /visits/{id}/approve. Notes are optional.
@@ -22,6 +24,10 @@ func (h *VisitHandler) Approve(c *gin.Context) {
 		Notes string `json:"notes"`
 	}
 	if !bindJSON(c, &body) {
+		return
+	}
+	if validation.RuneLen(strings.TrimSpace(body.Notes)) > validation.TextMaxLength {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Catatan persetujuan maksimal "+strconv.Itoa(validation.TextMaxLength)+" karakter.")
 		return
 	}
 	if err := h.visits.Approve(c.Request.Context(), actor, id, body.Notes); err != nil {
@@ -45,8 +51,12 @@ func (h *VisitHandler) Reject(c *gin.Context) {
 		return
 	}
 	reason := strings.TrimSpace(body.Reason)
-	if len([]rune(reason)) < 5 {
-		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Alasan penolakan minimal 5 karakter.")
+	if validation.RuneLen(reason) < validation.RejectReasonMinLength {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Alasan penolakan minimal "+strconv.Itoa(validation.RejectReasonMinLength)+" karakter.")
+		return
+	}
+	if validation.RuneLen(reason) > validation.TextMaxLength {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Alasan penolakan maksimal "+strconv.Itoa(validation.TextMaxLength)+" karakter.")
 		return
 	}
 	if err := h.visits.Reject(c.Request.Context(), actor, id, reason); err != nil {
@@ -75,6 +85,11 @@ func (h *VisitHandler) Reschedule(c *gin.Context) {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Tanggal mulai, tanggal selesai, dan alasan penjadwalan ulang wajib diisi.")
 		return
 	}
+	reason := strings.TrimSpace(body.Reason)
+	if validation.RuneLen(reason) > validation.TextMaxLength {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Alasan penjadwalan ulang maksimal "+strconv.Itoa(validation.TextMaxLength)+" karakter.")
+		return
+	}
 	start, err := time.Parse(time.RFC3339, body.StartDate)
 	if err != nil {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Tanggal mulai kunjungan tidak valid.")
@@ -85,7 +100,7 @@ func (h *VisitHandler) Reschedule(c *gin.Context) {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Tanggal selesai kunjungan tidak valid.")
 		return
 	}
-	if err := h.visits.Reschedule(c.Request.Context(), actor, id, start, end, strings.TrimSpace(body.Reason)); err != nil {
+	if err := h.visits.Reschedule(c.Request.Context(), actor, id, start, end, reason); err != nil {
 		response.Fail(c, err)
 		return
 	}

@@ -14,6 +14,7 @@ import (
 	"thc-vms/backend/internal/delivery/http/response"
 	"thc-vms/backend/internal/domain"
 	"thc-vms/backend/internal/usecase/superadmin"
+	"thc-vms/backend/internal/validation"
 )
 
 // SuperAdminHandler serves the super_admin back-office endpoints (PRD §4):
@@ -226,7 +227,9 @@ func (h *SuperAdminHandler) CreateLocation(c *gin.Context) {
 		return
 	}
 	locType := domain.LocationType(strings.TrimSpace(body.Type))
-	if err := superadmin.ValidateLocationCreate(body.Name, locType); err != nil {
+	if err := superadmin.ValidateLocationCreate(superadmin.LocationCreateInput{
+		Name: body.Name, Type: locType, Address: body.Address, City: body.City,
+	}); err != nil {
 		response.Fail(c, err)
 		return
 	}
@@ -448,7 +451,7 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 		Name:       body.Name,
 		Email:      body.Email,
 		Password:   body.Password,
-		Phone:      strings.TrimSpace(body.Phone),
+		Phone:      validation.NormalizePhone(body.Phone),
 		NIK:        strings.TrimSpace(body.NIK),
 		Role:       role,
 		LocationID: locationID,
@@ -478,7 +481,7 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 	pending := domain.User{
 		Name:               strings.TrimSpace(body.Name),
 		Email:              strings.TrimSpace(body.Email),
-		Phone:              strings.TrimSpace(body.Phone),
+		Phone:              validation.NormalizePhone(body.Phone),
 		NIK:                strings.TrimSpace(body.NIK),
 		PasswordHash:       string(hash),
 		RoleID:             roleID,
@@ -679,7 +682,7 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 		patch.Email = &trimmed
 	}
 	if body.Phone != nil {
-		trimmed := strings.TrimSpace(*body.Phone)
+		trimmed := validation.NormalizePhone(*body.Phone)
 		patch.Phone = &trimmed
 	}
 	if body.NIK != nil {
@@ -689,6 +692,10 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 	if body.Password != nil {
 		if *body.Password == "" {
 			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Password baru tidak boleh kosong.")
+			return
+		}
+		if err := validation.ValidPassword(*body.Password); err != nil {
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 			return
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(*body.Password), bcryptCost)

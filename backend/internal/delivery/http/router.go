@@ -103,6 +103,7 @@ type NotificationRoutes struct {
 type Chain struct {
 	Recovery       gin.HandlerFunc
 	CORS           gin.HandlerFunc
+	BodyLimit      gin.HandlerFunc
 	LoginLimiter   gin.HandlerFunc
 	Authenticate   gin.HandlerFunc
 	AdminOnly      gin.HandlerFunc
@@ -166,12 +167,23 @@ func withFallback(next gin.HandlerFunc) gin.HandlerFunc {
 // users.location_id or visit_request.location_id still reference the row, so
 // operational history is never orphaned by accident. Deactivation via PATCH
 // /locations/:id {is_active:false} stays the supported soft removal.
+
+// UploadPath is the full path of the multipart upload endpoint. It is the only
+// route exempt from the JSON body ceiling; that handler enforces the larger
+// ingest cap itself.
+const UploadPath = "/api/v1/uploads"
+
+// New assembles the route table from the injected handlers. Nil members fall
+// back to pass-through middleware so tests can mount a subset.
 func New(d Deps) *gin.Engine {
 	engine := gin.New()
 	engine.Use(withFallback(d.Chain.Recovery))
 	engine.Use(withFallback(d.Chain.CORS))
 
 	v1 := engine.Group("/api/v1")
+	// Every /api/v1 route is covered by the JSON body ceiling; only UploadPath
+	// opts out inside the middleware because that handler owns its own ceiling.
+	v1.Use(withFallback(d.Chain.BodyLimit))
 	v1.POST("/auth/login", withFallback(d.Chain.LoginLimiter), withFallback(d.Auth.Login))
 	v1.GET("/health", withFallback(d.Health.Health))
 	v1.GET("/ready", withFallback(d.Health.Ready))

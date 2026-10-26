@@ -10,11 +10,13 @@ package superadmin
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"thc-vms/backend/internal/domain"
+	"thc-vms/backend/internal/validation"
 )
 
 // badRequest builds the 400 VALIDATION_ERROR the handlers render for a
@@ -46,13 +48,32 @@ func NormalizeLocationTimezone(raw string) (domain.Timezone, error) {
 	}
 }
 
+// LocationCreateInput is the validated shape behind POST /locations.
+type LocationCreateInput struct {
+	Name    string
+	Type    domain.LocationType
+	Address string
+	City    string
+}
+
 // ValidateLocationCreate rejects a POST /locations body before it reaches
-// the store. The name is mandatory; the type must be the ERD vocabulary.
-func ValidateLocationCreate(name string, locType domain.LocationType) error {
-	if strings.TrimSpace(name) == "" {
+// the store. The name is mandatory; address and city stay optional but are
+// capped; the type must be the ERD vocabulary.
+func ValidateLocationCreate(in LocationCreateInput) error {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
 		return badRequest("Nama fasilitas wajib diisi.")
 	}
-	switch locType {
+	if validation.RuneLen(name) > validation.FacilityNameMaxLength {
+		return badRequest("Nama fasilitas maksimal " + strconv.Itoa(validation.FacilityNameMaxLength) + " karakter.")
+	}
+	if validation.RuneLen(strings.TrimSpace(in.Address)) > validation.FacilityAddressMaxLength {
+		return badRequest("Alamat fasilitas maksimal " + strconv.Itoa(validation.FacilityAddressMaxLength) + " karakter.")
+	}
+	if validation.RuneLen(strings.TrimSpace(in.City)) > validation.FacilityCityMaxLength {
+		return badRequest("Kota fasilitas maksimal " + strconv.Itoa(validation.FacilityCityMaxLength) + " karakter.")
+	}
+	switch in.Type {
 	case domain.LocationPusat, domain.LocationCabang, domain.LocationPOP, domain.LocationMiniPOP:
 		return nil
 	default:
@@ -69,8 +90,24 @@ func ValidateLocationPatch(patch domain.LocationPatch) error {
 		patch.City == nil && patch.Timezone == nil && patch.IsActive == nil {
 		return badRequest("Tidak ada field yang diubah.")
 	}
-	if patch.Name != nil && strings.TrimSpace(*patch.Name) == "" {
-		return badRequest("Nama fasilitas wajib diisi.")
+	if patch.Name != nil {
+		name := strings.TrimSpace(*patch.Name)
+		if name == "" {
+			return badRequest("Nama fasilitas wajib diisi.")
+		}
+		if validation.RuneLen(name) > validation.FacilityNameMaxLength {
+			return badRequest("Nama fasilitas maksimal " + strconv.Itoa(validation.FacilityNameMaxLength) + " karakter.")
+		}
+	}
+	if patch.Address != nil {
+		if validation.RuneLen(strings.TrimSpace(*patch.Address)) > validation.FacilityAddressMaxLength {
+			return badRequest("Alamat fasilitas maksimal " + strconv.Itoa(validation.FacilityAddressMaxLength) + " karakter.")
+		}
+	}
+	if patch.City != nil {
+		if validation.RuneLen(strings.TrimSpace(*patch.City)) > validation.FacilityCityMaxLength {
+			return badRequest("Kota fasilitas maksimal " + strconv.Itoa(validation.FacilityCityMaxLength) + " karakter.")
+		}
 	}
 	if patch.Type != nil {
 		switch *patch.Type {
@@ -143,6 +180,41 @@ func validateManualVendorName(raw string) error {
 	return nil
 }
 
+func validateAccountName(raw string) error {
+	if validation.RuneLen(strings.TrimSpace(raw)) > validation.NameMaxLength {
+		return badRequest("Nama maksimal " + strconv.Itoa(validation.NameMaxLength) + " karakter.")
+	}
+	return nil
+}
+
+func validateAccountEmail(raw string) error {
+	email := strings.TrimSpace(raw)
+	if validation.RuneLen(email) > validation.EmailMaxLength {
+		return badRequest("Email maksimal " + strconv.Itoa(validation.EmailMaxLength) + " karakter.")
+	}
+	if !validation.ValidEmail(email) {
+		return badRequest("Format email tidak valid.")
+	}
+	return nil
+}
+
+func validateAccountPhone(raw string) error {
+	if trimmed := strings.TrimSpace(raw); trimmed != "" && !validation.ValidPhone(trimmed) {
+		return badRequest("Nomor telepon tidak valid.")
+	}
+	return nil
+}
+
+func validateAccountPassword(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	if err := validation.ValidPassword(raw); err != nil {
+		return badRequest(err.Error())
+	}
+	return nil
+}
+
 // ManagedUserInput is the validated shape behind POST /users: the raw body
 // plus the caller's parsed identifiers. Type is derived by the server, never
 // read from the body. VendorName is the manually typed vendor company
@@ -171,6 +243,18 @@ type ManagedUserInput struct {
 func ValidateManagedUserCreate(in ManagedUserInput) (domain.UserType, error) {
 	if strings.TrimSpace(in.Name) == "" || strings.TrimSpace(in.Email) == "" || in.Password == "" {
 		return "", badRequest("Nama, email, dan password wajib diisi.")
+	}
+	if err := validateAccountName(in.Name); err != nil {
+		return "", err
+	}
+	if err := validateAccountEmail(in.Email); err != nil {
+		return "", err
+	}
+	if err := validateAccountPhone(in.Phone); err != nil {
+		return "", err
+	}
+	if err := validateAccountPassword(in.Password); err != nil {
+		return "", err
 	}
 	if err := ValidateUserNIK(in.Role, in.NIK); err != nil {
 		return "", err
@@ -247,14 +331,34 @@ func ValidateManagedUserUpdate(in ManagedUserPatchInput) error {
 			return err
 		}
 	}
-	if in.Password != nil && *in.Password == "" {
-		return badRequest("Password baru tidak boleh kosong.")
+	if in.Name != nil {
+		if strings.TrimSpace(*in.Name) == "" {
+			return badRequest("Nama tidak boleh kosong.")
+		}
+		if err := validateAccountName(*in.Name); err != nil {
+			return err
+		}
 	}
-	if in.Name != nil && strings.TrimSpace(*in.Name) == "" {
-		return badRequest("Nama tidak boleh kosong.")
+	if in.Email != nil {
+		if strings.TrimSpace(*in.Email) == "" {
+			return badRequest("Email tidak boleh kosong.")
+		}
+		if err := validateAccountEmail(*in.Email); err != nil {
+			return err
+		}
 	}
-	if in.Email != nil && strings.TrimSpace(*in.Email) == "" {
-		return badRequest("Email tidak boleh kosong.")
+	if in.Phone != nil {
+		if err := validateAccountPhone(*in.Phone); err != nil {
+			return err
+		}
+	}
+	if in.Password != nil {
+		if *in.Password == "" {
+			return badRequest("Password baru tidak boleh kosong.")
+		}
+		if err := validateAccountPassword(*in.Password); err != nil {
+			return err
+		}
 	}
 	switch in.Role {
 	case domain.RoleAdmin:

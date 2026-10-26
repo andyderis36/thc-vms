@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Textarea } from '@/components/ui/Textarea'
 import { ApiError } from '@/lib/api/fetcher'
 import { useCancelVisitMutation } from '@/lib/api/hooks'
+import { TEXT_MAX_LENGTH } from '@/lib/limits'
 
 export interface CancelModalProps {
   /** ID rute `/visits/[id]` — agar invalidasi cache menyasar kunci detail yang sama. */
@@ -89,6 +90,7 @@ export function CancelModal({ visitId, open, onClose }: CancelModalProps) {
             value={reason}
             hint="Opsional. Alasan akan tercatat pada riwayat kunjungan."
             placeholder="Contoh: pekerjaan dibatalkan oleh pelanggan"
+            maxLength={TEXT_MAX_LENGTH}
             onChange={(event) => setReason(event.target.value)}
           />
         </form>

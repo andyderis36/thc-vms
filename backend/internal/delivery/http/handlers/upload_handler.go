@@ -7,13 +7,25 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"thc-vms/backend/internal/delivery/http/drain"
 	"thc-vms/backend/internal/delivery/http/response"
 	"thc-vms/backend/internal/domain"
 )
 
-// defaultMaxUploadBytes is the 5 MB ceiling from AGENTS.md 6.4, applied when
-// the constructor is given no explicit limit.
-const defaultMaxUploadBytes = 5 * 1024 * 1024
+// defaultMaxIngestBytes is the transport/ingest ceiling applied when the
+// constructor is given no explicit limit. It mirrors the MAX_UPLOAD_INGEST_MB
+// default: the raw upload may be up to 20 MB because the storage adapter
+// compresses the file and only then applies the 5 MB stored ceiling.
+const defaultMaxIngestBytes = 20 * 1024 * 1024
+
+// multipartMemory bounds the RAM ParseMultipartForm may use before it spills
+// parts to temp files: 8 MiB when the ingest ceiling allows it, never more than
+// the ceiling, and never below 1 MiB. The floor matters because Go treats a
+// non-positive maxMemory as 32 MiB.
+const (
+	multipartMemoryPreferred = 8 * 1024 * 1024
+	multipartMemoryMin       = 1 * 1024 * 1024
+)
 
 // allowedUploadMIME is the handler-side MIME allow-list mirroring the storage
 // policy (application/pdf, image/jpeg, image/png). The adapter re-checks it;
@@ -28,18 +40,34 @@ var allowedUploadMIME = map[string]struct{}{
 // size/MIME policy verdict and the object-key layout stay in the storage
 // adapter, which the handler reaches through domain.IStorageService.
 type UploadHandler struct {
-	storage  domain.IStorageService
-	maxBytes int64
+	storage        domain.IStorageService
+	maxIngestBytes int64
 }
 
 // NewUploadHandler wires the handler to the storage port with an explicit
-// byte ceiling; a non-positive limit falls back to the 5 MB default. The
-// explicit limit exists so tests can prove the 413 path with a tiny body.
-func NewUploadHandler(storage domain.IStorageService, maxBytes int64) *UploadHandler {
-	if maxBytes <= 0 {
-		maxBytes = defaultMaxUploadBytes
+// transport/ingest byte ceiling; a non-positive limit falls back to
+// defaultMaxIngestBytes. The stored 5 MB ceiling is enforced by the storage
+// adapter after compression, not here. The explicit limit exists so tests can
+// prove the 413 path with a tiny body.
+func NewUploadHandler(storage domain.IStorageService, maxIngestBytes int64) *UploadHandler {
+	if maxIngestBytes <= 0 {
+		maxIngestBytes = defaultMaxIngestBytes
 	}
-	return &UploadHandler{storage: storage, maxBytes: maxBytes}
+	return &UploadHandler{storage: storage, maxIngestBytes: maxIngestBytes}
+}
+
+// multipartMemory returns the ParseMultipartForm memory budget for an ingest
+// ceiling of limit: multipartMemoryPreferred bytes, capped at limit, never
+// below multipartMemoryMin.
+func multipartMemory(limit int64) int64 {
+	switch {
+	case limit < multipartMemoryMin:
+		return multipartMemoryMin
+	case limit < multipartMemoryPreferred:
+		return limit
+	default:
+		return multipartMemoryPreferred
+	}
 }
 
 // Upload serves POST /uploads (multipart/form-data with a file part and a
@@ -54,22 +82,31 @@ func NewUploadHandler(storage domain.IStorageService, maxBytes int64) *UploadHan
 // "category/ownerSegment" HINT; the adapter re-expands the hint into the
 // mandated assignment_letters/{id}/... layout itself.
 //
-// The 5 MB ceiling is enforced with http.MaxBytesReader BEFORE reading the
-// body, so an oversized upload is refused with 413 without ever being
-// buffered; a disallowed MIME type is a 400. Success is 201 with
+// The ingest ceiling (default 20 MB, MAX_UPLOAD_INGEST_MB) is enforced with
+// http.MaxBytesReader BEFORE reading the body, so an oversized upload is
+// refused with 413 without ever being buffered in RAM; multipart parts spill to
+// temp files above multipartMemory and are removed when the request ends. The
+// unread remainder is drained before the 413 so net/http does not reset the
+// connection and strip the status from the client (I-05). A disallowed MIME
+// type is a 400. Success is 201 with
 // {file_url, file_name, file_size, mime_type}.
 func (h *UploadHandler) Upload(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, h.maxBytes)
-	if err := c.Request.ParseMultipartForm(h.maxBytes); err != nil {
+	originalBody := c.Request.Body
+	c.Request.Body = http.MaxBytesReader(c.Writer, originalBody, h.maxIngestBytes)
+	if err := c.Request.ParseMultipartForm(multipartMemory(h.maxIngestBytes)); err != nil {
 		if strings.Contains(err.Error(), "too large") {
+			drain.Bounded(originalBody, h.maxIngestBytes)
 			response.FailWith(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE",
-				fmt.Sprintf("Ukuran berkas melebihi batas %d byte.", h.maxBytes))
+				fmt.Sprintf("Ukuran berkas melebihi batas %d byte.", h.maxIngestBytes))
 			return
 		}
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Isi multipart tidak valid.")
 		return
 	}
 	form := c.Request.MultipartForm
+	if form != nil {
+		defer func() { _ = form.RemoveAll() }()
+	}
 	category := strings.TrimSpace(firstFormValue(form.Value, "category"))
 	switch category {
 	case "assignment_letter", "id_card", "checkin_photo":
@@ -86,9 +123,10 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 		return
 	}
 	header := files[0]
-	if header.Size > h.maxBytes {
+	if header.Size > h.maxIngestBytes {
+		drain.Bounded(originalBody, h.maxIngestBytes)
 		response.FailWith(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE",
-			fmt.Sprintf("Ukuran berkas melebihi batas %d byte.", h.maxBytes))
+			fmt.Sprintf("Ukuran berkas melebihi batas %d byte.", h.maxIngestBytes))
 		return
 	}
 	if header.Size <= 0 {

@@ -35,7 +35,7 @@ func fullyWiredDeps() Deps {
 	notifications := NotificationRoutes{List: wired(), MarkRead: wired(), MarkAllRead: wired()}
 	health := HealthProbes{Health: wired(), Ready: wired()}
 	chain := Chain{
-		Recovery: wired(), CORS: wired(), LoginLimiter: wired(),
+		Recovery: wired(), CORS: wired(), BodyLimit: wired(), LoginLimiter: wired(),
 		Authenticate: wired(), AdminOnly: wired(), ApproveOnly: wired(),
 		GateOnly: wired(), SuperAdminOnly: wired(), NotifyOnly: wired(),
 	}

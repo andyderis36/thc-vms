@@ -127,7 +127,7 @@ func TestCreateVisit_Returns201WithDetail(t *testing.T) {
 		"is_nda_accepted": true,
 		"notes": "splicing FO",
 		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
-		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
+		"visitors": [{"name": "Andi", "id_number": "ID12345678", "phone": "081234567890"}]
 	}`
 	rec := serveJSON(engine, "POST", "/visits", payload)
 	mustStatus(t, rec, 201)
@@ -181,7 +181,7 @@ func TestCreateVisit_EchoMatchesGetDetail(t *testing.T) {
 		"is_nda_accepted": true,
 		"notes": "splicing FO",
 		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
-		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
+		"visitors": [{"name": "Andi", "id_number": "ID12345678", "phone": "081234567890"}]
 	}`
 	rec := serveJSON(engine, "POST", "/visits", payload)
 	mustStatus(t, rec, 201)
@@ -252,7 +252,7 @@ func TestCreateVisit_MapsPerVisitorVendorIDAndPhotoURL(t *testing.T) {
 		"end_date": "2026-10-01T17:00:00Z",
 		"is_nda_accepted": true,
 		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
-		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811", "photo_url": "http://localhost:9000/b/id_card/visit-1/selfie.jpg", "vendor_id": "33333333-3333-3333-3333-333333333333"}]
+		"visitors": [{"name": "Andi", "id_number": "ID12345678", "phone": "081234567890", "photo_url": "http://localhost:9000/b/id_card/visit-1/selfie.jpg", "vendor_id": "33333333-3333-3333-3333-333333333333"}]
 	}`
 	rec := serveJSON(engine, "POST", "/visits", payload)
 	mustStatus(t, rec, 201)
@@ -295,7 +295,7 @@ func TestCreateVisit_RejectsMalformedPerVisitorVendorID(t *testing.T) {
 		"end_date": "2026-10-01T17:00:00Z",
 		"is_nda_accepted": true,
 		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
-		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811", "vendor_id": "bukan-uuid"}]
+		"visitors": [{"name": "Andi", "id_number": "ID12345678", "phone": "081234567890", "vendor_id": "bukan-uuid"}]
 	}`
 	rec := serveJSON(engine, "POST", "/visits", payload)
 	mustStatus(t, rec, 400)

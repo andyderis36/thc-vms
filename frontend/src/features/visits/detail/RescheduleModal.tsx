@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Textarea } from '@/components/ui/Textarea'
 import { ApiError } from '@/lib/api/fetcher'
 import { useRescheduleVisitMutation } from '@/lib/api/hooks'
+import { TEXT_MAX_LENGTH } from '@/lib/limits'
 
 export interface RescheduleModalProps {
   /** ID rute `/visits/[id]` — agar invalidasi cache menyasar kunci detail yang sama. */
@@ -78,6 +79,8 @@ export function RescheduleModal({
     }
     if (reason.trim() === '') {
       next.reason = 'Alasan perubahan jadwal wajib diisi.'
+    } else if (reason.length > TEXT_MAX_LENGTH) {
+      next.reason = `Alasan perubahan jadwal maksimal ${TEXT_MAX_LENGTH} karakter.`
     }
     return next
   }
@@ -153,6 +156,7 @@ export function RescheduleModal({
             error={errors.reason}
             hint="Wajib diisi — alasan akan tercatat pada riwayat kunjungan."
             placeholder="Contoh: teknisi vendor berhalangan, digeser ke hari kerja berikutnya"
+            maxLength={TEXT_MAX_LENGTH}
             onChange={(event) => setReason(event.target.value)}
           />
         </form>

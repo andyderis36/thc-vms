@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -9,6 +11,7 @@ import (
 	"thc-vms/backend/internal/delivery/http/response"
 	"thc-vms/backend/internal/domain"
 	"thc-vms/backend/internal/usecase/gate"
+	"thc-vms/backend/internal/validation"
 )
 
 // GateService is the gate port this handler drives. *gate.Service satisfies
@@ -50,6 +53,14 @@ func (h *GateHandler) CheckIn(c *gin.Context) {
 		Notes     string  `json:"notes"`
 	}
 	if !bindJSON(c, &body) {
+		return
+	}
+	if body.BadgeCode != nil && validation.RuneLen(strings.TrimSpace(*body.BadgeCode)) > validation.BadgeCodeMaxLength {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Kode badge maksimal "+strconv.Itoa(validation.BadgeCodeMaxLength)+" karakter.")
+		return
+	}
+	if validation.RuneLen(strings.TrimSpace(body.Notes)) > validation.CheckinNotesMaxLength {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Catatan check-in maksimal "+strconv.Itoa(validation.CheckinNotesMaxLength)+" karakter.")
 		return
 	}
 	key := strings.TrimSpace(c.Param("id"))

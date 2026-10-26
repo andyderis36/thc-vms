@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ScannerPanel } from './ScannerPanel'
+import { VISIT_ID_INPUT_MAX_LENGTH } from '@/lib/limits'
 
 /** Spion modul: `start` HARUS dipanggil ulang setelah unggahan gambar. */
 const startMock = vi.hoisted(() => vi.fn(async () => undefined))
@@ -61,6 +62,17 @@ describe('ScannerPanel - dua tab + unggah gambar di bawah bingkai', () => {
       document.getElementById('thc-gate-scanner-mode-panel')?.getAttribute('aria-labelledby'),
     ).toBe('thc-gate-scanner-mode-panel-tab-manual')
     expect(document.getElementById('thc-gate-scanner-mode-panel-tab-manual')).not.toBeNull()
+  })
+
+  it('input Visit ID manual dibatasi maxLength VISIT_ID_INPUT_MAX_LENGTH', () => {
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Input Manual' }))
+
+    expect(screen.getByLabelText('Visit ID')).toHaveAttribute(
+      'maxlength',
+      String(VISIT_ID_INPUT_MAX_LENGTH),
+    )
   })
 
   it('setelah memindai gambar unggahan, kamera dibangun ulang (viewfinder tidak mati)', async () => {

@@ -101,7 +101,7 @@ func TestResponseKeysAreSubsetOfOpenapi(t *testing.T) {
 		"end_date": "2026-10-01T17:00:00Z",
 		"is_nda_accepted": true,
 		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
-		"visitors": [{"name": "Andi", "id_number": "ID123", "phone": "0811"}]
+		"visitors": [{"name": "Andi", "id_number": "ID12345678", "phone": "081234567890"}]
 	}`
 
 	t.Run("list envelope and items", func(t *testing.T) {
