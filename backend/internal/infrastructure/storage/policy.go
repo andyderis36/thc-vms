@@ -8,12 +8,17 @@ import (
 	"thc-vms/backend/internal/domain"
 )
 
-// policy is the immutable upload rule set distilled from config: the byte
-// ceiling from MAX_UPLOAD_SIZE_MB and the ALLOWED_MIME_TYPES allow-list. It is
-// resolved once at construction time so every validation is a map lookup and a
-// comparison, and so a request can never widen the rules it is checked against.
+// policy is the immutable upload rule set distilled from config: the two byte
+// ceilings and the ALLOWED_MIME_TYPES allow-list. It is resolved once at
+// construction time so every validation is a map lookup and a comparison, and
+// so a request can never widen the rules it is checked against.
+//
+// maxIngestBytes bounds the raw request body the server accepts (transport),
+// while maxSizeBytes bounds what is actually persisted (storage). Compression
+// happens between the two, which is why the transport ceiling is larger.
 type policy struct {
 	maxSizeBytes     int64
+	maxIngestBytes   int64
 	allowedMIMETypes map[string]struct{}
 }
 
@@ -27,15 +32,20 @@ func newPolicy(cfg config.Upload) policy {
 			allowed[normalised] = struct{}{}
 		}
 	}
-	return policy{maxSizeBytes: cfg.MaxSizeBytes, allowedMIMETypes: allowed}
+	return policy{
+		maxSizeBytes:     cfg.MaxSizeBytes,
+		maxIngestBytes:   cfg.MaxIngestBytes,
+		allowedMIMETypes: allowed,
+	}
 }
 
-// validateUpload is the whole upload policy, applied before any network call:
-// a caller that gets a non-nil error here has spent no I/O and no bytes. Every
-// refusal wraps domain.ErrStorageRejected so the delivery layer renders the
-// mandated 400 STORAGE_REJECTED envelope via domain.FromError.
+// validateUpload is the transport-stage upload policy, applied before any
+// network call: a caller that gets a non-nil error here has spent no I/O and no
+// bytes. MIME and nil-content refusals wrap domain.ErrStorageRejected (400
+// STORAGE_REJECTED), while an over-ingest-ceiling payload is a
+// domain.FileTooLargeError (413 FILE_TOO_LARGE); domain.FromError renders both.
 func validateUpload(p policy, in domain.UploadRequest) error {
-	if err := p.validateSize(in.Size); err != nil {
+	if err := p.validateIngestSize(in.Size); err != nil {
 		return err
 	}
 	if err := p.validateMIMEType(in.ContentType); err != nil {
@@ -47,16 +57,26 @@ func validateUpload(p policy, in domain.UploadRequest) error {
 	return nil
 }
 
-// validateSize enforces the MAX_UPLOAD_SIZE_MB ceiling. The boundary is
-// inclusive: a payload of exactly MaxSizeBytes is accepted, one byte more is
-// not. A non-positive size is refused because a zero-length multipart part is
-// always a client bug, never a legitimate document.
-func (p policy) validateSize(size int64) error {
+// validateIngestSize enforces the MAX_UPLOAD_INGEST_MB transport ceiling. The
+// boundary is inclusive: a payload of exactly MaxIngestBytes is accepted, one
+// byte more is not. A non-positive size is refused because a zero-length
+// multipart part is always a client bug, never a legitimate document.
+func (p policy) validateIngestSize(size int64) error {
 	if size <= 0 {
 		return reject(fmt.Sprintf("ukuran berkas tidak valid: %d byte", size))
 	}
+	if size > p.maxIngestBytes {
+		return &domain.FileTooLargeError{Limit: p.maxIngestBytes}
+	}
+	return nil
+}
+
+// validateStoredSize enforces the MAX_UPLOAD_SIZE_MB ceiling on the bytes that
+// would actually be persisted. It runs after compression, so a large raw upload
+// may legitimately shrink below the limit; only the final size decides.
+func (p policy) validateStoredSize(size int64) error {
 	if size > p.maxSizeBytes {
-		return reject(fmt.Sprintf("ukuran berkas %d byte melebihi batas %d byte", size, p.maxSizeBytes))
+		return &domain.FileTooLargeError{Limit: p.maxSizeBytes}
 	}
 	return nil
 }

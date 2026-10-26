@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -57,6 +58,27 @@ func (e *AppError) Error() string {
 // Unwrap exposes the root cause so errors.Is and errors.As keep working.
 func (e *AppError) Unwrap() error {
 	return e.Err
+}
+
+// FileTooLargeError marks a payload that exceeds one of the upload ceilings.
+// Limit is the byte count that was violated: the transport ceiling (what the
+// request may carry before compression) or the stored ceiling (what the bucket
+// may hold afterwards). Cause keeps the compression failure that made a large
+// original unusable, without leaking it into the client message.
+type FileTooLargeError struct {
+	Limit int64
+	Cause error
+}
+
+// Error renders the user-facing refusal. The message is part of the API
+// contract, so it always names the exact byte limit that was exceeded.
+func (e *FileTooLargeError) Error() string {
+	return fmt.Sprintf("Ukuran berkas melebihi batas %d byte.", e.Limit)
+}
+
+// Unwrap exposes the underlying cause so errors.Is and errors.As keep working.
+func (e *FileTooLargeError) Unwrap() error {
+	return e.Cause
 }
 
 // InvalidCredentials builds the 401 login failure.
@@ -129,6 +151,15 @@ func FromError(err error) *AppError {
 	var appErr *AppError
 	if errors.As(err, &appErr) {
 		return appErr
+	}
+	var tooLarge *FileTooLargeError
+	if errors.As(err, &tooLarge) {
+		return &AppError{
+			Status:  http.StatusRequestEntityTooLarge,
+			Code:    "FILE_TOO_LARGE",
+			Message: tooLarge.Error(),
+			Err:     err,
+		}
 	}
 	switch {
 	case errors.Is(err, ErrInvalidCredentials):

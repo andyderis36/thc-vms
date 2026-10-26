@@ -22,8 +22,8 @@ func TestValidateManagedUserUpdate(t *testing.T) {
 
 	valid := []superadmin.ManagedUserPatchInput{
 		{Role: domain.RoleAdmin, Name: strPtr("Baru")},
-		{Role: domain.RoleAdmin, Email: strPtr("b@thc.local"), Phone: strPtr("0800")},
-		{Role: domain.RoleVendor, Phone: strPtr("0801")},
+		{Role: domain.RoleAdmin, Email: strPtr("b@thc.local"), Phone: strPtr("080012345678")},
+		{Role: domain.RoleVendor, Phone: strPtr("080112345678")},
 		{Role: domain.RoleSecurity, Name: strPtr("Pengawas Baru")},
 		{Role: domain.RoleSuperAdmin, Name: strPtr("Pusat Baru")},
 		{Role: domain.RoleAdmin, LocationID: uuidPtr(locID)},

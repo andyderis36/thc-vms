@@ -14,6 +14,7 @@ import (
 	"thc-vms/backend/internal/delivery/http/response"
 	"thc-vms/backend/internal/domain"
 	"thc-vms/backend/internal/usecase/visit"
+	"thc-vms/backend/internal/validation"
 )
 
 // VisitService is the visit-lifecycle port this handler drives. *visit.Service
@@ -69,9 +70,12 @@ func (h *VisitHandler) List(c *gin.Context) {
 	// vendor user name / visit_id in SQL. `search` stays accepted as a legacy alias so
 	// older clients keep filtering; both are trimmed and an empty value means
 	// unfiltered, never an error. It narrows within the actor's scope only.
-	search := strings.TrimSpace(c.Query("q"))
+	// q is capped by truncation (never an error): the free-text filter is a
+	// convenience, so an oversized pasted query narrows to its first
+	// SearchQueryMaxLength characters instead of failing the listing.
+	search := truncateRunes(strings.TrimSpace(c.Query("q")), validation.SearchQueryMaxLength)
 	if search == "" {
-		search = strings.TrimSpace(c.Query("search"))
+		search = truncateRunes(strings.TrimSpace(c.Query("search")), validation.SearchQueryMaxLength)
 	}
 	// date_from/date_to is the documented window filter (openapi GET /visits):
 	// vr.start_date >= date_from AND vr.start_date < date_to in SQL. Both
@@ -218,7 +222,10 @@ func (h *VisitHandler) Get(c *gin.Context) {
 		return
 	}
 	key := strings.TrimSpace(c.Param("id"))
-	if key == "" {
+	// A key beyond VisitIDInputMaxLength can never identify a stored visit,
+	// so it answers the ordinary not-found path instead of running an
+	// unbounded query.
+	if key == "" || validation.RuneLen(key) > validation.VisitIDInputMaxLength {
 		response.Fail(c, domain.NotFoundEntity("Kunjungan"))
 		return
 	}
@@ -240,6 +247,10 @@ func (h *VisitHandler) Cancel(c *gin.Context) {
 		Reason string `json:"reason"`
 	}
 	if !bindJSON(c, &body) {
+		return
+	}
+	if validation.RuneLen(strings.TrimSpace(body.Reason)) > validation.TextMaxLength {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Alasan pembatalan maksimal "+strconv.Itoa(validation.TextMaxLength)+" karakter.")
 		return
 	}
 	if err := h.visits.Cancel(c.Request.Context(), actor, id, body.Reason); err != nil {
@@ -298,25 +309,40 @@ func checkCreateBody(body createVisitBody) string {
 	if len(body.PurposeIDs) < 1 && strings.TrimSpace(body.PurposeNote) == "" {
 		return "Minimal satu tujuan kunjungan wajib dipilih atau ditulis."
 	}
-	if len([]rune(strings.TrimSpace(body.PurposeNote))) > 200 {
-		return "Tujuan lain kunjungan maksimal 200 karakter."
+	if validation.RuneLen(strings.TrimSpace(body.PurposeNote)) > validation.PurposeNoteMaxLength {
+		return "Tujuan lain kunjungan maksimal " + strconv.Itoa(validation.PurposeNoteMaxLength) + " karakter."
+	}
+	if validation.RuneLen(strings.TrimSpace(body.Notes)) > validation.TextMaxLength {
+		return "Catatan kunjungan maksimal " + strconv.Itoa(validation.TextMaxLength) + " karakter."
 	}
 	if len(body.Visitors) < 1 {
 		return "Minimal satu pengunjung wajib didaftarkan."
 	}
-	if len(body.Visitors) > 10 {
-		return "Jumlah pengunjung maksimal 10 orang."
+	if len(body.Visitors) > validation.TechniciansMax {
+		return "Jumlah pengunjung maksimal " + strconv.Itoa(validation.TechniciansMax) + " orang."
 	}
 	for i, visitor := range body.Visitors {
 		n := i + 1
-		if strings.TrimSpace(visitor.Name) == "" {
+		name := strings.TrimSpace(visitor.Name)
+		if name == "" {
 			return "Nama pengunjung ke-" + strconv.Itoa(n) + " wajib diisi."
 		}
-		if strings.TrimSpace(visitor.IDNumber) == "" {
+		if validation.RuneLen(name) > validation.NameMaxLength {
+			return "Nama pengunjung ke-" + strconv.Itoa(n) + " maksimal " + strconv.Itoa(validation.NameMaxLength) + " karakter."
+		}
+		idNumber := strings.TrimSpace(visitor.IDNumber)
+		if idNumber == "" {
 			return "Nomor identitas pengunjung ke-" + strconv.Itoa(n) + " wajib diisi."
 		}
-		if strings.TrimSpace(visitor.Phone) == "" {
+		if !validation.ValidIDNumber(idNumber) {
+			return "Nomor identitas pengunjung ke-" + strconv.Itoa(n) + " tidak valid."
+		}
+		phone := strings.TrimSpace(visitor.Phone)
+		if phone == "" {
 			return "Nomor telepon pengunjung ke-" + strconv.Itoa(n) + " wajib diisi."
+		}
+		if !validation.ValidPhone(phone) {
+			return "Nomor telepon pengunjung ke-" + strconv.Itoa(n) + " tidak valid."
 		}
 		if visitor.VendorID != nil {
 			if id := strings.TrimSpace(*visitor.VendorID); id != "" {
@@ -326,8 +352,13 @@ func checkCreateBody(body createVisitBody) string {
 			}
 		}
 		if visitor.VendorName != nil {
-			if len([]rune(strings.TrimSpace(*visitor.VendorName))) > 120 {
-				return "Nama perusahaan vendor pengunjung ke-" + strconv.Itoa(n) + " maksimal 120 karakter."
+			if validation.RuneLen(strings.TrimSpace(*visitor.VendorName)) > validation.VendorNameMaxLength {
+				return "Nama perusahaan vendor pengunjung ke-" + strconv.Itoa(n) + " maksimal " + strconv.Itoa(validation.VendorNameMaxLength) + " karakter."
+			}
+		}
+		if visitor.Jabatan != nil {
+			if validation.RuneLen(strings.TrimSpace(*visitor.Jabatan)) > validation.JabatanMaxLength {
+				return "Jabatan pengunjung ke-" + strconv.Itoa(n) + " maksimal " + strconv.Itoa(validation.JabatanMaxLength) + " karakter."
 			}
 		}
 	}
@@ -420,4 +451,13 @@ func queryInt(raw string, def int) int {
 		return def
 	}
 	return n
+}
+
+// truncateRunes caps s at limit characters without splitting a multi-byte rune.
+func truncateRunes(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit])
 }

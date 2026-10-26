@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,7 @@ import (
 	"thc-vms/backend/internal/delivery/http/response"
 	"thc-vms/backend/internal/domain"
 	"thc-vms/backend/internal/usecase/superadmin"
+	"thc-vms/backend/internal/validation"
 )
 
 // bcryptCost is the bcrypt work factor for security-account passwords. The
@@ -57,6 +59,47 @@ func (h *UserHandler) appendAuditFallback(ctx context.Context, entry domain.Audi
 // every account created here carries the gate-staff role.
 func NewUserHandler(users domain.UserRepository, locations domain.MasterDataRepository, securityRoleID domain.UUID) *UserHandler {
 	return &UserHandler{users: users, locations: locations, securityRoleID: securityRoleID}
+}
+
+// validateAccountIdentity applies the shared account-field limits to the
+// trimmed name/email/phone. Absent optional values pass; required presence is
+// checked by the caller. The returned message is Bahasa Indonesia and empty
+// when the fields are valid.
+func validateAccountIdentity(name, email, phone string) string {
+	if validation.RuneLen(strings.TrimSpace(name)) > validation.NameMaxLength {
+		return "Nama maksimal " + strconv.Itoa(validation.NameMaxLength) + " karakter."
+	}
+	if trimmed := strings.TrimSpace(email); trimmed != "" {
+		if validation.RuneLen(trimmed) > validation.EmailMaxLength {
+			return "Email maksimal " + strconv.Itoa(validation.EmailMaxLength) + " karakter."
+		}
+		if !validation.ValidEmail(trimmed) {
+			return "Format email tidak valid."
+		}
+	}
+	if trimmed := strings.TrimSpace(phone); trimmed != "" && !validation.ValidPhone(trimmed) {
+		return "Nomor telepon tidak valid."
+	}
+	return ""
+}
+
+// validateAccountPassword applies the password policy. An empty value passes
+// because an omitted password means "keep the stored credential" on update.
+func validateAccountPassword(password string) string {
+	if password == "" {
+		return ""
+	}
+	if err := validation.ValidPassword(password); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func stringOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // userToAccount projects one stored security account onto the openapi User
@@ -167,6 +210,14 @@ func (h *UserHandler) CreateSecurity(c *gin.Context) {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Nama, email, dan password wajib diisi.")
 		return
 	}
+	if msg := validateAccountIdentity(body.Name, body.Email, body.Phone); msg != "" {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", msg)
+		return
+	}
+	if msg := validateAccountPassword(body.Password); msg != "" {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", msg)
+		return
+	}
 	if body.NIK != nil && strings.TrimSpace(*body.NIK) != "" {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "NIK hanya untuk role admin dan vendor.")
 		return
@@ -194,7 +245,7 @@ func (h *UserHandler) CreateSecurity(c *gin.Context) {
 	pending := domain.User{
 		Name:         strings.TrimSpace(body.Name),
 		Email:        strings.TrimSpace(body.Email),
-		Phone:        strings.TrimSpace(body.Phone),
+		Phone:        validation.NormalizePhone(body.Phone),
 		PasswordHash: string(hash),
 		RoleID:       h.securityRoleID,
 		LocationID:   locationID,
@@ -499,12 +550,20 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 		patch.Email = &trimmed
 	}
 	if body.Phone != nil {
-		trimmed := strings.TrimSpace(*body.Phone)
+		trimmed := validation.NormalizePhone(*body.Phone)
 		patch.Phone = &trimmed
+	}
+	if msg := validateAccountIdentity(stringOrEmpty(patch.Name), stringOrEmpty(patch.Email), stringOrEmpty(patch.Phone)); msg != "" {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", msg)
+		return
 	}
 	if body.Password != nil {
 		if *body.Password == "" {
 			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Password baru tidak boleh kosong.")
+			return
+		}
+		if msg := validateAccountPassword(*body.Password); msg != "" {
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", msg)
 			return
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(*body.Password), bcryptCost)

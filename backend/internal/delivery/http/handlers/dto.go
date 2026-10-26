@@ -6,6 +6,7 @@ import (
 
 	"thc-vms/backend/internal/domain"
 	"thc-vms/backend/internal/usecase/visit"
+	"thc-vms/backend/internal/validation"
 )
 
 // DTOs in this file mirror docs/4. openapi.yaml L770-913 field for field.
@@ -271,7 +272,9 @@ func toCreateInput(body createVisitBody, start, end time.Time) visit.CreateVisit
 		in.PurposeIDs = append(in.PurposeIDs, domain.UUID(pid))
 	}
 	for _, w := range body.Visitors {
-		visitor := visit.VisitorInput{Name: w.Name, IDNumber: w.IDNumber, Phone: w.Phone}
+		// Phone is persisted in canonical form (digits only, 62 -> 0) so the
+		// column never carries spaces, dashes or stray letters.
+		visitor := visit.VisitorInput{Name: w.Name, IDNumber: w.IDNumber, Phone: validation.NormalizePhone(w.Phone)}
 		if w.IDCardPhotoURL != nil {
 			photo := *w.IDCardPhotoURL
 			visitor.IDCardPhotoURL = &photo

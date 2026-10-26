@@ -94,7 +94,7 @@ func TestUpdateUser_ManualVendorNameSetKeepClear(t *testing.T) {
 		users := newStubManagedUsers(vendorWithCompany("vendor-1", "tek@vendor.local", "PT Lama"))
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
-		rec := serveJSON(engine, "PATCH", "/users/vendor-1", `{"phone":"0899"}`)
+		rec := serveJSON(engine, "PATCH", "/users/vendor-1", `{"phone":"089912345678"}`)
 		mustStatus(t, rec, http.StatusOK)
 
 		stored := users.byID["vendor-1"].User.VendorNameOverride

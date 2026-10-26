@@ -39,6 +39,11 @@ func MapError(err error) error {
 			return fmt.Errorf("repository: uniqueness clash: %w", domain.ErrConflict)
 		case "23514":
 			return fmt.Errorf("repository: check constraint rejected value: %w", domain.ErrValidation)
+		case "22001":
+			// string_data_right_truncation: the value is longer than the
+			// column allows. That is a malformed field (the handler-side
+			// limits should have caught it), not an infrastructure fault.
+			return fmt.Errorf("repository: value exceeds column length: %w", domain.ErrValidation)
 		case "23503":
 			// A surviving reference blocks the write: the row is still
 			// needed elsewhere, which is a state clash (409), not a

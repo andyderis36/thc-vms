@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -96,10 +97,12 @@ func isAlreadyOwned(err error) bool {
 // Upload stores one file and returns its public URL.
 //
 // The order is deliberate and is the security-relevant part: the caller's hint
-// is split, the upload policy is applied, and only then is the object key built
-// from the adapter's own layout. A refused upload has therefore spent no
-// network round trip and no bucket I/O, and a caller can never talk the adapter
-// into a directory of its own choosing.
+// is split, the upload policy is applied, the bytes are prepared (compressed
+// and re-checked against the stored ceiling), and only then is the object key
+// built from the adapter's own layout. A refused upload has therefore spent no
+// network round trip and no bucket I/O, a caller can never talk the adapter
+// into a directory of its own choosing, and nothing is persisted unless the
+// final bytes fit the stored ceiling.
 func (a *MinIOAdapter) Upload(ctx context.Context, in domain.UploadRequest) (domain.UploadResult, error) {
 	category, ownerID, err := splitObjectKeyHint(in.ObjectKey)
 	if err != nil {
@@ -108,14 +111,17 @@ func (a *MinIOAdapter) Upload(ctx context.Context, in domain.UploadRequest) (dom
 	if err := validateUpload(a.policy, in); err != nil {
 		return domain.UploadResult{}, err
 	}
+	content, mimeType, err := prepareStoredContent(in, a.policy)
+	if err != nil {
+		return domain.UploadResult{}, err
+	}
 	objectKey, err := buildObjectKey(category, ownerID, in.FileName)
 	if err != nil {
 		return domain.UploadResult{}, err
 	}
 
-	content := in.Content
-	if _, err := a.client.PutObject(ctx, a.bucket, objectKey, content, in.Size, minio.PutObjectOptions{
-		ContentType: normaliseMIMEType(in.ContentType),
+	if _, err := a.client.PutObject(ctx, a.bucket, objectKey, bytes.NewReader(content), int64(len(content)), minio.PutObjectOptions{
+		ContentType: mimeType,
 	}); err != nil {
 		return domain.UploadResult{}, fmt.Errorf("storage: put %q: %w", objectKey, err)
 	}
@@ -123,8 +129,8 @@ func (a *MinIOAdapter) Upload(ctx context.Context, in domain.UploadRequest) (dom
 	return domain.UploadResult{
 		FileURL:  a.publicObjectURL(objectKey),
 		FileName: sanitiseStoredName(in.FileName),
-		FileSize: in.Size,
-		MimeType: normaliseMIMEType(in.ContentType),
+		FileSize: int64(len(content)),
+		MimeType: mimeType,
 	}, nil
 }
 

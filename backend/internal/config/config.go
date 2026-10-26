@@ -47,7 +47,10 @@ const (
 
 	defaultStorageDriver = "minio"
 	defaultMaxUploadMB   = 5
-	defaultAllowedMIMEs  = "application/pdf,image/jpeg,image/png"
+	// defaultMaxUploadIngestMB is the transport ceiling for a raw upload before
+	// compression, deliberately four times the 5 MB stored ceiling.
+	defaultMaxUploadIngestMB = 20
+	defaultAllowedMIMEs      = "application/pdf,image/jpeg,image/png"
 	// defaultPresignTTLMinutes bounds how long a presigned file URL stays
 	// fetchable. Short enough that a leaked <a>/<img> href dies quickly,
 	// long enough for a guard to open it from the visit detail page.
@@ -150,10 +153,15 @@ func (s Storage) PresignTTL() time.Duration {
 	return time.Duration(s.PresignTTLMinutes) * time.Minute
 }
 
-// Upload carries the file policy enforced by the storage adapter.
+// Upload carries the file policy enforced by the storage adapter. Two ceilings
+// are intentional: MaxSizeBytes bounds what is STORED (after browser/server
+// compression), MaxIngestBytes bounds the raw request body that is TRANSPORTED
+// to the server.
 type Upload struct {
 	MaxSizeMB        int
 	MaxSizeBytes     int64
+	MaxIngestMB      int
+	MaxIngestBytes   int64
 	AllowedMIMETypes []string
 }
 
@@ -230,6 +238,22 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	maxIngestMB, err := intEnv("MAX_UPLOAD_INGEST_MB", defaultMaxUploadIngestMB)
+	if err != nil {
+		return nil, err
+	}
+
+	maxSizeBytes := int64(maxSizeMB) * 1024 * 1024
+	maxIngestBytes := int64(maxIngestMB) * 1024 * 1024
+	// Invariant: the transport ceiling is never below the stored ceiling. A
+	// cap configured lower would make a legal stored file unuploadable, since
+	// the raw request carrying it is refused before compression can shrink it.
+	// Raising (never lowering) preserves the documented 5 MB stored policy.
+	if maxIngestBytes < maxSizeBytes {
+		maxIngestMB = maxSizeMB
+		maxIngestBytes = maxSizeBytes
+	}
+
 	presignTTLMinutes, err := intEnv("S3_PRESIGN_TTL_MINUTES", defaultPresignTTLMinutes)
 	if err != nil {
 		return nil, err
@@ -278,7 +302,9 @@ func Load() (*Config, error) {
 		},
 		Upload: Upload{
 			MaxSizeMB:        maxSizeMB,
-			MaxSizeBytes:     int64(maxSizeMB) * 1024 * 1024,
+			MaxSizeBytes:     maxSizeBytes,
+			MaxIngestMB:      maxIngestMB,
+			MaxIngestBytes:   maxIngestBytes,
 			AllowedMIMETypes: splitList(stringEnv("ALLOWED_MIME_TYPES", defaultAllowedMIMEs)),
 		},
 	}, nil

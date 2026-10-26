@@ -44,29 +44,55 @@ func pngRequest(size int64) domain.UploadRequest {
 	}
 }
 
-// Given a 5 MB ceiling from MAX_UPLOAD_SIZE_MB, when a 6.2 MB upload is
-// validated, then it is refused as ErrStorageRejected, while a payload of
-// exactly the limit is accepted.
-func TestUpload_RejectsOversizeFile(t *testing.T) {
+// Given a 5 MB stored ceiling and a 20 MB ingest ceiling, when a 6.2 MB upload
+// arrives, then the transport stage accepts it (compression may shrink it) and
+// only the stored-size check refuses it; exactly the stored limit is accepted.
+func TestUpload_StoredCeilingRejectsOnlyAfterCompression(t *testing.T) {
 	cfg := loadTestConfig(t, "5", localAllowlist)
-	limit := cfg.Upload.MaxSizeBytes
-	if limit != 5*mebibyte {
-		t.Fatalf("Given MAX_UPLOAD_SIZE_MB=5, the parsed limit must be 5 MiB, got %d", limit)
+	storedLimit := cfg.Upload.MaxSizeBytes
+	if storedLimit != 5*mebibyte {
+		t.Fatalf("Given MAX_UPLOAD_SIZE_MB=5, the parsed limit must be 5 MiB, got %d", storedLimit)
 	}
 	p := newPolicy(cfg.Upload)
 
 	oversize := pngRequest(6*mebibyte + 209*1024) // 6.2 MB
-	if oversize.Size <= limit {
-		t.Fatalf("test fixture must exceed the limit, got %d <= %d", oversize.Size, limit)
+	if oversize.Size <= storedLimit {
+		t.Fatalf("test fixture must exceed the stored limit, got %d <= %d", oversize.Size, storedLimit)
 	}
-	err := validateUpload(p, oversize)
-	if !errors.Is(err, domain.ErrStorageRejected) {
-		t.Fatalf("a 6.2 MB upload must satisfy errors.Is(err, domain.ErrStorageRejected), got %v", err)
+	if err := validateUpload(p, oversize); err != nil {
+		t.Fatalf("a 6.2 MB upload is below the ingest ceiling and must pass transport validation, got %v", err)
 	}
 
-	atLimit := pngRequest(limit)
-	if err := validateUpload(p, atLimit); err != nil {
-		t.Fatalf("a payload of exactly %d bytes must be accepted, got %v", limit, err)
+	var tooLarge *domain.FileTooLargeError
+	err := p.validateStoredSize(oversize.Size)
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("a 6.2 MB payload must fail the stored-size check with FileTooLargeError, got %v", err)
+	}
+	if tooLarge.Limit != storedLimit {
+		t.Fatalf("stored refusal limit = %d, want %d", tooLarge.Limit, storedLimit)
+	}
+
+	if err := p.validateStoredSize(storedLimit); err != nil {
+		t.Fatalf("a payload of exactly %d bytes must be accepted, got %v", storedLimit, err)
+	}
+}
+
+// Given the 20 MB ingest ceiling, when a payload exceeds it, then the
+// transport stage refuses it with that ceiling before any compression runs.
+func TestUpload_RejectsOversizeIngest(t *testing.T) {
+	cfg := loadTestConfig(t, "5", localAllowlist)
+	p := newPolicy(cfg.Upload)
+	if p.maxIngestBytes != 20*mebibyte {
+		t.Fatalf("Given the default ingest ceiling, parsed limit must be 20 MiB, got %d", p.maxIngestBytes)
+	}
+
+	var tooLarge *domain.FileTooLargeError
+	err := validateUpload(p, pngRequest(p.maxIngestBytes+1))
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("an over-ingest payload must be a FileTooLargeError, got %v", err)
+	}
+	if tooLarge.Limit != p.maxIngestBytes {
+		t.Fatalf("ingest refusal limit = %d, want %d", tooLarge.Limit, p.maxIngestBytes)
 	}
 }
 

@@ -21,7 +21,7 @@ func TestSuperAdmin_UpdateUser(t *testing.T) {
 		users := newStubManagedUsers(managedAccount("target-1", "lama@thc.local", domain.RoleAdmin, &locID))
 		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
 
-		rec := serveJSON(engine, "PATCH", "/users/target-1", `{"name":"Baru","phone":"0800"}`)
+		rec := serveJSON(engine, "PATCH", "/users/target-1", `{"name":"Baru","phone":"080012345678"}`)
 		mustStatus(t, rec, http.StatusOK)
 		data := decodeData[map[string]any](t, mustSuccess(t, rec))
 		assertSubset(t, "User", data)
