@@ -9,6 +9,24 @@ import nextTs from 'eslint-config-next/typescript'
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  {
+    // File E2E Playwright bukan komponen React/Next: matikan aturan React &
+    // Next yang tidak relevan, tetapi aturan TypeScript tetap aktif.
+    files: ['e2e/**/*.ts', 'playwright.config.ts'],
+    rules: {
+      '@next/next/no-html-link-for-pages': 'off',
+      '@next/next/no-img-element': 'off',
+      '@next/next/no-sync-scripts': 'off',
+      '@next/next/no-page-custom-font': 'off',
+      'react/display-name': 'off',
+      'react/prop-types': 'off',
+      'react/jsx-key': 'off',
+      'react/jsx-no-target-blank': 'off',
+      'react/no-unescaped-entities': 'off',
+      'react-hooks/rules-of-hooks': 'off',
+      'react-hooks/exhaustive-deps': 'off',
+    },
+  },
   globalIgnores([
     '.next/**',
     'out/**',
