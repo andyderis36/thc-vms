@@ -1,11 +1,18 @@
-# THC-VMS production deploy — the ONLY trigger (no webhook alongside it).
-# Requires a Gitea Actions self-hosted runner installed ON the Ubuntu VPS
-# (labels below must match the runner). The runner executes the repo's
-# deploy/deploy.sh, which self-pulls latest main before deploying.
+# THC-VMS production deploy.
+# Runs ONLY on a push to `main` - i.e. after the PR `dev` -> `main` has been
+# merged and that merge commit is pushed. There is no tag trigger: releases are
+# not deployed by tag. `dev` never deploys; pushes to `dev` only run ci.yml.
+# The Gitea Actions self-hosted runner on the Ubuntu VPS (labels below must
+# match) executes deploy/deploy.sh, which self-pulls latest main before deploying.
 name: deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+# Serialize deploys; never cancel one midway (deploy.sh mutates the live stack).
+concurrency:
+  group: deploy
+  cancel-in-progress: false
 jobs:
   deploy:
     runs-on: [self-hosted, linux, vps]
