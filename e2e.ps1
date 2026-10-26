@@ -25,6 +25,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $Frontend = Join-Path $RepoRoot 'frontend'
+$PlaywrightCli = Join-Path $Frontend 'node_modules\.bin\playwright.cmd'
 $Vms = Join-Path $RepoRoot 'vms.ps1'
 $LiveUrl = 'https://vms.thckalbar.com'
 $LivePacingMs = if ($env:E2E_LIVE_PACING_MS) { $env:E2E_LIVE_PACING_MS } else { '13000' }
@@ -50,6 +51,38 @@ function Wait-Http([string]$Url, [int]$Seconds = 90) {
         Start-Sleep -Milliseconds 700
     }
     return $false
+}
+
+function Test-DockerEngine {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & docker info 2>&1 | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+function Ensure-DockerEngine {
+    if (Test-DockerEngine) { return }
+
+    $dockerDesktop = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+    if (-not (Test-Path -LiteralPath $dockerDesktop)) {
+        throw 'Docker engine tidak berjalan dan Docker Desktop tidak ditemukan. Nyalakan Docker Desktop lalu ulangi.'
+    }
+
+    Write-Step 'Docker Desktop belum berjalan; menyalakan dan menunggu engine siap'
+    Start-Process -FilePath $dockerDesktop | Out-Null
+    $deadline = (Get-Date).AddSeconds(180)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-DockerEngine) {
+            Write-Ok 'Docker engine siap'
+            return
+        }
+        Start-Sleep -Seconds 3
+    }
+    throw 'Docker engine tidak siap dalam 180 detik. Buka Docker Desktop secara manual lalu ulangi.'
 }
 
 # Jangan pernah mewarisi target dari shell sebelumnya: tanpa ini, `e2e.cmd`
@@ -93,8 +126,9 @@ function Assert-LiveTarget {
 }
 
 function Ensure-Dependencies {
-    if (-not (Test-Path -LiteralPath (Join-Path $Frontend 'node_modules\@playwright\test'))) {
-        Write-Step 'frontend: npm ci (node_modules belum lengkap)'
+    if (-not (Test-Path -LiteralPath (Join-Path $Frontend 'node_modules\@playwright\test')) -or
+        -not (Test-Path -LiteralPath $PlaywrightCli)) {
+        Write-Step 'frontend: npm ci (node_modules/Playwright CLI belum lengkap)'
         Push-Location $Frontend
         try { & npm ci } finally { Pop-Location }
         if ($LASTEXITCODE -ne 0) { throw "npm ci gagal (exit $LASTEXITCODE)" }
@@ -114,10 +148,20 @@ function Ensure-Dependencies {
 }
 
 function Ensure-LocalStack {
-    if (-not (Test-Http 'http://localhost:8080/api/v1/health')) {
-        Write-Step 'backend belum sehat; menyiapkan docker + backend lewat vms.ps1'
+    $beHealth = Test-Http 'http://localhost:8080/api/v1/health'
+    $beReady = Test-Http 'http://localhost:8080/api/v1/ready'
+    $minioReady = Test-Http 'http://localhost:9000/minio/health/live'
+
+    if (-not ($beHealth -and $beReady -and $minioReady)) {
+        Write-Step 'stack lokal belum siap (DB/MinIO/backend); menyiapkan docker + backend lewat vms.ps1'
+        Ensure-DockerEngine
         & $Vms docker start
-        & $Vms be start
+        if ($beHealth -and -not $beReady) {
+            Write-Step 'backend hidup tapi database belum siap; restart backend'
+            & $Vms be restart
+        } elseif (-not $beHealth) {
+            & $Vms be start
+        }
     }
     if (-not (Test-Http 'http://localhost:3210/login')) {
         Write-Step 'frontend belum hidup; menyalakan lewat vms.ps1'
@@ -127,10 +171,16 @@ function Ensure-LocalStack {
     if (-not (Wait-Http 'http://localhost:8080/api/v1/health' 90)) {
         throw 'backend tidak sehat di http://localhost:8080/api/v1/health. Cek: vms be logs'
     }
+    if (-not (Wait-Http 'http://localhost:8080/api/v1/ready' 90)) {
+        throw 'backend belum siap (DB/MinIO) di http://localhost:8080/api/v1/ready. Cek: vms docker logs; vms be logs'
+    }
+    if (-not (Wait-Http 'http://localhost:9000/minio/health/live' 90)) {
+        throw 'MinIO tidak sehat di http://localhost:9000/minio/health/live. Cek: vms docker logs'
+    }
     if (-not (Wait-Http 'http://localhost:3210/login' 90)) {
         throw 'frontend tidak hidup di http://localhost:3210/login. Cek: vms fe logs'
     }
-    Write-Ok 'stack lokal siap (backend :8080 + frontend :3210)'
+    Write-Ok 'stack lokal siap (backend :8080 + DB + MinIO + frontend :3210)'
 }
 
 $mode = $Mode.ToLower()
@@ -156,10 +206,14 @@ if ($isLiveCheck) {
 if ($isCheck) {
     Write-Step 'cek stack lokal (tanpa menjalankan test)'
     $be = Test-Http 'http://localhost:8080/api/v1/health'
+    $beReady = Test-Http 'http://localhost:8080/api/v1/ready'
+    $minio = Test-Http 'http://localhost:9000/minio/health/live'
     $fe = Test-Http 'http://localhost:3210/login'
-    if ($be) { Write-Ok 'backend  :8080 sehat' } else { Write-Err2 'backend  :8080 TIDAK sehat' }
+    if ($be) { Write-Ok 'backend  :8080 health' } else { Write-Err2 'backend  :8080 health TIDAK sehat' }
+    if ($beReady) { Write-Ok 'backend  :8080 ready (DB)' } else { Write-Err2 'backend  :8080 ready TIDAK siap (DB)' }
+    if ($minio) { Write-Ok 'MinIO    :9000 health' } else { Write-Err2 'MinIO    :9000 TIDAK sehat' }
     if ($fe) { Write-Ok 'frontend :3210 hidup' } else { Write-Err2 'frontend :3210 TIDAK hidup' }
-    if ($be -and $fe) { exit 0 } else { exit 1 }
+    if ($be -and $beReady -and $minio -and $fe) { exit 0 } else { exit 1 }
 }
 
 Ensure-Dependencies
@@ -188,14 +242,14 @@ if ($isLive) {
     Set-LiveE2EEnv
     Write-Step "menjalankan E2E headed ke $LiveUrl"
     Push-Location $Frontend
-    try { & npm run e2e -- --project=e2e --no-deps --headed } finally { Pop-Location }
+    try { & $PlaywrightCli test --project=e2e --no-deps --headed } finally { Pop-Location }
 } else {
     Ensure-LocalStack
     Set-LocalE2EEnv
 
     Write-Step 'menjalankan E2E headed ke localhost:3210'
     Push-Location $Frontend
-    try { & npm run e2e:headed } finally { Pop-Location }
+    try { & $PlaywrightCli test --headed } finally { Pop-Location }
 }
 
 $code = $LASTEXITCODE
