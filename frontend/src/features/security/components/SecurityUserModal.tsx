@@ -29,6 +29,17 @@ import { TABLE_CLASS, TABLE_WRAPPER_CLASS } from '@/lib/table-styles'
 import { useSession } from '@/lib/auth/session'
 import { can, getRoleLabel } from '@/lib/auth/capabilities'
 import type { Role, UpdateUserStatusRequest, User } from '@/lib/api/types'
+import {
+  EMAIL_MAX_LENGTH,
+  NAME_MAX_LENGTH,
+  PASSWORD_MAX_BYTES,
+  PHONE_MAX_LENGTH,
+  SEARCH_QUERY_MAX_LENGTH,
+  isValidEmail,
+  isValidPassword,
+  isValidPhone,
+  sanitizePhoneInput,
+} from '@/lib/limits'
 
 /** Salinan lokal (sengaja tanpa lintas-feature import): pesan error aman untuk UI. */
 function apiErrorMessage(error: unknown): string {
@@ -253,6 +264,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
             placeholder="Cari nama, email, atau cabang…"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
+            maxLength={SEARCH_QUERY_MAX_LENGTH}
           />
         </div>
         <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
@@ -672,6 +684,9 @@ function CreateSecurityModal({
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [locationId, setLocationId] = useState('')
+  const [emailError, setEmailError] = useState<string | undefined>(undefined)
+  const [phoneError, setPhoneError] = useState<string | undefined>(undefined)
+  const [passwordError, setPasswordError] = useState<string | undefined>(undefined)
 
   const createUser = useCreateSecurityUserMutation()
 
@@ -684,6 +699,9 @@ function CreateSecurityModal({
       setPhone('')
       setPassword('')
       setLocationId('')
+      setEmailError(undefined)
+      setPhoneError(undefined)
+      setPasswordError(undefined)
     }
   }, [open])
 
@@ -694,6 +712,21 @@ function CreateSecurityModal({
     event.preventDefault()
     if (name.trim() === '' || email.trim() === '' || password === '') return
     if (effectiveLocationId === '') return
+
+    const nextEmailError = isValidEmail(email) ? undefined : 'Format email tidak valid.'
+    setEmailError(nextEmailError)
+    if (nextEmailError !== undefined) return
+
+    const nextPhoneError =
+      phone.trim() === '' || isValidPhone(phone) ? undefined : 'Format nomor telepon tidak valid.'
+    setPhoneError(nextPhoneError)
+    if (nextPhoneError !== undefined) return
+
+    const nextPasswordError = isValidPassword(password)
+      ? undefined
+      : 'Kata sandi minimal 8 karakter dan maksimal 72 byte.'
+    setPasswordError(nextPasswordError)
+    if (nextPasswordError !== undefined) return
 
     createUser.mutate(
       {
@@ -747,6 +780,7 @@ function CreateSecurityModal({
             value={name}
             onChange={(event) => setName(event.target.value)}
             autoComplete="name"
+            maxLength={NAME_MAX_LENGTH}
             required
           />
           <Input
@@ -754,26 +788,42 @@ function CreateSecurityModal({
             type="email"
             placeholder="nama@thc.id"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) => {
+              setEmail(event.target.value)
+              if (emailError !== undefined) setEmailError(undefined)
+            }}
             autoComplete="email"
+            maxLength={EMAIL_MAX_LENGTH}
+            error={emailError}
             required
           />
           <Input
             label="No. Telepon"
             type="tel"
+            inputMode="tel"
             placeholder="08xxxxxxxxxx"
             value={phone}
-            onChange={(event) => setPhone(event.target.value)}
+            onChange={(event) => {
+              setPhone(sanitizePhoneInput(event.target.value))
+              if (phoneError !== undefined) setPhoneError(undefined)
+            }}
             autoComplete="tel"
+            maxLength={PHONE_MAX_LENGTH}
+            error={phoneError}
           />
           <Input
             label="Kata Sandi"
             type="password"
             placeholder="Kata sandi awal"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value)
+              if (passwordError !== undefined) setPasswordError(undefined)
+            }}
             autoComplete="new-password"
-            hint={`Dibagikan ke ${getRoleLabel('security').toLowerCase()}; dapat diubah setelah masuk.`}
+            maxLength={PASSWORD_MAX_BYTES}
+            hint={`Minimal 8 karakter. Dibagikan ke ${getRoleLabel('security').toLowerCase()}; dapat diubah setelah masuk.`}
+            error={passwordError}
             required
           />
         </div>

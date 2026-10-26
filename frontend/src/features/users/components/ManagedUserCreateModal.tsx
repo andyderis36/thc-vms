@@ -11,6 +11,16 @@ import { requiresManagedLocation } from '@/features/users/managed-user-filters'
 import { useCreateManagedUserMutation, useVendorsQuery } from '@/lib/api/hooks'
 import type { CreateManagedUserRequest, ManagedUserRole } from '@/lib/api/types'
 import { getRoleLabel } from '@/lib/auth/capabilities'
+import {
+  EMAIL_MAX_LENGTH,
+  NAME_MAX_LENGTH,
+  PASSWORD_MAX_BYTES,
+  PHONE_MAX_LENGTH,
+  isValidEmail,
+  isValidPassword,
+  isValidPhone,
+  sanitizePhoneInput,
+} from '@/lib/limits'
 import { validateNik } from '@/lib/users/nik'
 import {
   VENDOR_NAME_MAX_LENGTH,
@@ -45,6 +55,9 @@ export function ManagedUserCreateModal({
   const [phone, setPhone] = useState('')
   const [nik, setNik] = useState('')
   const [nikError, setNikError] = useState<string | undefined>(undefined)
+  const [emailError, setEmailError] = useState<string | undefined>(undefined)
+  const [phoneError, setPhoneError] = useState<string | undefined>(undefined)
+  const [passwordError, setPasswordError] = useState<string | undefined>(undefined)
   const [locationId, setLocationId] = useState('')
   // Teks vendor bebas (bukan id): boleh pilih dari katalog via <datalist>
   // ATAU ketik manual; dipetakan saat submit lewat `resolveVendorInput`.
@@ -64,6 +77,21 @@ export function ManagedUserCreateModal({
     event.preventDefault()
     if (name.trim() === '' || email.trim() === '' || password === '') return
     if (needsLocation && locationId === '') return
+
+    const nextEmailError = isValidEmail(email) ? undefined : 'Format email tidak valid.'
+    setEmailError(nextEmailError)
+    if (nextEmailError !== undefined) return
+
+    const nextPhoneError =
+      phone.trim() === '' || isValidPhone(phone) ? undefined : 'Format nomor telepon tidak valid.'
+    setPhoneError(nextPhoneError)
+    if (nextPhoneError !== undefined) return
+
+    const nextPasswordError = isValidPassword(password)
+      ? undefined
+      : 'Kata sandi minimal 8 karakter dan maksimal 72 byte.'
+    setPasswordError(nextPasswordError)
+    if (nextPasswordError !== undefined) return
 
     // NIK wajib untuk admin & vendor (BE: 400 bila absen/format salah).
     const error = validateNik(nik, true)
@@ -131,6 +159,7 @@ export function ManagedUserCreateModal({
             value={name}
             onChange={(event) => setName(event.target.value)}
             autoComplete="name"
+            maxLength={NAME_MAX_LENGTH}
             required
           />
           <Input
@@ -138,26 +167,42 @@ export function ManagedUserCreateModal({
             type="email"
             placeholder="nama@thc.id"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) => {
+              setEmail(event.target.value)
+              if (emailError !== undefined) setEmailError(undefined)
+            }}
             autoComplete="email"
+            maxLength={EMAIL_MAX_LENGTH}
+            error={emailError}
             required
           />
           <Input
             label="No. Telepon"
             type="tel"
+            inputMode="tel"
             placeholder="08xxxxxxxxxx"
             value={phone}
-            onChange={(event) => setPhone(event.target.value)}
+            onChange={(event) => {
+              setPhone(sanitizePhoneInput(event.target.value))
+              if (phoneError !== undefined) setPhoneError(undefined)
+            }}
             autoComplete="tel"
+            maxLength={PHONE_MAX_LENGTH}
+            error={phoneError}
           />
           <Input
             label="Kata Sandi"
             type="password"
             placeholder="Kata sandi awal"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value)
+              if (passwordError !== undefined) setPasswordError(undefined)
+            }}
             autoComplete="new-password"
-            hint="Dibagikan ke user; dapat diubah setelah masuk."
+            maxLength={PASSWORD_MAX_BYTES}
+            hint="Minimal 8 karakter. Dibagikan ke user; dapat diubah setelah masuk."
+            error={passwordError}
             required
           />
         </div>

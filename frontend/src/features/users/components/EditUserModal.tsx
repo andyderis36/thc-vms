@@ -14,6 +14,16 @@ import {
   resolveVendorInput,
 } from '@/lib/visits/vendor-input'
 import { validateNik } from '@/lib/users/nik'
+import {
+  EMAIL_MAX_LENGTH,
+  NAME_MAX_LENGTH,
+  PASSWORD_MAX_BYTES,
+  PHONE_MAX_LENGTH,
+  isValidEmail,
+  isValidPassword,
+  isValidPhone,
+  sanitizePhoneInput,
+} from '@/lib/limits'
 import { managedRoleTone } from '@/lib/visits/status-badge'
 import { getRoleLabel } from '@/lib/auth/capabilities'
 
@@ -52,6 +62,9 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
   // Prefill NIK dari baris; required — pengosongan ditolak (cermin BE).
   const [nik, setNik] = useState(user.nik ?? '')
   const [nikError, setNikError] = useState<string | undefined>(undefined)
+  const [emailError, setEmailError] = useState<string | undefined>(undefined)
+  const [phoneError, setPhoneError] = useState<string | undefined>(undefined)
+  const [passwordError, setPasswordError] = useState<string | undefined>(undefined)
   const [locationId, setLocationId] = useState(user.location_id ?? '')
   // Prefill teks vendor apa adanya dari baris. Tanpa perubahan = field absen
   // dari payload; dikosongkan = kirim `vendor_name: ''` (bersihkan kolom).
@@ -77,6 +90,23 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
     event.preventDefault()
     if (name.trim() === '' || email.trim() === '') return
     if (locationMode === 'select' && locationId === '') return
+
+    const nextEmailError = isValidEmail(email) ? undefined : 'Format email tidak valid.'
+    setEmailError(nextEmailError)
+    if (nextEmailError !== undefined) return
+
+    const nextPhoneError =
+      phone.trim() === '' || isValidPhone(phone) ? undefined : 'Format nomor telepon tidak valid.'
+    setPhoneError(nextPhoneError)
+    if (nextPhoneError !== undefined) return
+
+    const nextPasswordError =
+      password === '' || isValidPassword(password)
+        ? undefined
+        : 'Kata sandi minimal 8 karakter dan maksimal 72 byte.'
+    setPasswordError(nextPasswordError)
+    if (nextPasswordError !== undefined) return
+
     // NIK tak boleh dikosongkan untuk admin/vendor (BE wajib).
     if (showNik) {
       const error = validateNik(nik, true)
@@ -147,6 +177,7 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
             value={name}
             onChange={(event) => setName(event.target.value)}
             autoComplete="name"
+            maxLength={NAME_MAX_LENGTH}
             required
           />
           <Input
@@ -154,17 +185,28 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
             type="email"
             placeholder="nama@thc.id"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) => {
+              setEmail(event.target.value)
+              if (emailError !== undefined) setEmailError(undefined)
+            }}
             autoComplete="email"
+            maxLength={EMAIL_MAX_LENGTH}
+            error={emailError}
             required
           />
           <Input
             label="No. Telepon"
             type="tel"
+            inputMode="tel"
             placeholder="08xxxxxxxxxx"
             value={phone}
-            onChange={(event) => setPhone(event.target.value)}
+            onChange={(event) => {
+              setPhone(sanitizePhoneInput(event.target.value))
+              if (phoneError !== undefined) setPhoneError(undefined)
+            }}
             autoComplete="tel"
+            maxLength={PHONE_MAX_LENGTH}
+            error={phoneError}
             hint="Kosongkan untuk menghapus nomor."
           />
           <Input
@@ -172,8 +214,14 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
             type="password"
             placeholder="Kosongkan bila tak diubah"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value)
+              if (passwordError !== undefined) setPasswordError(undefined)
+            }}
             autoComplete="new-password"
+            maxLength={PASSWORD_MAX_BYTES}
+            hint="Minimal 8 karakter."
+            error={passwordError}
           />
           {isSelf ? (
             <Input
@@ -183,6 +231,7 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
               autoComplete="current-password"
+              maxLength={PASSWORD_MAX_BYTES}
               required={password !== ''}
             />
           ) : null}

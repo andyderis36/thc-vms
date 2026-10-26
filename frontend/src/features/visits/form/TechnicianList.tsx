@@ -16,6 +16,12 @@ import { Input } from '@/components/ui/Input'
 import { UploadBox } from './UploadBox'
 import { technicianAnchorId } from './invalid-fields'
 import { useJabatanQuery, useVendorsQuery } from '@/lib/api/hooks'
+import {
+  ID_NUMBER_MAX_LENGTH,
+  NAME_MAX_LENGTH,
+  PHONE_MAX_LENGTH,
+  sanitizePhoneInput,
+} from '@/lib/limits'
 import { JABATAN_MAX_LENGTH } from '@/lib/visits/jabatan-input'
 import { VENDOR_NAME_MAX_LENGTH } from '@/lib/visits/vendor-input'
 import {
@@ -97,6 +103,7 @@ function TechnicianRow({
   })
   const rowError = errors.technicians?.[index]
   const removeLabel = `Hapus anggota ${index + 1}`
+  const phoneField = register(`technicians.${index}.phone`)
 
   return (
     <div className="card p-4">
@@ -133,6 +140,7 @@ function TechnicianRow({
           required
           fieldSize="gate"
           autoComplete="off"
+          maxLength={NAME_MAX_LENGTH}
           placeholder="Sesuai KTP/SIM"
           error={rowError?.name?.message}
           id={technicianAnchorId(index, 'name')}
@@ -144,6 +152,7 @@ function TechnicianRow({
           fieldSize="gate"
           inputMode="numeric"
           autoComplete="off"
+          maxLength={ID_NUMBER_MAX_LENGTH}
           placeholder="Nomor identitas yang masih berlaku"
           error={rowError?.id_number?.message}
           id={technicianAnchorId(index, 'id_number')}
@@ -156,10 +165,15 @@ function TechnicianRow({
           type="tel"
           inputMode="tel"
           autoComplete="off"
+          maxLength={PHONE_MAX_LENGTH}
           placeholder="08xxxxxxxxxx"
           error={rowError?.phone?.message}
           id={technicianAnchorId(index, 'phone')}
-          {...register(`technicians.${index}.phone`)}
+          {...phoneField}
+          onChange={(event) => {
+            event.target.value = sanitizePhoneInput(event.target.value)
+            phoneField.onChange(event)
+          }}
         />
         {/* Jabatan: teks bebas + saran jabatan yang pernah terdaftar. */}
         <Input
@@ -186,7 +200,7 @@ function TechnicianRow({
         <UploadBox
           compact
           label="Foto KTP"
-          hint="Wajib diunggah — maksimal 5 MB (JPG/PNG)."
+          hint="Wajib diunggah — foto dikompresi otomatis (hasil ≤5 MB, JPG/PNG)."
           category="id_card"
           id={technicianAnchorId(index, 'id_card_photo')}
           value={photo.url === '' ? null : photo}
@@ -209,7 +223,7 @@ function TechnicianRow({
         <UploadBox
           compact
           label="Foto Selfie"
-          hint="Wajah anggota terlihat jelas — maksimal 5 MB (JPG/PNG)."
+          hint="Wajah anggota terlihat jelas — foto dikompresi otomatis (hasil ≤5 MB, JPG/PNG)."
           idleButtonLabel="Unggah Foto Selfie"
           changeButtonLabel="Ganti Foto Selfie"
           category="id_card"

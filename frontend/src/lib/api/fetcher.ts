@@ -187,9 +187,10 @@ export async function uploadFile(
   file: File,
   category: UploadCategory,
 ): Promise<UploadFileResult> {
-  // Validasi 5 MB + MIME pre-kompresi, kompresi foto (≤1600px, JPEG q0.8),
-  // lalu validasi post-kompresi — semuanya sebelum baris byte apa pun
-  // menyentuh jaringan. Pesan penolakan tetap bahasa Indonesia.
+  // Dua langkah sebelum baris byte apa pun menyentuh jaringan: validasi ingest
+  // 20 MB + MIME, kompresi foto (≤1600px, JPEG q0.82), lalu validasi stored
+  // 5 MB pada hasil foto — plafon stored PDF ditangguhkan ke server. Pesan
+  // penolakan tetap bahasa Indonesia.
   const prepared = await prepareUpload(file);
   if (!prepared.ok) {
     throw new ApiError(prepared.message, 400, 'VALIDATION_ERROR');

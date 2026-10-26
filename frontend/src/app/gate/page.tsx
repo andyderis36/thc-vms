@@ -15,6 +15,7 @@ import { SearchInput } from '@/components/ui/SearchInput'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { RequireRole } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import { SEARCH_QUERY_MAX_LENGTH } from '@/lib/limits'
 import {
   useCheckInVisitMutation,
   useCheckOutVisitMutation,
@@ -424,6 +425,7 @@ function GateContent() {
               placeholder="Cari Visit ID atau Vendor/Mitra…"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
+              maxLength={SEARCH_QUERY_MAX_LENGTH}
               fieldSize="gate"
               className={searchInput !== '' ? 'pr-12' : ''}
             />

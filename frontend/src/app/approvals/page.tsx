@@ -21,6 +21,7 @@ import { useLocationsQuery, usePendingApprovalCount, useVisitsQuery } from '@/li
 import type { Role, VisitDetail, VisitListParams, VisitOrder, VisitSortField } from '@/lib/api/types'
 import { RequireRole } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import { SEARCH_QUERY_MAX_LENGTH } from '@/lib/limits'
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
 
@@ -242,6 +243,7 @@ function ApprovalsScreen() {
             placeholder="Cari nama Vendor/Mitra atau Visit ID…"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
+            maxLength={SEARCH_QUERY_MAX_LENGTH}
           />
         </div>
         <div className="min-w-36 flex-1 sm:w-44 sm:flex-none">

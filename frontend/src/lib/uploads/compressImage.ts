@@ -4,20 +4,21 @@
  *
  * Foto JPEG/PNG diturunkan via canvas ke sisi terpanjang maksimum
  * `MAX_IMAGE_EDGE_PX` piksel, lalu dikodekan ulang sebagai JPEG kualitas
- * `JPEG_QUALITY`. Berkas non-gambar (PDF) dilewatkan apa adanya — byte-identik.
+ * `JPEG_QUALITY`. Berkas non-gambar (PDF) dilewatkan apa adanya — byte-identik;
+ * PDF dikompresi oleh server, bukan di sini.
  *
  * Orientasi EXIF diterapkan oleh decoder browser (`imageOrientation:
  * 'from-image'`); hasil encode canvas tidak membawa metadata EXIF, sehingga
  * koreksi gambar tidak pernah bergantung pada parsing EXIF di sini.
  */
 
-import { validateUpload } from '@/lib/uploads/validation'
+import { validateStoredUpload, validateUploadIngest } from '@/lib/uploads/validation'
 
 /** Sisi terpanjang hasil kompresi (AGENTS.md: skala wajar untuk foto unggahan). */
 export const MAX_IMAGE_EDGE_PX = 1600
 
-/** Kualitas JPEG hasil encode ulang (0.8 = keseimbangan ukuran vs kejelasan). */
-export const JPEG_QUALITY = 0.8
+/** Kualitas JPEG hasil encode ulang (0.82 = keseimbangan ukuran vs kejelasan). */
+export const JPEG_QUALITY = 0.82
 
 /** Satu-satunya tipe foto yang dikompres; selebihnya (PDF dkk.) dilewatkan. */
 const PHOTO_MIME_TYPES: readonly string[] = ['image/jpeg', 'image/png']
@@ -30,7 +31,7 @@ function jpegName(name: string): string {
 }
 
 /**
- * Turunkan foto ke ≤1600px sisi terpanjang dan encode ulang JPEG q0.8.
+ * Turunkan foto ke ≤1600px sisi terpanjang dan encode ulang JPEG q0.82.
  * Berkas yang bukan foto (PDF, dll.) dikembalikan apa adanya (byte-identik).
  */
 export async function compressImage(file: File): Promise<File> {
@@ -78,13 +79,15 @@ export async function compressImage(file: File): Promise<File> {
 }
 
 /**
- * Validasi 5 MB + MIME sebelum DAN sesudah kompresi (pesan Indonesia dari
- * `validateUpload`), lalu kompresi foto. Dipakai `uploadFile` sebelum
+ * Dua langkah unggahan sebelum jaringan: (1) validasi ingest 20 MB + MIME pada
+ * berkas mentah, (2) kompresi foto — PDF dilewatkan apa adanya, (3) untuk foto
+ * saja, validasi stored 5 MB pada hasil kompresi. Plafon stored PDF ditangguhkan
+ * ke server yang mengompresi dan memutuskannya. Dipakai `uploadFile` sebelum
  * FormData dibuat — berkas tidak pernah menyentuh jaringan dalam bentuk
  * mentahnya.
  */
 export async function prepareUpload(file: File): Promise<PreparedUpload> {
-  const before = validateUpload(file)
+  const before = validateUploadIngest(file)
   if (!before.ok) {
     return before
   }
@@ -99,9 +102,13 @@ export async function prepareUpload(file: File): Promise<PreparedUpload> {
     }
   }
 
-  const after = validateUpload(prepared)
-  if (!after.ok) {
-    return after
+  // PDF tidak dikompresi di peramban, jadi plafon stored 5 MB-nya adalah
+  // urusan server — hanya foto yang diperiksa terhadap hasil kompresinya.
+  if (prepared.type !== 'application/pdf') {
+    const after = validateStoredUpload(prepared)
+    if (!after.ok) {
+      return after
+    }
   }
   return { ok: true, file: prepared }
 }

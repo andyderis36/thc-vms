@@ -28,6 +28,12 @@ import type { Location } from '@/lib/api/types'
 import { can } from '@/lib/auth/capabilities'
 import { RequireRole } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import {
+  FACILITY_ADDRESS_MAX_LENGTH,
+  FACILITY_CITY_MAX_LENGTH,
+  FACILITY_NAME_MAX_LENGTH,
+  SEARCH_QUERY_MAX_LENGTH,
+} from '@/lib/limits'
 import { DEFAULT_PAGE_SIZE, paginate } from '@/lib/pagination'
 import {
   TABLE_CARD_LIST_CLASS,
@@ -307,6 +313,7 @@ function FacilitiesScreen() {
             placeholder="Cari nama fasilitas atau kota…"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
+            maxLength={SEARCH_QUERY_MAX_LENGTH}
           />
         </div>
         {/* Anak TERAKHIR toolbar: reset semua filter (termasuk filter Cabang). */}
@@ -800,6 +807,7 @@ function LocationFormModal({ title, submitLabel, locations, initial, onClose }: 
           placeholder="Kantor Cabang Sambas"
           value={form.name}
           onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+          maxLength={FACILITY_NAME_MAX_LENGTH}
           required
         />
         <div className="grid gap-4 sm:grid-cols-2">
@@ -828,12 +836,14 @@ function LocationFormModal({ title, submitLabel, locations, initial, onClose }: 
           placeholder="Jl. Sukaramai No. 12, Sambas"
           value={form.address}
           onChange={(event) => setForm((prev) => ({ ...prev, address: event.target.value }))}
+          maxLength={FACILITY_ADDRESS_MAX_LENGTH}
         />
         <Input
           label="Kota"
           placeholder="Sambas"
           value={form.city}
           onChange={(event) => setForm((prev) => ({ ...prev, city: event.target.value }))}
+          maxLength={FACILITY_CITY_MAX_LENGTH}
         />
       </form>
     </Modal>

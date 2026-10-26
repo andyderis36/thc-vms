@@ -33,6 +33,7 @@ import type { VisitDetail, VisitListParams, VisitOrder, VisitSortField, VisitSta
 import { can } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import { SEARCH_QUERY_MAX_LENGTH } from '@/lib/limits'
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { VISIT_STATUS_META } from '@/lib/visits/status-badge'
 import { mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
@@ -505,6 +506,7 @@ function DashboardScreen() {
             placeholder="Cari Visit ID, Vendor/Mitra, atau lokasi…"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
+            maxLength={SEARCH_QUERY_MAX_LENGTH}
           />
         </div>
         <div className="min-w-36 flex-1 sm:w-44 sm:flex-none">

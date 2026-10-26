@@ -11,6 +11,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CreateVisitRequest } from '@/lib/api/types'
+import {
+  ID_NUMBER_MAX_LENGTH,
+  NAME_MAX_LENGTH,
+  PHONE_MAX_LENGTH,
+  TEXT_MAX_LENGTH,
+} from '@/lib/limits'
 
 import { VisitForm } from './VisitForm'
 
@@ -245,5 +251,34 @@ describe('VisitForm - foto KTP wajib diunggah', () => {
       'https://cdn.example/ktp.jpg',
     )
     expect(screen.queryByText('Foto KTP wajib diunggah.')).not.toBeInTheDocument()
+  })
+})
+
+describe('VisitForm - batas input kanonik', () => {
+  it('menerapkan maxLength dari @/lib/limits pada isian anggota & catatan', () => {
+    render(<VisitForm />)
+
+    expect(
+      screen.getByLabelText<HTMLInputElement>(/Nama Lengkap/),
+    ).toHaveAttribute('maxlength', String(NAME_MAX_LENGTH))
+    expect(
+      screen.getByLabelText<HTMLInputElement>(/Nomor KTP \/ SIM/),
+    ).toHaveAttribute('maxlength', String(ID_NUMBER_MAX_LENGTH))
+    expect(
+      screen.getByLabelText<HTMLInputElement>(/Nomor HP/),
+    ).toHaveAttribute('maxlength', String(PHONE_MAX_LENGTH))
+    expect(
+      screen.getByLabelText<HTMLTextAreaElement>(/Catatan Tambahan/),
+    ).toHaveAttribute('maxlength', String(TEXT_MAX_LENGTH))
+  })
+
+  it('membuang non-digit dari isian Nomor HP (tempel "+62 812-3456-7890")', () => {
+    render(<VisitForm />)
+
+    const phone = screen.getByLabelText<HTMLInputElement>(/Nomor HP/)
+    fireEvent.change(phone, { target: { value: '+62 812-3456-7890' } })
+
+    expect(phone).toHaveValue('6281234567890')
+    expect(phone.value).toMatch(/^[0-9]*$/)
   })
 })

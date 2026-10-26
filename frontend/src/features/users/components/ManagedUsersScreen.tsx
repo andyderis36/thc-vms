@@ -52,6 +52,7 @@ import {
 import type { User } from '@/lib/api/types'
 import { getRoleLabel } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
+import { SEARCH_QUERY_MAX_LENGTH } from '@/lib/limits'
 import { DEFAULT_PAGE_SIZE, paginate } from '@/lib/pagination'
 
 export interface ManagedUsersScreenProps {
@@ -306,6 +307,7 @@ export function ManagedUsersScreen({
             placeholder="Cari nama atau email…"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
+            maxLength={SEARCH_QUERY_MAX_LENGTH}
           />
         </div>
         {/* Selalu anak TERAKHIR: satu-satunya reset untuk semua kontrol di atas. */}

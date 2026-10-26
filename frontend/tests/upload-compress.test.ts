@@ -183,7 +183,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('compressImage — downscale + JPEG q0.8', () => {
+describe('compressImage — downscale + JPEG q0.82', () => {
   it('shrinks a 4000×3000 jpeg to a ≤1600px longest edge and drops its bytes', async () => {
     const calls = stubRasterizer({
       pixels: { width: 4000, height: 3000 },
@@ -196,13 +196,13 @@ describe('compressImage — downscale + JPEG q0.8', () => {
     expect(calls.drawn).toEqual({ width: 1600, height: 1200 })
     expect(MAX_IMAGE_EDGE_PX).toBe(1600)
     expect(calls.encodeArgs).toEqual({ type: 'image/jpeg', quality: JPEG_QUALITY })
-    expect(JPEG_QUALITY).toBe(0.8)
+    expect(JPEG_QUALITY).toBe(0.82)
     expect(output.type).toBe('image/jpeg')
     expect(output.name).toBe('ktp.jpg')
     expect(output.size).toBeLessThan(input.size)
   })
 
-  it('re-encodes an already-small jpeg at native dimensions (no upscale, still q0.8)', async () => {
+  it('re-encodes an already-small jpeg at native dimensions (no upscale, still q0.82)', async () => {
     const calls = stubRasterizer({
       pixels: { width: 800, height: 600 },
       encode: (width, height) => new Uint8Array(Math.floor((width * height) / 4)),
@@ -212,7 +212,7 @@ describe('compressImage — downscale + JPEG q0.8', () => {
     const output = await compressImage(input)
 
     expect(calls.drawn).toEqual({ width: 800, height: 600 })
-    expect(calls.encodeArgs).toEqual({ type: 'image/jpeg', quality: 0.8 })
+    expect(calls.encodeArgs).toEqual({ type: 'image/jpeg', quality: 0.82 })
     expect(output.type).toBe('image/jpeg')
     expect(output.size).toBeLessThan(input.size)
   })
@@ -279,21 +279,36 @@ describe('compressImage — EXIF independence', () => {
   })
 })
 
-describe('prepareUpload — validasi pre & post kompresi (pesan Indonesia)', () => {
-  it('rejects an oversized image BEFORE compression with the Indonesian 5 MB message', async () => {
+describe('prepareUpload — dua langkah: ingest 20 MB lalu stored 5 MB (pesan Indonesia)', () => {
+  it('rejects a photo over the 20 MB ingest ceiling BEFORE compression with the Indonesian 20 MB message', async () => {
     const calls = stubRasterizer({
       pixels: { width: 4000, height: 3000 },
       encode: () => new Uint8Array(1024),
     })
-    const oversized = new File([makeJpegBytes(6 * MB)], 'raksasa.jpg', { type: 'image/jpeg' })
+    const oversized = new File([makeJpegBytes(21 * MB)], 'raksasa.jpg', { type: 'image/jpeg' })
 
     const result = await prepareUpload(oversized)
 
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('expected rejection')
-    expect(result.message).toContain('5 MB')
+    expect(result.message).toContain('20 MB')
     expect(result.message).toContain('raksasa.jpg')
     expect(calls.decodeCalls).toHaveLength(0)
+  })
+
+  it('compresses a photo above the old flat 5 MB cap instead of rejecting it outright', async () => {
+    stubRasterizer({
+      pixels: { width: 4000, height: 3000 },
+      encode: (width, height) => new Uint8Array(Math.floor((width * height) / 8)),
+    })
+    const input = new File([makeJpegBytes(6 * MB)], 'foto-besar.jpg', { type: 'image/jpeg' })
+
+    const result = await prepareUpload(input)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected success')
+    expect(result.file.size).toBeLessThan(MAX_UPLOAD_BYTES)
+    expect(result.file.size).toBeLessThan(input.size)
   })
 
   it('rejects an unsupported MIME before compression with the Indonesian format message', async () => {
@@ -359,6 +374,42 @@ describe('prepareUpload — validasi pre & post kompresi (pesan Indonesia)', () 
     expect(bytesEqual(new Uint8Array(await result.file.arrayBuffer()), bytes)).toBe(true)
   })
 
+  it('accepts an 8 MB pdf at ingest — the stored 5 MB cap is deferred to the server', async () => {
+    const calls = stubRasterizer({
+      pixels: { width: 10, height: 10 },
+      encode: () => new Uint8Array(0),
+    })
+    const bytes = makePdfBytes(8 * MB)
+    const pdf = new File([bytes], 'surat-tugas-besar.pdf', { type: 'application/pdf' })
+
+    const result = await prepareUpload(pdf)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected success')
+    expect(result.file.size).toBeGreaterThan(MAX_UPLOAD_BYTES)
+    expect(bytesEqual(new Uint8Array(await result.file.arrayBuffer()), bytes)).toBe(true)
+    expect(calls.decodeCalls).toHaveLength(0)
+  })
+
+  it('refuses a 21 MB pdf at ingest with the Indonesian 20 MB message, never a 5 MB one', async () => {
+    const calls = stubRasterizer({
+      pixels: { width: 10, height: 10 },
+      encode: () => new Uint8Array(0),
+    })
+    const pdf = new File([makePdfBytes(21 * MB)], 'terlalu-besar.pdf', {
+      type: 'application/pdf',
+    })
+
+    const result = await prepareUpload(pdf)
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('expected rejection')
+    expect(result.message).toContain('20 MB')
+    expect(result.message).toContain('terlalu-besar.pdf')
+    expect(result.message).not.toContain('5 MB')
+    expect(calls.decodeCalls).toHaveLength(0)
+  })
+
   it('reports a rasterizer failure with an Indonesian message instead of leaking a DOM error', async () => {
     stubDecodeFailure(new Error('decode error: The source image is corrupt'))
     const input = new File([makeJpegBytes(1 * MB)], 'rusak.jpg', { type: 'image/jpeg' })
@@ -396,16 +447,17 @@ describe('uploadFile — kompresi terjadi SEBELUM data dikirim', () => {
     expect((body as FormData).get('category')).toBe('id_card')
   })
 
-  it('throws ApiError with the Indonesian 5 MB message and never hits the network when the file is oversize', async () => {
+  it('throws ApiError with the Indonesian 20 MB message and never hits the network when the file exceeds the ingest ceiling', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    const oversized = new File([makeJpegBytes(6 * MB)], 'raksasa.jpg', { type: 'image/jpeg' })
+    const oversized = new File([makeJpegBytes(21 * MB)], 'raksasa.jpg', { type: 'image/jpeg' })
 
     const failure = await uploadFile(oversized, 'checkin_photo').catch((error: unknown) => error)
 
     expect(failure).toBeInstanceOf(ApiError)
     const apiError = failure as ApiError
-    expect(apiError.message).toContain('5 MB')
+    expect(apiError.message).toContain('20 MB')
+    expect(apiError.message).toContain('raksasa.jpg')
     expect(apiError.status).toBe(400)
     expect(apiError.code).toBe('VALIDATION_ERROR')
     expect(fetchMock).not.toHaveBeenCalled()

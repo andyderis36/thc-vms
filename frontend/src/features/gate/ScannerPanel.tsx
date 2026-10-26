@@ -12,6 +12,7 @@ import {
   classifyCameraFailure,
   type CameraSupport,
 } from '@/features/gate/camera-support'
+import { VISIT_ID_INPUT_MAX_LENGTH } from '@/lib/limits'
 
 /**
  * SCR-05 — Panel Pemindai Dua-Tab: kamera langsung (dengan tombol unggah
@@ -461,6 +462,7 @@ export function ScannerPanel({
                   placeholder="VST-2026090001"
                   value={manual}
                   onChange={(event) => setManual(event.target.value)}
+                  maxLength={VISIT_ID_INPUT_MAX_LENGTH}
                   hint="Format: VST-2026090001. Gunakan bila QR rusak atau kamera bermasalah."
                   autoComplete="off"
                   className="font-mono uppercase"

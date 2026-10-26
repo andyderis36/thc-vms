@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { useRejectVisitMutation } from '@/lib/api/hooks'
 import { queryKeys } from '@/lib/api/query-keys'
 import type { VisitDetail } from '@/lib/api/types'
+import { TEXT_MAX_LENGTH } from '@/lib/limits'
 import { apiErrorMessage, VisitSummary } from './ApproveModal'
 
 /** Alasan wajib minimal 5 karakter — tombol Tolak tetap nonaktif di bawahnya. */
@@ -32,7 +33,14 @@ export function RejectModal({ open, visit, onClose }: RejectModalProps) {
   const queryClient = useQueryClient()
 
   const trimmed = reason.trim()
-  const reasonValid = trimmed.length >= MIN_REASON
+  const reasonValid =
+    trimmed.length >= MIN_REASON && reason.length <= TEXT_MAX_LENGTH
+  const reasonError =
+    reason.length > TEXT_MAX_LENGTH
+      ? `Alasan maksimal ${TEXT_MAX_LENGTH} karakter.`
+      : reason.length > 0 && trimmed.length < MIN_REASON
+        ? 'Alasan minimal 5 karakter.'
+        : undefined
 
   const handleReject = (): void => {
     if (visit === null || !reasonValid) return
@@ -86,7 +94,8 @@ export function RejectModal({ open, visit, onClose }: RejectModalProps) {
         placeholder="Jelaskan alasan penolakan (min. 5 karakter)"
         value={reason}
         onChange={(event) => setReason(event.target.value)}
-        error={reason.length > 0 && !reasonValid ? 'Alasan minimal 5 karakter.' : undefined}
+        error={reasonError}
+        maxLength={TEXT_MAX_LENGTH}
         hint={`Minimal ${MIN_REASON} karakter.`}
         required
         rows={3}

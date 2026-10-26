@@ -9,22 +9,55 @@
 
 import { z } from 'zod'
 
-import { JABATAN_MAX_LENGTH } from '@/lib/visits/jabatan-input'
-import { MAX_TECHNICIANS } from '@/lib/visits/vendor-input'
+import {
+  ID_NUMBER_PATTERN,
+  JABATAN_MAX_LENGTH,
+  NAME_MAX_LENGTH,
+  PURPOSE_NOTE_MAX_LENGTH,
+  TECHNICIANS_MAX,
+  TEXT_MAX_LENGTH,
+  VENDOR_NAME_MAX_LENGTH,
+  isValidPhone,
+} from '@/lib/limits'
 
 // Batas anggota tim dimiliki `lib/visits/vendor-input.ts` (modul `lib/` tidak
 // boleh mengimpor `features/`); di-re-export di sini agar importir lama
 // (`TechnicianList.tsx`, dll.) tetap berfungsi tanpa perubahan.
-export { MAX_TECHNICIANS }
+export { TECHNICIANS_MAX as MAX_TECHNICIANS }
 
 /**
  * Satu baris anggota: nama, identitas, HP, foto KTP, dan selfie WAJIB.
  * `jabatan` opsional (teks bebas + saran dari `GET /jabatan`).
  */
 export const technicianSchema = z.object({
-  name: z.string().trim().min(1, 'Nama lengkap anggota wajib diisi.'),
-  id_number: z.string().trim().min(1, 'Nomor KTP/SIM anggota wajib diisi.'),
-  phone: z.string().trim().min(1, 'Nomor HP anggota wajib diisi.'),
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Nama lengkap anggota wajib diisi.')
+    .max(
+      NAME_MAX_LENGTH,
+      `Nama lengkap anggota maksimal ${NAME_MAX_LENGTH} karakter.`,
+    ),
+  id_number: z
+    .string()
+    .trim()
+    .min(1, 'Nomor KTP/SIM anggota wajib diisi.')
+    .regex(
+      ID_NUMBER_PATTERN,
+      'Nomor KTP/SIM anggota harus terdiri dari 8-20 huruf atau angka tanpa spasi.',
+    ),
+  phone: z
+    .string()
+    .trim()
+    .min(1, 'Nomor HP anggota wajib diisi.')
+    .refine(
+      (value) => !/[A-Za-z]/.test(value),
+      'Nomor HP tidak boleh mengandung huruf.',
+    )
+    .refine(
+      isValidPhone,
+      'Nomor HP anggota tidak valid (9-15 digit angka, diawali 0 atau 62).',
+    ),
   // Foto KTP WAJIB (keputusan pemilik produk): tanpa foto identitas, anggota
   // tak bisa diverifikasi pengawas pas. Bentuknya mirror `selfie` — baris baru
   // memakai sentinel kosong `{ url: '', name: '' }` agar galat tampil di level
@@ -74,7 +107,10 @@ export const technicianSchema = z.object({
   vendor_name: z
     .string()
     .trim()
-    .max(120, 'Nama vendor maksimal 120 karakter.')
+    .max(
+      VENDOR_NAME_MAX_LENGTH,
+      `Nama vendor maksimal ${VENDOR_NAME_MAX_LENGTH} karakter.`,
+    )
     .optional(),
 })
 
@@ -94,7 +130,10 @@ export const visitFormSchema = z
     purpose_note: z
       .string()
       .trim()
-      .max(200, 'Tujuan lain maksimal 200 karakter.')
+      .max(
+        PURPOSE_NOTE_MAX_LENGTH,
+        `Tujuan lain maksimal ${PURPOSE_NOTE_MAX_LENGTH} karakter.`,
+      )
       .optional(),
     start_date: z.string().min(1, 'Waktu mulai wajib diisi.'),
     end_date: z.string().min(1, 'Waktu selesai wajib diisi.'),
@@ -105,13 +144,17 @@ export const visitFormSchema = z
         (value): boolean => value != null,
         'Surat Tugas / SPK wajib diunggah.',
       ),
-    notes: z.string().trim().optional(),
+    notes: z
+      .string()
+      .trim()
+      .max(TEXT_MAX_LENGTH, `Catatan maksimal ${TEXT_MAX_LENGTH} karakter.`)
+      .optional(),
     technicians: z
       .array(technicianSchema)
       .min(1, 'Minimal satu anggota wajib didaftarkan.')
       .max(
-        MAX_TECHNICIANS,
-        `Jumlah anggota maksimal ${MAX_TECHNICIANS} orang.`,
+        TECHNICIANS_MAX,
+        `Jumlah anggota maksimal ${TECHNICIANS_MAX} orang.`,
       ),
     is_nda_accepted: z
       .boolean()

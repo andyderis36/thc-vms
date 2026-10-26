@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { useApproveVisitMutation } from '@/lib/api/hooks'
 import { queryKeys } from '@/lib/api/query-keys'
 import type { VisitDetail } from '@/lib/api/types'
+import { TEXT_MAX_LENGTH } from '@/lib/limits'
 import { primaryVendorDisplay } from '@/lib/visits/vendor-display'
 import { visitVendorUser } from '@/lib/visits/vendor-user'
 import { formatVisitSchedule } from './VisitTable'
@@ -125,6 +126,7 @@ export function ApproveModal({ open, visit, onClose }: ApproveModalProps) {
         placeholder="Catatan untuk petugas pos (opsional)"
         value={notes}
         onChange={(event) => setNotes(event.target.value)}
+        maxLength={TEXT_MAX_LENGTH}
         rows={3}
       />
     </Modal>

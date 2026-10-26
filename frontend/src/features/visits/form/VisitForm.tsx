@@ -35,6 +35,7 @@ import {
 } from '@/lib/api/hooks'
 import type { CreateVisitRequest } from '@/lib/api/types'
 import { useSession } from '@/lib/auth/session'
+import { PURPOSE_NOTE_MAX_LENGTH, TEXT_MAX_LENGTH } from '@/lib/limits'
 import {
   selectLatestVisit,
   toTechnicianRows,
@@ -452,7 +453,7 @@ export function VisitForm() {
                 placeholder="Tulis tujuan bila tidak ada di daftar"
                 hint="Opsional — maksimal 200 karakter. Cukup isi ini bila tidak memilih tujuan dari daftar."
                 autoComplete="off"
-                maxLength={200}
+                maxLength={PURPOSE_NOTE_MAX_LENGTH}
                 error={errors.purpose_note?.message}
                 {...register('purpose_note')}
               />
@@ -552,7 +553,7 @@ export function VisitForm() {
               <UploadBox
                 id="visit-assignment-letter"
                 label="Unggah Surat Tugas / Surat Perintah Kerja"
-                hint="Format PDF, JPG, atau PNG — maksimal 5 MB. Bisa dipilih dari galeri, kamera, atau berkas perangkat."
+                hint="Format PDF, JPG, atau PNG. Foto dikompresi otomatis (hasil ≤5 MB); PDF hingga 20 MB dikompresi otomatis oleh server (hasil ≤5 MB). Bisa dipilih dari galeri, kamera, atau berkas perangkat."
                 idleButtonLabel="Pilih dari Galeri / Berkas"
                 changeButtonLabel="Ganti Berkas"
                 category="assignment_letter"
@@ -583,6 +584,7 @@ export function VisitForm() {
             placeholder="Rincian pekerjaan atau daftar peralatan yang dibawa (mis. splicer, OTDR, genset portable)."
             hint="Opsional — tuliskan rincian yang membantu petugas pos jaga."
             error={errors.notes?.message}
+            maxLength={TEXT_MAX_LENGTH}
             {...register('notes')}
           />
         </CardBody>

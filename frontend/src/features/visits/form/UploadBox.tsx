@@ -7,7 +7,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { ApiError } from '@/lib/api/fetcher'
 import { useUploadFileMutation } from '@/lib/api/hooks'
 import type { UploadCategory } from '@/lib/api/types'
-import { ALLOWED_MIME_TYPES, validateUpload } from '@/lib/uploads/validation'
+import { ALLOWED_MIME_TYPES, validateUploadIngest } from '@/lib/uploads/validation'
 
 /** Berkas hasil unggahan: URL object storage + nama berkas untuk tampilan. */
 export interface UploadedFile {
@@ -36,12 +36,17 @@ export interface UploadBoxProps {
 const ACCEPT_TYPES = ALLOWED_MIME_TYPES.join(',')
 
 /**
- * Dropzone + pemilih berkas untuk lampiran (PDF/JPG/PNG, maks 5 MB).
+ * Dropzone + pemilih berkas untuk lampiran (PDF/JPG/PNG).
  *
- * Aturan ukuran/MIME TIDAK ditulis ulang di sini: `validateUpload` (sudah
- * berunit test) dijalankan sebelum `useUploadFileMutation`, sehingga berkas
- * tak valid tidak pernah menyentuh jaringan. Seret-lepas memakai event drag
- * HTML asli; tombol pilih berkas tetap tersedia sebagai jalur akses keyboard.
+ * Aturan ukuran/MIME TIDAK ditulis ulang di sini: pemilih berkas memakai
+ * plafon INGEST 20 MB (`validateUploadIngest`, sudah berunit test) karena
+ * berkas mentah belum dikompresi — foto disusutkan peramban di
+ * `prepareUpload` lalu diperiksa terhadap plafon stored 5 MB, dan PDF
+ * disusutkan server yang juga menegakkan plafon stored. Memakai plafon stored
+ * di sini akan menolak foto 6 MB yang sebenarnya bisa dikompresi. Validasi
+ * berjalan sebelum `useUploadFileMutation`, sehingga berkas tak valid tidak
+ * pernah menyentuh jaringan. Seret-lepas memakai event drag HTML asli; tombol
+ * pilih berkas tetap tersedia sebagai jalur akses keyboard.
  */
 export function UploadBox({
   label,
@@ -76,8 +81,11 @@ export function UploadBox({
     if (file === undefined || file === null || upload.isPending) {
       return
     }
-    // Validasi lokal wajib sebelum jaringan — pesan penolakan dari validateUpload.
-    const verdict = validateUpload(file)
+    // Validasi lokal wajib sebelum jaringan dan memakai plafon ingest 20 MB:
+    // foto baru diperiksa terhadap plafon stored 5 MB setelah dikompresi, PDF
+    // setelah server mengompresinya. Pesan penolakan datang dari validator di
+    // validation.ts.
+    const verdict = validateUploadIngest(file)
     if (!verdict.ok) {
       setUploadError(verdict.message)
       return
