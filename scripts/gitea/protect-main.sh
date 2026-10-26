@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Protect `main` on Gitea so CI must pass before the dev -> main PR can merge.
 #
-# The required status check contexts are the two blocking CI jobs from ci.yml;
-# e2e is advisory until it is proven green on the runner. Gitea derives contexts
-# as "<workflow> / <job>", so they stay stable only because ci.yml deliberately
-# has no job-level `name:`.
+# The required status check contexts are the two blocking CI jobs from ci.yml.
+# Playwright E2E is not run on the VPS runner. Gitea derives contexts as
+# "<workflow> / <job>", so they stay stable only because ci.yml deliberately has
+# no job-level `name:`.
 #
 # Usage:
 #   GITEA_TOKEN=... bash scripts/gitea/protect-main.sh
@@ -83,4 +83,4 @@ if [ "${result}" -lt 200 ] || [ "${result}" -ge 300 ]; then
   exit 1
 fi
 
-echo "OK: 'main' requires ci / backend and ci / frontend (e2e is advisory)."
+echo "OK: 'main' requires ci / backend and ci / frontend."
