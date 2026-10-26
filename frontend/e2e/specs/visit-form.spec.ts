@@ -369,6 +369,7 @@ test('@VISIT-01 happy path lengkap: 1 anggota KTP+selfie, SPK 1,5 MB, tujuan kat
 test('@VISIT-02 klien meneruskan SPK 6,2 MB dan menolak 21 MB dengan pesan batas 20 MB', async ({
   h,
 }) => {
+  test.setTimeout(120_000)
   const page = await h.openAs('vendor')
   await openForm(page)
 
@@ -388,11 +389,22 @@ test('@VISIT-02 klien meneruskan SPK 6,2 MB dan menolak 21 MB dengan pesan batas
   const mediumSpk = await writeAsset(test.info(), 'spk-6mb.pdf', pdfBuffer(6200))
   const firstUpload = page.waitForResponse(
     (response) => response.request().method() === 'POST' && response.url().includes('/uploads'),
+    { timeout: 60_000 },
   )
   await input.setInputFiles(mediumSpk)
   const firstStatus = (await firstUpload).status()
   expect([201, 413]).toContain(firstStatus)
   await expect(clientSizeAlert).toHaveCount(0)
+
+  // `UploadBox.processFile` mengabaikan berkas baru selama mutation upload
+  // masih `isPending`. Tunggu state pending benar-benar turun sebelum memilih
+  // berkas 21 MB; tanpa ini, test balapan dengan response production yang
+  // lebih lambat dan file kedua tidak pernah diproses.
+  const uploadBox = page.locator('#visit-assignment-letter')
+  await expect(uploadBox.getByText('Mengunggah berkas.', { exact: true })).toHaveCount(0)
+  await expect(
+    uploadBox.getByRole('button', { name: /Ganti Berkas|Pilih dari Galeri \/ Berkas/ }),
+  ).toBeVisible()
 
   // Di atas plafon transport, klien menolak lebih dulu tanpa request tambahan.
   const hugeSpk = await writeAsset(test.info(), 'spk-21mb.pdf', pdfBuffer(21500))
