@@ -191,9 +191,9 @@ func TestLoginAudit_NilWriterDisablesTrail(t *testing.T) {
 func TestLoginAudit_LastLoginStillStamped(t *testing.T) {
 	users := seedAdminUser(t, "Password123!")
 	audit := &fakeAudit{}
+	before := time.Now()
 	svc := loginSvcWithAudit(users, audit)
 
-	before := time.Now()
 	if _, err := svc.Login(auditCtx(), "admin@thc.local", "Password123!"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
