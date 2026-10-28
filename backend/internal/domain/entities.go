@@ -84,7 +84,9 @@ const (
 // User mirrors the USER table. LocationID is nil for super_admin and vendor,
 // and mandatory for admin and security; VendorID is set for external vendor
 // staff only. NIK is the national identity number: "" means SQL NULL
-// (mirroring Phone), populated only for admin and vendor accounts.
+// (mirroring Phone), populated only for admin and vendor accounts. AvatarURL
+// is the self-service profile photo's absolute object URL: "" means SQL NULL,
+// the same convention as Phone/NIK.
 // VendorNameOverride is the manually typed vendor company (migration 000005):
 // it is a *string rather than the ""-means-NULL convention of Phone/NIK so
 // the stored NULL maps one-to-one onto nil without a sentinel, and so the
@@ -100,6 +102,7 @@ type User struct {
 	PasswordHash       string
 	Phone              string
 	NIK                string
+	AvatarURL          string
 	RoleID             UUID
 	LocationID         *UUID
 	Type               UserType

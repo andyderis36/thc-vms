@@ -20,6 +20,7 @@ SELECT
     u.password_hash,
     u.phone,
     u.nik,
+    u.avatar_url,
     u.role_id,
     r.name AS role,
     u.location_id,
@@ -43,6 +44,7 @@ SELECT
     u.email,
     u.phone,
     u.nik,
+    u.avatar_url,
     u.role_id,
     r.name AS role,
     u.location_id,
@@ -58,6 +60,43 @@ JOIN role r ON r.id = u.role_id
 LEFT JOIN location l ON l.id = u.location_id
 LEFT JOIN vendor v ON v.id = u.vendor_id
 WHERE u.id = $1;
+
+-- Self-service profile write. The usecase resolves the final name, phone and
+-- avatar (empty -> NULL) and this statement stores them verbatim, then re-reads
+-- the SAME projection as GetUserByID so the caller gets the complete profile
+-- row. A plain UPDATE ... RETURNING cannot join role/location/vendor, so the
+-- CTE carries the updated row into the joined projection unchanged.
+-- name: UpdateUserProfile :one
+WITH updated AS (
+    UPDATE users
+    SET name       = $2,
+        phone      = $3,
+        avatar_url = $4,
+        updated_at = now()
+    WHERE users.id = $1
+    RETURNING users.id, users.name, users.email, users.phone, users.nik, users.avatar_url, users.role_id, users.location_id, users.status, users.type, users.vendor_id, users.vendor_name_override, users.created_at
+)
+SELECT
+    u.id,
+    u.name,
+    u.email,
+    u.phone,
+    u.nik,
+    u.avatar_url,
+    u.role_id,
+    r.name AS role,
+    u.location_id,
+    l.name AS location_name,
+    u.status,
+    u.type,
+    v.name AS vendor_name,
+    u.vendor_id,
+    u.vendor_name_override,
+    u.created_at
+FROM updated u
+JOIN role r ON r.id = u.role_id
+LEFT JOIN location l ON l.id = u.location_id
+LEFT JOIN vendor v ON v.id = u.vendor_id;
 
 -- Successful login bookkeeping. Also refreshes updated_at (see the migration
 -- header: the repository layer owns this column).
@@ -87,6 +126,7 @@ SELECT
     u.email,
     u.phone,
     u.nik,
+    u.avatar_url,
     r.name AS role,
     u.location_id,
     l.name AS location_name,
@@ -131,6 +171,7 @@ SELECT
     u.email,
     u.phone,
     u.nik,
+    u.avatar_url,
     r.name AS role,
     u.location_id,
     l.name AS location_name,

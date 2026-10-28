@@ -34,6 +34,7 @@ sql:
       - "migrations/000010_rename_demo_accounts_to_vendor_security.up.sql"
       - "migrations/000012_visitor_jabatan.up.sql"
       - "migrations/000013_visit_list_perf.up.sql"
+      - "migrations/000014_user_profile.up.sql"
     queries: "internal/repository/db/queries"
 
     gen:

@@ -162,6 +162,7 @@ SELECT
     u.password_hash,
     u.phone,
     u.nik,
+    u.avatar_url,
     u.role_id,
     r.name AS role,
     u.location_id,
@@ -189,6 +190,7 @@ type GetUserByEmailForLoginRow struct {
 	PasswordHash       string      `json:"password_hash"`
 	Phone              pgtype.Text `json:"phone"`
 	Nik                pgtype.Text `json:"nik"`
+	AvatarUrl          pgtype.Text `json:"avatar_url"`
 	RoleID             uuid.UUID   `json:"role_id"`
 	Role               string      `json:"role"`
 	LocationID         pgtype.UUID `json:"location_id"`
@@ -225,6 +227,7 @@ func (q *Queries) GetUserByEmailForLogin(ctx context.Context, arg GetUserByEmail
 		&i.PasswordHash,
 		&i.Phone,
 		&i.Nik,
+		&i.AvatarUrl,
 		&i.RoleID,
 		&i.Role,
 		&i.LocationID,
@@ -245,6 +248,7 @@ SELECT
     u.email,
     u.phone,
     u.nik,
+    u.avatar_url,
     u.role_id,
     r.name AS role,
     u.location_id,
@@ -272,6 +276,7 @@ type GetUserByIDRow struct {
 	Email              string      `json:"email"`
 	Phone              pgtype.Text `json:"phone"`
 	Nik                pgtype.Text `json:"nik"`
+	AvatarUrl          pgtype.Text `json:"avatar_url"`
 	RoleID             uuid.UUID   `json:"role_id"`
 	Role               string      `json:"role"`
 	LocationID         pgtype.UUID `json:"location_id"`
@@ -294,6 +299,7 @@ func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (GetUs
 		&i.Email,
 		&i.Phone,
 		&i.Nik,
+		&i.AvatarUrl,
 		&i.RoleID,
 		&i.Role,
 		&i.LocationID,
@@ -450,6 +456,7 @@ SELECT
     u.email,
     u.phone,
     u.nik,
+    u.avatar_url,
     r.name AS role,
     u.location_id,
     l.name AS location_name,
@@ -483,6 +490,7 @@ type ListManagedUsersRow struct {
 	Email              string      `json:"email"`
 	Phone              pgtype.Text `json:"phone"`
 	Nik                pgtype.Text `json:"nik"`
+	AvatarUrl          pgtype.Text `json:"avatar_url"`
 	Role               string      `json:"role"`
 	LocationID         pgtype.UUID `json:"location_id"`
 	LocationName       pgtype.Text `json:"location_name"`
@@ -519,6 +527,7 @@ func (q *Queries) ListManagedUsers(ctx context.Context, arg ListManagedUsersPara
 			&i.Email,
 			&i.Phone,
 			&i.Nik,
+			&i.AvatarUrl,
 			&i.Role,
 			&i.LocationID,
 			&i.LocationName,
@@ -546,6 +555,7 @@ SELECT
     u.email,
     u.phone,
     u.nik,
+    u.avatar_url,
     r.name AS role,
     u.location_id,
     l.name AS location_name,
@@ -573,6 +583,7 @@ type ListSecurityUsersRow struct {
 	Email        string      `json:"email"`
 	Phone        pgtype.Text `json:"phone"`
 	Nik          pgtype.Text `json:"nik"`
+	AvatarUrl    pgtype.Text `json:"avatar_url"`
 	Role         string      `json:"role"`
 	LocationID   pgtype.UUID `json:"location_id"`
 	LocationName pgtype.Text `json:"location_name"`
@@ -602,6 +613,7 @@ func (q *Queries) ListSecurityUsers(ctx context.Context, arg ListSecurityUsersPa
 			&i.Email,
 			&i.Phone,
 			&i.Nik,
+			&i.AvatarUrl,
 			&i.Role,
 			&i.LocationID,
 			&i.LocationName,
@@ -733,6 +745,99 @@ type UpdateUserLastLoginParams struct {
 func (q *Queries) UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error {
 	_, err := q.db.Exec(ctx, updateUserLastLogin, arg.ID)
 	return err
+}
+
+const updateUserProfile = `-- name: UpdateUserProfile :one
+WITH updated AS (
+    UPDATE users
+    SET name       = $2,
+        phone      = $3,
+        avatar_url = $4,
+        updated_at = now()
+    WHERE users.id = $1
+    RETURNING users.id, users.name, users.email, users.phone, users.nik, users.avatar_url, users.role_id, users.location_id, users.status, users.type, users.vendor_id, users.vendor_name_override, users.created_at
+)
+SELECT
+    u.id,
+    u.name,
+    u.email,
+    u.phone,
+    u.nik,
+    u.avatar_url,
+    u.role_id,
+    r.name AS role,
+    u.location_id,
+    l.name AS location_name,
+    u.status,
+    u.type,
+    v.name AS vendor_name,
+    u.vendor_id,
+    u.vendor_name_override,
+    u.created_at
+FROM updated u
+JOIN role r ON r.id = u.role_id
+LEFT JOIN location l ON l.id = u.location_id
+LEFT JOIN vendor v ON v.id = u.vendor_id
+`
+
+type UpdateUserProfileParams struct {
+	ID        uuid.UUID   `json:"id"`
+	Name      string      `json:"name"`
+	Phone     pgtype.Text `json:"phone"`
+	AvatarUrl pgtype.Text `json:"avatar_url"`
+}
+
+type UpdateUserProfileRow struct {
+	ID                 uuid.UUID   `json:"id"`
+	Name               string      `json:"name"`
+	Email              string      `json:"email"`
+	Phone              pgtype.Text `json:"phone"`
+	Nik                pgtype.Text `json:"nik"`
+	AvatarUrl          pgtype.Text `json:"avatar_url"`
+	RoleID             uuid.UUID   `json:"role_id"`
+	Role               string      `json:"role"`
+	LocationID         pgtype.UUID `json:"location_id"`
+	LocationName       pgtype.Text `json:"location_name"`
+	Status             string      `json:"status"`
+	Type               string      `json:"type"`
+	VendorName         pgtype.Text `json:"vendor_name"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	CreatedAt          time.Time   `json:"created_at"`
+}
+
+// Self-service profile write. The usecase resolves the final name, phone and
+// avatar (empty -> NULL) and this statement stores them verbatim, then re-reads
+// the SAME projection as GetUserByID so the caller gets the complete profile
+// row. A plain UPDATE ... RETURNING cannot join role/location/vendor, so the
+// CTE carries the updated row into the joined projection unchanged.
+func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error) {
+	row := q.db.QueryRow(ctx, updateUserProfile,
+		arg.ID,
+		arg.Name,
+		arg.Phone,
+		arg.AvatarUrl,
+	)
+	var i UpdateUserProfileRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.Phone,
+		&i.Nik,
+		&i.AvatarUrl,
+		&i.RoleID,
+		&i.Role,
+		&i.LocationID,
+		&i.LocationName,
+		&i.Status,
+		&i.Type,
+		&i.VendorName,
+		&i.VendorID,
+		&i.VendorNameOverride,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const updateUserStatus = `-- name: UpdateUserStatus :one

@@ -94,6 +94,16 @@ type ObjectReader interface {
 	OpenObject(ctx context.Context, objectKey string) (ObjectContent, error)
 }
 
+// ProfileUpdate is the fully resolved body of a self-service profile write.
+// The usecase resolves the final values first (an empty phone/avatar is sent as
+// "" and the adapter stores SQL NULL), so the adapter performs a straight
+// read-modify-write rather than a COALESCE patch.
+type ProfileUpdate struct {
+	Name      string
+	Phone     string
+	AvatarURL string
+}
+
 // UserRepository is the port the PostgreSQL adapter implements for accounts.
 type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (User, error)
@@ -109,6 +119,18 @@ type UserRepository interface {
 	// security callers must always pass their own location so the adapter can
 	// emit the branch-equality predicate (PRD L110).
 	ListSecurity(ctx context.Context, locationID *UUID) ([]User, error)
+}
+
+// ProfileRepository is the self-service profile port. It is separate from
+// UserRepository for the same reason ManagedUserRepository is (see admin.go):
+// the older usecase/delivery fakes implement only the narrow ports, so
+// widening UserRepository would break their compilation without changing
+// behaviour. The PostgreSQL adapter satisfies both ports with one struct.
+type ProfileRepository interface {
+	// UpdateProfile writes the caller's own editable profile fields and returns
+	// the complete refreshed user row. The caller resolves the final values;
+	// this is a read-modify-write, not a partial patch.
+	UpdateProfile(ctx context.Context, id UUID, update ProfileUpdate) (User, error)
 }
 
 // VisitSortBy is the whitelisted sort column for GET /visits. It is a closed

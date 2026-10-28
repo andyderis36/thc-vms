@@ -38,9 +38,12 @@ import (
 
 // timeouts for the HTTP server and the graceful shutdown.
 const (
-	readTimeout     = 10 * time.Second
+	// Uploads ingest up to 20 MB (MAX_UPLOAD_INGEST_MB). A 10s read deadline
+	// truncates multipart bodies on slow links and surfaces as a misleading
+	// 400 "Isi multipart tidak valid."; keep ReadHeaderTimeout short instead.
+	readTimeout     = 120 * time.Second
 	readHeader      = 5 * time.Second
-	writeTimeout    = 15 * time.Second
+	writeTimeout    = 120 * time.Second
 	idleTimeout     = 60 * time.Second
 	shutdownTimeout = 10 * time.Second
 )
@@ -106,7 +109,8 @@ func run(ctx context.Context) error {
 	jwtSvc := infraJWT.NewService(cfg).WithDirectory(dir)
 	authSvc := auth.NewService(auth.Deps{
 		Users: users, Roles: dir.Roles(), Locations: master, Vendors: repository.NewVendorRepository(pool), Issuer: jwtSvc, Clock: clock,
-	})
+		Profiles: repository.NewProfileRepository(pool), Audit: audit,
+	}).WithFileLinks(store, cfg.Storage.PresignTTL())
 	// File links on visit reads are short-lived presigned URLs of our own
 	// private bucket (never the raw stored address); the TTL comes from
 	// S3_PRESIGN_TTL_MINUTES and is guaranteed positive by config. The object
@@ -151,13 +155,14 @@ func run(ctx context.Context) error {
 	visitHandler := handlers.NewVisitHandler(visitSvc)
 	gateHandler := handlers.NewGateHandler(gateSvc)
 	masterHandler := handlers.NewMasterHandler(master)
-	userHandler := handlers.NewUserHandler(users, master, securityRoleID)
+	userHandler := handlers.NewUserHandler(users, master, securityRoleID).
+		WithFileLinks(store, cfg.Storage.PresignTTL())
 	superAdminHandler := handlers.NewSuperAdminHandler(
 		repository.NewManagedUserRepository(pool),
 		repository.NewLocationAdminRepository(pool),
 		visits,
 		adminRoleID, vendorRoleID,
-	)
+	).WithFileLinks(store, cfg.Storage.PresignTTL())
 	uploadHandler := handlers.NewUploadHandler(store, cfg.Upload.MaxIngestBytes)
 	fileHandler := handlers.NewFileHandler(visitSvc)
 	auditHandler := handlers.NewAuditHandler(audit)
@@ -191,7 +196,8 @@ func run(ctx context.Context) error {
 	}
 	deps := deliveryhttp.Deps{
 		Auth: deliveryhttp.AuthRoutes{
-			Login: authHandler.Login, Me: authHandler.Me, Logout: authHandler.Logout,
+			Login: authHandler.Login, Me: authHandler.Me, PatchMe: authHandler.PatchMe,
+			Logout: authHandler.Logout,
 		},
 		Users: deliveryhttp.UserRoutes{
 			List: userHandler.ListSecurity, Create: userHandler.CreateSecurity,

@@ -99,10 +99,60 @@ func TestAuditList_FilterReachesStore(t *testing.T) {
 	store := &stubAuditStore{items: []domain.AuditLog{cannedAuditLog()}, total: 1}
 	engine := newAuditListEngine(store, domain.RoleSuperAdmin)
 
-	rec := serve(engine, "GET", "/audit-logs?action=user.create&entity=user", nil, "")
+	rec := serve(engine, "GET", "/audit-logs?action=user.create&entity=user&q=%20%20Audit%20Actor%20%20&order=ASC", nil, "")
 	mustStatus(t, rec, http.StatusOK)
 	if store.last.Action != domain.AuditActionUserCreate || store.last.Entity != domain.AuditEntityUser {
 		t.Fatalf("store got action=%q entity=%q, want the query filters", store.last.Action, store.last.Entity)
+	}
+	if store.last.Q != "Audit Actor" || store.last.Order != "asc" {
+		t.Fatalf("store got q=%q order=%q, want trimmed q and normalised asc", store.last.Q, store.last.Order)
+	}
+}
+
+func TestAuditList_ClampsLimitAndEchoesNormalisedFilter(t *testing.T) {
+	store := &stubAuditStore{items: []domain.AuditLog{cannedAuditLog()}, total: 1}
+	engine := newAuditListEngine(store, domain.RoleSuperAdmin)
+
+	rec := serve(engine, "GET", "/audit-logs?page=2&limit=5000&q=%20%20tek%20%20&order=bogus", nil, "")
+	mustStatus(t, rec, http.StatusOK)
+	env := mustSuccess(t, rec)
+
+	var page struct {
+		Page   int    `json:"page"`
+		Limit  int    `json:"limit"`
+		Offset int    `json:"offset"`
+		Q      string `json:"q"`
+		Order  string `json:"order"`
+	}
+	if err := json.Unmarshal(env.Data, &page); err != nil {
+		t.Fatalf("data is not the paginated trail: %v: %q", err, string(env.Data))
+	}
+	if page.Page != 2 || page.Limit != 200 || page.Offset != 200 || page.Q != "tek" || page.Order != "desc" {
+		t.Fatalf("echo = %+v, want page 2 limit 200 offset 200 q tek order desc", page)
+	}
+	if store.last.Limit != 200 || store.last.Offset != 200 || store.last.Q != "tek" || store.last.Order != "desc" {
+		t.Fatalf("store got limit=%d offset=%d q=%q order=%q, want normalised values", store.last.Limit, store.last.Offset, store.last.Q, store.last.Order)
+	}
+}
+
+func TestAuditList_DefaultLimitIsDomainDefault(t *testing.T) {
+	store := &stubAuditStore{items: []domain.AuditLog{cannedAuditLog()}, total: 1}
+	engine := newAuditListEngine(store, domain.RoleSuperAdmin)
+
+	rec := serve(engine, "GET", "/audit-logs", nil, "")
+	mustStatus(t, rec, http.StatusOK)
+	env := mustSuccess(t, rec)
+
+	var page struct {
+		Limit  int    `json:"limit"`
+		Offset int    `json:"offset"`
+		Order  string `json:"order"`
+	}
+	if err := json.Unmarshal(env.Data, &page); err != nil {
+		t.Fatalf("data is not the paginated trail: %v: %q", err, string(env.Data))
+	}
+	if page.Limit != 50 || page.Offset != 0 || page.Order != "desc" {
+		t.Fatalf("defaults = %+v, want limit 50 offset 0 order desc", page)
 	}
 }
 

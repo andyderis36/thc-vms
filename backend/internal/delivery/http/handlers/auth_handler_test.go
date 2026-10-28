@@ -29,6 +29,11 @@ type stubAuthService struct {
 	lastLoginEmail string
 	lastMeID       domain.UUID
 	logoutCalls    int
+
+	updateSelfErr   error
+	updateSelfCalls int
+	lastSelfActor   auth.SelfIdentity
+	lastSelfUpdate  auth.SelfUpdate
 }
 
 func (s *stubAuthService) Login(_ context.Context, email, password string) (auth.LoginResult, error) {
@@ -43,6 +48,16 @@ func (s *stubAuthService) Me(_ context.Context, id domain.UUID) (auth.Profile, e
 	s.lastMeID = id
 	if s.meErr != nil {
 		return auth.Profile{}, s.meErr
+	}
+	return s.profile, nil
+}
+
+func (s *stubAuthService) UpdateSelf(_ context.Context, actor auth.SelfIdentity, in auth.SelfUpdate) (auth.Profile, error) {
+	s.updateSelfCalls++
+	s.lastSelfActor = actor
+	s.lastSelfUpdate = in
+	if s.updateSelfErr != nil {
+		return auth.Profile{}, s.updateSelfErr
 	}
 	return s.profile, nil
 }
@@ -74,6 +89,7 @@ func newAuthEngine(svc *stubAuthService, role domain.RoleName, loc string) *gin.
 	h := handlers.NewAuthHandler(svc)
 	engine.POST("/auth/login", h.Login)
 	engine.GET("/auth/me", h.Me)
+	engine.PATCH("/auth/me", h.PatchMe)
 	engine.POST("/auth/logout", h.Logout)
 	return engine
 }
@@ -222,4 +238,172 @@ func TestResponseEnvelope_MatchesTheMandatedContract(t *testing.T) {
 			t.Fatalf("error needs code+message: %q", raw)
 		}
 	})
+}
+
+// cannedSelfProfile is the projection a successful self-update returns: a
+// presigned avatar and the two fields a vendor may edit.
+func cannedSelfProfile() auth.Profile {
+	p := cannedAuthProfile()
+	p.Role = domain.RoleVendor
+	p.LocationID = nil
+	p.LocationName = nil
+	p.AvatarURL = "http://localhost:9000/thc-vms-bucket/profile_photos/pending-actor-1/photo.jpg?X-Amz-Signature=abc"
+	p.EditableFields = []string{"phone", "avatar_url"}
+	return p
+}
+
+func TestPatchMe_ReturnsUpdatedUserProjection(t *testing.T) {
+	svc := &stubAuthService{profile: cannedSelfProfile()}
+	engine := newAuthEngine(svc, domain.RoleVendor, "")
+
+	rec := serveJSON(engine, "PATCH", "/auth/me", `{"phone":"0812-3456-7890"}`)
+	mustStatus(t, rec, http.StatusOK)
+	data := decodeData[map[string]any](t, mustSuccess(t, rec))
+
+	if data["avatar_url"] != cannedSelfProfile().AvatarURL {
+		t.Fatalf("avatar_url = %v, want the presigned URL", data["avatar_url"])
+	}
+	fields, ok := data["editable_fields"].([]any)
+	if !ok || len(fields) != 2 {
+		t.Fatalf("editable_fields = %v, want [phone avatar_url]", data["editable_fields"])
+	}
+	if svc.updateSelfCalls != 1 {
+		t.Fatalf("usecase calls = %d, want exactly 1", svc.updateSelfCalls)
+	}
+	if svc.lastSelfActor.UserID != domain.UUID("actor-1") || svc.lastSelfActor.Role != domain.RoleVendor {
+		t.Fatalf("actor = %+v, want the authenticated caller", svc.lastSelfActor)
+	}
+	if svc.lastSelfUpdate.Phone == nil || *svc.lastSelfUpdate.Phone != "0812-3456-7890" {
+		t.Fatalf("phone not forwarded verbatim: %+v", svc.lastSelfUpdate)
+	}
+	if svc.lastSelfUpdate.Name != nil || svc.lastSelfUpdate.AvatarURL != nil || svc.lastSelfUpdate.ClearAvatar {
+		t.Fatalf("absent members must stay absent: %+v", svc.lastSelfUpdate)
+	}
+}
+
+func TestPatchMe_RejectsLockedAndUnknownFields(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"email", `{"email":"baru@thc.local"}`},
+		{"nik", `{"nik":"3201010101010001"}`},
+		{"password", `{"password":"Rahasia123!"}`},
+		{"role", `{"role":"super_admin"}`},
+		{"type", `{"type":"internal"}`},
+		{"status", `{"status":"inactive"}`},
+		{"location_id", `{"location_id":"loc-1"}`},
+		{"vendor_name", `{"vendor_name":"PT Lain"}`},
+		{"malformed", `{`},
+		{"non object", `[]`},
+		{"trailing value", `{"phone":"081234567890"} {"email":"baru@thc.local"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &stubAuthService{profile: cannedSelfProfile()}
+			engine := newAuthEngine(svc, domain.RoleSuperAdmin, "")
+
+			rec := serveJSON(engine, "PATCH", "/auth/me", tc.body)
+			mustStatus(t, rec, http.StatusBadRequest)
+			env := decodeEnvelope(t, rec)
+			if env.Success || env.Error == nil || env.Error.Code != "VALIDATION_ERROR" {
+				t.Fatalf("body %s must be a 400 VALIDATION_ERROR, got %q", tc.body, rec.Body.String())
+			}
+			if svc.updateSelfCalls != 0 {
+				t.Fatalf("a rejected body must never reach the usecase (calls = %d)", svc.updateSelfCalls)
+			}
+		})
+	}
+}
+
+func TestPatchMe_AvatarTriState(t *testing.T) {
+	const avatar = "http://localhost:9000/thc-vms-bucket/profile_photos/pending-actor-1/photo.jpg"
+
+	t.Run("null clears", func(t *testing.T) {
+		svc := &stubAuthService{profile: cannedSelfProfile()}
+		engine := newAuthEngine(svc, domain.RoleVendor, "")
+
+		mustStatus(t, serveJSON(engine, "PATCH", "/auth/me", `{"avatar_url":null}`), http.StatusOK)
+		if !svc.lastSelfUpdate.ClearAvatar || svc.lastSelfUpdate.AvatarURL != nil {
+			t.Fatalf("null must map to ClearAvatar, got %+v", svc.lastSelfUpdate)
+		}
+	})
+
+	t.Run("string replaces", func(t *testing.T) {
+		svc := &stubAuthService{profile: cannedSelfProfile()}
+		engine := newAuthEngine(svc, domain.RoleVendor, "")
+
+		mustStatus(t, serveJSON(engine, "PATCH", "/auth/me", `{"avatar_url":"`+avatar+`"}`), http.StatusOK)
+		if svc.lastSelfUpdate.ClearAvatar {
+			t.Fatal("a string must not clear the photo")
+		}
+		if svc.lastSelfUpdate.AvatarURL == nil || *svc.lastSelfUpdate.AvatarURL != avatar {
+			t.Fatalf("avatar_url not forwarded: %+v", svc.lastSelfUpdate)
+		}
+	})
+
+	t.Run("absent keeps", func(t *testing.T) {
+		svc := &stubAuthService{profile: cannedSelfProfile()}
+		engine := newAuthEngine(svc, domain.RoleVendor, "")
+
+		mustStatus(t, serveJSON(engine, "PATCH", "/auth/me", `{"phone":"081234567890"}`), http.StatusOK)
+		if svc.lastSelfUpdate.ClearAvatar || svc.lastSelfUpdate.AvatarURL != nil {
+			t.Fatalf("an absent avatar_url must keep the photo, got %+v", svc.lastSelfUpdate)
+		}
+	})
+
+	t.Run("non string rejected", func(t *testing.T) {
+		svc := &stubAuthService{profile: cannedSelfProfile()}
+		engine := newAuthEngine(svc, domain.RoleVendor, "")
+
+		mustStatus(t, serveJSON(engine, "PATCH", "/auth/me", `{"avatar_url":123}`), http.StatusBadRequest)
+		if svc.updateSelfCalls != 0 {
+			t.Fatal("a non-string avatar_url must never reach the usecase")
+		}
+	})
+}
+
+func TestPatchMe_PassesUsecaseRefusalsThrough(t *testing.T) {
+	t.Run("403 role-blocked name", func(t *testing.T) {
+		const message = "Field name hanya dapat diubah oleh super_admin."
+		svc := &stubAuthService{
+			profile:       cannedSelfProfile(),
+			updateSelfErr: &domain.AppError{Status: http.StatusForbidden, Code: "FORBIDDEN", Message: message},
+		}
+		engine := newAuthEngine(svc, domain.RoleVendor, "")
+
+		rec := serveJSON(engine, "PATCH", "/auth/me", `{"name":"Nama Baru"}`)
+		mustStatus(t, rec, http.StatusForbidden)
+		env := decodeEnvelope(t, rec)
+		if env.Error == nil || env.Error.Code != "FORBIDDEN" || env.Error.Message != message {
+			t.Fatalf("403 envelope not passed through: %q", rec.Body.String())
+		}
+	})
+
+	t.Run("400 empty patch", func(t *testing.T) {
+		svc := &stubAuthService{
+			profile:       cannedSelfProfile(),
+			updateSelfErr: &domain.AppError{Status: http.StatusBadRequest, Code: "VALIDATION_ERROR", Message: "Tidak ada perubahan yang diberikan."},
+		}
+		engine := newAuthEngine(svc, domain.RoleVendor, "")
+
+		rec := serveJSON(engine, "PATCH", "/auth/me", `{}`)
+		mustStatus(t, rec, http.StatusBadRequest)
+		env := decodeEnvelope(t, rec)
+		if env.Error == nil || env.Error.Code != "VALIDATION_ERROR" {
+			t.Fatalf("empty patch envelope wrong: %q", rec.Body.String())
+		}
+		if svc.updateSelfCalls != 1 {
+			t.Fatalf("an empty object must reach the usecase validation (calls = %d)", svc.updateSelfCalls)
+		}
+	})
+}
+
+func TestPatchMe_RequiresIdentity(t *testing.T) {
+	svc := &stubAuthService{profile: cannedSelfProfile()}
+	engine := gin.New()
+	h := handlers.NewAuthHandler(svc)
+	engine.PATCH("/auth/me", h.PatchMe)
+
+	mustStatus(t, serveJSON(engine, "PATCH", "/auth/me", `{"phone":"081234567890"}`), http.StatusUnauthorized)
+	if svc.updateSelfCalls != 0 {
+		t.Fatal("an unauthenticated patch must never reach the usecase")
+	}
 }

@@ -43,12 +43,17 @@ type auditLogDTO struct {
 }
 
 // auditListDTO mirrors the AuditLogListResponse data object: {items, total,
-// page, limit}. It is never a bare array.
+// page, limit, offset, q, order}. The filter members echo the NORMALISED values
+// the repository actually applied (clamped limit, floored offset, trimmed q,
+// asc/desc order), never the raw query strings. It is never a bare array.
 type auditListDTO struct {
-	Items []auditLogDTO `json:"items"`
-	Total int64         `json:"total"`
-	Page  int           `json:"page"`
-	Limit int           `json:"limit"`
+	Items  []auditLogDTO `json:"items"`
+	Total  int64         `json:"total"`
+	Page   int           `json:"page"`
+	Limit  int           `json:"limit"`
+	Offset int           `json:"offset"`
+	Q      string        `json:"q"`
+	Order  string        `json:"order"`
 }
 
 // toAuditLog projects one stored trail row onto the wire shape.
@@ -85,12 +90,12 @@ func (h *AuditHandler) List(c *gin.Context) {
 		return
 	}
 	page := queryInt(c.Query("page"), 1)
-	limit := queryInt(c.Query("limit"), 20)
 	filter := domain.AuditFilter{
 		Entity: strings.TrimSpace(c.Query("entity")),
 		Action: strings.TrimSpace(c.Query("action")),
-		Limit:  limit,
-		Offset: (page - 1) * limit,
+		Q:      strings.TrimSpace(c.Query("q")),
+		Order:  c.Query("order"),
+		Limit:  queryInt(c.Query("limit"), 0),
 	}
 	if raw := strings.TrimSpace(c.Query("user_id")); raw != "" {
 		parsed, err := domain.ParseUUID(raw)
@@ -115,6 +120,8 @@ func (h *AuditHandler) List(c *gin.Context) {
 		return
 	}
 	filter.From, filter.To = from, to
+	filter = domain.NormaliseAuditFilter(filter)
+	filter.Offset = (page - 1) * filter.Limit
 	items, total, err := h.audit.List(c.Request.Context(), filter)
 	if err != nil {
 		response.Fail(c, err)
@@ -124,5 +131,13 @@ func (h *AuditHandler) List(c *gin.Context) {
 	for _, item := range items {
 		rows = append(rows, toAuditLog(item))
 	}
-	response.OK(c, auditListDTO{Items: rows, Total: total, Page: page, Limit: limit})
+	response.OK(c, auditListDTO{
+		Items:  rows,
+		Total:  total,
+		Page:   page,
+		Limit:  filter.Limit,
+		Offset: filter.Offset,
+		Q:      filter.Q,
+		Order:  filter.Order,
+	})
 }

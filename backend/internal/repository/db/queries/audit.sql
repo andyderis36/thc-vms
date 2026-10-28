@@ -36,8 +36,13 @@ RETURNING *;
 -- name: ListAuditLogs :many
 -- Filtered trail read. date_from is inclusive, date_to is exclusive (half-open
 -- [from, to) window, same convention as the visits.sql list queries).
--- ORDER BY is fully specified (id last) so LIMIT/OFFSET pagination cannot
--- repeat or drop a row.
+-- `q` is a NULLable free-text needle: a case-insensitive substring match across
+-- the action/entity/entity id, the request observations and the joined actor
+-- (name/email). `order` is bound and compared inside static CASE branches
+-- (never concatenated): anything other than 'asc' sorts descending, which is
+-- the normalised default the Go layer sends. ORDER BY is fully specified
+-- (timestamp + id, same direction) so LIMIT/OFFSET pagination cannot repeat or
+-- drop a row.
 SELECT *
 FROM audit_log
 WHERE (sqlc.narg('user_id')::uuid IS NULL OR user_id = sqlc.narg('user_id')::uuid)
@@ -45,7 +50,24 @@ WHERE (sqlc.narg('user_id')::uuid IS NULL OR user_id = sqlc.narg('user_id')::uui
   AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR timestamp >= sqlc.narg('date_from')::timestamptz)
   AND (sqlc.narg('date_to')::timestamptz IS NULL OR timestamp < sqlc.narg('date_to')::timestamptz)
-ORDER BY timestamp DESC, id DESC
+  AND (
+        sqlc.narg('q')::text IS NULL
+     OR action ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR entity ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR entity_id::text ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR COALESCE(ip, '') ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR COALESCE(user_agent, '') ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR EXISTS (
+          SELECT 1 FROM users u
+          WHERE u.id = audit_log.user_id
+            AND (u.name ILIKE '%' || sqlc.narg('q')::text || '%' OR u.email ILIKE '%' || sqlc.narg('q')::text || '%')
+        )
+  )
+ORDER BY
+  CASE WHEN sqlc.arg('order')::text = 'asc' THEN audit_log.timestamp END ASC,
+  CASE WHEN sqlc.arg('order')::text <> 'asc' THEN audit_log.timestamp END DESC,
+  CASE WHEN sqlc.arg('order')::text = 'asc' THEN audit_log.id END ASC,
+  CASE WHEN sqlc.arg('order')::text <> 'asc' THEN audit_log.id END DESC
 LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: CountAuditLogs :one
@@ -56,4 +78,17 @@ WHERE (sqlc.narg('user_id')::uuid IS NULL OR user_id = sqlc.narg('user_id')::uui
   AND (sqlc.narg('entity')::text IS NULL OR entity = sqlc.narg('entity')::text)
   AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR timestamp >= sqlc.narg('date_from')::timestamptz)
-  AND (sqlc.narg('date_to')::timestamptz IS NULL OR timestamp < sqlc.narg('date_to')::timestamptz);
+  AND (sqlc.narg('date_to')::timestamptz IS NULL OR timestamp < sqlc.narg('date_to')::timestamptz)
+  AND (
+        sqlc.narg('q')::text IS NULL
+     OR action ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR entity ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR entity_id::text ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR COALESCE(ip, '') ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR COALESCE(user_agent, '') ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR EXISTS (
+          SELECT 1 FROM users u
+          WHERE u.id = audit_log.user_id
+            AND (u.name ILIKE '%' || sqlc.narg('q')::text || '%' OR u.email ILIKE '%' || sqlc.narg('q')::text || '%')
+        )
+  );

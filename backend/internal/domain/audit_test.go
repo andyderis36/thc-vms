@@ -110,18 +110,31 @@ func TestRequestMeta_ContextRoundTrip(t *testing.T) {
 
 func TestNormaliseAuditFilter_DefaultsAndClamps(t *testing.T) {
 	got := NormaliseAuditFilter(AuditFilter{})
-	if got.Limit != 50 || got.Offset != 0 {
-		t.Fatalf("defaults = %+v, want limit 50 offset 0", got)
+	if got.Limit != 50 || got.Offset != 0 || got.Order != "desc" || got.Q != "" {
+		t.Fatalf("defaults = %+v, want limit 50 offset 0 order desc", got)
 	}
 	got = NormaliseAuditFilter(AuditFilter{Limit: 5000, Offset: -3})
 	if got.Limit != 200 || got.Offset != 0 {
 		t.Fatalf("clamps = %+v, want limit 200 offset 0", got)
 	}
+	for _, raw := range []string{"ASC", " asc ", "Asc"} {
+		if order := NormaliseAuditFilter(AuditFilter{Order: raw}).Order; order != "asc" {
+			t.Fatalf("order %q normalised to %q, want asc", raw, order)
+		}
+	}
+	for _, raw := range []string{"", "desc", "DESC", "sideways", "ascending"} {
+		if order := NormaliseAuditFilter(AuditFilter{Order: raw}).Order; order != "desc" {
+			t.Fatalf("order %q normalised to %q, want desc", raw, order)
+		}
+	}
+	if q := NormaliseAuditFilter(AuditFilter{Q: "  audit actor  "}).Q; q != "audit actor" {
+		t.Fatalf("q = %q, want trimmed needle", q)
+	}
 	from := time.Now()
 	to := from.Add(time.Hour)
 	actor := UUID("user-1")
-	kept := NormaliseAuditFilter(AuditFilter{UserID: &actor, Entity: "user", Action: AuditActionUserCreate, From: &from, To: &to, Limit: 10, Offset: 5})
-	if kept.UserID != &actor || kept.Entity != "user" || kept.From != &from || kept.To != &to || kept.Limit != 10 || kept.Offset != 5 {
+	kept := NormaliseAuditFilter(AuditFilter{UserID: &actor, Entity: "user", Action: AuditActionUserCreate, Q: "tek", Order: "asc", From: &from, To: &to, Limit: 10, Offset: 5})
+	if kept.UserID != &actor || kept.Entity != "user" || kept.Q != "tek" || kept.Order != "asc" || kept.From != &from || kept.To != &to || kept.Limit != 10 || kept.Offset != 5 {
 		t.Fatalf("explicit filters must survive: %+v", kept)
 	}
 }

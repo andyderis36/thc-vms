@@ -457,3 +457,56 @@ func TestLogin_EmailLookupIsCaseInsensitive(t *testing.T) {
 		t.Fatalf("profile email = %q, want stored form", got.User.Email)
 	}
 }
+
+// TestLogin_PresignsAvatarURL pins the login read path: the account row feeds
+// the same profile projection as GET /auth/me, so a stored absolute avatar URL
+// must come back presigned. The repository regression test covers the SQL
+// projection; this one covers the presign step the login response runs through.
+func TestLogin_PresignsAvatarURL(t *testing.T) {
+	users := &fakeUsers{byEmail: map[string]domain.User{}, byID: map[domain.UUID]domain.User{}}
+	admin := activeAdmin(hashPassword(t, "Password123!"))
+	admin.AvatarURL = selfAvatarURL(admin.ID)
+	users.byEmail["admin@thc.local"] = admin
+	users.byID[admin.ID] = admin
+	store := &fakeSelfStorage{}
+	svc := NewService(loginDeps(users)).WithFileLinks(store, 15*time.Minute)
+
+	got, err := svc.Login(context.Background(), "admin@thc.local", "Password123!")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	want := "https://signed.example/" + domain.ProfilePhotoOwnerPrefix(admin.ID) + "avatar.jpg"
+	if got.User.AvatarURL != want {
+		t.Fatalf("avatar_url = %q, want the presigned %q", got.User.AvatarURL, want)
+	}
+	if strings.Contains(got.User.AvatarURL, selfStorageBase) {
+		t.Fatalf("avatar_url = %q, the raw bucket address must never reach the client", got.User.AvatarURL)
+	}
+	if store.signCalls != 1 {
+		t.Fatalf("PresignedURL calls = %d, want 1", store.signCalls)
+	}
+}
+
+// TestLogin_UnwiredStorageLeavesAvatarEmpty proves the documented degradation:
+// a Service built without WithFileLinks still logs in and answers an empty
+// avatar instead of panicking or returning a raw bucket URL.
+func TestLogin_UnwiredStorageLeavesAvatarEmpty(t *testing.T) {
+	users := &fakeUsers{byEmail: map[string]domain.User{}, byID: map[domain.UUID]domain.User{}}
+	admin := activeAdmin(hashPassword(t, "Password123!"))
+	admin.AvatarURL = selfAvatarURL(admin.ID)
+	users.byEmail["admin@thc.local"] = admin
+	users.byID[admin.ID] = admin
+	svc := NewService(loginDeps(users))
+
+	got, err := svc.Login(context.Background(), "admin@thc.local", "Password123!")
+	if err != nil {
+		t.Fatalf("Login without storage: %v", err)
+	}
+	if got.Token == "" {
+		t.Fatal("empty token without storage")
+	}
+	if got.User.AvatarURL != "" {
+		t.Fatalf("avatar_url = %q, want empty when storage is unwired", got.User.AvatarURL)
+	}
+}

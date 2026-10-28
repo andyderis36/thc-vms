@@ -26,7 +26,7 @@ var openapiKeys = map[string]map[string]bool{
 	"User": {
 		"id": true, "name": true, "email": true, "phone": true, "nik": true, "role": true,
 		"location_id": true, "location_name": true, "status": true,
-		"type": true, "vendor_name": true,
+		"type": true, "vendor_name": true, "avatar_url": true, "editable_fields": true,
 	},
 	"VisitDetail": {
 		"id": true, "visit_id": true, "status": true, "location": true,

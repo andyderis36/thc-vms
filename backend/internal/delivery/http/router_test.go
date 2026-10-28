@@ -50,6 +50,10 @@ func (fakeAuthService) Me(_ context.Context, _ domain.UUID) (auth.Profile, error
 	return auth.Profile{}, domain.ErrUnauthorized
 }
 
+func (fakeAuthService) UpdateSelf(_ context.Context, _ auth.SelfIdentity, _ auth.SelfUpdate) (auth.Profile, error) {
+	return auth.Profile{}, domain.ErrUnauthorized
+}
+
 func (fakeAuthService) Logout(_ context.Context) error { return nil }
 
 // fakeVisitService answers every visit call with 404.
@@ -171,7 +175,7 @@ func testEngine() *gin.Engine {
 	limiter := middleware.NewRateLimiter(1000, time.Minute)
 	return deliveryhttp.New(deliveryhttp.Deps{
 		Auth: deliveryhttp.AuthRoutes{
-			Login: auth.Login, Me: auth.Me, Logout: auth.Logout,
+			Login: auth.Login, Me: auth.Me, PatchMe: auth.PatchMe, Logout: auth.Logout,
 		},
 		Users: deliveryhttp.UserRoutes{
 			List: users.ListSecurity, Create: users.CreateSecurity, UpdateStatus: users.UpdateSecurityStatus,
@@ -217,7 +221,7 @@ func serve(engine *gin.Engine, method, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 36 wired
+// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 37 wired
 // operations resolves to a registered route: a registered route may answer
 // 401/403/400/500 without credentials, but never 404. The two Phase-2
 // feedback and incident endpoints must 404.
@@ -228,6 +232,7 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/health"},
 		{http.MethodGet, "/api/v1/ready"},
 		{http.MethodGet, "/api/v1/auth/me"},
+		{http.MethodPatch, "/api/v1/auth/me"},
 		{http.MethodPost, "/api/v1/auth/logout"},
 		{http.MethodGet, "/api/v1/users/security"},
 		{http.MethodPost, "/api/v1/users/security"},
@@ -261,8 +266,8 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/notifications"},
 		{http.MethodPost, "/api/v1/uploads"},
 	}
-	if len(wired) != 36 {
-		t.Fatalf("contract drift: wired routes = %d, want 36", len(wired))
+	if len(wired) != 37 {
+		t.Fatalf("contract drift: wired routes = %d, want 37", len(wired))
 	}
 	for _, route := range wired {
 		rec := serve(engine, route.method, route.path)
