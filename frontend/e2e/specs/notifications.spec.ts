@@ -32,6 +32,7 @@
 import type { Page } from '@playwright/test'
 import { expect, test } from '../fixtures'
 import { LOCATIONS, apiFetchRaw, type ApiEnvelope, type Role } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 /** Bentuk `GET /notifications` sesuai `docs/4. openapi.yaml`. */
 interface NotificationItem {
@@ -157,7 +158,7 @@ test('@NOTIF-01 lonceng notifikasi tampil di shell setiap peran (super, admin, a
 }) => {
   for (const role of BELL_ROLES) {
     const page = await h.openAs(role)
-    await page.goto('/')
+    await gotoApp(page, '/')
 
     const trigger = bell(page)
     await expect(trigger, `lonceng wajib tampil untuk peran ${role}`).toBeVisible()
@@ -181,7 +182,7 @@ test('@NOTIF-02 badge belum-dibaca cocok dengan unread_count API dan baris kunju
   expect(feed.unread_count, 'harus ada minimal satu unread baru').toBeGreaterThan(0)
 
   const page = await h.openAs('admin')
-  await page.goto('/')
+  await gotoApp(page, '/')
 
   // Badge & aria-label WAJIB berasal dari unread_count akun yang sama.
   const trigger = bell(page)
@@ -213,7 +214,7 @@ test('@NOTIF-03 memilih satu notifikasi menandainya dibaca (PATCH terverifikasi 
   )
 
   const page = await h.openAs('admin')
-  await page.goto('/')
+  await gotoApp(page, '/')
   await openBell(page)
 
   // Klik baris nyata: panel menutup, PATCH berjalan, lalu deep-link ke detail.
@@ -253,7 +254,7 @@ test('@NOTIF-04 tandai semua dibaca menurunkan unread_count akun itu ke nol', as
   expect(before.unread_count).toBeGreaterThan(0)
 
   const page = await h.openAs('admin-sambas')
-  await page.goto('/')
+  await gotoApp(page, '/')
   await openBell(page)
   await expect(notificationRow(page, visit.code)).toBeVisible()
 
@@ -384,7 +385,7 @@ test('@NOTIF-07 lonceng vendor tetap terjangkau dan panelnya bisa dipakai di vie
 
   const page = await h.openAs('vendor')
   await page.setViewportSize({ width: 360, height: 800 })
-  await page.goto('/')
+  await gotoApp(page, '/')
 
   const trigger = bell(page)
   await expect(trigger).toBeVisible()

@@ -44,6 +44,7 @@ import {
 } from '../helpers/api'
 import { pngBuffer } from '../helpers/assets'
 import { deleteUploadedFiles } from '../helpers/storage'
+import { gotoApp } from '../helpers/nav'
 
 interface MeUser {
   name: string
@@ -215,7 +216,7 @@ test('@GG2-01 avatar pengawas tampil di top bar desktop dan pita body ponsel den
 
     // ---- A. Desktop 1280x800: avatar tepat di samping nama pengawas --------
     await page.setViewportSize({ width: 1280, height: 800 })
-    await page.goto('/gate')
+    await gotoApp(page, '/gate')
 
     const header = page.locator('header').first()
     const headerAvatar = header.locator('[data-avatar-state="image"] img').first()
@@ -269,7 +270,7 @@ test('@GG2-01 avatar pengawas tampil di top bar desktop dan pita body ponsel den
     // ---- B. Ponsel 375x800: pita identitas body memuat avatar yang sama ----
     const mobileMark = avatarLoads.length
     await page.setViewportSize({ width: 375, height: 800 })
-    await page.goto('/gate')
+    await gotoApp(page, '/gate')
 
     const strip = page.getByTestId('kiosk-status-strip')
     await expect(strip, 'pita identitas ponsel harus terlihat').toBeVisible()
@@ -329,7 +330,7 @@ test('@K6-01 detail kunjungan admin memakai judul "Anggota" dan setiap baris men
   ).toBe('approved')
 
   const page = await h.openAs('admin')
-  await page.goto(`/visits/${visit.id}`)
+  await gotoApp(page, `/visits/${visit.id}`)
   await expect(page.getByRole('heading', { level: 1 })).toContainText(visit.code)
 
   const heading = page.getByRole('heading', { name: 'Anggota', exact: true })

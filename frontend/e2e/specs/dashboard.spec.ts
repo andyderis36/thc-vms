@@ -31,6 +31,7 @@ import {
   getVisitViaApi,
   loginViaApi,
 } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 const PLACEHOLDER_SPK_URL =
   'http://localhost:9000/thc-vms-bucket/assignment_letter/e2e-placeholder.pdf'
@@ -74,7 +75,7 @@ test('@DASH-01 dashboard superadmin menampilkan empat KPI, empat tab, dan filter
   h,
 }) => {
   const page = await h.openAs('super')
-  await page.goto('/dashboard')
+  await gotoApp(page, '/dashboard')
 
   await expectDashboardChrome(page)
   const facility = page.getByLabel('Fasilitas')
@@ -89,7 +90,7 @@ test('@DASH-02 dashboard admin menampilkan KPI/tab dengan Fasilitas terkunci ke 
   h,
 }) => {
   const page = await h.openAs('admin')
-  await page.goto('/dashboard')
+  await gotoApp(page, '/dashboard')
 
   await expectDashboardChrome(page)
   const facility = page.getByLabel('Fasilitas')
@@ -106,7 +107,7 @@ test('@DASH-03 tab Sedang di Lokasi memuat kunjungan check-in dan baris membuka 
   expect((await getVisitViaApi(superToken, visit.id)).status).toBe('visiting')
 
   const page = await h.openAs('admin')
-  await page.goto('/dashboard')
+  await gotoApp(page, '/dashboard')
   await expectDashboardChrome(page)
 
   const visitingTab = page.getByRole('tab', { name: /^Sedang di Lokasi/ })
@@ -165,7 +166,7 @@ test('@DASH-04 dashboard vendor hanya memuat kunjungan sendiri tanpa kontrol app
     const foreignCode = foreignVisit.visit_id
 
     const page = await h.openAs('vendor')
-    await page.goto('/dashboard')
+    await gotoApp(page, '/dashboard')
     await expectDashboardChrome(page)
 
     await expect(visitRow(page, ownVisit.code)).toBeVisible()
@@ -193,7 +194,7 @@ test('@DASH-05 baris SPK kartu kunjungan mobile sejajar vertikal dengan ikonnya'
 
   async function measureSpkRow(width: number) {
     await page.setViewportSize({ width, height: 800 })
-    await page.goto('/dashboard')
+    await gotoApp(page, '/dashboard')
 
     const allTab = page.getByRole('tab', { name: /^Semua Kunjungan/ })
     if ((await allTab.getAttribute('aria-selected')) !== 'true') {

@@ -29,6 +29,7 @@ import {
   loginViaApi,
   type ApiEnvelope,
 } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 const PASSWORD = 'Password123!'
 const NEW_PASSWORD = 'RahasiaBaru456!'
@@ -285,7 +286,7 @@ test('@NAV-02 admin membuka /security: form tambah + daftar pengawas cabangnya s
   h,
 }) => {
   const page = await h.openAs('admin')
-  await page.goto('/security')
+  await gotoApp(page, '/security')
 
   await expect(
     page.getByRole('heading', { name: 'Kelola Pengawas', exact: true }),
@@ -326,7 +327,7 @@ test('@AUTH-07 admin menambah pengawas baru via UI dan lokasinya = cabang admin'
   try {
     const adminToken = await h.tokenAs('admin')
     const page = await h.openAs('admin')
-    await page.goto('/security')
+    await gotoApp(page, '/security')
     await expect(
       page.getByRole('heading', { name: 'Kelola Pengawas', exact: true }),
     ).toBeVisible()
@@ -372,7 +373,7 @@ test('@DEL-01 super_admin menghapus pengawas baru via UI lalu API 404', async ({
     expect(created.location_id).toBe(LOCATIONS.hq)
 
     const page = await h.openAs('super')
-    await page.goto('/security')
+    await gotoApp(page, '/security')
     await expect(
       page.getByRole('heading', { name: 'Kelola Pengawas', exact: true }),
     ).toBeVisible()
@@ -404,7 +405,7 @@ test('@NAV-04 /coordinators memuat admin + super_admin dan filter peran bekerja'
   h,
 }) => {
   const page = await h.openAs('super')
-  await page.goto('/coordinators')
+  await gotoApp(page, '/coordinators')
 
   await expect(
     page.getByRole('heading', { name: 'Koordinator Wilayah & Superadmin', exact: true }),
@@ -437,7 +438,7 @@ test('@NAV-05 /vendor-registrations hanya akun vendor dan filter vendor bekerja'
   h,
 }) => {
   const page = await h.openAs('super')
-  await page.goto('/vendor-registrations')
+  await gotoApp(page, '/vendor-registrations')
 
   await expect(
     page.getByRole('heading', { name: 'Pendaftaran Vendor/Mitra', exact: true }),
@@ -468,12 +469,12 @@ test('@NAV-05 /vendor-registrations hanya akun vendor dan filter vendor bekerja'
 test('@NAV-06 /users 404 dan filter Superadmin menyembunyikan tombol tambah', async ({ h }) => {
   const page = await h.openAs('super')
 
-  const response = await page.goto('/users')
+  const response = await gotoApp(page, '/users')
   expect(response?.status()).toBe(404)
   await expect(page.getByRole('heading', { name: '404', exact: true })).toBeVisible()
   await expect(page.getByText('This page could not be found.')).toBeVisible()
 
-  await page.goto('/coordinators')
+  await gotoApp(page, '/coordinators')
   await expect(
     page.getByRole('heading', { name: 'Koordinator Wilayah & Superadmin', exact: true }),
   ).toBeVisible()
@@ -506,7 +507,7 @@ test('@EDT-01 super_admin mengubah nama koordinator baru lewat modal Ubah', asyn
     })
 
     const page = await h.openAs('super')
-    await page.goto('/coordinators')
+    await gotoApp(page, '/coordinators')
     await expect(
       page.getByRole('heading', { name: 'Koordinator Wilayah & Superadmin', exact: true }),
     ).toBeVisible()
@@ -555,7 +556,7 @@ test('@EDT-02 reset kata sandi lewat modal Ubah lalu login dengan sandi baru', a
     })
 
     const page = await h.openAs('super')
-    await page.goto('/coordinators')
+    await gotoApp(page, '/coordinators')
     await expect(
       page.getByRole('heading', { name: 'Koordinator Wilayah & Superadmin', exact: true }),
     ).toBeVisible()
@@ -615,7 +616,7 @@ test('@EDT-03 admin ubah pengawas se-cabang; lintas cabang ditolak (UI & API)', 
     expect(sambasUser.location_id).toBe(LOCATIONS.sambas)
 
     const page = await h.openAs('admin')
-    await page.goto('/security')
+    await gotoApp(page, '/security')
     await expect(
       page.getByRole('heading', { name: 'Kelola Pengawas', exact: true }),
     ).toBeVisible()
@@ -660,7 +661,7 @@ test('@EDT-03 admin ubah pengawas se-cabang; lintas cabang ditolak (UI & API)', 
   }
 })
 
-test('@SEED akun seed tetap bisa login dengan peran & lokasi yang benar', async ({ h }) => {
+test('@SEED akun seed tetap bisa login dengan peran & lokasi yang benar', async () => {
   // Guard terakhir: memastikan tidak ada test back-office yang menyentuh seed.
   const seeds = [
     { role: 'super', email: 'superadmin@thc.net.id', apiRole: 'super_admin', location: null },
@@ -672,9 +673,9 @@ test('@SEED akun seed tetap bisa login dengan peran & lokasi yang benar', async 
   for (const seed of seeds) {
     const login = await loginViaApi(seed.email, PASSWORD)
     expect(login.user.email).toBe(seed.email)
-    expect(login.user.role).toBe(seed.apiRole)
+    expect(login.user.role, `peran API untuk seed ${seed.role}`).toBe(seed.apiRole)
     expect(login.user.location_id).toBe(seed.location)
-    // Token seed juga harus hidup untuk peran yang dipakai harness.
-    expect(await h.tokenAs(seed.role)).not.toBe('')
+    const me = await apiFetchRaw(login.token, 'GET', '/auth/me')
+    expect(me.status, `GET /auth/me untuk seed ${seed.email}`).toBe(200)
   }
 })

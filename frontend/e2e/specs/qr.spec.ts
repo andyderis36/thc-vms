@@ -25,6 +25,7 @@ import {
   type ApiEnvelope,
   type VisitRecord,
 } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 function qrSection(page: Page) {
   return page.locator('section[aria-label="Kartu QR akses fasilitas"]')
@@ -46,7 +47,7 @@ test('@QR-01 vendor dengan tiket approved diarahkan ke detail dan QR above-the-f
 
   const page = await h.openAs('vendor')
   await page.setViewportSize({ width: 360, height: 800 })
-  await page.goto('/qr')
+  await gotoApp(page, '/qr')
 
   await expectRedirectToDetail(page, visit.id)
   await expect(qrSvg(page, visit.code)).toBeVisible()
@@ -82,7 +83,7 @@ test('@QR-02 vendor tanpa tiket aktif melihat empty state dan CTA Ajukan Kunjung
   expect(active).toHaveLength(0)
 
   const page = await h.openAs('vendor')
-  await page.goto('/qr')
+  await gotoApp(page, '/qr')
 
   await expect(page).toHaveURL(/\/qr$/)
   await expect(page.getByText('Belum ada tiket aktif', { exact: true })).toBeVisible()
@@ -111,7 +112,7 @@ test('@QR-03 kunjungan rescheduled tidak menjadi tiket QR sampai disetujui ulang
   expect((await getVisitViaApi(superToken, visit.id)).status).toBe('rescheduled')
 
   const page = await h.openAs('vendor')
-  await page.goto('/qr')
+  await gotoApp(page, '/qr')
 
   await expect(page).toHaveURL(/\/qr$/)
   await expect(page.getByText('Belum ada tiket aktif', { exact: true })).toBeVisible()
@@ -120,7 +121,7 @@ test('@QR-03 kunjungan rescheduled tidak menjadi tiket QR sampai disetujui ulang
   await approveVisitViaApi(await h.tokenAs('admin'), visit.id, 'Setujui ulang E2E QR-03')
   expect((await getVisitViaApi(superToken, visit.id)).status).toBe('approved')
 
-  await page.goto('/qr')
+  await gotoApp(page, '/qr')
   await expectRedirectToDetail(page, visit.id)
   await expect(qrSvg(page, visit.code)).toBeVisible()
 })
