@@ -235,9 +235,13 @@ export function SuperadminShell({
     { href: '/security', label: NAV_LABELS.security.mobile, icon: <Shield aria-hidden="true" className="size-5 shrink-0" /> },
   ]
 
+  // `unoptimized` WAJIB: `/_next/image?url=%2Fthcw.png&w=1080&q=75` dengan
+  // `Accept: image/avif` menggantung tanpa respons (>45 s, terukur 2026-10-28)
+  // dan ikut menahan permintaan Next lain di server yang sama. Aset ini hanya
+  // 24 KB (500x235) - tidak ada yang perlu di-resize, sajikan apa adanya.
   const logoMark = (
     <span className={LOGO_CLASS}>
-      <Image src="/thcw.png" alt="THC" width={500} height={235} className="h-10 w-auto" />
+      <Image src="/thcw.png" alt="THC" width={500} height={235} unoptimized className="h-10 w-auto" />
     </span>
   )
 

@@ -145,8 +145,12 @@ export function SecurityKioskShell({
           <div className="flex min-w-0 items-center gap-2 md:gap-3">
             {/* Logo `h-10` (40px) TETAP di semua breakpoint: 40px masih muat
                 di bar ponsel 56px (sisa 8px atas/bawah) dan sama dengan
-                navbar role lain. */}
-            <Image src="/thcw.png" alt="THC" width={500} height={235} className="h-10 w-auto shrink-0" />
+                navbar role lain.
+                `unoptimized` WAJIB: `/_next/image?url=%2Fthcw.png&w=1080&q=75`
+                dengan `Accept: image/avif` menggantung tanpa respons (>45 s,
+                terukur 2026-10-28) dan ikut menahan permintaan Next lain di
+                server yang sama. Aset ini hanya 24 KB (500x235). */}
+            <Image src="/thcw.png" alt="THC" width={500} height={235} unoptimized className="h-10 w-auto shrink-0" />
             {/* Ponsel: tanpa cap 112px - badge lokasi pindah ke pita body
                 `KioskStatusStrip`, jadi di baris-1 tersedia tempat untuk jam +
                 counter on-site. Teks penuh SELALU ada di DOM; pemotongan murni

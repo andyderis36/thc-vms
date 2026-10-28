@@ -19,6 +19,7 @@
 
 import type { Locator } from '@playwright/test'
 import { expect, test } from '../fixtures'
+import { gotoApp } from '../helpers/nav'
 
 /** Lebar viewport ponsel target (SOP ergonomi mobile AGENTS.md §6.5). */
 const PHONE_WIDTHS = [320, 375, 390] as const
@@ -97,7 +98,7 @@ test('@VC-01 ikon SPK dan label "Lihat SPK" segaris tengah di ponsel 320/375/390
   )
 
   await page.setViewportSize({ width: 375, height: 812 })
-  await page.goto('/approvals')
+  await gotoApp(page, '/approvals')
 
   // Cari per kode kunjungan (server-side q) agar kartu dijamin ada di halaman 1.
   await page.getByLabel('Cari permohonan').fill(created.code)

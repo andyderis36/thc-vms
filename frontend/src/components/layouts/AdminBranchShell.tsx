@@ -200,9 +200,14 @@ export function AdminBranchShell({
   // sidebar/laci berlatar `bg-sidebar-dark` (#09090b) jadi gambar berdiri
   // sendiri tanpa alas chip. Logo dirender `h-10 w-auto`: tinggi TETAP 40px
   // agar TIDAK PERNAH melebihi tinggi navbar (64px desktop / 56px ponsel).
+  //
+  // `unoptimized` WAJIB: `/_next/image?url=%2Fthcw.png&w=1080&q=75` dengan
+  // `Accept: image/avif` menggantung tanpa respons (>45 s, terukur 2026-10-28)
+  // dan ikut menahan permintaan Next lain di server yang sama. Aset ini hanya
+  // 24 KB (500x235) - tidak ada yang perlu di-resize, sajikan apa adanya.
   const logoMark = (
     <span className="flex items-center">
-      <Image src="/thcw.png" alt="THC" width={500} height={235} className="h-10 w-auto" />
+      <Image src="/thcw.png" alt="THC" width={500} height={235} unoptimized className="h-10 w-auto" />
     </span>
   )
 

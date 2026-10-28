@@ -15,6 +15,7 @@
  */
 
 import { expect, test } from '../fixtures'
+import { gotoApp } from '../helpers/nav'
 
 function auditSearchParams(search: string): URLSearchParams {
   return new URLSearchParams(search)
@@ -29,7 +30,7 @@ test('@K5-01 pencarian debounce menulis q ke URL dan mengirim satu request', asy
     }
   })
 
-  await page.goto('/audit')
+  await gotoApp(page, '/audit')
   await expect(page.locator('tbody tr').first()).toBeVisible()
 
   const qRequests = (): string[] =>
@@ -49,7 +50,7 @@ test('@K5-01 pencarian debounce menulis q ke URL dan mengirim satu request', asy
 
 test('@K5-02 urutan dan preset tanggal bertahan setelah reload', async ({ h }) => {
   const page = await h.openAs('super')
-  await page.goto('/audit')
+  await gotoApp(page, '/audit')
   await expect(page.locator('tbody tr').first()).toBeVisible()
 
   await page.getByLabel('Urutan').selectOption('asc')
@@ -84,7 +85,7 @@ test('@K5-02 urutan dan preset tanggal bertahan setelah reload', async ({ h }) =
 
 test('@K5-04 klik menu yang sama mengembalikan state ke URL', async ({ h }) => {
   const page = await h.openAs('super')
-  await page.goto('/audit?q=admin&order=asc')
+  await gotoApp(page, '/audit?q=admin&order=asc')
   await expect(page.getByLabel('Cari jejak audit')).toHaveValue('admin')
   await expect(page.getByLabel('Urutan')).toHaveValue('asc')
 
@@ -96,7 +97,7 @@ test('@K5-04 klik menu yang sama mengembalikan state ke URL', async ({ h }) => {
 
 test('@K5-03 modal detail dikelompokkan dan menampilkan ID Jejak', async ({ h }) => {
   const page = await h.openAs('super')
-  await page.goto('/audit')
+  await gotoApp(page, '/audit')
   await page.locator('tbody tr').first().click()
 
   const dialog = page.getByRole('dialog')
@@ -114,7 +115,7 @@ test('@K5-03 modal detail dikelompokkan dan menampilkan ID Jejak', async ({ h })
 
 test('@K5-05 halaman di luar rentang menawarkan lompat ke halaman terakhir', async ({ h }) => {
   const page = await h.openAs('super')
-  await page.goto('/audit?page=999')
+  await gotoApp(page, '/audit?page=999')
 
   await expect(page.getByText('Halaman ini kosong')).toBeVisible()
   const summary = await page.getByText(/melewati halaman terakhir/).textContent()
@@ -134,7 +135,8 @@ test('@K5-05 halaman di luar rentang menawarkan lompat ke halaman terakhir', asy
 
 test('@K5-06 parameter URL tidak valid dinormalisasi tanpa memicu crash', async ({ h }) => {
   const page = await h.openAs('super')
-  await page.goto(
+  await gotoApp(
+    page,
     '/audit?user_id=bukan-uuid&from=2026-13-45&to=abc&entity=BUKAN_ENTITAS&action=nope&page=0&limit=-3',
   )
 
@@ -166,7 +168,7 @@ test('@K5-07 rentang tanggal terbalik menampilkan guard tanpa request', async ({
     }
   })
 
-  await page.goto('/audit')
+  await gotoApp(page, '/audit')
   await expect(page.getByLabel('Dari Tanggal')).toBeVisible()
   await expect(page.locator('tbody tr').first()).toBeVisible()
 

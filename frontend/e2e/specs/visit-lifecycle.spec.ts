@@ -47,6 +47,7 @@ import {
   rescheduleVisitViaApi,
   type ApiResult,
 } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 interface QrData {
   visit_id: string
@@ -78,7 +79,7 @@ function cancelButton(page: Page) {
 
 /** Buka `/visits/{id}` lalu tunggu heading kode kunjungan (guard sesi lolos). */
 async function openDetail(page: Page, visitId: string, code: string): Promise<void> {
-  await page.goto(`/visits/${visitId}`)
+  await gotoApp(page, `/visits/${visitId}`)
   await expect(page.getByRole('heading', { level: 1 })).toContainText(code)
 }
 
@@ -383,7 +384,7 @@ test('@QREP-02 vendor lain ditolak membaca QR kunjungan milik admin (404, UI tan
 
   // UI vendor berhenti di layar 404 — tidak ada kartu QR yang ter-mount.
   const page = await h.openAs('vendor')
-  await page.goto(`/visits/${visit.id}`)
+  await gotoApp(page, `/visits/${visit.id}`)
   await expect(page.getByText('Kunjungan tidak ditemukan', { exact: true })).toBeVisible()
   await expect(qrSection(page)).toHaveCount(0)
 })

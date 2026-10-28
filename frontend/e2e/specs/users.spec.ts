@@ -26,6 +26,7 @@
 import type { Page } from '@playwright/test'
 import { expect, test, type Harness } from '../fixtures'
 import { LOCATIONS, apiFetch, apiFetchRaw, type ApiEnvelope } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 const PASSWORD = 'Password123!'
 
@@ -109,7 +110,7 @@ test('@USR-01 pencarian email di /coordinators menyaring baris dan Reset Filter 
   h,
 }) => {
   const page = await h.openAs('super')
-  await page.goto('/coordinators')
+  await gotoApp(page, '/coordinators')
 
   await expect(
     page.getByRole('heading', { name: 'Koordinator Wilayah & Superadmin', exact: true }),
@@ -138,7 +139,7 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
   const name = `${h.unique('Koordinator')} Uji`
   try {
     const page = await h.openAs('super')
-    await page.goto('/coordinators')
+    await gotoApp(page, '/coordinators')
     await expect(
       page.getByRole('heading', { name: 'Koordinator Wilayah & Superadmin', exact: true }),
     ).toBeVisible()
@@ -190,7 +191,7 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
 
 test('@USR-03 filter Cabang hanya menampilkan koordinator cabang terpilih', async ({ h }) => {
   const page = await h.openAs('super')
-  await page.goto('/coordinators')
+  await gotoApp(page, '/coordinators')
   await expect(tableRowWith(page, 'admin1@thc.com')).toHaveCount(1)
 
   // Tombol aksi baris berlabel "… (Admin Cabang …)" juga cocok dengan "Cabang".
@@ -208,7 +209,7 @@ test('@USR-04 filter peran Koordinator Wilayah menyembunyikan Superadmin dan mem
   h,
 }) => {
   const page = await h.openAs('super')
-  await page.goto('/coordinators')
+  await gotoApp(page, '/coordinators')
   await expect(tableRowWith(page, 'superadmin@thc.net.id')).toHaveCount(1)
 
   await page

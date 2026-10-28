@@ -58,6 +58,7 @@ import {
   type Role,
 } from '../helpers/api'
 import { pngBuffer } from '../helpers/assets'
+import { gotoApp } from '../helpers/nav'
 
 /** Bentuk `User` dari openapi yang dipakai spec ini. */
 interface ProfileUser {
@@ -204,7 +205,7 @@ async function expectToast(page: Page, text: string): Promise<void> {
 }
 
 async function openProfilePage(page: Page): Promise<void> {
-  await page.goto('/profile')
+  await gotoApp(page, '/profile')
   await expect(
     page.getByRole('heading', { name: 'Profil Saya', exact: true }),
   ).toBeVisible()
@@ -258,7 +259,7 @@ function requireAvatarPath(avatarUrl: string | null, context: string): string {
 
 async function uiLogin(page: Page, role: Role): Promise<void> {
   const account = ACCOUNTS[role]
-  await page.goto('/login')
+  await gotoApp(page, '/login')
   await expect(page.getByRole('heading', { name: 'Masuk', exact: true })).toBeVisible()
   // `Input` menandai field `required` dengan bintang di dalam `<label>`, jadi
   // accessible name-nya "Email *"/"Kata Sandi *" dan `getByLabel(..., exact)`
@@ -327,7 +328,7 @@ async function assertShellEntry(
   if (viewport !== undefined) {
     await page.setViewportSize(viewport)
   }
-  await page.goto(path)
+  await gotoApp(page, path)
 
   if (role === 'super' || role === 'admin') {
     const trigger = page
@@ -861,7 +862,7 @@ test('@PROF-12 nama + pill shift sebaris di pita kios, chip lokasi rata kanan, d
 }) => {
   const page = await h.openAs('security')
   await page.setViewportSize({ width: 375, height: 800 })
-  await page.goto('/gate')
+  await gotoApp(page, '/gate')
 
   const strip = page.locator('[data-testid="kiosk-status-strip"]')
   await expect(strip).toBeVisible()
@@ -939,7 +940,7 @@ test('@PROF-13 security /profile memakai tautan kembali ringkas ke /gate tanpa t
 }) => {
   const page = await h.openAs('security')
   await page.setViewportSize({ width: 375, height: 800 })
-  await page.goto('/profile')
+  await gotoApp(page, '/profile')
 
   const back = page.getByRole('link', { name: 'Gate Check-in', exact: true })
   await expect(back).toBeVisible()
@@ -990,12 +991,12 @@ test('@PROF-13 security /profile memakai tautan kembali ringkas ke /gate tanpa t
   ).toBe(true)
 
   await page.setViewportSize({ width: 320, height: 800 })
-  await page.goto('/profile')
+  await gotoApp(page, '/profile')
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     'profil security 320px tidak boleh overflow horizontal',
   ).toBe(true)
-  await page.goto('/gate')
+  await gotoApp(page, '/gate')
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     'gate security 320px tidak boleh overflow horizontal',
@@ -1007,7 +1008,7 @@ test('@PROF-14 vendor /profile tanpa back link di badan halaman maupun navbar', 
 }) => {
   const page = await h.openAs('vendor')
   await page.setViewportSize({ width: 375, height: 800 })
-  await page.goto('/profile')
+  await gotoApp(page, '/profile')
 
   const heading = page.getByRole('heading', { name: 'Profil Saya', exact: true })
   await expect(heading).toBeVisible()
@@ -1050,7 +1051,7 @@ test('@PROF-14 vendor /profile tanpa back link di badan halaman maupun navbar', 
   ).toBe(true)
 
   await page.setViewportSize({ width: 320, height: 800 })
-  await page.goto('/profile')
+  await gotoApp(page, '/profile')
   await expect(
     page.getByRole('heading', { name: 'Profil Saya', exact: true }),
   ).toBeVisible()
@@ -1070,7 +1071,7 @@ test('@PROF-15 chip profil vendor memakai ikon saja pada desktop dan nama pada t
 
   // ---- Desktop 1280x800: chip ikon 44px (w-11) -----------------------------
   await page.setViewportSize({ width: 1280, height: 800 })
-  await page.goto('/dashboard')
+  await gotoApp(page, '/dashboard')
 
   const chip = page.locator('header a[aria-label^="Profil "]').first()
   await expect(chip).toBeVisible()
@@ -1100,7 +1101,7 @@ test('@PROF-15 chip profil vendor memakai ikon saja pada desktop dan nama pada t
 
   // ---- Tablet 768x800: nama penuh, ikon disembunyikan ----------------------
   await page.setViewportSize({ width: 768, height: 800 })
-  await page.goto('/dashboard')
+  await gotoApp(page, '/dashboard')
 
   const tabletChip = page.locator('header a[aria-label^="Profil "]').first()
   await expect(tabletChip).toBeVisible()
@@ -1119,7 +1120,7 @@ test('@PROF-15 chip profil vendor memakai ikon saja pada desktop dan nama pada t
 
   // ---- Ponsel 375x800: kembali ke chip ikon 44px ---------------------------
   await page.setViewportSize({ width: 375, height: 800 })
-  await page.goto('/dashboard')
+  await gotoApp(page, '/dashboard')
 
   const phoneChip = page.locator('header a[aria-label^="Profil "]').first()
   await expect(phoneChip).toBeVisible()

@@ -35,6 +35,7 @@ import {
   type ApiFailure,
   type ApiResult,
 } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 /** UUID berformat sah yang tidak pernah menjadi baris visitor kunjungan uji. */
 const UNKNOWN_VISITOR_ID = '00000000-0000-4000-8000-000000000000'
@@ -125,7 +126,7 @@ test('@FILE-01 vendor melihat dan membuka SPK miliknya di halaman detail', async
       response.url().includes('kind=assignment_letter'),
   )
 
-  await page.goto(`/visits/${created.id}`)
+  await gotoApp(page, `/visits/${created.id}`)
 
   const spkResponse = await spkResponsePromise
   console.log(

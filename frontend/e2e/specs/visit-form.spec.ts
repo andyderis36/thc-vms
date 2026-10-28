@@ -26,6 +26,7 @@ import {
 } from '../helpers/api'
 import { exeBuffer, jpegBuffer, pdfBuffer, writeAsset } from '../helpers/assets'
 import { collectFileUrls, deleteUploadedFiles } from '../helpers/storage'
+import { gotoApp } from '../helpers/nav'
 
 const HQ_LABEL = 'Kantor Pusat THC (Pontianak)'
 const PURPOSE_CATALOG = 'Splicing & Maintenance Kabel Fiber Optik'
@@ -110,7 +111,7 @@ async function fetchVisitRaw(token: string, id: string): Promise<RawVisit> {
 }
 
 async function openForm(page: Page): Promise<void> {
-  await page.goto('/visits/new')
+  await gotoApp(page, '/visits/new')
   await expect(
     page.getByRole('heading', { name: 'Pengajuan Akses Fasilitas Jaringan THC' }),
   ).toBeVisible()
@@ -147,10 +148,14 @@ async function uploadInto(
   fileName: string,
 ): Promise<void> {
   const box = page.locator(`#${boxId}`)
+  // Anggaran 80 s (di bawah test timeout 90 s): run live 2026-10-28 memutus
+  // unggahan 1,5 MB di plafon 60 s saat jaringan lambat, padahal request tetap
+  // berjalan. Batas ini masih menghasilkan error Playwright yang jelas bila
+  // unggahan benar-benar tidak pernah dikirim.
   const uploaded = page.waitForResponse(
     (response) =>
       response.request().method() === 'POST' && response.url().includes('/api/v1/uploads'),
-    { timeout: 60_000 },
+    { timeout: 80_000 },
   )
   await box.locator('input[type=file]').setInputFiles(filePath)
   const response = await uploaded

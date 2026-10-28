@@ -26,13 +26,14 @@ import {
   rescheduleVisitViaApi,
   TOKEN_STORAGE_KEY,
 } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 const GATE_URL = '/gate'
 const TOLERANCE_TEXT = /toleransi/i
 
 /** Buka `/gate` lalu tunggu panel pemindai siap (guard sesi sudah lolos). */
 async function openGate(page: Page): Promise<void> {
-  await page.goto(GATE_URL)
+  await gotoApp(page, GATE_URL)
   await expect(page.getByRole('tablist', { name: 'Mode pemindaian' })).toBeVisible()
 }
 

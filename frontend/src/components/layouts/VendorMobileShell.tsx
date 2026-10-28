@@ -147,9 +147,13 @@ export function VendorMobileShell({
                 warnanya identik dengan latar header sehingga chip tak
                 terlihat. Aset logo TIDAK boleh dihapus (instruksi pengguna)
                 — hanya alasnya yang dibuang; pola sama dipakai
-                SecurityKioskShell & AdminBranchShell. */}
+                SecurityKioskShell & AdminBranchShell.
+                `unoptimized` WAJIB: `/_next/image?url=%2Fthcw.png&w=1080&q=75`
+                dengan `Accept: image/avif` menggantung tanpa respons (>45 s,
+                terukur 2026-10-28) dan ikut menahan permintaan Next lain di
+                server yang sama. Aset ini hanya 24 KB (500x235). */}
             <span className="flex shrink-0 items-center">
-              <Image src="/thcw.png" alt="THC" width={500} height={235} className="h-10 w-auto shrink-0" />
+              <Image src="/thcw.png" alt="THC" width={500} height={235} unoptimized className="h-10 w-auto shrink-0" />
             </span>
           </div>
 

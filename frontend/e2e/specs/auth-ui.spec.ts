@@ -11,6 +11,7 @@
 import type { Browser, Page } from '@playwright/test'
 import { expect, test } from '../fixtures'
 import { FRONTEND_BASE, TOKEN_STORAGE_KEY } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 const DEMO_PASSWORD = 'Password123!'
 const SECURITY_EMAIL = 'security1a@thc.com'
@@ -28,7 +29,7 @@ const PROTECTED_PATHS = [
 ] as const
 
 async function gotoLogin(page: Page): Promise<void> {
-  await page.goto('/login')
+  await gotoApp(page, '/login')
   await expect(
     page.getByRole('heading', { name: 'Masuk', exact: true }),
   ).toBeVisible()
@@ -126,7 +127,7 @@ test('@NAV-03 Vendor dipulangkan ke /dashboard dari seluruh rute terproteksi', a
   const page = await h.openAs('vendor')
 
   for (const path of PROTECTED_PATHS) {
-    await page.goto(path)
+    await gotoApp(page, path)
     await expect(page, `vendor ${path} harus dipulangkan`).toHaveURL(
       /\/dashboard$/,
     )
@@ -142,7 +143,7 @@ test('@NAV-03 Security dipulangkan ke /gate dari seluruh rute terproteksi', asyn
   const page = await h.openAs('security')
 
   for (const path of PROTECTED_PATHS) {
-    await page.goto(path)
+    await gotoApp(page, path)
     await expect(page, `security ${path} harus dipulangkan`).toHaveURL(
       /\/gate$/,
     )
@@ -156,7 +157,7 @@ test('@LOGOUT Aksi Keluar pada menu profil menghapus token dan kembali ke /login
   h,
 }) => {
   const page = await h.openAs('admin')
-  await page.goto('/dashboard')
+  await gotoApp(page, '/dashboard')
   await expect(
     page.getByRole('heading', { name: 'Dashboard Kunjungan', exact: true }),
   ).toBeVisible()

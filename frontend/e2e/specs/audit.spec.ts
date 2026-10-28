@@ -24,6 +24,7 @@ import {
   type ApiEnvelope,
   type Role,
 } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 interface AuditRow {
   id: string
@@ -62,7 +63,7 @@ test('@AUD-01 super_admin melihat jejak audit; filter tanggal menyaring lalu Res
   h,
 }) => {
   const page = await h.openAs('super')
-  await page.goto('/audit')
+  await gotoApp(page, '/audit')
 
   await expect(
     page.getByRole('heading', { name: 'Jejak Audit', exact: true }),
@@ -115,7 +116,7 @@ test('@AUD-02 hapus kunjungan lewat API menghasilkan baris visit.delete di tabel
     expect(auditRow.metadata['visit_code']).toBe(visit.code)
 
     const page = await h.openAs('super')
-    await page.goto('/audit')
+    await gotoApp(page, '/audit')
     await expect(
       page.getByRole('heading', { name: 'Jejak Audit', exact: true }),
     ).toBeVisible()
@@ -201,7 +202,7 @@ test('@AUD-03 GET /audit-logs menolak admin, security, dan vendor; super_admin m
 
 test('@NAV-03 admin dipulangkan dari /audit ke /dashboard', async ({ h }) => {
   const page = await h.openAs('admin')
-  await page.goto('/audit')
+  await gotoApp(page, '/audit')
 
   await expect(page).toHaveURL(/\/dashboard$/)
   await expect(

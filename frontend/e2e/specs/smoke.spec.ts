@@ -7,6 +7,7 @@
 
 import { expect, test } from '../fixtures'
 import { getVisitViaApi, LOCATIONS, type Role } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 const ROLES: readonly Role[] = [
   'super',
@@ -20,7 +21,7 @@ const ROLES: readonly Role[] = [
 for (const role of ROLES) {
   test(`@SMOKE ${role} diarahkan ke halaman awal sesuai peran`, async ({ h }) => {
     const page = await h.openAs(role)
-    await page.goto('/')
+    await gotoApp(page, '/')
 
     if (role === 'security' || role === 'security-sambas') {
       await expect(page).toHaveURL(/\/gate$/)

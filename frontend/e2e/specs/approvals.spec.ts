@@ -24,6 +24,7 @@
 import type { Page } from '@playwright/test'
 import { expect, test } from '../fixtures'
 import { getVisitViaApi, LOCATIONS } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 /** `datetime-local` memakai waktu lokal tanpa zona: `YYYY-MM-DDTHH:mm`. */
 function toLocalInput(date: Date): string {
@@ -57,7 +58,7 @@ function visitRow(page: Page, code: string) {
 }
 
 async function openApprovals(page: Page): Promise<void> {
-  await page.goto('/approvals')
+  await gotoApp(page, '/approvals')
   await expect(page.getByRole('heading', { name: 'Antrean Approval', exact: true })).toBeVisible()
 }
 
@@ -179,7 +180,7 @@ test('@APPR-03 reschedule lewat detail lalu approve ulang dari antrean', async (
   const newEnd = plusMinutes(24 * 60 + 120)
 
   const page = await h.openAs('admin')
-  await page.goto(`/visits/${visit.id}`)
+  await gotoApp(page, `/visits/${visit.id}`)
   await expect(page.getByRole('heading', { level: 1 })).toContainText(visit.code)
 
   await rescheduleViaUi(page, newStart, newEnd)
@@ -222,7 +223,7 @@ test('@APPR-05 antrean menyegarkan tanpa reload setelah reschedule dan approve u
   const newEnd = plusMinutes(48 * 60 + 120)
 
   const page = await h.openAs('admin')
-  await page.goto(`/visits/${visit.id}`)
+  await gotoApp(page, `/visits/${visit.id}`)
   await expect(page.getByRole('heading', { level: 1 })).toContainText(visit.code)
 
   await rescheduleViaUi(page, newStart, newEnd)

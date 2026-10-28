@@ -28,6 +28,7 @@ import {
   deleteVisitViaApi,
   type ApiEnvelope,
 } from '../helpers/api'
+import { gotoApp } from '../helpers/nav'
 
 type FacilityType = 'pusat' | 'cabang' | 'pop' | 'minipop'
 type FacilityTimezone = 'WIB' | 'WITA' | 'WIT'
@@ -195,7 +196,7 @@ async function expectToast(page: Page, text: string | RegExp): Promise<void> {
 
 async function openFacilities(h: Harness): Promise<Page> {
   const page = await h.openAs('super')
-  await page.goto('/facilities')
+  await gotoApp(page, '/facilities')
   await expect(
     page.getByRole('heading', { name: 'Fasilitas & Cabang', exact: true }),
   ).toBeVisible()
@@ -516,7 +517,7 @@ test('@NAV-03 admin dipulangkan dari /facilities ke /dashboard tanpa kontrol tam
   h,
 }) => {
   const page = await h.openAs('admin')
-  await page.goto('/facilities')
+  await gotoApp(page, '/facilities')
 
   await expect(page).toHaveURL(/\/dashboard$/)
   await expect(
