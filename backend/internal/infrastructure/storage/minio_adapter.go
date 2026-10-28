@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -94,6 +95,13 @@ func isAlreadyOwned(err error) bool {
 	return response.Code == "BucketAlreadyOwnedByYou" || response.Code == "BucketAlreadyExists"
 }
 
+// objectMissing honours the ObjectReader contract ("a missing key is
+// ErrNotFound"): without this translation a dangling row becomes a 500.
+func objectMissing(err error) bool {
+	response := minio.ToErrorResponse(err)
+	return response.Code == "NoSuchKey" || response.StatusCode == http.StatusNotFound
+}
+
 // Upload stores one file and returns its public URL.
 //
 // The order is deliberate and is the security-relevant part: the caller's hint
@@ -165,6 +173,9 @@ func (a *MinIOAdapter) OpenObject(ctx context.Context, objectKey string) (domain
 	info, err := obj.Stat()
 	if err != nil {
 		_ = obj.Close()
+		if objectMissing(err) {
+			return domain.ObjectContent{}, fmt.Errorf("storage: stat %q: %w", objectKey, domain.ErrNotFound)
+		}
 		return domain.ObjectContent{}, fmt.Errorf("storage: stat %q: %w", objectKey, err)
 	}
 	return domain.ObjectContent{
