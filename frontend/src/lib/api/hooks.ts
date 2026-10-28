@@ -52,12 +52,14 @@ import {
   updateLocation,
   updateManagedUser,
   updateManagedUserStatus,
+  updateMe,
   updateSecurityUser,
   updateSecurityUserStatus,
   uploadFile,
 } from '@/lib/api/client'
 import { ApiError } from '@/lib/api/fetcher'
 import { queryKeys } from '@/lib/api/query-keys'
+import { useSession } from '@/lib/auth/session'
 import type {
   ApproveRequest,
   AuditLogListParams,
@@ -75,6 +77,7 @@ import type {
   UpdateLocationRequest,
   UpdateManagedUserRequest,
   UpdateSecurityUserRequest,
+  UpdateSelfProfileRequest,
   UpdateUserStatusRequest,
   UploadCategory,
   VisitDetail,
@@ -316,6 +319,7 @@ export function auditLogsQueryOptions(params: AuditLogListParams) {
   return queryOptions({
     queryKey: queryKeys.auditLogs(params),
     queryFn: () => listAuditLogs(params),
+    placeholderData: (previous) => previous,
     staleTime: VISIT_STALE_TIME,
     retry: shouldRetry,
   })
@@ -611,6 +615,24 @@ export function useUpdateManagedUserMutation() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: MANAGED_USERS_PREFIX })
       void queryClient.invalidateQueries({ queryKey: queryKeys.me() })
+    },
+  })
+}
+
+/**
+ * `PATCH /auth/me` — perbarui profil sendiri. Cache `me` langsung diisi
+ * respons terbaru (avatar presigned berumur pendek, jadi selalu dari respons),
+ * lalu sesi React state ditulis sinkron via `applyUser` agar header memakai
+ * nama/avatar baru tanpa reload dan tanpa bisa ditimpa `/auth/me` yang basi.
+ */
+export function useUpdateProfileMutation() {
+  const queryClient = useQueryClient()
+  const { applyUser } = useSession()
+  return useMutation({
+    mutationFn: (body: UpdateSelfProfileRequest) => updateMe(body),
+    onSuccess: (user) => {
+      queryClient.setQueryData(queryKeys.me(), user)
+      applyUser(user)
     },
   })
 }

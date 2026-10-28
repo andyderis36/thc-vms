@@ -164,6 +164,7 @@ function buildSeed(): MockDb {
       status: 'active',
       type: 'internal',
       vendor_name: null,
+      avatar_url: null,
     },
     ...[
       'Agus Setiawan (Admin Kantor Pusat Pontianak)',
@@ -186,6 +187,7 @@ function buildSeed(): MockDb {
           status: 'active',
           type: 'internal',
           vendor_name: null,
+          avatar_url: null,
         };
       },
     ),
@@ -217,6 +219,7 @@ function buildSeed(): MockDb {
         status: 'active',
         type: 'internal',
         vendor_name: null,
+        avatar_url: null,
       };
     }),
     ...[
@@ -247,6 +250,7 @@ function buildSeed(): MockDb {
         status: 'active',
         type: 'external',
         vendor_name: vendorById(vendorId),
+        avatar_url: null,
       };
     }),
   ];

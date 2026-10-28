@@ -21,6 +21,13 @@ export interface DetailModalProps {
   title: string
   /** Baris pengenal di bawah judul, mis. nama record. */
   subtitle?: string
+  /**
+   * Slot identitas opsional pada baris header, di samping `subtitle`
+   * (mis. `<UserAvatar name={record.name} avatarUrl={record.avatar_url} />`).
+   * Absen (`undefined`/`null`) ⇒ TIDAK ada elemen ekstra: markup & spasi
+   * baris subtitle persis seperti sebelum slot ini ada (kompat mundur).
+   */
+  avatar?: ReactNode
   /** Baris label→nilai berurutan; label diasumsikan unik per daftar. */
   fields: DetailField[]
   /** Dipanggil saat modal ditutup (Escape, klik overlay, atau tombol Tutup). */
@@ -65,8 +72,10 @@ const FOCUSABLE_SELECTOR =
  * trap) dan tak memindahkan fokus ke dalam dialog. Keduanya ditutup di sini:
  * fokus awal masuk ke area isi, dan Tab diputar di dalam dialog.
  */
-export function DetailModal({ title, subtitle, fields, onClose }: DetailModalProps) {
+export function DetailModal({ title, subtitle, avatar, fields, onClose }: DetailModalProps) {
   const contentRef = useRef<HTMLDivElement>(null)
+  const hasSubtitle = subtitle !== undefined && subtitle !== ''
+  const hasAvatar = avatar !== undefined && avatar !== null
 
   useEffect(() => {
     const content = contentRef.current
@@ -125,7 +134,14 @@ export function DetailModal({ title, subtitle, fields, onClose }: DetailModalPro
       }
     >
       <div ref={contentRef} tabIndex={-1} className="outline-none">
-        {subtitle !== undefined && subtitle !== '' ? (
+        {hasAvatar ? (
+          <div className="mb-3 flex items-center gap-3">
+            <span className="flex shrink-0">{avatar}</span>
+            {hasSubtitle ? (
+              <p className="min-w-0 text-sm text-ink-secondary">{subtitle}</p>
+            ) : null}
+          </div>
+        ) : hasSubtitle ? (
           <p className="mb-3 text-sm text-ink-secondary">{subtitle}</p>
         ) : null}
         <dl className="divide-y divide-border-light rounded-card border border-border-light bg-brand/5">

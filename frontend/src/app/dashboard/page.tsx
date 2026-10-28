@@ -24,6 +24,7 @@ import { SearchInput } from '@/components/ui/SearchInput'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Tabs, type TabItem } from '@/components/ui/Tabs'
+import { VendorIdentityCard } from '@/features/dashboard/components/VendorIdentityCard'
 import { ApproveModal, apiErrorMessage } from '@/features/visits/components/ApproveModal'
 import { RejectModal } from '@/features/visits/components/RejectModal'
 import { VisitCards } from '@/features/visits/components/VisitCards'
@@ -430,30 +431,7 @@ function DashboardScreen() {
       ) : null}
 
       {/* Kartu identitas Vendor/Mitra — di atas metrik, ikut VendorMobileShell. */}
-      {role === 'vendor' ? (
-        <section aria-label="Identitas Vendor/Mitra" className="card mb-5 flex items-center gap-4 p-4">
-          <span
-            aria-hidden="true"
-            className="flex size-12 shrink-0 items-center justify-center rounded-badge bg-brand text-lg font-bold text-brand-contrast"
-          >
-            {(user.name.charAt(0) || 'P').toUpperCase()}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold text-ink">{user.name}</p>
-            <p className="truncate text-xs text-ink-secondary">
-              {user.vendor_name ?? 'Vendor'}
-              {' · '}
-              {user.email}
-            </p>
-            <p className="mt-0.5 truncate text-xs text-ink-muted">
-              {user.nik !== null ? `NIK ${user.nik}` : 'NIK —'}
-            </p>
-          </div>
-          <Badge tone={user.status === 'active' ? 'success' : 'neutral'}>
-            {user.status === 'active' ? 'Aktif' : 'Nonaktif'}
-          </Badge>
-        </section>
-      ) : null}
+      {role === 'vendor' ? <VendorIdentityCard user={user} /> : null}
 
       {/* Baris metrik — grid 2x2 di mobile, 4 kolom di desktop (larangan scroll). */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">

@@ -3,11 +3,14 @@ import '@testing-library/jest-dom/vitest'
 
 import { cleanup, render, screen } from '@testing-library/react'
 import { createElement, type ComponentProps } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SecurityKioskShell } from './SecurityKioskShell'
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/gate' }))
+/** State mutable agar tiap kasus uji bisa menguji visibilitas rute berbeda. */
+const pathnameState = vi.hoisted(() => ({ value: '/gate' }))
+
+vi.mock('next/navigation', () => ({ usePathname: () => pathnameState.value }))
 
 /** Ganti `next/image` dengan `<img>` polos: jsdom tidak menjalankan loader optimasi. */
 vi.mock('next/image', () => ({
@@ -16,7 +19,12 @@ vi.mock('next/image', () => ({
 
 vi.mock('@/lib/auth/session', () => ({
   useSession: () => ({
-    user: { name: 'Joko Susilo', role: 'security', location_name: 'POP Pontianak' },
+    user: {
+      name: 'Joko Susilo',
+      role: 'security',
+      location_name: 'POP Pontianak',
+      avatar_url: 'https://minio.local/avatar.png',
+    },
     status: 'authenticated',
     signOut: vi.fn(),
   }),
@@ -31,6 +39,10 @@ afterEach(() => {
   cleanup()
 })
 
+beforeEach(() => {
+  pathnameState.value = '/gate'
+})
+
 /**
  * Topbar kios SATU baris di semua breakpoint:
  * - kiri: logo THC; badge lokasi `md:inline-flex` (di ponsel pindah ke
@@ -38,10 +50,12 @@ afterEach(() => {
  * - tengah: jam live WIB dengan counter "X Teknisi On-Site" TEPAT di
  *   bawahnya (ponsel: kolom bertumpuk di antara logo dan lonceng;
  *   md+: jam + counter sebaris).
- * - kanan: tautan kembali (ikon di ponsel), lonceng notifikasi, nama
- *   petugas (lg+), dan tombol logout ringkas.
+ * - kanan: tautan kembali (ikon di ponsel), lonceng notifikasi, avatar +
+ *   nama petugas (md+), dan tombol logout ringkas.
  *
  * Identitas petugas + pos jaga tidak di navbar; ia ada di pita body `/gate`.
+ * Label kiri topbar lama (judul pos) sudah dihapus — kiri hanya logo +
+ * badge lokasi — dan tidak boleh muncul lagi.
  */
 describe('SecurityKioskShell — topbar kios satu baris di semua breakpoint', () => {
   it('header hanya punya SATU baris - tier-2 dihapus', () => {
@@ -99,10 +113,70 @@ describe('SecurityKioskShell — topbar kios satu baris di semua breakpoint', ()
     expect(screen.getAllByText(/Teknisi On-Site/).length).toBeGreaterThan(0)
   })
 
-  it('nama petugas hanya muncul SATU kali di dalam shell', () => {
+  it('nama petugas hanya muncul SATU kali dan menaut ke /profile', () => {
     render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
 
     expect(screen.getAllByText('Joko Susilo').length).toBeLessThanOrEqual(1)
+
+    const nameLink = screen.getByText('Joko Susilo')
+    expect(nameLink.tagName).toBe('A')
+    expect(nameLink).toHaveAttribute('href', '/profile')
+    expect(nameLink).toHaveAccessibleName('Profil Joko Susilo')
+  })
+
+  it('header menampilkan avatar sesi: <img> src avatar_url, wrapper image, aria-hidden, alt kosong', () => {
+    render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    const img = document.querySelector('header img[src="https://minio.local/avatar.png"]')
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('alt')).toBe('')
+    expect(img?.getAttribute('aria-hidden')).toBe('true')
+
+    const wrapper = img?.closest('[data-avatar-state]')
+    expect(wrapper).not.toBeNull()
+    expect(wrapper?.getAttribute('data-avatar-state')).toBe('image')
+    expect(wrapper?.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('avatar mendahului nama di DOM dan grupnya hidden md:flex (tak masuk bar ponsel 56px)', () => {
+    render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    const nameLink = screen.getByText('Joko Susilo')
+    const ordered = Array.from(
+      document.querySelectorAll(
+        'header img[src="https://minio.local/avatar.png"], header a[href="/profile"]',
+      ),
+    )
+    // querySelectorAll selalu mengembalikan urutan dokumen: avatar dulu,
+    // tautan nama menyusul (bukan sebaliknya).
+    expect(ordered).toHaveLength(2)
+    expect(ordered[0]?.getAttribute('src')).toBe('https://minio.local/avatar.png')
+    expect(ordered[1]).toBe(nameLink)
+
+    const group = ordered[0]?.closest('[data-avatar-state]')?.parentElement
+    expect(group).not.toBeNull()
+    const classes = (group?.getAttribute('class') ?? '').split(/\s+/)
+    // Tampil mulai 768px (md), bukan lg — di <768px permukaan avatar adalah
+    // pita body `/gate`. `hidden` + `md:flex` menjamin tak ada di bar ponsel.
+    expect(classes).toContain('hidden')
+    expect(classes).toContain('md:flex')
+    expect(classes).not.toContain('lg:flex')
+    // `min-w-0` = syarat `truncate` nama agar cluster kanan tak overflow.
+    expect(classes).toContain('min-w-0')
+    expect(group?.contains(nameLink)).toBe(true)
+
+    const nameAnchor = nameLink as HTMLAnchorElement
+    expect(nameAnchor.className).toContain('truncate')
+    expect(nameAnchor.className).toContain('max-w-full')
+  })
+
+  it('label topbar lama di kiri sudah dihapus dari header', () => {
+    render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    const removedLabel = ['Gate', 'Access', 'Control'].join(' ')
+    expect(screen.queryByText(removedLabel)).toBeNull()
+    const header = document.querySelector('header')?.textContent ?? ''
+    expect(header).not.toContain(removedLabel)
   })
 
   it('badge lokasi disembunyikan di ponsel (hidden md:inline-flex)', () => {
@@ -113,6 +187,18 @@ describe('SecurityKioskShell — topbar kios satu baris di semua breakpoint', ()
     const className = badge?.getAttribute('class') ?? ''
     expect(className).toContain('hidden')
     expect(className).toContain('md:inline-flex')
+  })
+
+  it('di md badge lokasi punya lantai lebar agar tak terlipat jadi sliver', () => {
+    render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    const badge = document.querySelector('[title="POP Pontianak"]')?.closest('.status-badge')
+    expect(badge).not.toBeNull()
+    const classes = (badge?.getAttribute('class') ?? '').split(/\s+/)
+    expect(classes).toContain('md:min-w-24')
+    expect(classes).toContain('md:max-w-56')
+    // Pemotongan teks ada pada span isi badge, bukan pada pembungkusnya.
+    expect(badge?.querySelector('span.truncate')).not.toBeNull()
   })
 
   it('tidak ada pita identitas kios di dalam shell (pita hidup di body /gate)', () => {
@@ -134,6 +220,13 @@ describe('SecurityKioskShell — topbar kios satu baris di semua breakpoint', ()
     expect(children[children.length - 1]).toBe(logout)
     expect(children.indexOf(bell)).toBeLessThan(children.indexOf(logout))
     expect(cluster?.textContent).toContain('Joko Susilo')
+
+    const nameGroup = document
+      .querySelector('header img[src="https://minio.local/avatar.png"]')
+      ?.closest('[data-avatar-state]')?.parentElement
+    expect(nameGroup).not.toBeNull()
+    expect(children.indexOf(bell)).toBeLessThan(children.indexOf(nameGroup!))
+    expect(children.indexOf(nameGroup!)).toBeLessThan(children.indexOf(logout))
   })
 
   it('bottom bar ponsel reservasi safe area iOS tanpa terjepit', () => {
@@ -156,5 +249,46 @@ describe('SecurityKioskShell — topbar kios satu baris di semua breakpoint', ()
     const classes = (main?.getAttribute('class') ?? '').split(/\s+/)
     // Padding bawah 96px (bar 56px + sisanya) PLUS inset home indicator.
     expect(classes).toContain('pb-[calc(6rem_+_env(safe-area-inset-bottom))]')
+  })
+})
+
+describe('visibilitas rute', () => {
+  it('/gate: tab gerbang tampil, tanpa tautan kembali, padding bawah bar tetap', () => {
+    pathnameState.value = '/gate'
+    const { container } = render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    expect(screen.getAllByRole('tab').length).toBeGreaterThan(0)
+    expect(
+      screen.queryAllByRole('link', { name: 'Kembali ke Pos Check-in' }).length,
+    ).toBe(0)
+    const classes = (container.querySelector('main')?.getAttribute('class') ?? '').split(/\s+/)
+    expect(classes).toContain('pb-[calc(6rem_+_env(safe-area-inset-bottom))]')
+  })
+
+  it('/profile: tab gerbang disembunyikan, bottom bar absen, padding konten pb-4', () => {
+    pathnameState.value = '/profile'
+    const { container } = render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(
+      screen.queryAllByRole('link', { name: 'Kembali ke Pos Check-in' }).length,
+    ).toBe(0)
+    const classes = (container.querySelector('main')?.getAttribute('class') ?? '').split(/\s+/)
+    expect(classes).toContain('pb-4')
+    expect(container.querySelector('div.fixed.bottom-0.min-h-bar-mobile')).toBeNull()
+  })
+
+  it('/visits/visit-1: tab disembunyikan, dua tautan kembali menaut ke /gate, padding pb-4', () => {
+    pathnameState.value = '/visits/visit-1'
+    const { container } = render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    const backLinks = screen.getAllByRole('link', { name: 'Kembali ke Pos Check-in' })
+    expect(backLinks).toHaveLength(2)
+    for (const link of backLinks) {
+      expect(link).toHaveAttribute('href', '/gate')
+    }
+    const classes = (container.querySelector('main')?.getAttribute('class') ?? '').split(/\s+/)
+    expect(classes).toContain('pb-4')
   })
 })

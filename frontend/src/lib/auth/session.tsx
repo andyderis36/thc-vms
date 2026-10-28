@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -42,9 +43,22 @@ export interface SessionValue {
   signOut: () => Promise<void>;
   /** Hidrasi ulang user dari token tersimpan. Tidak melempar. */
   refresh: () => Promise<void>;
+  /**
+   * Tulis user baru ke sesi secara SINKRON (mis. hasil `PATCH /auth/me`).
+   * Menaikkan epoch sehingga respons `/auth/me` yang lebih lama tidak bisa
+   * menimpanya dengan data basi.
+   */
+  applyUser: (user: User) => void;
 }
 
 const SessionContext = createContext<SessionValue | null>(null);
+
+/**
+ * Interval penyegaran senyap user selama sesi aktif. `avatar_url` adalah
+ * presigned URL berumur 15 menit; 10 menit memberi margin satu tick penuh
+ * sebelum tautan di UI kedaluwarsa.
+ */
+export const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 /**
  * Kunci flag sekali-pakai "sesi kedaluwarsa" di `sessionStorage`.
@@ -120,23 +134,70 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
   // menyala sesaat di dashboard akun baru sampai refetch selesai.
   const queryClient = useQueryClient();
 
+  /**
+   * Generasi tulis state user. Semua jalur async menangkap nilai ini SEBELUM
+   * `await` dan hanya boleh commit bila nilainya belum berubah. Tanpa ini,
+   * `GET /auth/me` yang dimulai sebelum `PATCH /auth/me` bisa selesai
+   * belakangan dan menimpa avatar baru dengan data basi.
+   */
+  const writeEpochRef = useRef(0);
+
+  /** Tulis user baru secara sinkron + batalkan semua commit async yang lebih tua. */
+  const applyUser = useCallback((next: User): void => {
+    writeEpochRef.current += 1;
+    setUser(next);
+    setStatus('authenticated');
+  }, []);
+
+  /**
+   * Hidrasi ulang user TANPA efek samping destruktif: dipakai signIn dan
+   * interval latar. Kegagalan transien (jaringan/5xx) diabaikan dan state
+   * dibiarkan apa adanya — tidak menandai sesi kedaluwarsa, tidak clearToken.
+   * Mengembalikan `null` bila hasilnya sudah basi (applyUser lebih baru).
+   */
+  const hydrateSilently = useCallback(async (): Promise<User | null> => {
+    const epoch = writeEpochRef.current;
+    try {
+      const me = await fetchMeDeduped();
+      if (epoch !== writeEpochRef.current) {
+        return null;
+      }
+      setUser(me);
+      setStatus('authenticated');
+      return me;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const refresh = useCallback(async (): Promise<void> => {
     const token = getToken();
     if (token === null) {
+      writeEpochRef.current += 1;
       setUser(null);
       setStatus('unauthenticated');
       return;
     }
+    const epoch = writeEpochRef.current;
     try {
       // Pakai dedupe bersama agar refresh + mount effect tidak dobel-hit.
       const me = await fetchMeDeduped();
+      if (epoch !== writeEpochRef.current) {
+        return;
+      }
       setUser(me);
       setStatus('authenticated');
     } catch {
+      // Hasil basi tidak boleh mengakhiri sesi yang baru saja ditulis
+      // (mis. applyUser setelah PATCH profil berhasil).
+      if (epoch !== writeEpochRef.current) {
+        return;
+      }
       // Token sempat ada tapi getMe gagal (basi/401/jaringan): tandai sesi
       // berakhir SEBELUM clearToken agar guard bisa redirect `?expired=1`.
       // Navigasi + toast tetap tugas guard + layar login, bukan provider ini.
       // Cache ikut dibuang: akun berikutnya wajib mulai dari data kosong.
+      writeEpochRef.current += 1;
       markSessionExpired();
       queryClient.clear();
       clearToken();
@@ -156,21 +217,24 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
         }
         return;
       }
+      const epoch = writeEpochRef.current;
       try {
         // Dedupe bersama: mount StrictMode ganda hanya menembak 1 request.
         const me = await fetchMeDeduped();
-        if (!cancelled) {
+        if (!cancelled && epoch === writeEpochRef.current) {
           setUser(me);
           setStatus('authenticated');
         }
       } catch {
+        if (cancelled || epoch !== writeEpochRef.current) {
+          return;
+        }
         // Token sempat ada tapi getMe gagal: tandai expired sebelum clear.
+        writeEpochRef.current += 1;
         markSessionExpired();
         clearToken();
-        if (!cancelled) {
-          setUser(null);
-          setStatus('unauthenticated');
-        }
+        setUser(null);
+        setStatus('unauthenticated');
       }
     })();
     return (): void => {
@@ -178,15 +242,35 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
     };
   }, []);
 
+  useEffect(() => {
+    if (status !== 'authenticated') {
+      return undefined;
+    }
+    const intervalId = window.setInterval(() => {
+      // SENGAJA memakai hydrateSilently, BUKAN refresh(): tick latar tidak
+      // boleh mengakhiri sesi hanya karena satu permintaan /auth/me gagal.
+      void hydrateSilently();
+    }, SESSION_REFRESH_INTERVAL_MS);
+    return (): void => {
+      window.clearInterval(intervalId);
+    };
+  }, [status, hydrateSilently]);
+
   const signIn = useCallback(async (email: string, password: string): Promise<User> => {
     try {
       const result = await login({ email, password });
       // Buang sisa cache akun sebelumnya SEBELUM sesi baru dipasang, supaya
       // layar pertama akun baru tidak pernah melukis data akun lama.
       queryClient.clear();
+      // Sesi baru adalah penulis terbaru: naikkan epoch agar `/auth/me` yang
+      // dimulai sebelum login ini tidak menimpa payload login.
+      writeEpochRef.current += 1;
+      // Fallback segera: payload login cukup untuk membuka sesi walau /auth/me
+      // lambat/gagal. Nilainya lalu diganti hasil hidrasi yang kanonik.
       setUser(result.user);
       setStatus('authenticated');
-      return result.user;
+      const hydrated = await hydrateSilently();
+      return hydrated ?? result.user;
     } catch (err: unknown) {
       // Jangan lempar ApiError mentah ke UI; bungkus jadi Error biasa.
       // Kegagalan jaringan (tanpa respons HTTP) dibungkus ke kelas khusus
@@ -196,7 +280,7 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
       }
       throw new Error(toDisplayMessage(err));
     }
-  }, [queryClient]);
+  }, [queryClient, hydrateSilently]);
 
   const signOut = useCallback(async (): Promise<void> => {
     try {
@@ -207,6 +291,9 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
       // Batalkan fetch yang masih jalan lalu buang cache: tanpa ini, login
       // berikutnya membaca daftar basi akun lama sampai refetch selesai.
       // `finally` menjamin sesi lokal berakhir walau jaringan gagal.
+      // Naikkan epoch SEBELUM membuang state + sesudah await, agar hidrasi
+      // `/auth/me` yang masih jalan tidak menghidupkan sesi yang sudah keluar.
+      writeEpochRef.current += 1;
       await queryClient.cancelQueries();
       queryClient.clear();
       clearToken();
@@ -216,8 +303,8 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
   }, [queryClient]);
 
   const value = useMemo<SessionValue>(
-    () => ({ user, status, signIn, signOut, refresh }),
-    [user, status, signIn, signOut, refresh],
+    () => ({ user, status, signIn, signOut, refresh, applyUser }),
+    [user, status, signIn, signOut, refresh, applyUser],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

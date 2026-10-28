@@ -36,6 +36,7 @@ function makeVisit(overrides: Partial<VisitDetail> = {}): VisitDetail {
       status: 'active',
       type: 'external',
       vendor_name: 'PT Lintas Fiber',
+      avatar_url: null,
     },
     vendor_name: 'PT Lintas Fiber',
     start_date: '2026-09-26T08:00:00+07:00',

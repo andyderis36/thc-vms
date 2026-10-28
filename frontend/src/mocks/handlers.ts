@@ -136,6 +136,32 @@ function unauthorized(): Response {
 }
 
 // ---------------------------------------------------------------------------
+// Profil mandiri (PATCH /auth/me)
+// ---------------------------------------------------------------------------
+
+/** Field yang boleh diubah sendiri lewat `PATCH /auth/me` (openapi). */
+const PROFILE_EDITABLE_FIELDS = new Set(['name', 'phone', 'avatar_url']);
+
+/** Nomor telepon kanonik: hanya digit, awalan `62` diganti `0` (cermin BE). */
+const PHONE_PATTERN = /^(?:62|0)[0-9]{8,13}$/;
+
+/** Daftar field yang boleh diubah sendiri, dihitung dari peran pemanggil. */
+function editableFieldsFor(role: User['role']): string[] {
+  return role === 'super_admin'
+    ? ['name', 'phone', 'avatar_url']
+    : ['phone', 'avatar_url'];
+}
+
+/**
+ * Amplop `GET`/`PATCH /auth/me`: profil + `editable_fields` peran. Menyalin
+ * objek agar `editable_fields` tidak ikut tersimpan pada `db.users` (field ini
+ * hanya dijamin pada respons `/auth/me`, bukan pada user tertanam kunjungan).
+ */
+function meResponse(user: User): User {
+  return { ...user, editable_fields: editableFieldsFor(user.role) };
+}
+
+// ---------------------------------------------------------------------------
 // Scoping multi-cabang (AGENTS.md §6.1)
 // ---------------------------------------------------------------------------
 
@@ -397,7 +423,80 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    return ok(auth);
+    return ok(meResponse(auth));
+  }),
+
+  http.patch(`${API_BASE}/auth/me`, async ({ request }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    const body = await readJsonBody(request);
+    const keys = Object.keys(body);
+    const unknownField = keys.find(
+      (key) => !PROFILE_EDITABLE_FIELDS.has(key),
+    );
+    if (unknownField !== undefined) {
+      return fail(
+        'VALIDATION_ERROR',
+        `Field "${unknownField}" tidak dapat diubah pada profil sendiri.`,
+        400,
+      );
+    }
+    if (keys.length === 0) {
+      return fail(
+        'VALIDATION_ERROR',
+        'Tidak ada perubahan yang diberikan.',
+        400,
+      );
+    }
+    const next: Partial<Pick<User, 'name' | 'phone' | 'avatar_url'>> = {};
+    if ('name' in body) {
+      if (auth.role !== 'super_admin') {
+        return fail(
+          'FORBIDDEN',
+          'Hanya Superadmin yang dapat mengubah nama sendiri.',
+          403,
+        );
+      }
+      const name = stringField(body, 'name')?.trim() ?? '';
+      if (name === '' || name.length > 100) {
+        return fail(
+          'VALIDATION_ERROR',
+          'Nama wajib diisi dan maksimal 100 karakter.',
+          400,
+        );
+      }
+      next.name = name;
+    }
+    if ('phone' in body) {
+      const raw = stringField(body, 'phone') ?? '';
+      const canonical = raw.startsWith('62') ? `0${raw.slice(2)}` : raw;
+      if (!PHONE_PATTERN.test(canonical)) {
+        return fail(
+          'VALIDATION_ERROR',
+          'Nomor telepon harus berupa digit dengan awalan 0 atau 62.',
+          400,
+        );
+      }
+      next.phone = canonical;
+    }
+    if ('avatar_url' in body) {
+      const avatar = body['avatar_url'];
+      if (avatar === null) {
+        next.avatar_url = null;
+      } else if (typeof avatar === 'string' && avatar.length <= 2048) {
+        next.avatar_url = avatar;
+      } else {
+        return fail(
+          'VALIDATION_ERROR',
+          'URL avatar tidak valid.',
+          400,
+        );
+      }
+    }
+    Object.assign(auth, next);
+    return ok(meResponse(auth));
   }),
 
   http.post(`${API_BASE}/auth/logout`, () => ok(null)),
@@ -1110,6 +1209,7 @@ export const handlers: RequestHandler[] = [
       status: 'active',
       type: 'internal',
       vendor_name: null,
+      avatar_url: null,
     };
     db.users.push(created);
     return ok(created, 201);
@@ -1440,6 +1540,7 @@ export const handlers: RequestHandler[] = [
       status: 'active',
       type: role === 'admin' ? 'internal' : 'external',
       vendor_name: vendorName,
+      avatar_url: null,
     };
     db.users.push(created);
     return ok(created, 201);

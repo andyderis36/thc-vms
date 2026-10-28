@@ -118,9 +118,9 @@ export function VisitCards({ visits, role, onApprove, onReject }: VisitCardsProp
                   )}
                 </span>
               </p>
-              <p className="flex items-start gap-2">
-                <FileText className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-                <span className="min-w-0">
+              <p className="flex items-center gap-2">
+                <FileText className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+                <span className="flex min-w-0 items-center">
                   {spkUrl ? (
                     <SpkFileLink
                       visitId={visit.id}

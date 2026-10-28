@@ -507,13 +507,13 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
             </CardBody>
           </Card>
 
-          {/* Daftar Tim Teknisi — permukaan ber-tint lembut (bukan kotak
-              berborder) supaya deretan teknisi terbaca sebagai kartu data,
+          {/* Daftar Anggota — permukaan ber-tint lembut (bukan kotak
+              berborder) supaya deretan anggota terbaca sebagai kartu data,
               bukan tabel bersel. */}
           <Card>
             <CardBody>
               <PanelTitle icon={Users} trailing={<Badge tone="neutral">{visit.visitors.length}</Badge>}>
-                Tim Teknisi
+                Anggota
               </PanelTitle>
               {visit.visitors.length > 0 ? (
                 <ul className="mt-4 flex flex-col gap-3">
@@ -551,6 +551,9 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                           <p className="text-label text-ink-secondary">
                             {`Perusahaan: ${(visitor.vendor_name ?? '').trim() !== '' ? visitor.vendor_name : '—'}`}
                           </p>
+                          <p className="text-label text-ink-secondary">
+                            {`Jabatan: ${(visitor.jabatan ?? '').trim() !== '' ? visitor.jabatan : '—'}`}
+                          </p>
                           <div className="mt-1.5 flex flex-wrap gap-2">
                             {ktpUrl !== null && ktpUrl !== '' ? (
                               <VisitFilePhoto
@@ -577,7 +580,7 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                 </ul>
               ) : (
                 <p className="mt-3 rounded-control bg-neutral-bg px-4 py-3 text-sm text-neutral-text">
-                  Belum ada data teknisi pada kunjungan ini.
+                  Belum ada data anggota pada kunjungan ini.
                 </p>
               )}
             </CardBody>

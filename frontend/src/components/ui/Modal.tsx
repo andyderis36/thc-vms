@@ -53,7 +53,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/35 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 backdrop-blur-sm p-4"
       onClick={(event) => {
         // Hanya tutup bila klik mendarat pada overlay, bukan isi panel.
         if (event.target === event.currentTarget) onClose()
@@ -64,9 +64,9 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`w-full ${SIZE_CLASSES[size]} rounded-modal bg-surface border border-border-light/60 p-6 shadow-modal`}
+        className={`my-auto flex max-h-[calc(100dvh-2rem)] w-full ${SIZE_CLASSES[size]} flex-col rounded-modal bg-surface border border-border-light/60 p-6 shadow-modal`}
       >
-        <header className="mb-4 flex items-start justify-between gap-4">
+        <header className="mb-4 flex shrink-0 items-start justify-between gap-4">
           <h2 id={titleId} className="text-lg font-semibold text-ink">
             {title}
           </h2>
@@ -94,10 +94,10 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
           </button>
         </header>
 
-        <div className="text-sm text-ink">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto text-sm text-ink">{children}</div>
 
         {footer ? (
-          <footer className="mt-6 flex items-center justify-end gap-2">{footer}</footer>
+          <footer className="mt-6 flex shrink-0 items-center justify-end gap-2">{footer}</footer>
         ) : null}
       </div>
     </div>

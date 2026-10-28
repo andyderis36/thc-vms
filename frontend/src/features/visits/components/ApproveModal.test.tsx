@@ -50,6 +50,7 @@ function buildVisit(overrides: Partial<VisitDetail> & Pick<VisitDetail, 'id' | '
       status: 'active',
       type: 'internal',
       vendor_name: null,
+      avatar_url: null,
     },
     vendor_name: 'PT Mitra Jaringan',
     start_date: '2026-09-26T08:00:00+07:00',

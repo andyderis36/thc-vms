@@ -16,6 +16,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Pagination } from '@/components/ui/Pagination'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
+import { UserAvatar } from '@/components/ui/UserAvatar'
 import {
   useCreateSecurityUserMutation,
   useDeleteSecurityUserMutation,
@@ -428,6 +429,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
         <DetailModal
           title="Detail Pengawas"
           subtitle={detail.name}
+          avatar={<UserAvatar name={detail.name} avatarUrl={detail.avatar_url} size="lg" />}
           fields={securityUserDetailFields(detail)}
           onClose={() => setDetail(null)}
         />

@@ -13,6 +13,7 @@ import { Input, FIELD_HEIGHT } from '@/components/ui/Input'
 import { Pagination } from '@/components/ui/Pagination'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
+import { UserAvatar } from '@/components/ui/UserAvatar'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 import { EditUserModal } from '@/features/users/components/EditUserModal'
 import { ManagedRoleFilterSelect } from '@/features/users/components/ManagedRoleFilterSelect'
@@ -422,6 +423,7 @@ export function ManagedUsersScreen({
         <DetailModal
           title="Detail User"
           subtitle={detail.name}
+          avatar={<UserAvatar name={detail.name} avatarUrl={detail.avatar_url} size="lg" />}
           fields={managedUserDetailFields(detail)}
           onClose={() => setDetail(null)}
         />

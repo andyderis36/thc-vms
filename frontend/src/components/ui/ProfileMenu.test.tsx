@@ -42,6 +42,19 @@ describe('ProfileMenu', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
+  it('menampilkan item Profil sebagai tautan ke /profile SEBELUM item Keluar', () => {
+    renderMenu()
+    openMenu()
+
+    const profil = screen.getByRole('menuitem', { name: 'Profil' })
+    expect(profil.tagName).toBe('A')
+    expect(profil).toHaveAttribute('href', '/profile')
+
+    const menuItems = screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())
+    expect(menuItems).toEqual(['Profil', 'Keluar'])
+    expect(screen.getByRole('menuitem', { name: 'Keluar' }).tagName).toBe('BUTTON')
+  })
+
   it('menutup panel dan mengembalikan fokus ke pemicu saat Escape ditekan', () => {
     renderMenu()
     openMenu()
@@ -63,7 +76,24 @@ describe('ProfileMenu', () => {
 
   it('menampilkan foto avatar bila avatarUrl disediakan', () => {
     renderMenu({ user: { ...USER, avatarUrl: 'https://cdn.example/u.png' } })
-    expect(screen.getByRole('img', { name: 'Akun Budi Santoso' })).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: 'Akun Budi Santoso' }).tagName).toBe('SPAN')
+    const avatar = screen.getByRole('img', { name: 'Akun Budi Santoso' })
+    expect(avatar.tagName).toBe('SPAN')
+
+    const img = avatar.querySelector('img')
+    expect(img).toHaveAttribute('src', 'https://cdn.example/u.png')
+    expect(avatar.textContent).toBe('')
+  })
+
+  it('jatuh ke inisial dan melepas <img> saat foto gagal dimuat (URL kedaluwarsa)', () => {
+    renderMenu({ user: { ...USER, avatarUrl: 'https://cdn.example/expired.png' } })
+    const avatar = screen.getByRole('img', { name: 'Akun Budi Santoso' })
+    const img = avatar.querySelector('img')
+    expect(img).not.toBeNull()
+
+    fireEvent.error(img!)
+
+    expect(avatar.querySelector('img')).toBeNull()
+    expect(avatar.textContent).toBe('BS')
+    expect(screen.getByRole('img', { name: 'Akun Budi Santoso' })).toBe(avatar)
   })
 })

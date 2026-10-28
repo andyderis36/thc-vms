@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import Image from 'next/image'
-import { House, LogOut, Plus, QrCode, type LucideIcon } from 'lucide-react'
+import { House, LogOut, Plus, QrCode, UserRound, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useSession } from '@/lib/auth/session'
 import { getRoleLabel } from '@/lib/auth/capabilities'
@@ -178,19 +178,28 @@ export function VendorMobileShell({
             })}
           </nav>
 
-          {/* Nama vendor disembunyikan di bawah 640px (`hidden sm:block`):
-              pada 320px header sudah penuh (logo + wordmark + lonceng +
-              logout) sehingga nama vendor hanya jadi potongan sampah;
-              dari 640px ruang cukup dan nama tampil lagi sebagai penanda
-              akun. Halaman dashboard sudah memuat kartu identitas vendor,
-              jadi nama tidak perlu diulang dua kali di sana. */}
+          {/* Nama vendor TIDAK lagi disembunyikan total di ponsel: pada < 640px
+              ia menyusut menjadi chip ikon akun 44px yang tetap menjadi tautan
+              `/profile` (satu-satunya pintu profil di SHELL-04 — bottom nav
+              hanya memuat 3 tujuan + tombol Ajukan, jadi menyembunyikan nama
+              membuat vendor di ponsel tak bisa membuka profilnya sama sekali).
+              Dari 640px ruang cukup dan nama penuh tampil lagi sebagai penanda
+              akun. Chip ikon dipakai (bukan inisial) agar tidak perlu logika
+              inisial ketiga di repo ini. */}
           <div className="flex min-w-0 items-center gap-1">
-            <span
-              className="hidden min-w-0 max-w-72 truncate text-label font-semibold text-brand-contrast/80 sm:block lg:max-w-40"
-              title={vendorLabel}
+            {/* Chip/nama vendor = tautan ke `/profile` (profil mandiri). Target
+                sentuh 44px dikejar lewat `py-3` (padding, BUKAN font-size:
+                teks tetap `text-label`) + `min-h-touch`; padding negatif
+                `-my-1` mengembalikan kotak ke posisi visual semula sehingga
+                tidak ada layout shift terhadap lonceng/logout di sebelahnya. */}
+            <Link
+              href="/profile"
+              aria-label={`Profil ${vendorLabel}`}
+              className="-my-1 flex min-h-touch w-11 shrink-0 items-center justify-center rounded-control px-1 py-3 text-label font-semibold text-brand-contrast/80 transition-colors hover:bg-brand-dark hover:text-brand-contrast focus-visible:outline-brand-contrast sm:w-auto sm:min-w-0 sm:max-w-72 sm:justify-start sm:truncate lg:w-11 lg:max-w-none lg:justify-center"
             >
-              {vendorLabel}
-            </span>
+              <UserRound aria-hidden="true" className="size-5 shrink-0 sm:hidden lg:block" />
+              <span className="hidden truncate sm:block lg:hidden">{vendorLabel}</span>
+            </Link>
             {/* Lonceng notifikasi tersimpan milik vendor (approved/rejected/
                 reminder/auto_cancelled) — shell ini satu-satunya entitlement
                 vendor, jadi panelnya WAJIB tersedia di SHELL-04. `tone="brand"`

@@ -23,6 +23,7 @@ function securityStub(overrides: Partial<User> = {}): User {
     status: 'active',
     type: 'internal',
     vendor_name: null,
+    avatar_url: null,
     ...overrides,
   }
 }

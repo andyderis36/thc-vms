@@ -30,6 +30,7 @@ import type {
   UpdateLocationRequest,
   UpdateManagedUserRequest,
   UpdateSecurityUserRequest,
+  UpdateSelfProfileRequest,
   UpdateUserStatusRequest,
   User,
   Vendor,
@@ -56,6 +57,11 @@ export async function login(body: LoginRequest): Promise<LoginResult> {
 
 export function getMe(): Promise<User> {
   return apiFetch<User>('/auth/me');
+}
+
+/** `PATCH /auth/me` — perbarui profil sendiri; respons membawa `avatar_url` presigned terbaru. */
+export function updateMe(body: UpdateSelfProfileRequest): Promise<User> {
+  return apiFetch<User>('/auth/me', { method: 'PATCH', body: JSON.stringify(body) });
 }
 
 export async function logout(): Promise<void> {
@@ -292,6 +298,8 @@ export function listAuditLogs(params: AuditLogListParams = {}): Promise<AuditLog
   if (params.date_from !== undefined && params.date_from !== '')
     query.set('date_from', params.date_from);
   if (params.date_to !== undefined && params.date_to !== '') query.set('date_to', params.date_to);
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.order !== undefined) query.set('order', params.order);
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   const search = query.toString();
