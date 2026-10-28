@@ -41,10 +41,12 @@ erDiagram
         string email UK "Indexed for fast login"
         string password_hash "Bcrypt hash"
         string phone
+        string nik "Nullable: 16 digit KTP; null untuk security & super_admin (000002)"
         uuid role_id FK
         uuid location_id FK "Nullable: required for admin & security, null for super_admin & vendor"
         string type "internal | external"
         string status "active | inactive | blacklisted"
+        string avatar_url "Nullable: absolute object URL, bukan presigned URL; foto profil (000014)"
         uuid vendor_id FK "Nullable for internal staff"
         text vendor_name_override "Nullable: manual vendor company, TIDAK terdaftar di katalog vendor (000005)"
         timestamp last_login

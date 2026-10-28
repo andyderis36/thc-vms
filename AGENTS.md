@@ -168,8 +168,25 @@ thc-vms/
 │   │   └── lib/                   # Axios instance, Auth context, Utils
 │   └── app/globals.css            # Tailwind v4 theme tokens
 ├── docs/                          # Spesifikasi Dokumen Lengkap (SSOT)
+├── dummy-assets/                  # Aset uji siap pakai (KTP, selfie, surat tugas)
 └── AGENTS.md                      # Pedoman ini
 ```
+
+### 5.1 Aset Dummy untuk QA / E2E / Verifikasi Manual
+
+Folder [`dummy-assets/`](dummy-assets) berisi berkas nyata yang **siap dipakai** untuk menguji unggah berkas tanpa membuat aset baru:
+
+| Berkas | Jenis | Pemakaian |
+|---|---|---|
+| `ktp.jpg` | `image/jpeg` | Foto KTP anggota teknisi |
+| `selfie.jpg` | `image/jpeg` | Foto selfie anggota / foto profil |
+| `selfie-2.jpeg` | `image/jpeg` | Selfie alternatif (uji ganti foto) |
+| `surat-tugas.pdf` | `application/pdf` | Surat Tugas / SPK |
+
+Aturan pakai:
+- **WAJIB** memakai berkas dari folder ini untuk QA unggah (foto profil, KTP, selfie, SPK) — jangan membuat gambar/PDF baru di temp.
+- Jangan mengubah/menghapus berkas di folder ini; perlakukan sebagai aset read-only.
+- Untuk uji unggah berulang, salin dulu ke `$RUN_TMP` bila perlu variasi nama berkas.
 
 ---
 
