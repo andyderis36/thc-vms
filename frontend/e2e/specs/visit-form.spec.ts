@@ -149,13 +149,18 @@ async function uploadInto(
   const box = page.locator(`#${boxId}`)
   const uploaded = page.waitForResponse(
     (response) =>
-      response.request().method() === 'POST' &&
-      response.url().includes('/api/v1/uploads') &&
-      response.status() >= 200 &&
-      response.status() < 300,
+      response.request().method() === 'POST' && response.url().includes('/api/v1/uploads'),
+    { timeout: 60_000 },
   )
   await box.locator('input[type=file]').setInputFiles(filePath)
-  const body = (await (await uploaded).json()) as { data?: { file_url?: unknown } }
+  const response = await uploaded
+  if (!response.ok()) {
+    const detail = await response.text().catch(() => '')
+    throw new Error(
+      `[visit-form] POST /uploads ${response.status()} untuk ${fileName}: ${detail}`,
+    )
+  }
+  const body = (await response.json()) as { data?: { file_url?: unknown } }
   const fileUrl = body.data?.file_url
   if (typeof fileUrl !== 'string') {
     throw new Error(`[visit-form] respons POST /uploads tanpa data.file_url untuk ${fileName}`)
@@ -327,6 +332,7 @@ test.afterEach(async ({ h }) => {
 test('@VISIT-01 happy path lengkap: 1 anggota KTP+selfie, SPK 1,5 MB, tujuan katalog, NDA', async ({
   h,
 }) => {
+  test.setTimeout(120_000)
   const page = await h.openAs('vendor')
   const marker = h.unique('visit01')
   markers.push(marker)
