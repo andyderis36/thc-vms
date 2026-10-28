@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createElement, type ImgHTMLAttributes, type ReactNode } from 'react'
 import {
   afterAll,
@@ -32,7 +32,6 @@ import { NAV_LABELS } from '@/lib/nav/labels'
 import { TABLE_CLASS, TABLE_WRAPPER_CLASS } from '@/lib/table-styles'
 import {
   AVATAR_OBJECT_URL,
-  flushEffects,
   installAvatarFetchStubs,
   mockAvatarImage,
 } from '@/test-utils/avatarFetch'
@@ -441,11 +440,11 @@ describe('modal detail user — avatar identitas', () => {
     mockAvatarImage(fetchMock)
     const dialog = openDetail(renderScreen(COORDINATORS_PAGE_ROLES), 'Bayu Santoso')
 
-    await flushEffects()
-
     const wrapper = dialog.querySelector('[data-avatar-state]') as HTMLElement
     expect(wrapper).not.toBeNull()
-    expect(wrapper).toHaveAttribute('data-avatar-state', 'image')
+    await waitFor(() => {
+      expect(wrapper).toHaveAttribute('data-avatar-state', 'image')
+    })
     expect(wrapper.querySelector('img')).toHaveAttribute('src', AVATAR_OBJECT_URL)
     expect(dialog.querySelector('dl')?.contains(wrapper)).toBe(false)
 

@@ -94,7 +94,9 @@ describe('UserAvatar', () => {
     const [calledUrl, init] = call ?? []
     expect(calledUrl).toBe(RESOLVED_URL)
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer token-abc')
-    expect(wrapperOf(container)).toHaveAttribute('data-avatar-state', 'image')
+    await waitFor(() => {
+      expect(wrapperOf(container)).toHaveAttribute('data-avatar-state', 'image')
+    })
   })
 
   it('jatuh ke inisial tanpa melempar saat respons 404', async () => {
@@ -127,9 +129,9 @@ describe('UserAvatar', () => {
 
     const { container, unmount } = render(<UserAvatar name={NAME} avatarUrl={AVATAR_PATH} />)
     await waitFor(() => {
-      expect(createObjectURL).toHaveBeenCalledTimes(1)
+      expect(wrapperOf(container)).toHaveAttribute('data-avatar-state', 'image')
     })
-    expect(wrapperOf(container)).toHaveAttribute('data-avatar-state', 'image')
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
 
     unmount()
 
