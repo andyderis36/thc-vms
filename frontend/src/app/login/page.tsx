@@ -199,12 +199,18 @@ function LoginScreen() {
           aria-hidden="true"
           className="absolute inset-0 -z-10 bg-linear-to-br from-sidebar-dark/90 via-sidebar-dark/70 to-brand/60"
         />
+        {/* `unoptimized` WAJIB (dua pemakaian di berkas ini): `/_next/image`
+            `?url=%2Fthcw.png&w=1080&q=75` dengan `Accept: image/avif`
+            menggantung tanpa respons (>45 s, terukur 2026-10-28) dan ikut
+            menahan permintaan Next lain di server yang sama. Aset ini hanya
+            24 KB (500x235) - sajikan apa adanya. */}
         <Image
           src="/thcw.png"
           alt="THC"
           width={500}
           height={235}
           priority
+          unoptimized
           className="relative z-10 h-auto w-52"
         />
         <div className="relative z-10 max-w-md text-center">
@@ -238,6 +244,7 @@ function LoginScreen() {
               width={500}
               height={235}
               priority
+              unoptimized
               className="h-15 w-auto shrink-0"
             />
             <p className="mt-4 w-full text-center text-sm font-bold leading-snug text-brand-contrast">
