@@ -3,7 +3,8 @@
  *
  * Cakupan (tag judul = ID skenario):
  * - @PROF-01 telepon dapat diubah semua peran lalu bertahan setelah reload.
- * - @PROF-02 vendor mengunggah PNG lewat file chooser nyata; avatar presigned.
+ * - @PROF-02 vendor mengunggah PNG lewat file chooser nyata; `avatar_url` berupa
+ *   path `/api/v1/avatars/<uuid>` dan fotonya benar-benar ter-render.
  * - @PROF-03 foto yang ada dapat dihapus dan `avatar_url` kembali null.
  * - @PROF-04 nama tidak dirender & ditolak 403 untuk non-super_admin.
  * - @PROF-05 super_admin mengganti namanya sendiri lewat UI.
@@ -27,9 +28,12 @@
  *   nama penuh tampil di tablet.
  *
  * KESELAMATAN DATA: setiap test yang memutasi profil membaca `GET /auth/me`
- * lebih dulu, lalu mengembalikan `name`/`phone`/`avatar_url` asli di `finally`.
- * `name` hanya ikut dikirim bila peran memang boleh mengubahnya (super_admin);
- * mengirimnya untuk peran lain akan ditolak 403 dan membuat cleanup gagal.
+ * lebih dulu, lalu mengembalikan `name`/`phone` di `finally`. `name` hanya ikut
+ * dikirim bila peran memang boleh mengubahnya (super_admin); mengirimnya untuk
+ * peran lain akan ditolak 403 dan membuat cleanup gagal. `avatar_url` yang
+ * dibaca adalah PATH TURUNAN (`/api/v1/avatars/<uuid>?v=...`), bukan nilai
+ * storage yang bisa ditulis balik, jadi restore hanya mengirim `null` (hapus)
+ * saat snapshot memang kosong.
  *
  * ANGGARAN LOGIN UI: `@PROF-09` memakai TEPAT 3 login UI nyata (admin, admin
  * setelah logout, super_admin) — backend membatasi `/auth/login` 5/menit/IP
@@ -38,6 +42,11 @@
 
 import type { BrowserContext, Locator, Page, Response } from '@playwright/test'
 import { expect, test, type Harness } from '../fixtures'
+import {
+  expectAvatarLoad,
+  expectImageDecoded,
+  trackAvatarLoads,
+} from '../helpers/avatar'
 import {
   ACCOUNTS,
   API_BASE,
@@ -106,7 +115,7 @@ function expectSuccess<T>(body: ApiEnvelope<T>, context: string): T {
   return body.data
 }
 
-/** `GET /auth/me` — sumber kebenaran sesi (termasuk avatar presigned). */
+/** `GET /auth/me` — sumber kebenaran sesi (termasuk path avatar backend). */
 async function readMe(h: Harness, role: Role): Promise<ProfileUser> {
   const token = await h.tokenAs(role)
   const result = await apiFetchRaw<ApiEnvelope<ProfileUser>>(token, 'GET', '/auth/me')
@@ -142,15 +151,24 @@ async function patchMe(
 /**
  * Kembalikan snapshot asli. Kegagalan cleanup dicatat, bukan dilempar, agar
  * kegagalan asersi utama tidak tertutup oleh error restore.
+ *
+ * `avatar_url` dari `GET /auth/me` adalah PATH TURUNAN
+ * (`/api/v1/avatars/<uuid>?v=...`), bukan URL objek storage. `PATCH /auth/me`
+ * memvalidasi nilai itu sebagai URL objek milik akun dan menolak path relatif,
+ * sehingga mengirim balik path snapshot akan membuat SELURUH request 400 —
+ * termasuk restore `name`/`phone`. Karena itu `avatar_url` hanya dikirim saat
+ * snapshot memang `null` (menghapus foto hasil tes); bila snapshot sudah punya
+ * foto, field itu dibiarkan apa adanya. Skenario yang menimpa atau menghapus
+ * foto dijaga `requireEmptyAvatar` agar foto asli tidak hilang.
  */
 async function restoreProfile(h: Harness, snapshot: ProfileSnapshot): Promise<void> {
   try {
-    const body: Record<string, unknown> = {
-      phone: snapshot.phone,
-      avatar_url: snapshot.avatarUrl,
-    }
+    const body: Record<string, unknown> = { phone: snapshot.phone }
     if (snapshot.nameEditable) {
       body.name = snapshot.name
+    }
+    if (snapshot.avatarUrl === null) {
+      body.avatar_url = null
     }
     const result = await patchMe(h, snapshot.role, body)
     console.log(
@@ -210,18 +228,32 @@ function sidebarAvatarImg(page: Page): Locator {
 }
 
 /**
- * `src` presigned yang ada tapi gagal diambil (403/kedaluwarsa) tidak boleh
- * lulus — `naturalWidth` 0 membuktikan gambar benar-benar termuat.
+ * Avatar sidebar hanya dirender setelah `fetch` Bearer selesai; `naturalWidth`
+ * 0 berarti byte gagal diambil (401/404) dan TIDAK boleh lulus.
  */
 async function expectSidebarAvatarLoaded(page: Page): Promise<void> {
-  const avatar = sidebarAvatarImg(page)
-  await expect(avatar).toBeVisible()
-  const src = await avatar.getAttribute('src')
-  expect(src, 'avatar sidebar harus punya src').not.toBeNull()
-  expect(src ?? '').toMatch(/^https?:\/\//)
-  await expect
-    .poll(() => avatar.evaluate((el) => (el instanceof HTMLImageElement ? el.naturalWidth : 0)))
-    .toBeGreaterThan(0)
+  await expectImageDecoded(sidebarAvatarImg(page), 'avatar sidebar')
+}
+
+/** `avatar_url` sekarang path backend, bukan URL presigned MinIO. */
+function requireAvatarPath(avatarUrl: string | null, context: string): string {
+  if (avatarUrl === null) {
+    throw new Error(`[e2e-profile] ${context}: avatar_url masih null.`)
+  }
+  expect(avatarUrl, `${context}: avatar_url harus diawali /api/v1/avatars/`).toMatch(
+    /^\/api\/v1\/avatars\//,
+  )
+  expect(avatarUrl, `${context}: avatar_url tidak boleh URL absolut`).not.toMatch(
+    /^https?:\/\//,
+  )
+  const parsed = new URL(avatarUrl, 'http://e2e.invalid')
+  expect(parsed.pathname, `${context}: path avatar tidak valid`).toMatch(
+    /^\/api\/v1\/avatars\/[0-9a-f-]{36}$/,
+  )
+  expect(parsed.searchParams.get('v') ?? '', `${context}: versi avatar (?v=) hilang`).toMatch(
+    /^[0-9a-f]{8}$/,
+  )
+  return avatarUrl
 }
 
 async function uiLogin(page: Page, role: Role): Promise<void> {
@@ -261,6 +293,22 @@ async function ensureAvatar(
   })
   const seeded = await patchMe(h, role, { avatar_url: uploaded.fileUrl })
   expect(seeded.status, `seed avatar ${role}`).toBe(200)
+}
+
+/**
+ * PROF-02/03/10 menimpa atau menghapus foto akun. `avatar_url` hasil GET kini
+ * path turunan (`/api/v1/avatars/...`) yang tidak bisa dikirim balik lewat
+ * `PATCH /auth/me`, jadi foto asli tidak dapat direstore. Bila akun sudah punya
+ * foto, skenario dihentikan agar data nyata tidak hilang; data seed standar
+ * selalu kosong sehingga cakupan normal tetap berjalan.
+ */
+function requireEmptyAvatar(snapshot: ProfileSnapshot, context: string): void {
+  if (snapshot.avatarUrl !== null) {
+    test.skip(
+      true,
+      `${context}: ${snapshot.role} sudah punya foto profil; unggah/hapus tidak dapat direstore.`,
+    )
+  }
 }
 
 /**
@@ -356,10 +404,11 @@ test('@PROF-01 nomor telepon diperbarui lewat UI dan bertahan setelah reload unt
   }
 })
 
-test('@PROF-02 vendor mengunggah foto profil PNG lewat file chooser dan avatar presigned tersimpan', async ({
+test('@PROF-02 vendor mengunggah foto profil PNG lewat file chooser dan avatar_url tersimpan sebagai path backend', async ({
   h,
 }) => {
   const snapshot = await snapshotProfile(h, 'vendor')
+  requireEmptyAvatar(snapshot, 'PROF-02')
 
   try {
     const page = await h.openAs('vendor')
@@ -385,19 +434,12 @@ test('@PROF-02 vendor mengunggah foto profil PNG lewat file chooser dan avatar p
     expect(patchResponse.status()).toBe(200)
 
     const preview = page.getByRole('img', { name: `Foto profil ${snapshot.name}` })
-    await expect(preview).toBeVisible()
-    await expect(preview).toHaveAttribute('src', /\?/)
+    await expectImageDecoded(preview, 'pratinjau avatar profil setelah unggah')
     await expect(page.getByRole('button', { name: 'Hapus foto' })).toBeVisible()
     await expectToast(page, 'Foto profil berhasil diperbarui.')
 
     const me = await readMe(h, 'vendor')
-    const avatarUrl = me.avatar_url ?? null
-    expect(avatarUrl).not.toBeNull()
-    if (avatarUrl === null) {
-      throw new Error('[e2e-profile] avatar_url vendor tetap null setelah unggah.')
-    }
-    expect(avatarUrl.length).toBeGreaterThan(0)
-    expect(new URL(avatarUrl).search.length).toBeGreaterThan(0)
+    requireAvatarPath(me.avatar_url ?? null, 'avatar vendor setelah unggah')
   } finally {
     await restoreProfile(h, snapshot)
   }
@@ -407,6 +449,7 @@ test('@PROF-03 foto profil yang ada dapat dihapus dan avatar_url kembali null', 
   h,
 }) => {
   const snapshot = await snapshotProfile(h, 'vendor')
+  requireEmptyAvatar(snapshot, 'PROF-03')
 
   try {
     const token = await h.tokenAs('vendor')
@@ -423,9 +466,10 @@ test('@PROF-03 foto profil yang ada dapat dihapus dan avatar_url kembali null', 
     const page = await h.openAs('vendor')
     await openProfilePage(page)
 
-    await expect(
+    await expectImageDecoded(
       page.getByRole('img', { name: `Foto profil ${snapshot.name}` }),
-    ).toBeVisible()
+      'pratinjau avatar profil sebelum dihapus',
+    )
     const removeButton = page.getByRole('button', { name: 'Hapus foto', exact: true })
     await expect(removeButton).toBeVisible()
 
@@ -609,23 +653,30 @@ test('@PROF-09 foto profil bertahan setelah logout/login UI nyata untuk admin da
     // Context bersih TANPA storageState: satu-satunya jalan masuk adalah UI.
     cleanContext = await browser.newContext({ baseURL: FRONTEND_BASE })
     const uiPage = await cleanContext.newPage()
+    const avatarLoads = trackAvatarLoads(uiPage)
 
     await uiLogin(uiPage, 'admin')
+    await expectAvatarLoad(avatarLoads, 0, 'avatar sidebar admin setelah login')
     await expectSidebarAvatarLoaded(uiPage)
 
     // Regresi yang dilaporkan: logout lalu login lagi menghilangkan foto.
     await uiLogout(uiPage)
+    const reloginMark = avatarLoads.length
     await uiLogin(uiPage, 'admin')
+    await expectAvatarLoad(avatarLoads, reloginMark, 'avatar sidebar admin setelah login ulang')
     await expectSidebarAvatarLoaded(uiPage)
 
     await uiPage.goto('/profile')
-    await expect(
+    await expectImageDecoded(
       uiPage.getByRole('img', { name: `Foto profil ${adminSnapshot.name}` }),
-    ).toBeVisible()
+      'pratinjau avatar di /profile',
+    )
 
     // Logout bukan login; login UI #3 baru milik super_admin.
     await uiLogout(uiPage)
+    const superMark = avatarLoads.length
     await uiLogin(uiPage, 'super')
+    await expectAvatarLoad(avatarLoads, superMark, 'avatar sidebar super_admin')
     await expectSidebarAvatarLoaded(uiPage)
   } finally {
     if (cleanContext !== null) {
@@ -640,22 +691,23 @@ test('@PROF-10 unggah foto profil lewat UI memperbarui avatar sidebar tanpa relo
   h,
 }) => {
   const snapshot = await snapshotProfile(h, 'admin')
+  requireEmptyAvatar(snapshot, 'PROF-10')
 
   try {
     // Avatar wajib ada sebelum unggah agar asersi "src berubah" bermakna.
     await ensureAvatar(h, 'admin', snapshot)
 
     const page = await h.openAs('admin')
+    const avatarLoads = trackAvatarLoads(page)
     await openProfilePage(page)
 
     const avatar = sidebarAvatarImg(page)
-    await expect(avatar).toBeVisible()
-    await expect
-      .poll(() => avatar.evaluate((el) => (el instanceof HTMLImageElement ? el.naturalWidth : 0)))
-      .toBeGreaterThan(0)
+    await expectAvatarLoad(avatarLoads, 0, 'avatar sidebar sebelum unggah')
+    await expectImageDecoded(avatar, 'avatar sidebar sebelum unggah')
     const srcBefore = await avatar.getAttribute('src')
     expect(srcBefore, 'avatar sidebar harus punya src sebelum unggah').not.toBeNull()
 
+    const uploadMark = avatarLoads.length
     const chooserPromise = page.waitForEvent('filechooser')
     const uploadPromise = page.waitForResponse(isUpload)
     const patchPromise = page.waitForResponse(isProfilePatch)
@@ -676,13 +728,11 @@ test('@PROF-10 unggah foto profil lewat UI memperbarui avatar sidebar tanpa relo
     expect(patchResponse.status()).toBe(200)
 
     // Tanpa page.reload(): sesi di-refresh oleh useUpdateProfileMutation.
+    await expectAvatarLoad(avatarLoads, uploadMark, 'avatar sidebar setelah unggah')
+    // Dua fetch terpisah menghasilkan dua blob URL berbeda (bukan URL presigned).
     await expect.poll(() => avatar.getAttribute('src')).not.toBe(srcBefore)
-    await expect
-      .poll(() => avatar.evaluate((el) => (el instanceof HTMLImageElement ? el.naturalWidth : 0)))
-      .toBeGreaterThan(0)
+    await expectImageDecoded(avatar, 'avatar sidebar setelah unggah')
 
-    const srcAfter = await avatar.getAttribute('src')
-    expect(srcAfter ?? '').toMatch(/^https?:\/\//)
     await expectToast(page, 'Foto profil berhasil diperbarui.')
   } finally {
     await restoreProfile(h, snapshot)
@@ -702,39 +752,27 @@ test('@PROF-11 avatar vendor di kartu dashboard + avatar pengawas di navbar dan 
 
     // ---- A. Vendor desktop 1280x800: kartu identitas menampilkan foto -----
     const vendor = await h.openAs('vendor')
+    const vendorLoads = trackAvatarLoads(vendor)
     await vendor.setViewportSize({ width: 1280, height: 800 })
     await vendor.goto('/dashboard')
 
     const card = vendor.locator('section[aria-label="Identitas Vendor/Mitra"]')
     await expect(card).toBeVisible()
     const vendorAvatar = card.locator('[data-avatar-state="image"] img')
-    await expect(vendorAvatar).toBeVisible()
-    const vendorSrc = await vendorAvatar.getAttribute('src')
-    expect(vendorSrc ?? '').toMatch(/^https?:\/\//)
-    await expect
-      .poll(() =>
-        vendorAvatar.evaluate((el) =>
-          el instanceof HTMLImageElement ? el.naturalWidth : 0,
-        ),
-      )
-      .toBeGreaterThan(0)
+    await expectAvatarLoad(vendorLoads, 0, 'avatar kartu vendor desktop')
+    await expectImageDecoded(vendorAvatar, 'avatar kartu vendor desktop')
     await expect(card.getByText(vendorSnapshot.name, { exact: true })).toBeVisible()
 
     // ---- B. Vendor ponsel 320x800: kartu tetap utuh tanpa scroll samping --
+    const vendorMobileMark = vendorLoads.length
     await vendor.setViewportSize({ width: 320, height: 800 })
     await vendor.goto('/dashboard')
 
     const mobileCard = vendor.locator('section[aria-label="Identitas Vendor/Mitra"]')
     await expect(mobileCard).toBeVisible()
     const mobileVendorAvatar = mobileCard.locator('[data-avatar-state="image"] img')
-    await expect(mobileVendorAvatar).toBeVisible()
-    await expect
-      .poll(() =>
-        mobileVendorAvatar.evaluate((el) =>
-          el instanceof HTMLImageElement ? el.naturalWidth : 0,
-        ),
-      )
-      .toBeGreaterThan(0)
+    await expectAvatarLoad(vendorLoads, vendorMobileMark, 'avatar kartu vendor ponsel')
+    await expectImageDecoded(mobileVendorAvatar, 'avatar kartu vendor ponsel')
     expect(
       await vendor.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -744,19 +782,18 @@ test('@PROF-11 avatar vendor di kartu dashboard + avatar pengawas di navbar dan 
 
     // ---- C. Security desktop 1280x800: avatar tepat di kiri nama navbar --
     const security = await h.openAs('security')
+    const securityLoads = trackAvatarLoads(security)
     await security.setViewportSize({ width: 1280, height: 800 })
     await security.goto('/gate')
 
     const header = security.locator('header').first()
     const headerAvatar = security.locator('header [data-avatar-state="image"] img').first()
-    await expect(headerAvatar).toBeVisible()
-    await expect
-      .poll(() =>
-        headerAvatar.evaluate((el) =>
-          el instanceof HTMLImageElement ? el.naturalWidth : 0,
-        ),
-      )
-      .toBeGreaterThan(0)
+    const headerLoad = await expectAvatarLoad(
+      securityLoads,
+      0,
+      'avatar header security desktop',
+    )
+    await expectImageDecoded(headerAvatar, 'avatar header security desktop')
 
     const nameLink = security.locator('header a[aria-label^="Profil "]')
     await expect(nameLink).toBeVisible()
@@ -776,20 +813,23 @@ test('@PROF-11 avatar vendor di kartu dashboard + avatar pengawas di navbar dan 
     ).toHaveCount(0)
 
     // ---- D. Security ponsel 320x800: pita body memuat avatar + nama jaga ---
+    const securityMobileMark = securityLoads.length
     await security.setViewportSize({ width: 320, height: 800 })
     await security.goto('/gate')
 
     const strip = security.locator('[data-testid="kiosk-status-strip"]')
     await expect(strip).toBeVisible()
     const stripAvatar = strip.locator('[data-avatar-state="image"] img')
-    await expect(stripAvatar).toBeVisible()
-    await expect
-      .poll(() =>
-        stripAvatar.evaluate((el) =>
-          el instanceof HTMLImageElement ? el.naturalWidth : 0,
-        ),
-      )
-      .toBeGreaterThan(0)
+    const stripLoad = await expectAvatarLoad(
+      securityLoads,
+      securityMobileMark,
+      'avatar pita security ponsel',
+    )
+    await expectImageDecoded(stripAvatar, 'avatar pita security ponsel')
+    expect(
+      stripLoad.path,
+      'header dan pita ponsel harus memakai path /api/v1/avatars/ yang sama',
+    ).toBe(headerLoad.path)
 
     const guardName = strip.locator('p').first()
     await expect(guardName).toBeVisible()
