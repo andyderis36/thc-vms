@@ -189,21 +189,49 @@ function describeBody(body: unknown): string {
   }
 }
 
-// Produksi membatasi login 5/menit/IP; pacing menjaga suite di bawah ambang
-// itu tanpa melonggarkan batas keamanan server. Default 0 = tanpa pacing.
+// Produksi membatasi login 5/menit/IP (fixed window, `AUTH_RATE_LIMIT`).
+// Suite LIVE berbagi satu IP dengan pengguna nyata, jadi anggaran login dijaga
+// di sini - bukan dengan melonggarkan batas keamanan server. Dua syarat
+// berlaku sekaligus: jarak minimum `E2E_LOGIN_PACING_MS` antar-percobaan dan
+// kuota bergulir 4 login/60 detik (satu slot di bawah batas server) supaya
+// jalur API dan UI tidak pernah bertabrakan menjadi burst. Default 0 = tanpa
+// pacing (lokal).
 const LOGIN_PACING_MS = Number(process.env.E2E_LOGIN_PACING_MS ?? 0)
+const AUTH_WINDOW_MS = 60_000
+const AUTH_MAX_PER_WINDOW = 4
+const AUTH_RETRIES_ON_429 = 2
+const loginHits: number[] = []
 let nextLoginAt = 0
 
-async function paceLogin(): Promise<void> {
+/**
+ * Ambil satu slot login: tunggu sampai jarak minimum dan kuota bergulir
+ * terpenuhi, lalu catat percobaannya. Dipakai juga oleh `auth-ui.spec.ts`
+ * agar login lewat UI dan lewat API berbagi satu anggaran yang sama.
+ */
+export async function awaitLoginSlot(): Promise<void> {
   if (LOGIN_PACING_MS <= 0) {
     return
   }
-  const now = Date.now()
-  const waitMs = Math.max(0, nextLoginAt - now)
-  nextLoginAt = Math.max(now, nextLoginAt) + LOGIN_PACING_MS
-  if (waitMs > 0) {
+  for (;;) {
+    const now = Date.now()
+    while (loginHits.length > 0 && now - (loginHits[0] ?? now) >= AUTH_WINDOW_MS) {
+      loginHits.shift()
+    }
+    const oldest = loginHits[0]
+    const spacingWait = Math.max(0, nextLoginAt - now)
+    const quotaWait =
+      oldest !== undefined && loginHits.length >= AUTH_MAX_PER_WINDOW
+        ? AUTH_WINDOW_MS - (now - oldest)
+        : 0
+    const waitMs = Math.max(spacingWait, quotaWait)
+    if (waitMs <= 0) {
+      break
+    }
     await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
   }
+  const now = Date.now()
+  loginHits.push(now)
+  nextLoginAt = now + LOGIN_PACING_MS
 }
 
 /**
@@ -217,9 +245,8 @@ export async function apiFetchRaw<T = unknown>(
   path: string,
   body?: unknown,
 ): Promise<ApiResult<T>> {
-  if (method === 'POST' && path === '/auth/login') {
-    await paceLogin()
-  }
+  const isLogin = method === 'POST' && path === '/auth/login'
+  const maxAttempts = isLogin ? AUTH_RETRIES_ON_429 + 1 : 1
   const headers: Record<string, string> = {
     accept: 'application/json',
   }
@@ -232,16 +259,25 @@ export async function apiFetchRaw<T = unknown>(
     init.body = JSON.stringify(body)
   }
 
-  let response: Response
-  try {
-    response = await fetch(apiUrl(path), init)
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new Error(`[api] ${method} ${path} gagal terhubung ke backend: ${reason}`)
-  }
+  for (let attempt = 1; ; attempt += 1) {
+    if (isLogin) {
+      await awaitLoginSlot()
+    }
+    let response: Response
+    try {
+      response = await fetch(apiUrl(path), init)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      throw new Error(`[api] ${method} ${path} gagal terhubung ke backend: ${reason}`)
+    }
 
-  const text = await response.text()
-  return { status: response.status, body: parseBody(text) as T }
+    const text = await response.text()
+    const result: ApiResult<T> = { status: response.status, body: parseBody(text) as T }
+    if (!isLogin || result.status !== 429 || attempt >= maxAttempts) {
+      return result
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, AUTH_WINDOW_MS))
+  }
 }
 
 /**

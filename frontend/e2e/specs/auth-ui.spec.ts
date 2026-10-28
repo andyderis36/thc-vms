@@ -10,13 +10,12 @@
 
 import type { Browser, Page } from '@playwright/test'
 import { expect, test } from '../fixtures'
-import { FRONTEND_BASE, TOKEN_STORAGE_KEY } from '../helpers/api'
+import { FRONTEND_BASE, TOKEN_STORAGE_KEY, awaitLoginSlot } from '../helpers/api'
 import { gotoApp } from '../helpers/nav'
 
 const DEMO_PASSWORD = 'Password123!'
 const SECURITY_EMAIL = 'security1a@thc.com'
 const ADMIN_EMAIL = 'admin1@thc.com'
-const LOGIN_PACING_MS = Number(process.env.E2E_LOGIN_PACING_MS ?? 0)
 
 /** Semua rute yang diproteksi guard client-side pada skenario NAV-03. */
 const PROTECTED_PATHS = [
@@ -40,10 +39,7 @@ async function fillAndSubmitLogin(
   email: string,
   password: string,
 ): Promise<void> {
-  // Pacing rate-limit (bukan sinkronisasi): produksi menolak >5 login/menit/IP.
-  if (LOGIN_PACING_MS > 0) {
-    await page.waitForTimeout(LOGIN_PACING_MS)
-  }
+  await awaitLoginSlot()
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('Kata Sandi').fill(password)
   await page.getByRole('button', { name: 'Masuk', exact: true }).click()
