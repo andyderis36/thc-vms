@@ -107,6 +107,7 @@ type User struct {
 	Nik pgtype.Text `json:"nik"`
 	// Nama perusahaan vendor akun PIC yang diketik manual; TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor (hanya dipakai sebagai vendor_name tampilan bila vendor_id absen)
 	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	AvatarUrl          pgtype.Text `json:"avatar_url"`
 }
 
 type Vendor struct {

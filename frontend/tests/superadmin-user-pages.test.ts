@@ -61,6 +61,7 @@ const { managedUsersFixture } = vi.hoisted(() => ({
       status: 'active',
       type: 'internal',
       vendor_name: null,
+      avatar_url: 'https://minio.local/avatars/bayu.png',
     },
     {
       id: 'u-super',
@@ -74,6 +75,7 @@ const { managedUsersFixture } = vi.hoisted(() => ({
       status: 'active',
       type: 'internal',
       vendor_name: null,
+      avatar_url: null,
     },
     {
       id: 'u-vendor',
@@ -87,6 +89,7 @@ const { managedUsersFixture } = vi.hoisted(() => ({
       status: 'active',
       type: 'external',
       vendor_name: 'PT Lintas Fiber',
+      avatar_url: null,
     },
   ],
 }))
@@ -140,6 +143,7 @@ function userStub(overrides: Partial<User> = {}): User {
     status: 'active',
     type: 'internal',
     vendor_name: null,
+    avatar_url: null,
     ...overrides,
   }
 }
@@ -399,5 +403,42 @@ describe('layar user terkelola — filter peran di kolom "Peran"', () => {
 
     // Akun super_admin tak punya cabang, jadi filter cabang disembunyikan.
     expect(screen.queryByLabelText('Cabang')).toBeNull()
+  })
+})
+
+describe('modal detail user — avatar identitas', () => {
+  function openDetail(container: HTMLElement, name: string): HTMLElement {
+    const table = tableOf(container)
+    fireEvent.click(within(table).getByRole('button', { name: `Aksi untuk ${name}` }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Lihat detail' }))
+    return screen.getByRole('dialog')
+  }
+
+  it('membuka "Lihat detail" menampilkan <img> avatar dari avatar_url baris', () => {
+    const dialog = openDetail(renderScreen(COORDINATORS_PAGE_ROLES), 'Bayu Santoso')
+
+    const wrapper = dialog.querySelector('[data-avatar-state]') as HTMLElement
+    expect(wrapper).not.toBeNull()
+    expect(wrapper).toHaveAttribute('data-avatar-state', 'image')
+    expect(wrapper.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://minio.local/avatars/bayu.png',
+    )
+    expect(dialog.querySelector('dl')?.contains(wrapper)).toBe(false)
+
+    const row = dialog.querySelector('div.mb-3') as HTMLElement
+    expect(row).not.toBeNull()
+    expect(row).toHaveTextContent('Bayu Santoso')
+    expect(row.contains(wrapper)).toBe(true)
+  })
+
+  it('jatuh ke inisial ketika avatar_url baris null', () => {
+    const dialog = openDetail(renderScreen(COORDINATORS_PAGE_ROLES), 'Agus Salim')
+
+    const wrapper = dialog.querySelector('[data-avatar-state]') as HTMLElement
+    expect(wrapper).not.toBeNull()
+    expect(wrapper).toHaveAttribute('data-avatar-state', 'initials')
+    expect(wrapper.querySelector('img')).toBeNull()
+    expect(wrapper.textContent).toBe('AS')
   })
 })

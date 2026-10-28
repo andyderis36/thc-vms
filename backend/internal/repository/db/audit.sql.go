@@ -19,6 +19,19 @@ WHERE ($1::uuid IS NULL OR user_id = $1::uuid)
   AND ($3::text IS NULL OR action = $3::text)
   AND ($4::timestamptz IS NULL OR timestamp >= $4::timestamptz)
   AND ($5::timestamptz IS NULL OR timestamp < $5::timestamptz)
+  AND (
+        $6::text IS NULL
+     OR action ILIKE '%' || $6::text || '%'
+     OR entity ILIKE '%' || $6::text || '%'
+     OR entity_id::text ILIKE '%' || $6::text || '%'
+     OR COALESCE(ip, '') ILIKE '%' || $6::text || '%'
+     OR COALESCE(user_agent, '') ILIKE '%' || $6::text || '%'
+     OR EXISTS (
+          SELECT 1 FROM users u
+          WHERE u.id = audit_log.user_id
+            AND (u.name ILIKE '%' || $6::text || '%' OR u.email ILIKE '%' || $6::text || '%')
+        )
+  )
 `
 
 type CountAuditLogsParams struct {
@@ -27,6 +40,7 @@ type CountAuditLogsParams struct {
 	Action   pgtype.Text        `json:"action"`
 	DateFrom pgtype.Timestamptz `json:"date_from"`
 	DateTo   pgtype.Timestamptz `json:"date_to"`
+	Q        pgtype.Text        `json:"q"`
 }
 
 // Companion count; predicate is byte-for-byte the ListAuditLogs one.
@@ -37,6 +51,7 @@ func (q *Queries) CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) 
 		arg.Action,
 		arg.DateFrom,
 		arg.DateTo,
+		arg.Q,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -125,8 +140,25 @@ WHERE ($1::uuid IS NULL OR user_id = $1::uuid)
   AND ($3::text IS NULL OR action = $3::text)
   AND ($4::timestamptz IS NULL OR timestamp >= $4::timestamptz)
   AND ($5::timestamptz IS NULL OR timestamp < $5::timestamptz)
-ORDER BY timestamp DESC, id DESC
-LIMIT $7 OFFSET $6
+  AND (
+        $6::text IS NULL
+     OR action ILIKE '%' || $6::text || '%'
+     OR entity ILIKE '%' || $6::text || '%'
+     OR entity_id::text ILIKE '%' || $6::text || '%'
+     OR COALESCE(ip, '') ILIKE '%' || $6::text || '%'
+     OR COALESCE(user_agent, '') ILIKE '%' || $6::text || '%'
+     OR EXISTS (
+          SELECT 1 FROM users u
+          WHERE u.id = audit_log.user_id
+            AND (u.name ILIKE '%' || $6::text || '%' OR u.email ILIKE '%' || $6::text || '%')
+        )
+  )
+ORDER BY
+  CASE WHEN $7::text = 'asc' THEN audit_log.timestamp END ASC,
+  CASE WHEN $7::text <> 'asc' THEN audit_log.timestamp END DESC,
+  CASE WHEN $7::text = 'asc' THEN audit_log.id END ASC,
+  CASE WHEN $7::text <> 'asc' THEN audit_log.id END DESC
+LIMIT $9 OFFSET $8
 `
 
 type ListAuditLogsParams struct {
@@ -135,14 +167,21 @@ type ListAuditLogsParams struct {
 	Action   pgtype.Text        `json:"action"`
 	DateFrom pgtype.Timestamptz `json:"date_from"`
 	DateTo   pgtype.Timestamptz `json:"date_to"`
+	Q        pgtype.Text        `json:"q"`
+	Order    string             `json:"order"`
 	Offset   int32              `json:"offset"`
 	Limit    int32              `json:"limit"`
 }
 
 // Filtered trail read. date_from is inclusive, date_to is exclusive (half-open
 // [from, to) window, same convention as the visits.sql list queries).
-// ORDER BY is fully specified (id last) so LIMIT/OFFSET pagination cannot
-// repeat or drop a row.
+// `q` is a NULLable free-text needle: a case-insensitive substring match across
+// the action/entity/entity id, the request observations and the joined actor
+// (name/email). `order` is bound and compared inside static CASE branches
+// (never concatenated): anything other than 'asc' sorts descending, which is
+// the normalised default the Go layer sends. ORDER BY is fully specified
+// (timestamp + id, same direction) so LIMIT/OFFSET pagination cannot repeat or
+// drop a row.
 func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error) {
 	rows, err := q.db.Query(ctx, listAuditLogs,
 		arg.UserID,
@@ -150,6 +189,8 @@ func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([
 		arg.Action,
 		arg.DateFrom,
 		arg.DateTo,
+		arg.Q,
+		arg.Order,
 		arg.Offset,
 		arg.Limit,
 	)

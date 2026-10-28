@@ -539,16 +539,19 @@ function GateContent() {
       onSiteCount={onSiteCount}
       onNotificationSelect={handleNotificationSelect}
     >
-      {/* Pita identitas ponsel: nama pengawas + shift dengan badge lokasi
-          tepat di bawahnya. Badge lokasi tidak lagi di navbar ponsel (di
-          320px ia terpangkas), sementara jam + counter on-site hidup di
-          kolom tengah navbar. Pita ini HANYA memuat identitas petugas +
-          lokasi. Hanya di /gate: shell kios juga dipakai
+      {/* Pita identitas ponsel: baris 1 = nama pengawas (truncate) + pill
+          shift di kanan (tak terpotong truncation nama), baris 2 = chip
+          lokasi rata kanan di bawahnya. Chip lokasi tidak lagi di navbar
+          ponsel (di 320px ia terpangkas), sementara jam + counter on-site
+          hidup di kolom tengah navbar. Pita ini HANYA memuat identitas
+          petugas + lokasi. Hanya di /gate: shell kios juga dipakai
           /visits/[id] yang tidak butuh pita ini. */}
       <KioskStatusStrip
         className="mb-3"
         guardName={user?.name ?? 'Petugas Jaga'}
         locationName={user?.location_name ?? 'Lokasi Terkunci'}
+        avatarUrl={user?.avatar_url}
+        href="/profile"
       />
       {gateContent}
     </SecurityKioskShell>

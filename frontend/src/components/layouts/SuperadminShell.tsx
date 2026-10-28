@@ -279,7 +279,11 @@ export function SuperadminShell({
               pernah melayang di baris sendiri. */}
           <div className={PROFILE_MENU_DARK_CLASS}>
             <ProfileMenu
-              user={{ name: displayName, role: 'SUPERADMIN' }}
+              user={{
+                name: displayName,
+                role: 'SUPERADMIN',
+                avatarUrl: user !== null ? (user.avatar_url ?? undefined) : undefined,
+              }}
               onLogout={handleSignOut}
               alwaysShowName
               roleSlot={

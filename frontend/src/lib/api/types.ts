@@ -50,6 +50,19 @@ export interface User {
   status: 'active' | 'inactive' | 'blacklisted';
   type: 'internal' | 'external';
   vendor_name: string | null;
+  /**
+   * URL presigned berumur pendek untuk foto profil (di-resolve ulang pada
+   * setiap respons; URL bucket mentah tidak pernah diekspos). `null` bila
+   * belum ada foto. Jangan disimpan di luar cache respons — selalu ambil dari
+   * `/auth/me` (atau respons update) karena URL kedaluwarsa.
+   */
+  avatar_url: string | null;
+  /**
+   * Field yang boleh diubah sendiri oleh pemanggil, dihitung dari peran.
+   * Hanya dijamin ada pada respons `/auth/me` (dan `PATCH /auth/me`), sehingga
+   * opsional untuk payload user lain (mis. `vendor_user` kunjungan).
+   */
+  editable_fields?: string[];
 }
 
 export interface Location {
@@ -325,6 +338,18 @@ export interface UpdateSecurityUserRequest {
   location_id?: string | null;
 }
 
+/**
+ * `PATCH /auth/me` — profil sendiri. `phone` & `avatar_url` untuk semua peran;
+ * `name` hanya diterima untuk `super_admin` (peran lain dijawab 403 FORBIDDEN).
+ * Field lain ditolak backend 400 VALIDATION_ERROR.
+ */
+export interface UpdateSelfProfileRequest {
+  name?: string;
+  phone?: string;
+  /** `null` menghapus avatar. */
+  avatar_url?: string | null;
+}
+
 export interface CreateVisitRequest {
   location_id: string;
   purpose_ids: string[];
@@ -346,7 +371,7 @@ export interface UploadFileResult {
   mime_type: string;
 }
 
-export type UploadCategory = 'assignment_letter' | 'id_card' | 'checkin_photo';
+export type UploadCategory = 'assignment_letter' | 'id_card' | 'checkin_photo' | 'profile_photo';
 
 export interface QrPayload {
   visit_id: string;
@@ -400,6 +425,10 @@ export interface AuditLogListResult {
   total: number;
   page: number;
   limit: number;
+  /** Nilai filter efektif yang dipakai backend (setelah normalisasi/clamp). */
+  offset?: number;
+  q?: string;
+  order?: 'asc' | 'desc';
 }
 
 /** Query `GET /audit-logs`; semua opsional sesuai kontrak openapi. */
@@ -410,6 +439,10 @@ export interface AuditLogListParams {
   /** `YYYY-MM-DD` atau RFC3339; backend memakai batas atas +24h untuk date-only. */
   date_from?: string;
   date_to?: string;
+  /** Pencarian bebas atas aksi, entitas, ID entitas, IP, user-agent, dan pelaku. */
+  q?: string;
+  /** Arah urutan waktu; default server `desc`. */
+  order?: 'asc' | 'desc';
   page?: number;
   limit?: number;
 }

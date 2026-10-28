@@ -18,9 +18,10 @@ import (
 
 // AuthRoutes carries the bound auth-handler methods.
 type AuthRoutes struct {
-	Login  gin.HandlerFunc
-	Me     gin.HandlerFunc
-	Logout gin.HandlerFunc
+	Login   gin.HandlerFunc
+	Me      gin.HandlerFunc
+	PatchMe gin.HandlerFunc
+	Logout  gin.HandlerFunc
 }
 
 // UserRoutes carries the bound security-account handler methods.
@@ -191,6 +192,7 @@ func New(d Deps) *gin.Engine {
 	authed := v1.Group("")
 	authed.Use(withFallback(d.Chain.Authenticate))
 	authed.GET("/auth/me", withFallback(d.Auth.Me))
+	authed.PATCH("/auth/me", withFallback(d.Auth.PatchMe))
 	authed.POST("/auth/logout", withFallback(d.Auth.Logout))
 
 	admins := authed.Group("")

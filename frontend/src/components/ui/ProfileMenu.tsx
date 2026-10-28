@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { ChevronDown, LogOut } from 'lucide-react'
+import Link from 'next/link'
+import { ChevronDown, LogOut, UserRound } from 'lucide-react'
 
 export interface ProfileMenuUser {
   name: string
@@ -69,11 +70,11 @@ function initialsOf(name: string): string {
 
 /**
  * Dropdown profil shared untuk semua shell (SHELL-01..04).
- * Pemicu avatar + nama + panel menu berisi item "Keluar" (tanpa link settings —
- * route belum ada). Interaksi meniru pola `PurposeDropdown` (klik-luar +
- * Escape + refocus pemicu) tanpa dependensi eksternal.
- * Baris peran pada pemicu berasal dari `roleSlot` (bila ada) agar shell
- * sidebar bisa menyejajarkan lencana peran dengan kolom nama.
+ * Pemicu avatar + nama + panel menu berisi item "Profil" (tautan ke
+ * `/profile`, self-service) dan "Keluar". Interaksi meniru pola
+ * `PurposeDropdown` (klik-luar + Escape + refocus pemicu) tanpa dependensi
+ * eksternal. Baris peran pada pemicu berasal dari `roleSlot` (bila ada) agar
+ * shell sidebar bisa menyejajarkan lencana peran dengan kolom nama.
  */
 export function ProfileMenu({ user, onLogout, roleSlot, alwaysShowName = false }: ProfileMenuProps) {
   const [open, setOpen] = useState(false)
@@ -82,6 +83,14 @@ export function ProfileMenu({ user, onLogout, roleSlot, alwaysShowName = false }
   const generatedId = useId()
   const buttonId = `${generatedId}-button`
   const menuId = `${generatedId}-menu`
+
+  // Avatar presigned bisa kedaluwarsa: saat `<img>` gagal, jatuh ke inisial.
+  // Reset saat `avatarUrl` berubah agar URL baru selalu dicoba ulang.
+  const [imgError, setImgError] = useState(false)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset sengaja saat avatarUrl berubah; nilai sudah false pada mount, jadi React membatalkan re-render berlebihan.
+    setImgError(false)
+  }, [user.avatarUrl])
 
   // Tutup saat klik/tap di luar, atau Escape → refocus pemicu (pola PurposeDropdown/Modal).
   useEffect(() => {
@@ -135,13 +144,14 @@ export function ProfileMenu({ user, onLogout, roleSlot, alwaysShowName = false }
         className={TRIGGER_CLASS}
       >
         <span role="img" aria-label={`Akun ${user.name}`} className={AVATAR_CLASS}>
-          {user.avatarUrl ? (
+          {user.avatarUrl && !imgError ? (
             // eslint-disable-next-line @next/next/no-img-element -- avatar 36px dari host dinamis (avatarUrl), di luar images.remotePatterns yang hanya memuat localhost:9000; next/image akan 400 untuk host lain, dan avatar ini belum pernah diisi di produksi.
             <img
               src={user.avatarUrl}
               alt=""
               className="size-full object-cover"
               aria-hidden="true"
+              onError={() => setImgError(true)}
             />
           ) : (
             initialsOf(user.name)
@@ -171,6 +181,15 @@ export function ProfileMenu({ user, onLogout, roleSlot, alwaysShowName = false }
             <p className="text-sm font-semibold text-ink">{user.name}</p>
             {user.role ? <p className="text-xs text-ink-muted">{user.role}</p> : null}
           </div>
+          <Link
+            href="/profile"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className={ITEM_CLASS}
+          >
+            <UserRound aria-hidden="true" className="size-4 shrink-0" />
+            Profil
+          </Link>
           <button
             type="button"
             role="menuitem"

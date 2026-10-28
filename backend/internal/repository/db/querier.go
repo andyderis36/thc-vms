@@ -300,8 +300,13 @@ type Querier interface {
 	ListAllLocations(ctx context.Context) ([]Location, error)
 	// Filtered trail read. date_from is inclusive, date_to is exclusive (half-open
 	// [from, to) window, same convention as the visits.sql list queries).
-	// ORDER BY is fully specified (id last) so LIMIT/OFFSET pagination cannot
-	// repeat or drop a row.
+	// `q` is a NULLable free-text needle: a case-insensitive substring match across
+	// the action/entity/entity id, the request observations and the joined actor
+	// (name/email). `order` is bound and compared inside static CASE branches
+	// (never concatenated): anything other than 'asc' sorts descending, which is
+	// the normalised default the Go layer sends. ORDER BY is fully specified
+	// (timestamp + id, same direction) so LIMIT/OFFSET pagination cannot repeat or
+	// drop a row.
 	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
 	// One-off backfill source (cmd/backfill-notifications): the UNION of every
 	// event that should have produced a notification before the store existed.
@@ -459,6 +464,12 @@ type Querier interface {
 	// Successful login bookkeeping. Also refreshes updated_at (see the migration
 	// header: the repository layer owns this column).
 	UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error
+	// Self-service profile write. The usecase resolves the final name, phone and
+	// avatar (empty -> NULL) and this statement stores them verbatim, then re-reads
+	// the SAME projection as GetUserByID so the caller gets the complete profile
+	// row. A plain UPDATE ... RETURNING cannot join role/location/vendor, so the
+	// CTE carries the updated row into the joined projection unchanged.
+	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error)
 	// PATCH /users/security/{id}/status (openapi L161-188). Accepts only
 	// 'active'/'inactive' at the request boundary; the CHECK constraint on
 	// users.status additionally rejects 'blacklisted' writes from this path.

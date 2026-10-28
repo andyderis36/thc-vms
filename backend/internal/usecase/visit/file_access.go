@@ -2,6 +2,7 @@ package visit
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -133,6 +134,9 @@ func (s *Service) ResolveFileStream(ctx context.Context, actor Actor, visitID do
 	}
 	content, err := s.objectReader.OpenObject(ctx, key)
 	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return ObjectStream{}, fileNotFound()
+		}
 		return ObjectStream{}, err
 	}
 	return ObjectStream{

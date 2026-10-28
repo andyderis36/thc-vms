@@ -5,6 +5,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { DetailModal, isEmptyDetailValue, type DetailField } from './DetailModal'
+import { UserAvatar } from './UserAvatar'
 
 const FIELDS: DetailField[] = [
   { label: 'NAMA', value: 'Budi Santoso' },
@@ -129,5 +130,52 @@ describe('DetailModal', () => {
     first.focus()
     fireEvent.keyDown(first, { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(last)
+  })
+})
+
+describe('DetailModal — slot avatar', () => {
+  const AVATAR_URL = 'https://minio.local/avatars/budi.png'
+
+  function avatarWrapper(dialog: HTMLElement): HTMLElement {
+    const wrapper = dialog.querySelector('[data-avatar-state]')
+    expect(wrapper).not.toBeNull()
+    return wrapper as HTMLElement
+  }
+
+  it('menampilkan <img> avatar dari URL yang diberikan, di baris header bersama subtitle', () => {
+    renderDetail({ avatar: <UserAvatar name="Budi Santoso" avatarUrl={AVATAR_URL} /> })
+
+    const dialog = screen.getByRole('dialog')
+    const wrapper = avatarWrapper(dialog)
+    expect(wrapper).toHaveAttribute('data-avatar-state', 'image')
+    const img = wrapper.querySelector('img')
+    expect(img).toHaveAttribute('src', AVATAR_URL)
+
+    const row = dialog.querySelector('div.mb-3') as HTMLElement
+    expect(row).not.toBeNull()
+    expect(row).toHaveTextContent('Budi Santoso')
+    expect(row.contains(wrapper)).toBe(true)
+    expect(dialog.querySelector('dl')?.contains(wrapper)).toBe(false)
+  })
+
+  it('jatuh ke inisial ketika avatar_url null', () => {
+    renderDetail({ avatar: <UserAvatar name="Budi Santoso" avatarUrl={null} /> })
+
+    const wrapper = avatarWrapper(screen.getByRole('dialog'))
+    expect(wrapper).toHaveAttribute('data-avatar-state', 'initials')
+    expect(wrapper.querySelector('img')).toBeNull()
+    expect(wrapper.textContent).toBe('BS')
+  })
+
+  it('tanpa prop avatar mempertahankan markup subtitle lama tanpa elemen ekstra', () => {
+    renderDetail()
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.querySelector('[data-avatar-state]')).toBeNull()
+
+    const subtitle = dialog.querySelector('p.mb-3')
+    expect(subtitle).not.toBeNull()
+    expect(subtitle).toHaveTextContent('Budi Santoso')
+    expect(subtitle).toHaveClass('text-sm', 'text-ink-secondary')
   })
 })

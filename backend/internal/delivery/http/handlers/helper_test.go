@@ -257,6 +257,14 @@ type fakeStorage struct {
 	lastReq     domain.UploadRequest
 	result      domain.UploadResult
 	uploadErr   error
+
+	objectKey        string
+	objectKeyErr     error
+	presignURL       string
+	presignErr       error
+	lastPresignKey   string
+	lastPresignTTL   time.Duration
+	presignCallCount int
 }
 
 func (f *fakeStorage) EnsureBucket(_ context.Context) error { return nil }
@@ -270,12 +278,24 @@ func (f *fakeStorage) Upload(_ context.Context, in domain.UploadRequest) (domain
 	return f.result, nil
 }
 
-func (f *fakeStorage) PresignedURL(_ context.Context, _ string, _ time.Duration) (string, error) {
-	return "", nil
+func (f *fakeStorage) PresignedURL(_ context.Context, key string, ttl time.Duration) (string, error) {
+	f.presignCallCount++
+	f.lastPresignKey = key
+	f.lastPresignTTL = ttl
+	if f.presignErr != nil {
+		return "", f.presignErr
+	}
+	return f.presignURL, nil
 }
 
 func (f *fakeStorage) ObjectKeyFromStoredURL(_ string) (string, error) {
-	return "", domain.ErrValidation
+	if f.objectKeyErr != nil {
+		return "", f.objectKeyErr
+	}
+	if f.objectKey == "" {
+		return "", domain.ErrValidation
+	}
+	return f.objectKey, nil
 }
 
 // strPtr boxes a string for optional DTO/domain members in tests.

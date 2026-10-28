@@ -16,7 +16,12 @@ vi.mock('next/image', () => ({
 
 vi.mock('@/lib/auth/session', () => ({
   useSession: () => ({
-    user: { name: 'Admin Cabang', role: 'admin', location_name: 'POP Pontianak' },
+    user: {
+      name: 'Admin Cabang',
+      role: 'admin',
+      location_name: 'POP Pontianak',
+      avatar_url: 'https://cdn.example/avatar-admin.png',
+    },
     status: 'authenticated',
     signOut: vi.fn(),
   }),
@@ -142,5 +147,15 @@ describe('AdminBranchShell — topbar mobile & laci', () => {
     // Identitas aktif tetap lewat permukaan ber-tint + tinta brand.
     expect(classes).toContain('bg-brand-soft')
     expect(classes).toContain('text-brand')
+  })
+})
+
+describe('AdminBranchShell — foto profil sesi pada pemicu akun', () => {
+  it('pemicu profil merender <img> dengan src avatar_url dari sesi', () => {
+    renderShell()
+
+    const img = document.querySelector('button[aria-haspopup="menu"] span[role="img"] img')
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('src')).toBe('https://cdn.example/avatar-admin.png')
   })
 })

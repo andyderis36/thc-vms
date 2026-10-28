@@ -56,6 +56,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -346,5 +347,37 @@ func TestResolveFileStream_ResolvesEachSlot(t *testing.T) {
 				t.Fatalf("slot %s storage read = %d, want 1", tc.name, store.openCalls)
 			}
 		})
+	}
+}
+
+// Given an authorized read whose object is gone from the bucket, when the slot
+// is requested, then it fails closed as a 404 "Berkas tidak tersedia." instead
+// of surfacing a 500 for a file that is simply not there.
+func TestResolveFileStream_MissingObjectIs404(t *testing.T) {
+	repo := newFakeVisitRepo(t)
+	seedVisitWithFiles(repo)
+	store := newFakeStreamStorage()
+	svc := newFileService(repo, store)
+	owner := testActor(domain.RoleAdmin, "admin-1", "loc-A")
+
+	_, err := svc.ResolveFileStream(context.Background(), owner, "visit-1", FileKindAssignmentLetter, "")
+	if err == nil {
+		t.Fatal("a missing object must fail closed, got nil error")
+	}
+	if store.openCalls != 1 {
+		t.Fatalf("storage read = %d, want 1", store.openCalls)
+	}
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("err = %v, want *domain.AppError", err)
+	}
+	if appErr.Status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", appErr.Status)
+	}
+	if appErr.Message != "Berkas tidak tersedia." {
+		t.Fatalf("message = %q, want the fail-closed 404 copy", appErr.Message)
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want not found", err)
 	}
 }

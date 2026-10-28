@@ -21,6 +21,7 @@ func TestBuildObjectKey_MapsCategoriesToStructuredPrefixes(t *testing.T) {
 		{CategoryAssignmentLetter, "assignment_letters/"},
 		{CategoryIDCard, "id_cards/"},
 		{CategoryCheckinPhoto, "checkin_photos/"},
+		{CategoryProfilePhoto, "profile_photos/"},
 	}
 
 	for _, tc := range cases {

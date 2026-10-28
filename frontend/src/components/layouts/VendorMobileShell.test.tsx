@@ -38,7 +38,7 @@ function renderShell() {
 
 /** Kelas elemen sebagai daftar token (bukan substring) supaya `bg-brand` != `bg-brand-dark`. */
 function classTokens(element: Element | null | undefined): string[] {
-  return (element?.className ?? '').split(/\s+/).filter(Boolean)
+  return (element?.getAttribute('class') ?? '').split(/\s+/).filter(Boolean)
 }
 
 describe('VendorMobileShell — navbar biru & ringkas (SHELL-04)', () => {
@@ -68,14 +68,58 @@ describe('VendorMobileShell — navbar biru & ringkas (SHELL-04)', () => {
     expect(screen.queryByText('Visitor Portal')).toBeNull()
   })
 
-  it('nama vendor disembunyikan di layar sempit lalu tampil sejak sm (640px)', () => {
+  it('pintu profil selalu terjangkau di ponsel: chip ikon 44px, nama tampil hanya sm–lg (ikon-only lagi di desktop)', () => {
     renderShell()
 
-    const vendorName = screen.getByText('PT Lintas Fiber')
-    const classes = classTokens(vendorName)
+    const profileLink = screen.getByRole('link', { name: 'Profil PT Lintas Fiber' })
+    const linkClasses = classTokens(profileLink)
 
-    expect(classes).toContain('hidden')
-    expect(classes).toContain('sm:block')
+    // Regresi yang dijaga: bottom nav SHELL-04 hanya punya 3 tujuan, jadi
+    // anchor `hidden` di < sm membuat vendor di ponsel tak punya jalan ke
+    // /profile sama sekali (terukur 0x0 di viewport 360px).
+    expect(linkClasses).not.toContain('hidden')
+    expect(linkClasses).toContain('w-11')
+    expect(linkClasses).toContain('min-h-touch')
+    expect(profileLink).toHaveAttribute('href', '/profile')
+
+    const icon = profileLink.querySelector('svg')
+    expect(icon).not.toBeNull()
+    // Kontrak baru: ikon disembunyikan hanya pada rentang sm–lg (nama
+    // penuh mengambil alih), lalu MUNCUL LAGI di desktop sebagai chip
+    // ikon 44px — `lg:block` mengembalikannya setelah `sm:hidden`.
+    expect(classTokens(icon)).toContain('sm:hidden')
+    expect(classTokens(icon)).toContain('lg:block')
+
+    const vendorName = screen.getByText('PT Lintas Fiber')
+    expect(vendorName.tagName).toBe('SPAN')
+    // Nama penuh hanya untuk rentang sm–lg; di desktop nama disembunyikan
+    // (`lg:hidden`) supaya profil kembali murni chip ikon.
+    expect(classTokens(vendorName)).toContain('hidden')
+    expect(classTokens(vendorName)).toContain('sm:block')
+    expect(classTokens(vendorName)).toContain('lg:hidden')
+
+    // Tooltip `title` DILARANG: nama vendor akan muncul sebagai tooltip
+    // di seluruh breakpoint termasuk desktop, membatalkan chip ikon-only.
+    expect(profileLink).not.toHaveAttribute('title')
+  })
+
+  it('desktop (≥ lg): profil kembali chip ikon terpusat tanpa nama & tanpa tooltip', () => {
+    renderShell()
+
+    const profileLink = screen.getByRole('link', { name: 'Profil PT Lintas Fiber' })
+    const linkClasses = classTokens(profileLink)
+
+    // Kontrak desktop: lebar di-reset ke chip ikon (`lg:w-11`), `max-w-none`
+    // melepas clamp `sm:max-w-72`, dan `lg:justify-center` menetralkan
+    // `sm:justify-start` agar ikon kembali terpusat di chip 44px.
+    expect(linkClasses).toContain('lg:w-11')
+    expect(linkClasses).toContain('lg:max-w-none')
+    expect(linkClasses).toContain('lg:justify-center')
+
+    // Nama tetap ada di DOM (aksesibilitas: accessible name link) tetapi
+    // dibawa `lg:hidden` — assert kelas, bukan visibilitas jsdom.
+    const vendorName = screen.getByText('PT Lintas Fiber')
+    expect(classTokens(vendorName)).toContain('lg:hidden')
   })
 
   it('lonceng notifikasi tetap ada di navbar', () => {

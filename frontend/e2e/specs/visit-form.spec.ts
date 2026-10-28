@@ -149,13 +149,18 @@ async function uploadInto(
   const box = page.locator(`#${boxId}`)
   const uploaded = page.waitForResponse(
     (response) =>
-      response.request().method() === 'POST' &&
-      response.url().includes('/api/v1/uploads') &&
-      response.status() >= 200 &&
-      response.status() < 300,
+      response.request().method() === 'POST' && response.url().includes('/api/v1/uploads'),
+    { timeout: 60_000 },
   )
   await box.locator('input[type=file]').setInputFiles(filePath)
-  const body = (await (await uploaded).json()) as { data?: { file_url?: unknown } }
+  const response = await uploaded
+  if (!response.ok()) {
+    const detail = await response.text().catch(() => '')
+    throw new Error(
+      `[visit-form] POST /uploads ${response.status()} untuk ${fileName}: ${detail}`,
+    )
+  }
+  const body = (await response.json()) as { data?: { file_url?: unknown } }
   const fileUrl = body.data?.file_url
   if (typeof fileUrl !== 'string') {
     throw new Error(`[visit-form] respons POST /uploads tanpa data.file_url untuk ${fileName}`)
@@ -327,6 +332,7 @@ test.afterEach(async ({ h }) => {
 test('@VISIT-01 happy path lengkap: 1 anggota KTP+selfie, SPK 1,5 MB, tujuan katalog, NDA', async ({
   h,
 }) => {
+  test.setTimeout(120_000)
   const page = await h.openAs('vendor')
   const marker = h.unique('visit01')
   markers.push(marker)
@@ -369,6 +375,7 @@ test('@VISIT-01 happy path lengkap: 1 anggota KTP+selfie, SPK 1,5 MB, tujuan kat
 test('@VISIT-02 klien meneruskan SPK 6,2 MB dan menolak 21 MB dengan pesan batas 20 MB', async ({
   h,
 }) => {
+  test.setTimeout(120_000)
   const page = await h.openAs('vendor')
   await openForm(page)
 
@@ -388,11 +395,22 @@ test('@VISIT-02 klien meneruskan SPK 6,2 MB dan menolak 21 MB dengan pesan batas
   const mediumSpk = await writeAsset(test.info(), 'spk-6mb.pdf', pdfBuffer(6200))
   const firstUpload = page.waitForResponse(
     (response) => response.request().method() === 'POST' && response.url().includes('/uploads'),
+    { timeout: 60_000 },
   )
   await input.setInputFiles(mediumSpk)
   const firstStatus = (await firstUpload).status()
   expect([201, 413]).toContain(firstStatus)
   await expect(clientSizeAlert).toHaveCount(0)
+
+  // `UploadBox.processFile` mengabaikan berkas baru selama mutation upload
+  // masih `isPending`. Tunggu state pending benar-benar turun sebelum memilih
+  // berkas 21 MB; tanpa ini, test balapan dengan response production yang
+  // lebih lambat dan file kedua tidak pernah diproses.
+  const uploadBox = page.locator('#visit-assignment-letter')
+  await expect(uploadBox.getByText('Mengunggah berkas.', { exact: true })).toHaveCount(0)
+  await expect(
+    uploadBox.getByRole('button', { name: /Ganti Berkas|Pilih dari Galeri \/ Berkas/ }),
+  ).toBeVisible()
 
   // Di atas plafon transport, klien menolak lebih dulu tanpa request tambahan.
   const hugeSpk = await writeAsset(test.info(), 'spk-21mb.pdf', pdfBuffer(21500))

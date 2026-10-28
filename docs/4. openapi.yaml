@@ -139,6 +139,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserResponse'
 
+    patch:
+      tags: [Auth]
+      operationId: updateSelfProfile
+      summary: Perbarui profil sendiri (telepon & foto untuk semua peran; nama khusus Superadmin)
+      description: |
+        Memperbarui profil pengguna yang sedang login. Semua peran boleh mengubah
+        `phone` dan `avatar_url`. Hanya `super_admin` yang boleh mengubah `name`
+        miliknya sendiri; peran lain yang mengirim `name` ditolak 403 `FORBIDDEN`.
+        Email, password, nik, role, user type, status, dan location tidak diterima.
+        Perubahan nama dicatat sebagai `user.update` pada audit_log dengan metadata
+        nama lama dan nama baru (audit_log tidak memiliki snapshot nama).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSelfProfileRequest'
+      responses:
+        '200':
+          description: Profil berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: 'Body kosong, field tidak dikenal, atau panjang/format melanggar x-limits (VALIDATION_ERROR). Amplop galat: { success: false, error: { code, message } }.'
+        '401':
+          description: 'Tanpa token atau token kedaluwarsa (UNAUTHORIZED). Amplop galat: { success: false, error: { code, message } }.'
+        '403':
+          description: 'Peran selain super_admin mengirim `name` (FORBIDDEN). Amplop galat: { success: false, error: { code, message } }.'
+
   /auth/logout:
     post:
       tags: [Auth]
@@ -556,6 +589,18 @@ paths:
           description: Filter aksi (mis. user.create, visit.delete); kosong = tanpa filter
           schema:
             type: string
+        - name: q
+          in: query
+          description: Pencarian bebas (case-insensitive, substring) pada action, entity, entity_id, ip, user_agent, serta nama/email pelaku (users.name, users.email). Kosong = tanpa filter.
+          schema:
+            type: string
+        - name: order
+          in: query
+          description: Arah urutan timestamp (tiebreaker id mengikuti arah yang sama); nilai selain asc/desc jatuh ke desc.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
         - name: date_from
           in: query
           description: Batas bawah timestamp (inklusif). RFC3339 penuh atau date-only YYYY-MM-DD. Kosong = tanpa filter.
@@ -575,9 +620,11 @@ paths:
             default: 1
         - name: limit
           in: query
+          description: Jumlah baris per halaman; default 50, nilai di atas 200 dipotong (clamp) menjadi 200.
           schema:
             type: integer
-            default: 20
+            default: 50
+            maximum: 200
       responses:
         '200':
           description: Halaman jejak audit berhasil diambil
@@ -742,8 +789,8 @@ paths:
                   description: Berkas PDF/JPG/PNG. Plafon transport 20MB untuk berkas mentah; hasil akhir setelah kompresi wajib <= 5MB.
                 category:
                   type: string
-                  enum: [assignment_letter, id_card, checkin_photo]
-                  description: Kategori berkas untuk isolasi folder bucket MinIO
+                  enum: [assignment_letter, id_card, checkin_photo, profile_photo]
+                  description: Kategori berkas untuk isolasi folder bucket MinIO. `profile_photo` hanya menerima `image/jpeg` dan `image/png`.
                 owner_id:
                   type: string
                   deprecated: true
@@ -1332,6 +1379,16 @@ components:
           type: [string, "null"]
           maxLength: 120
           description: Nama perusahaan vendor akun ini (override ketikan manual bila ada, kalau tidak nama katalog vendor; TIDAK terdaftar di katalog bila diketik manual dan TIDAK pernah tampil di dropdown vendor)
+        avatar_url:
+          type: [string, "null"]
+          format: uri
+          description: URL presigned berumur pendek yang di-resolve ulang pada setiap respons; URL bucket mentah tidak pernah diekspos. Null bila belum ada foto profil.
+        editable_fields:
+          type: array
+          items:
+            type: string
+            enum: [name, phone, avatar_url]
+          description: Daftar field yang boleh diubah sendiri oleh pemanggil, dihitung dari peran pemanggil; hanya dijamin ada pada respons `/auth/me`.
 
     UserResponse:
       type: object
@@ -1421,6 +1478,30 @@ components:
           type: [string, "null"]
           format: uuid
           description: Cabang penugasan baru untuk akun security (mutasi lokasi). Absen/null = biarkan cabang saat ini (PATCH yang hanya berisi member ini tetap dianggap tanpa perubahan dan dijawab 400). Hanya Superadmin yang boleh mengisinya; Admin Cabang yang mengirim member ini mendapat 403.
+
+    UpdateSelfProfileRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        Profil mandiri pengguna yang sedang login. `phone` dan `avatar_url`
+        diterima untuk semua peran; `name` HANYA diterima untuk peran
+        `super_admin` (peran lain dijawab 403 FORBIDDEN). Email, password, nik,
+        role, user type, status, dan location TIDAK diterima.
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          description: Hanya diterima untuk peran `super_admin`; peran lain dijawab 403 FORBIDDEN. Perubahan dicatat sebagai `user.update` dengan metadata nama lama dan nama baru.
+        phone:
+          type: string
+          pattern: "^(?:62|0)[0-9]{8,13}$"
+          maxLength: 15
+          description: Nomor telepon kanonik (hanya digit, awalan 62 diganti 0).
+        avatar_url:
+          type: [string, "null"]
+          format: uri
+          maxLength: 2048
+          description: URL yang dikembalikan oleh `POST /uploads` dengan kategori `profile_photo`; null menghapus avatar.
 
     Location:
       type: object
@@ -1654,6 +1735,17 @@ components:
               type: integer
             limit:
               type: integer
+              description: Nilai limit setelah normalisasi (default 50, maksimum 200).
+            offset:
+              type: integer
+              description: Offset efektif setelah normalisasi limit.
+            q:
+              type: string
+              description: Pencarian bebas yang diterapkan (sudah di-trim); string kosong bila tidak ada.
+            order:
+              type: string
+              enum: [asc, desc]
+              description: Arah urutan yang diterapkan setelah normalisasi.
 
     Notification:
       type: object

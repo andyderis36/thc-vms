@@ -171,12 +171,52 @@ func TestUpload_RejectsUnknownCategory(t *testing.T) {
 	storage := &fakeStorage{}
 	engine := newUploadEngine(storage, 5*1024*1024)
 
-	body, ctype := multipartUpload(t, "spk.pdf", "application/pdf", []byte("x"),
+	body, ctype := multipartUpload(t, "x.jpg", "image/jpeg", []byte("hello"),
 		map[string]string{"category": "selfie", "owner_id": "visit-1"})
 	rec := serve(engine, "POST", "/uploads", body, ctype)
 	mustStatus(t, rec, 400)
 	if storage.uploadCalls != 0 {
 		t.Fatalf("unknown category reached storage")
+	}
+}
+
+// TestUpload_ProfilePhotoPassesImageHint pins the avatar upload path: the
+// profile_photo category reaches storage under the actor's own namespace, which
+// is the same prefix the auth profile write gate demands of avatar_url.
+func TestUpload_ProfilePhotoPassesImageHint(t *testing.T) {
+	storage := &fakeStorage{result: domain.UploadResult{
+		FileURL:  "http://localhost:9000/thc-vms-bucket/profile_photos/pending-actor-1/avatar.jpg",
+		FileName: "avatar.jpg",
+		FileSize: 5,
+		MimeType: "image/jpeg",
+	}}
+	engine := newUploadEngine(storage, 5*1024*1024)
+
+	body, ctype := multipartUpload(t, "avatar.jpg", "image/jpeg", []byte("hello"),
+		map[string]string{"category": "profile_photo", "owner_id": "someone-else"})
+	rec := serve(engine, "POST", "/uploads", body, ctype)
+	mustStatus(t, rec, 201)
+
+	if storage.uploadCalls != 1 {
+		t.Fatalf("upload calls = %d, want 1", storage.uploadCalls)
+	}
+	if storage.lastReq.ObjectKey != "profile_photo/pending-actor-1" {
+		t.Fatalf("ObjectKey = %q, want the actor namespace", storage.lastReq.ObjectKey)
+	}
+}
+
+// TestUpload_ProfilePhotoRejectsPDF keeps the avatar an image-only upload: PDF
+// is allowed for visit documents but is never a valid profile photo.
+func TestUpload_ProfilePhotoRejectsPDF(t *testing.T) {
+	storage := &fakeStorage{}
+	engine := newUploadEngine(storage, 5*1024*1024)
+
+	body, ctype := multipartUpload(t, "spk.pdf", "application/pdf", []byte("hello"),
+		map[string]string{"category": "profile_photo"})
+	rec := serve(engine, "POST", "/uploads", body, ctype)
+	mustStatus(t, rec, 400)
+	if storage.uploadCalls != 0 {
+		t.Fatalf("a PDF avatar reached storage")
 	}
 }
 

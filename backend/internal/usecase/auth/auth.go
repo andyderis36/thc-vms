@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"thc-vms/backend/internal/domain"
 )
@@ -38,18 +39,25 @@ type RoleDirectory interface {
 // pointers so location_id renders as JSON null for super_admin and vendor.
 // VendorName resolves best-effort through the vendors port (nil when the
 // caller wires no catalogue, e.g. hermetic tests).
+//
+// AvatarURL is the freshly minted presigned URL ("" when the account has no
+// photo or storage is unavailable), never the raw bucket address stored in
+// the database. EditableFields is the role-derived self-service policy table
+// from EditableFields(role), so the client never has to duplicate it.
 type Profile struct {
-	ID           domain.UUID
-	Name         string
-	Email        string
-	Phone        string
-	NIK          string
-	Role         domain.RoleName
-	LocationID   *domain.UUID
-	LocationName *string
-	Status       domain.UserStatus
-	Type         domain.UserType
-	VendorName   *string
+	ID             domain.UUID
+	Name           string
+	Email          string
+	Phone          string
+	NIK            string
+	Role           domain.RoleName
+	LocationID     *domain.UUID
+	LocationName   *string
+	Status         domain.UserStatus
+	Type           domain.UserType
+	VendorName     *string
+	AvatarURL      string
+	EditableFields []string
 }
 
 // LoginResult mirrors the openapi LoginResponse data object.
@@ -71,6 +79,10 @@ type Deps struct {
 	Issuer    Issuer
 	Clock     domain.Clock
 	Audit     domain.AuditRepository
+	// Profiles is the self-service write port behind PATCH /auth/me. It is a
+	// separate port from Users so the narrow login fakes keep compiling; a nil
+	// value only disables UpdateSelf (500), never login/logout/me.
+	Profiles domain.ProfileRepository
 }
 
 // Service is the authentication usecase.
@@ -82,6 +94,14 @@ type Service struct {
 	issuer    Issuer
 	clock     domain.Clock
 	audit     domain.AuditRepository
+	profiles  domain.ProfileRepository
+	// storage mints the short-lived avatar URL served on reads. It is wired
+	// after construction via WithFileLinks so existing NewService callers
+	// (tests, workers) keep compiling; a nil store blanks the avatar instead
+	// of leaking a raw private-bucket address.
+	storage domain.IStorageService
+	// presignTTL is the presigned-URL lifetime forwarded to the adapter.
+	presignTTL time.Duration
 }
 
 // NewService wires the collaborators. A nil Clock defaults to SystemClock;
@@ -98,6 +118,7 @@ func NewService(d Deps) *Service {
 		issuer:    d.Issuer,
 		clock:     d.Clock,
 		audit:     d.Audit,
+		profiles:  d.Profiles,
 	}
 }
 
@@ -113,14 +134,15 @@ func (s *Service) profile(ctx context.Context, user domain.User) (Profile, error
 		return Profile{}, domain.FromError(err)
 	}
 	out := Profile{
-		ID:     user.ID,
-		Name:   user.Name,
-		Email:  user.Email,
-		Phone:  user.Phone,
-		NIK:    user.NIK,
-		Role:   role,
-		Status: user.Status,
-		Type:   user.Type,
+		ID:             user.ID,
+		Name:           user.Name,
+		Email:          user.Email,
+		Phone:          user.Phone,
+		NIK:            user.NIK,
+		Role:           role,
+		Status:         user.Status,
+		Type:           user.Type,
+		EditableFields: EditableFields(role),
 	}
 	if user.LocationID != nil {
 		out.LocationID = user.LocationID
@@ -145,5 +167,6 @@ func (s *Service) profile(ctx context.Context, user domain.User) (Profile, error
 			out.VendorName = &name
 		}
 	}
+	out.AvatarURL = s.presignStoredURL(ctx, user.AvatarURL)
 	return out, nil
 }

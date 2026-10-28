@@ -250,7 +250,11 @@ export function AdminBranchShell({
          */
         <div className="mt-2 [&_[role=menu]]:top-auto [&_[role=menu]]:bottom-full [&_[role=menu]]:mt-0 [&_[role=menu]]:mb-1">
           <ProfileMenu
-            user={{ name: displayName, role: roleLabel }}
+            user={{
+              name: displayName,
+              role: roleLabel,
+              avatarUrl: user !== null ? (user.avatar_url ?? undefined) : undefined,
+            }}
             onLogout={handleSignOut}
             alwaysShowName
             roleSlot={

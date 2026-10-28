@@ -8,6 +8,7 @@ import { ArrowLeft, LogOut, MapPin } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { NotificationsMenu } from '@/components/ui/NotificationsMenu'
 import { Tabs, type TabItem } from '@/components/ui/Tabs'
+import { UserAvatar } from '@/components/ui/UserAvatar'
 import { useSession } from '@/lib/auth/session'
 import type { NotificationItem } from '@/lib/api/types'
 import { LiveClock } from './LiveClock'
@@ -59,13 +60,20 @@ export interface SecurityKioskShellProps {
  * SHELL-03 — Security Kiosk Shell (Zero Sidebar).
  *
  * Aturan mutlak: shell ini TIDAK memiliki sidebar, menu, drawer, hamburger,
- * atau tautan pengaturan apa pun. Petugas pos jaga harus fokus pada
- * verifikasi tamu dan tidak boleh tersesat ke layar admin. Navigasi
- * satu-satunya adalah 3 tab antrean gerbang (56px di ponsel sebagai bottom
- * bar tetap < 768px, 52px di md+ sebagai sub-bar di bawah topbar) — plus
- * tautan kembali "Kembali ke Pos Check-in" ke `/gate` yang hanya muncul ketika
- * pathname BUKAN `/gate` (mis. halaman detail `/visits/{id}`), agar petugas
- * selalu punya jalan kembali ke pos tanpa mengubah topbar di `/gate`.
+ * atau tautan navigasi ke layar admin; satu-satunya tautan akun adalah blok
+ * nama petugas di topbar yang menaut ke `/profile` (profil mandiri). Petugas
+ * pos jaga harus fokus pada verifikasi tamu dan tidak boleh tersesat ke
+ * layar admin.
+ *
+ * Isolasi rute (affordance per-halaman):
+ * - 3 tab antrean gerbang (56px di ponsel sebagai bottom bar tetap < 768px,
+ *   52px di md+ sebagai sub-bar di bawah topbar) HANYA tampil di `/gate`;
+ *   di rute lain (mis. `/profile` atau detail `/visits/{id}`) tab disembunyikan.
+ * - Tautan kembali "Kembali ke Pos Check-in" ke `/gate` muncul ketika pathname
+ *   BUKAN `/gate` DAN BUKAN `/profile` (mis. halaman detail `/visits/{id}`),
+ *   agar petugas selalu punya jalan kembali ke pos tanpa mengubah topbar di
+ *   `/gate`. `/profile` menekan BOTH tab DAN kontrol kembali navbar ini karena
+ *   body halaman profil membawa tautan kembali ringkasnya sendiri.
  */
 export function SecurityKioskShell({
   children,
@@ -80,7 +88,11 @@ export function SecurityKioskShell({
   const pathname = usePathname()
   const [internalTab, setInternalTab] = useState<string>(DEFAULT_TAB)
 
-  const showBackToGate = pathname !== '/gate'
+  // Tab antrean gerbang adalah affordance HANYA untuk rute `/gate`.
+  const showQueueTabs = pathname === '/gate'
+  // Kontrol kembali ke pos check-in tampil di semua rute kios kecuali
+  // `/gate` (sudah di pos) dan `/profile` (body-nya membawa tautan kembali ringkas).
+  const showBackToGate = pathname !== '/gate' && pathname !== '/profile'
 
   // Layar pemilik data mengendalikan tab bila activeTab/onTabChange diberikan.
   const selectedTab = activeTab ?? internalTab
@@ -119,14 +131,14 @@ export function SecurityKioskShell({
             di bawahnya (ponsel: kolom bertumpuk di antara logo dan lonceng;
             md+: jam + counter sebaris);
           - kanan: tautan kembali (ikon di ponsel), lonceng notifikasi,
-            nama petugas (lg+), dan tombol logout ringkas (logout paling
-            kanan supaya aksi keluar selalu di posisi yang konsisten).
+            avatar + nama petugas (md+), dan tombol logout ringkas (logout
+            paling kanan supaya aksi keluar selalu di posisi yang konsisten).
           Tinggi bar: 56px di ponsel (`h-bar-mobile`), 70px mulai md
           (`md:h-topbar-kiosk`). Grid 3 kolom hanya mulai xl (1280px); di
           768-1023px baris tetap flex + justify-between (§5.1). */}
       <header className="sticky top-0 z-30 bg-brand text-brand-contrast shadow-dropdown">
         <div className="flex h-bar-mobile items-center justify-between gap-2 px-3 md:h-topbar-kiosk md:gap-3 md:px-4 lg:gap-4 lg:px-6 xl:grid xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-          {/* Kiri: logo THC + nama pos + badge lokasi terkunci (bukan switcher).
+          {/* Kiri: logo THC + badge lokasi terkunci saja (bukan switcher).
               Di ponsel badge lokasi disembunyikan (pindah ke pita body).
               TANPA `flex-1` di ponsel: ruang bebas diserap kolom tengah agar
               jam benar-benar berada di antara logo dan lonceng. */}
@@ -135,15 +147,15 @@ export function SecurityKioskShell({
                 di bar ponsel 56px (sisa 8px atas/bawah) dan sama dengan
                 navbar role lain. */}
             <Image src="/thcw.png" alt="THC" width={500} height={235} className="h-10 w-auto shrink-0" />
-            <span className="hidden shrink-0 whitespace-nowrap text-sm font-black uppercase tracking-wide xl:block">
-              Gate Access Control
-            </span>
             {/* Ponsel: tanpa cap 112px - badge lokasi pindah ke pita body
                 `KioskStatusStrip`, jadi di baris-1 tersedia tempat untuk jam +
                 counter on-site. Teks penuh SELALU ada di DOM; pemotongan murni
                 CSS `truncate` sehingga screen reader tetap membacanya. `title`
-                menyimpan nilai utuh. */}
-            <Badge tone="info" className="hidden min-w-0 max-w-full gap-1.5 md:inline-flex md:max-w-56 xl:max-w-48">
+                menyimpan nilai utuh. Di md grup avatar + nama (GG2) ikut
+                tampil sehingga baris padat: `md:min-w-24` memberi badge lantai
+                96px agar tak terlipat jadi sliver, sisanya diserap nama yang
+                memang `truncate`. */}
+            <Badge tone="info" className="hidden min-w-0 max-w-full gap-1.5 md:inline-flex md:max-w-56 md:min-w-24 xl:max-w-48">
               <MapPin aria-hidden="true" className="size-3 shrink-0" />
               <span className="truncate" title={locationName}>{locationName}</span>
             </Badge>
@@ -182,8 +194,8 @@ export function SecurityKioskShell({
             ) : null}
           </div>
 
-          {/* Kanan: tautan kembali ikon (ponsel), lonceng notifikasi, nama
-              petugas (lg+), tombol logout ringkas. */}
+          {/* Kanan: tautan kembali ikon (ponsel), lonceng notifikasi, avatar +
+              nama petugas (md+), tombol logout ringkas. */}
           <div className="flex min-w-0 items-center justify-end gap-2 md:gap-3">
             {showBackToGate ? (
               <Link
@@ -196,9 +208,27 @@ export function SecurityKioskShell({
               </Link>
             ) : null}
             <NotificationsMenu tone="brand" onSelect={onNotificationSelect} />
-            <div className="hidden min-w-0 text-right lg:block">
-              <p className="truncate text-sm font-bold leading-tight">{guardName}</p>
-              <p className="truncate text-badge text-brand-contrast">{shiftLabel}</p>
+            {/* Grup avatar + nama tampil mulai `md` (768px) — di ponsel
+                permukaan avatar adalah pita body `/gate`. `min-w-0` +
+                `truncate` pada nama menjaga cluster kanan tetap muat tanpa
+                overflow; di 768px nama memang terpotong lebih dulu. */}
+            <div className="hidden min-w-0 items-center gap-2 md:flex">
+              <UserAvatar name={guardName} avatarUrl={user?.avatar_url} size="sm" tone="onBrand" />
+              <div className="min-w-0 text-left">
+                {/* `-mx-1 px-1`: wash hover selebar teks TANPA menggeser posisi
+                    teks maupun tetangga (gutter cluster 8px cukup untuk overshoot
+                    4px). `focus-visible:outline-brand-contrast`: cincin default
+                    `--color-brand` tak terlihat di atas header `bg-brand`, jadi
+                    dipindah ke tinta kontras seperti teks shell ini. */}
+                <Link
+                  href="/profile"
+                  aria-label={`Profil ${guardName}`}
+                  className="-mx-1 block max-w-full truncate rounded-control px-1 text-sm font-bold leading-tight text-brand-contrast transition-colors hover:bg-brand-dark focus-visible:outline-brand-contrast"
+                >
+                  {guardName}
+                </Link>
+                <p className="truncate text-badge text-brand-contrast">{shiftLabel}</p>
+              </div>
             </div>
             {/* Logout ringkas ala vendor (SHELL-04): ikon 44x44 tanpa label
                 teks dan tanpa border, supaya tidak menyisakan ruang baris
@@ -218,48 +248,57 @@ export function SecurityKioskShell({
             Jam + counter kini hidup di kolom tengah tier-1 di atas. */}
       </header>
 
-      {/* Sub-bar tab sentuh 52px (desktop / tablet landscape). Di ponsel bar
-          yang sama jadi bottom bar 56px (`min-h-bar-mobile`). */}
-      <div className="hidden bg-surface md:block">
-        <Tabs
-          tabs={desktopTabs}
-          value={selectedTab}
-          onChange={handleTabChange}
-          size="gate"
-          className="px-4 lg:px-6"
-        />
-      </div>
+      {/* Sub-bar tab sentuh 52px (desktop / tablet landscape). HANYA di `/gate`;
+          di rute lain tab gerbang disembunyikan (`showQueueTabs`). */}
+      {showQueueTabs ? (
+        <div className="hidden bg-surface md:block">
+          <Tabs
+            tabs={desktopTabs}
+            value={selectedTab}
+            onChange={handleTabChange}
+            size="gate"
+            className="px-4 lg:px-6"
+          />
+        </div>
+      ) : null}
 
       {/* Konten layar; overflow-x-clip mengunci scroll horizontal TANPA membuat
           scroll container (clip ≠ hidden) sehingga elemen sticky di dalamnya tetap
           bekerja. min-w-0 = min-inline-size:0; id+tabIndex = sasan skip-to-content.
-          Padding bawah menyisakan ruang untuk bottom bar ponsel 56px PLUS inset
-          safe area iOS (`env(safe-area-inset-bottom)`) — bar tumbuh sebesar
-          inset, jadi ruang kosong konten ikut tumbuh sama besar. */}
+          Saat tab tampil (`/gate`): padding bawah menyisakan ruang untuk bottom bar
+          ponsel 56px PLUS inset safe area iOS (`env(safe-area-inset-bottom)`).
+          Saat tab tersembunyi (rute lain): cukup `pb-4 md:pb-6 lg:pb-8` — tanpa
+          reserve bar yang memang tidak ada. */}
       <main
         id="main-content"
         tabIndex={-1}
-        className="min-w-0 flex-1 overflow-x-clip p-4 pb-[calc(6rem_+_env(safe-area-inset-bottom))] md:p-6 lg:p-8"
+        className={`min-w-0 flex-1 overflow-x-clip p-4 md:p-6 lg:p-8 ${
+          showQueueTabs
+            ? 'pb-[calc(6rem_+_env(safe-area-inset-bottom))]'
+            : 'pb-4 md:pb-6 lg:pb-8'
+        }`}
       >
         {children}
       </main>
 
       {/* Ponsel (< 768px): 3 tab yang sama sebagai bottom bar tetap 56px
-          (`min-h-bar-mobile`), sama seperti navbar ponsel 56px.
+          (`min-h-bar-mobile`), sama seperti navbar ponsel 56px. HANYA di `/gate`.
           `px-4` = gutter yang sama dengan sub-bar desktop (tanpa gutter,
           pil tab aktif menempel di x≈0 dan terbaca terpotong).
           Safe area: `min-h-bar-mobile` + `pb-[env(safe-area-inset-bottom)]` →
           bar tumbuh sebesar inset home indicator tanpa menjepit isi (tinggi
           tab tetap `min-h-bar-mobile`). */}
-      <div className="fixed inset-x-0 bottom-0 z-30 min-h-bar-mobile border-t border-border-light bg-surface pb-[env(safe-area-inset-bottom)] shadow-dropdown md:hidden">
-        <Tabs
-          tabs={mobileTabs}
-          value={selectedTab}
-          onChange={handleTabChange}
-          size="gate"
-          className="px-4"
-        />
-      </div>
+      {showQueueTabs ? (
+        <div className="fixed inset-x-0 bottom-0 z-30 min-h-bar-mobile border-t border-border-light bg-surface pb-[env(safe-area-inset-bottom)] shadow-dropdown md:hidden">
+          <Tabs
+            tabs={mobileTabs}
+            value={selectedTab}
+            onChange={handleTabChange}
+            size="gate"
+            className="px-4"
+          />
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -117,7 +117,7 @@ export function ScanResultModal({
         {`Tim Teknisi (${visit.visitors.length} orang)`}
       </h3>
       {visit.visitors.length > 0 ? (
-        <ul className="mt-2 flex max-h-72 flex-col gap-3 overflow-y-auto">
+        <ul className="mt-2 flex flex-col gap-3">
           {visit.visitors.map((visitor, index) => {
             const ktpUrl = visitor.id_card_photo_url ?? null
             const selfieUrl = visitor.photo_url ?? null

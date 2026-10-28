@@ -29,6 +29,7 @@ const bcryptCost = 10
 // only security-specific knowledge here is the injected role id, because the
 // domain port has no "create a user with a role name" convenience.
 type UserHandler struct {
+	avatarLinker
 	users          domain.UserRepository
 	locations      domain.MasterDataRepository
 	securityRoleID domain.UUID
@@ -106,7 +107,7 @@ func stringOrEmpty(s *string) string {
 // field set. The role is fixed: this endpoint only ever serves gate staff.
 // Gate staff never carry a NIK (the create/update bodies reject the key),
 // so the member renders as JSON null here.
-func userToAccount(u domain.User, locationName *string) accountDTO {
+func (h *UserHandler) userToAccount(ctx context.Context, u domain.User, locationName *string) accountDTO {
 	return accountDTO{
 		ID:           string(u.ID),
 		Name:         u.Name,
@@ -119,6 +120,7 @@ func userToAccount(u domain.User, locationName *string) accountDTO {
 		Status:       string(u.Status),
 		Type:         string(u.Type),
 		VendorName:   nil,
+		AvatarURL:    h.avatarURL(ctx, u.AvatarURL),
 	}
 }
 
@@ -169,7 +171,7 @@ func (h *UserHandler) ListSecurity(c *gin.Context) {
 	}
 	out := make([]accountDTO, 0, len(accounts))
 	for _, u := range accounts {
-		out = append(out, userToAccount(u, h.branchName(c, u.LocationID)))
+		out = append(out, h.userToAccount(c.Request.Context(), u, h.branchName(c, u.LocationID)))
 	}
 	response.OK(c, out)
 }
@@ -272,7 +274,7 @@ func (h *UserHandler) CreateSecurity(c *gin.Context) {
 			domain.AuditActionUserCreate, domain.AuditEntityUser, &created.ID,
 			map[string]string{"email": created.Email, "role": string(domain.RoleSecurity)}))
 	}
-	response.Created(c, userToAccount(created, h.branchName(c, created.LocationID)))
+	response.Created(c, h.userToAccount(c.Request.Context(), created, h.branchName(c, created.LocationID)))
 }
 
 // updateStatusBody mirrors UpdateUserStatusRequest. The contract enum is ONLY
@@ -355,7 +357,7 @@ func (h *UserHandler) UpdateSecurityStatus(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, userToAccount(updated, h.branchName(c, updated.LocationID)))
+	response.OK(c, h.userToAccount(c.Request.Context(), updated, h.branchName(c, updated.LocationID)))
 }
 
 // securityDeleteStore is the delete half of the account port that
@@ -608,5 +610,5 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 			domain.AuditActionUserUpdate, domain.AuditEntityUser, &targetID,
 			map[string]string{"fields": managedUserChangedFields(patch)}))
 	}
-	response.OK(c, userToAccount(updated, h.branchName(c, updated.LocationID)))
+	response.OK(c, h.userToAccount(c.Request.Context(), updated, h.branchName(c, updated.LocationID)))
 }

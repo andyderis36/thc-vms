@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Upload categories, exactly the three tokens the openapi /uploads multipart
+// Upload categories, exactly the four tokens the openapi /uploads multipart
 // contract accepts. The token itself never reaches an object key: each maps to
 // the plural directory mandated by AGENTS.md 6.4, so a caller cannot smuggle a
 // directory of its own choosing into the bucket.
@@ -14,6 +14,7 @@ const (
 	CategoryAssignmentLetter = "assignment_letter"
 	CategoryIDCard           = "id_card"
 	CategoryCheckinPhoto     = "checkin_photo"
+	CategoryProfilePhoto     = "profile_photo"
 )
 
 // rejectKey is the sentinel a sanitisation test compares against to mean "this
@@ -34,6 +35,7 @@ var categoryDirectories = map[string]string{
 	CategoryAssignmentLetter: "assignment_letters",
 	CategoryIDCard:           "id_cards",
 	CategoryCheckinPhoto:     "checkin_photos",
+	CategoryProfilePhoto:     "profile_photos",
 }
 
 // buildObjectKey assembles "<directory>/<ownerID>/<fileName>" for one upload.

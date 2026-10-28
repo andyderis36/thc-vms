@@ -1,10 +1,20 @@
 /**
- * Global setup Playwright: preflight konektivitas.
+ * Global setup Playwright: preflight konektivitas + pembersihan sisa run.
  *
- * Tugasnya HANYA memeriksa bahwa backend Go dan frontend Next.js sudah hidup
- * sebelum suite dijalankan. Skrip ini tidak pernah menyalakan server sendiri —
- * server sengaja dikelola manual oleh developer/CI.
+ * Tugasnya memeriksa bahwa backend Go dan frontend Next.js sudah hidup
+ * sebelum suite dijalankan, lalu menghapus kunjungan yang tertinggal dari run
+ * yang dibatalkan. Skrip ini tidak pernah menyalakan server sendiri - server
+ * sengaja dikelola manual oleh developer/CI.
  */
+
+import {
+  ACCOUNTS,
+  apiFetchRaw,
+  deleteVisitViaApi,
+  loginViaApiCached,
+  type ApiEnvelope,
+  type VisitRecord,
+} from './helpers/api'
 
 const BACKEND_HEALTH_URL = `${process.env.E2E_API_BASE_URL ?? 'http://localhost:8080/api/v1'}/health`
 const FRONTEND_LOGIN_URL = `${process.env.E2E_FRONTEND_BASE_URL ?? 'http://localhost:3210'}/login`
@@ -13,6 +23,16 @@ const PROBE_TIMEOUT_MS = 10_000
 const BACKEND_HINT =
   'Jalankan dari folder backend/: `docker compose up -d` (Postgres + MinIO) lalu `go run cmd/server/main.go`.'
 const FRONTEND_HINT = 'Jalankan dari folder frontend/: `npm run dev` (port 3210).'
+
+/**
+ * Penanda kunjungan buatan harness (`h.unique`): `E2E-<label>-<epoch>-<seq>-<rand>`.
+ * Run yang dibatalkan (Ctrl+C / timeout) melewati teardown, sehingga tiket
+ * `approved` lama bisa membuat @QR-02 gagal pada run berikutnya. Hanya baris
+ * dengan penanda ini yang dihapus; data non-E2E tidak pernah disentuh.
+ */
+const HARNESS_MARKER = /E2E-[A-Za-z0-9]+-\d+-\d+-[a-z0-9]+/
+const CLEANUP_PAGE_SIZE = 100
+const CLEANUP_MAX_PAGES = 20
 
 async function probe(url: string): Promise<Response> {
   const controller = new AbortController()
@@ -75,6 +95,56 @@ async function checkFrontend(): Promise<string | null> {
   }
 }
 
+async function cleanupLeftoverVisits(): Promise<void> {
+  if (process.env.E2E_SKIP_STORAGE_CLEANUP === '1') {
+    console.log('[preflight] cleanup kunjungan sisa dilewati (E2E_SKIP_STORAGE_CLEANUP=1)')
+    return
+  }
+
+  try {
+    const { token } = await loginViaApiCached(ACCOUNTS.super.email, ACCOUNTS.super.password)
+    const leftovers: VisitRecord[] = []
+
+    for (let page = 1; page <= CLEANUP_MAX_PAGES; page += 1) {
+      const result = await apiFetchRaw<ApiEnvelope<{ items: VisitRecord[] }>>(
+        token,
+        'GET',
+        `/visits?limit=${CLEANUP_PAGE_SIZE}&page=${page}`,
+      )
+      if (!result.body.success) {
+        throw new Error(
+          `HTTP ${result.status} pada GET /visits?page=${page}: ${result.body.error.message}`,
+        )
+      }
+      const items = result.body.data.items ?? []
+      leftovers.push(...items.filter((visit) => HARNESS_MARKER.test(visit.notes ?? '')))
+      if (items.length < CLEANUP_PAGE_SIZE) {
+        break
+      }
+    }
+
+    if (leftovers.length === 0) {
+      console.log('[preflight] tidak ada kunjungan sisa')
+      return
+    }
+
+    let removed = 0
+    for (const visit of leftovers) {
+      try {
+        await deleteVisitViaApi(token, visit.id)
+        removed += 1
+      } catch (error) {
+        console.warn(
+          `[preflight] gagal menghapus kunjungan sisa ${visit.id}: ${describeError(error)}`,
+        )
+      }
+    }
+    console.log(`[preflight] kunjungan sisa dihapus: ${removed}/${leftovers.length}`)
+  } catch (error) {
+    console.warn(`[preflight] cleanup kunjungan sisa gagal: ${describeError(error)}`)
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
   const failures = (await Promise.all([checkBackend(), checkFrontend()])).filter(
     (failure): failure is string => failure !== null,
@@ -91,4 +161,5 @@ export default async function globalSetup(): Promise<void> {
   }
 
   console.log('[preflight] backend & frontend siap')
+  await cleanupLeftoverVisits()
 }

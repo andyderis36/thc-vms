@@ -164,18 +164,23 @@ func (r *auditRepository) List(ctx context.Context, filter domain.AuditFilter) (
 	if err != nil {
 		return nil, 0, err
 	}
-	var entity, action pgtype.Text
+	var entity, action, search pgtype.Text
 	if strings.TrimSpace(filter.Entity) != "" {
 		entity = pgtype.Text{String: strings.TrimSpace(filter.Entity), Valid: true}
 	}
 	if strings.TrimSpace(filter.Action) != "" {
 		action = pgtype.Text{String: strings.TrimSpace(filter.Action), Valid: true}
 	}
+	if filter.Q != "" {
+		search = pgtype.Text{String: filter.Q, Valid: true}
+	}
 	q := db.New(r.pool)
 	rows, err := q.ListAuditLogs(ctx, db.ListAuditLogsParams{
 		UserID:   scope,
 		Entity:   entity,
 		Action:   action,
+		Q:        search,
+		Order:    filter.Order,
 		DateFrom: pgTimestamptz(filter.From),
 		DateTo:   pgTimestamptz(filter.To),
 		Offset:   int32(filter.Offset),
@@ -188,6 +193,7 @@ func (r *auditRepository) List(ctx context.Context, filter domain.AuditFilter) (
 		UserID:   scope,
 		Entity:   entity,
 		Action:   action,
+		Q:        search,
 		DateFrom: pgTimestamptz(filter.From),
 		DateTo:   pgTimestamptz(filter.To),
 	})

@@ -52,52 +52,26 @@ jobs:
         run: timeout 180 go vet ./...
 
       - name: Start PostgreSQL
-        run: |
-          docker rm -f ci-pg >/dev/null 2>&1 || true
-          docker run -d --name ci-pg \
-            -p 5432:5432 \
-            -e POSTGRES_USER=thc_user \
-            -e POSTGRES_PASSWORD=thc_password_local \
-            -e POSTGRES_DB=thc_vms_db \
-            postgres:18-alpine
-          for i in $(seq 1 60); do
-            if docker exec ci-pg pg_isready -U thc_user -d thc_vms_db >/dev/null 2>&1; then
-              echo "postgres ready"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "postgres did not become ready" >&2
-          docker logs ci-pg >&2 || true
-          exit 1
+        run: bash .gitea/scripts/ci-pg.sh start
 
       - name: Prepare scratch database
-        run: |
-          docker exec ci-pg psql -U thc_user -d postgres -tAc \
-            "SELECT 1 FROM pg_database WHERE datname='thc_vms_t03_test'" | grep -q 1 \
-            || docker exec ci-pg psql -U thc_user -d postgres -c \
-              "CREATE DATABASE thc_vms_t03_test"
-          # Read the counter from the maintenance DB so this probe's own
-          # transaction is never counted against the scratch database.
-          docker exec ci-pg psql -U thc_user -d postgres -tAc \
-            "SELECT xact_commit FROM pg_stat_database WHERE datname='thc_vms_t03_test'" \
-            | tr -d '[:space:]' > /tmp/xact_before
-          echo "xact_commit before: $(cat /tmp/xact_before)"
+        run: bash .gitea/scripts/ci-pg.sh prepare
 
       - name: Test
         working-directory: backend
         env:
           CI: "true"
           THC_VMS_TEST_DSN: postgres://thc_user:thc_password_local@localhost:5432/thc_vms_t03_test?sslmode=disable
-        run: timeout 900 go test ./... -count=1 -coverprofile=coverage.out
+        run: |
+          # Re-check right before the suite: the container can die between steps.
+          bash ../.gitea/scripts/ci-pg.sh prepare
+          timeout 900 go test ./... -count=1 -coverprofile=coverage.out
 
       - name: Guard against false green
         # The repository harness exits 0 when Postgres is unreachable. If no
         # transaction was committed, the integration tests silently skipped.
         run: |
-          after=$(docker exec ci-pg psql -U thc_user -d postgres -tAc \
-            "SELECT xact_commit FROM pg_stat_database WHERE datname='thc_vms_t03_test'" \
-            | tr -d '[:space:]')
+          after=$(bash .gitea/scripts/ci-pg.sh counter)
           before=$(tr -d '[:space:]' < /tmp/xact_before)
           echo "xact_commit before=${before} after=${after}"
           if [ "${after:-0}" -le "${before:-0}" ]; then

@@ -26,6 +26,10 @@ var _ domain.UserRepository = (*userRepository)(nil)
 // account port (the status flip is the shared UpdateStatus method).
 var _ domain.ManagedUserRepository = (*userRepository)(nil)
 
+// Compile-time proof that the same adapter satisfies the self-service profile
+// port.
+var _ domain.ProfileRepository = (*userRepository)(nil)
+
 // NewUserRepository builds the PostgreSQL-backed domain.UserRepository.
 func NewUserRepository(pool *pgxpool.Pool) domain.UserRepository {
 	return &userRepository{pool: pool}
@@ -36,6 +40,14 @@ func NewUserRepository(pool *pgxpool.Pool) domain.UserRepository {
 // than a widened NewUserRepository return) so the security-account callers
 // keep their narrow type and no existing signature changes.
 func NewManagedUserRepository(pool *pgxpool.Pool) domain.ManagedUserRepository {
+	return &userRepository{pool: pool}
+}
+
+// NewProfileRepository exposes the same PostgreSQL adapter through the
+// self-service profile port. It is a separate constructor for the same reason
+// NewManagedUserRepository is: existing callers keep their narrow type and no
+// existing signature changes.
+func NewProfileRepository(pool *pgxpool.Pool) domain.ProfileRepository {
 	return &userRepository{pool: pool}
 }
 
@@ -65,6 +77,29 @@ func (r *userRepository) FindByID(ctx context.Context, id domain.UUID) (domain.U
 		return domain.User{}, MapError(err)
 	}
 	return profileRowToUser(row), nil
+}
+
+// UpdateProfile stores the caller's own resolved profile fields and returns the
+// refreshed row. An empty phone or avatar is written as SQL NULL (mirroring
+// nikPtr); the generated statement re-reads the same joined projection as
+// GetUserByID, so the row maps through profileRowToUser unchanged.
+func (r *userRepository) UpdateProfile(ctx context.Context, id domain.UUID, update domain.ProfileUpdate) (domain.User, error) {
+	parsed, err := fromDomainUUID(id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	row, err := r.queries().UpdateUserProfile(ctx, db.UpdateUserProfileParams{
+		ID:        parsed,
+		Name:      update.Name,
+		Phone:     pgText(phonePtr(update.Phone)),
+		AvatarUrl: pgText(avatarPtr(update.AvatarURL)),
+	})
+	if err != nil {
+		return domain.User{}, MapError(err)
+	}
+	// UpdateUserProfileRow and GetUserByIDRow are the same projection, so the
+	// conversion keeps profileRowToUser the single source of row->domain.
+	return profileRowToUser(db.GetUserByIDRow(row)), nil
 }
 
 // Create persists a branch security account. The only generated user INSERT is
@@ -353,6 +388,7 @@ func managedListRowToUser(row db.ListManagedUsersRow) domain.ManagedUser {
 			Email:              row.Email,
 			Phone:              textValue(row.Phone),
 			NIK:                textValue(row.Nik),
+			AvatarURL:          textValue(row.AvatarUrl),
 			LocationID:         domainUUIDPtr(row.LocationID),
 			Type:               domain.UserType(row.Type),
 			Status:             domain.UserStatus(row.Status),
@@ -368,15 +404,16 @@ func managedListRowToUser(row db.ListManagedUsersRow) domain.ManagedUser {
 
 // loginRowToUser projects the auth lookup onto the domain account.
 //
-// KNOWN GAP (generated shape vs port): GetUserByEmailForLogin returns the
-// role NAME but no role_id, and no created_at/updated_at/last_login columns,
-// so User.RoleID stays empty and the audit timestamps stay zero here. Adding
-// u.role_id, u.created_at, u.updated_at and u.last_login to that SELECT would
-// close the gap without touching Go code.
-// loginRowToUser maps the login row onto the domain entity. RoleID is carried
-// even though the row also exposes the resolved role NAME: the JWT directory
-// and the profile projection both resolve a role from its id, so dropping it
-// here made every login fail with 401 at token-minting time.
+// KNOWN GAP (generated shape vs port): GetUserByEmailForLogin carries no
+// created_at/updated_at/last_login columns, so those audit timestamps stay zero
+// here. RoleID IS carried even though the row also exposes the resolved role
+// NAME: the JWT directory and the profile projection both resolve a role from
+// its id, so dropping it here made every login fail with 401 at token-minting
+// time. AvatarURL is carried too: login feeds this user straight into the shared
+// profile projection, which presigns it, so omitting the column made
+// POST /auth/login answer avatar_url "" while GET /auth/me answered a valid
+// presigned URL. Adding the remaining columns to that SELECT would close the
+// gap without touching Go code.
 func loginRowToUser(row db.GetUserByEmailForLoginRow) domain.User {
 	return domain.User{
 		ID:                 mustDomainUUID(row.ID),
@@ -385,6 +422,7 @@ func loginRowToUser(row db.GetUserByEmailForLoginRow) domain.User {
 		PasswordHash:       row.PasswordHash,
 		Phone:              textValue(row.Phone),
 		NIK:                textValue(row.Nik),
+		AvatarURL:          textValue(row.AvatarUrl),
 		RoleID:             mustDomainUUID(row.RoleID),
 		LocationID:         domainUUIDPtr(row.LocationID),
 		Type:               domain.UserType(row.Type),
@@ -403,6 +441,7 @@ func profileRowToUser(row db.GetUserByIDRow) domain.User {
 		Email:              row.Email,
 		Phone:              textValue(row.Phone),
 		NIK:                textValue(row.Nik),
+		AvatarURL:          textValue(row.AvatarUrl),
 		RoleID:             mustDomainUUID(row.RoleID),
 		LocationID:         domainUUIDPtr(row.LocationID),
 		Type:               domain.UserType(row.Type),
@@ -421,6 +460,7 @@ func securityRowToUser(row db.ListSecurityUsersRow) domain.User {
 		Email:      row.Email,
 		Phone:      textValue(row.Phone),
 		NIK:        textValue(row.Nik),
+		AvatarURL:  textValue(row.AvatarUrl),
 		LocationID: domainUUIDPtr(row.LocationID),
 		Type:       domain.UserType(row.Type),
 		Status:     domain.UserStatus(row.Status),
@@ -445,6 +485,15 @@ func nikPtr(nik string) *string {
 		return nil
 	}
 	return &nik
+}
+
+// avatarPtr maps the domain avatar URL the same way as nikPtr: empty means SQL
+// NULL, so "no avatar" has one representation.
+func avatarPtr(avatarURL string) *string {
+	if avatarURL == "" {
+		return nil
+	}
+	return &avatarURL
 }
 
 // textValue renders a nullable text column as a plain string, NULL as "".

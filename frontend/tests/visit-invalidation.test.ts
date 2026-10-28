@@ -73,6 +73,7 @@ const visitFixture: VisitDetail = {
     status: 'active',
     type: 'external',
     vendor_name: null,
+    avatar_url: null,
   },
   vendor_name: '',
   start_date: '2026-10-20T08:00:00+07:00',

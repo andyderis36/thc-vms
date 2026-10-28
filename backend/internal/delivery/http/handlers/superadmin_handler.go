@@ -27,6 +27,7 @@ import (
 // method re-asserts the role so direct handler tests prove the 403 without
 // the middleware.
 type SuperAdminHandler struct {
+	avatarLinker
 	users        domain.ManagedUserRepository
 	locations    domain.LocationAdminRepository
 	visits       domain.VisitRepository
@@ -171,7 +172,7 @@ func toMasterLocation(loc domain.Location) masterLocationDTO {
 // managedToAccount projects one console row onto the openapi User field set.
 // The role comes from the joined role name (never from the request), and the
 // password hash is never a member.
-func managedToAccount(m domain.ManagedUser) accountDTO {
+func (h *SuperAdminHandler) managedToAccount(ctx context.Context, m domain.ManagedUser) accountDTO {
 	return accountDTO{
 		ID:           string(m.User.ID),
 		Name:         m.User.Name,
@@ -184,6 +185,7 @@ func managedToAccount(m domain.ManagedUser) accountDTO {
 		Status:       string(m.User.Status),
 		Type:         string(m.User.Type),
 		VendorName:   m.VendorName,
+		AvatarURL:    h.avatarURL(ctx, m.User.AvatarURL),
 	}
 }
 
@@ -379,7 +381,7 @@ func (h *SuperAdminHandler) ListUsers(c *gin.Context) {
 	}
 	out := make([]accountDTO, 0, len(accounts))
 	for _, m := range accounts {
-		out = append(out, managedToAccount(m))
+		out = append(out, h.managedToAccount(c.Request.Context(), m))
 	}
 	response.OK(c, out)
 }
@@ -591,7 +593,7 @@ func (h *SuperAdminHandler) UpdateUserStatus(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, managedToAccount(updated))
+	response.OK(c, h.managedToAccount(c.Request.Context(), updated))
 }
 
 // updateManagedUserBody mirrors the PATCH /users/:id body: every member is
@@ -738,7 +740,7 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, managedToAccount(updated))
+	response.OK(c, h.managedToAccount(c.Request.Context(), updated))
 }
 
 // managedHashStore reads one stored row WITH its bcrypt hash for the

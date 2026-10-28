@@ -15,7 +15,12 @@ vi.mock('next/image', () => ({
 
 vi.mock('@/lib/auth/session', () => ({
   useSession: () => ({
-    user: { name: 'Pusat', role: 'super_admin', location_name: 'Pontianak' },
+    user: {
+      name: 'Pusat',
+      role: 'super_admin',
+      location_name: 'Pontianak',
+      avatar_url: 'https://cdn.example/avatar-super.png',
+    },
     status: 'authenticated',
     signOut: vi.fn(),
   }),
@@ -138,6 +143,16 @@ describe('SuperadminShell — regresi defek mobile', () => {
     // Identitas aktif tetap lewat permukaan ber-tint + tinta brand.
     expect(classes).toContain('bg-brand/10')
     expect(classes).toContain('text-brand-contrast')
+  })
+})
+
+describe('SuperadminShell — foto profil sesi pada pemicu akun', () => {
+  it('pemicu profil merender <img> dengan src avatar_url dari sesi', () => {
+    renderShell()
+
+    const img = document.querySelector('button[aria-haspopup="menu"] span[role="img"] img')
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('src')).toBe('https://cdn.example/avatar-super.png')
   })
 })
 

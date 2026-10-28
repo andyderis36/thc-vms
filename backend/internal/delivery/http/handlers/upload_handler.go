@@ -36,6 +36,12 @@ var allowedUploadMIME = map[string]struct{}{
 	"image/png":       {},
 }
 
+// imageUploadMIME is the image-only subset a profile photo may use.
+var imageUploadMIME = map[string]struct{}{
+	"image/jpeg": {},
+	"image/png":  {},
+}
+
 // UploadHandler serves POST /uploads. It owns the HTTP framing only: the
 // size/MIME policy verdict and the object-key layout stay in the storage
 // adapter, which the handler reaches through domain.IStorageService.
@@ -109,7 +115,7 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 	}
 	category := strings.TrimSpace(firstFormValue(form.Value, "category"))
 	switch category {
-	case "assignment_letter", "id_card", "checkin_photo":
+	case "assignment_letter", "id_card", "checkin_photo", "profile_photo":
 	default:
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Kategori berkas tidak dikenal.")
 		return
@@ -137,6 +143,15 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 	if _, ok := allowedUploadMIME[mime]; !ok {
 		response.Fail(c, fmt.Errorf("tipe MIME berkas tidak diizinkan: %q: %w", mime, domain.ErrStorageRejected))
 		return
+	}
+	if category == "profile_photo" {
+		// The profile photo is rendered in the shell chrome, so it is an image
+		// by definition; the shared allow-list also admits PDF for the visit
+		// documents, which is never a valid avatar.
+		if _, ok := imageUploadMIME[mime]; !ok {
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Foto profil harus berupa gambar JPG atau PNG.")
+			return
+		}
 	}
 	src, err := header.Open()
 	if err != nil {

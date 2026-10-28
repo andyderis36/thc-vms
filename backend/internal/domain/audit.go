@@ -171,20 +171,32 @@ type AuditLog struct {
 }
 
 // AuditFilter scopes ListAuditLogs. Every member is optional: nil/empty means
-// unfiltered (rendered as SQL NULL, never as dropped predicates). Limit is
-// clamped to 1..200, defaulting to 50; Offset floors at 0.
+// unfiltered (rendered as SQL NULL, never as dropped predicates). Q is a
+// free-text needle matched case-insensitively across the trail row and its
+// actor. Order is the sort direction of timestamp (and its id tiebreaker).
+// Limit is clamped to 1..200, defaulting to 50; Offset floors at 0.
 type AuditFilter struct {
 	UserID *UUID
 	Entity string
 	Action string
+	Q      string
+	Order  string
 	From   *time.Time
 	To     *time.Time
 	Limit  int
 	Offset int
 }
 
-// NormaliseAuditFilter applies the Limit/Offset defaults.
+// NormaliseAuditFilter applies the Limit/Offset defaults, trims the free-text
+// needle, and pins Order to the asc/desc vocabulary (default desc).
 func NormaliseAuditFilter(filter AuditFilter) AuditFilter {
+	filter.Q = strings.TrimSpace(filter.Q)
+	switch strings.ToLower(strings.TrimSpace(filter.Order)) {
+	case "asc":
+		filter.Order = "asc"
+	default:
+		filter.Order = "desc"
+	}
 	if filter.Limit <= 0 {
 		filter.Limit = 50
 	}

@@ -98,6 +98,59 @@ func TestUserRepository_Lifecycle(t *testing.T) {
 	}
 }
 
+// TestUserRepository_ListingsCarryAvatarURL pins the avatar column on both
+// back-office list projections: a stored photo reaches domain.User.AvatarURL
+// (the handler presigns it) and an absent photo stays empty (the handler
+// serializes it as null).
+func TestUserRepository_ListingsCarryAvatarURL(t *testing.T) {
+	pool := testPool(t)
+	resetTables(t, pool)
+	ctx := testContext(t)
+	loc := seedLocation(t, pool, "Cabang Avatar", "cabang")
+
+	withAvatar := seedUser(t, pool, seedUserParams{
+		Name: "Pengawas Avatar", Email: "avatar@thc.test", Role: "security", Location: loc, Type: "internal",
+	})
+	withoutAvatar := seedUser(t, pool, seedUserParams{
+		Name: "Pengawas Kosong", Email: "kosong@thc.test", Role: "security", Location: loc, Type: "internal",
+	})
+	if _, err := pool.Exec(ctx,
+		`UPDATE users SET avatar_url = $2 WHERE id = $1`,
+		uuidArg(withAvatar), storedAvatarURL); err != nil {
+		t.Fatalf("store avatar url: %v", err)
+	}
+
+	assertRows := func(label string, rows map[domain.UUID]domain.User) {
+		t.Helper()
+		if got := rows[withAvatar].AvatarURL; got != storedAvatarURL {
+			t.Fatalf("%s avatar = %q, want the stored %q", label, got, storedAvatarURL)
+		}
+		if got := rows[withoutAvatar].AvatarURL; got != "" {
+			t.Fatalf("%s avatar = %q, want empty for a NULL column", label, got)
+		}
+	}
+
+	securityRows, err := NewUserRepository(pool).ListSecurity(ctx, &loc)
+	if err != nil {
+		t.Fatalf("ListSecurity: %v", err)
+	}
+	securityByID := make(map[domain.UUID]domain.User, len(securityRows))
+	for _, user := range securityRows {
+		securityByID[user.ID] = user
+	}
+	assertRows("ListSecurity", securityByID)
+
+	managedRows, err := NewManagedUserRepository(pool).ListManagedUsers(ctx, domain.UserFilter{LocationID: &loc})
+	if err != nil {
+		t.Fatalf("ListManagedUsers: %v", err)
+	}
+	managedByID := make(map[domain.UUID]domain.User, len(managedRows))
+	for _, account := range managedRows {
+		managedByID[account.User.ID] = account.User
+	}
+	assertRows("ListManagedUsers", managedByID)
+}
+
 // TestMasterDataRepository_Pickers covers both catalogue lists and the
 // location detail read.
 func TestMasterDataRepository_Pickers(t *testing.T) {
