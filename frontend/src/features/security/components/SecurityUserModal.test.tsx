@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+
+import { AVATAR_OBJECT_URL, installAvatarFetchStubs, mockAvatarImage } from '@/test-utils/avatarFetch'
 
 import { SecurityUserPanel } from './SecurityUserModal'
 
@@ -20,7 +22,7 @@ const { securityMembers } = vi.hoisted(() => ({
       status: 'active',
       type: 'internal',
       vendor_name: null,
-      avatar_url: 'https://minio.local/avatars/joko.png',
+      avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
     },
     {
       id: 'sec-2',
@@ -79,6 +81,16 @@ vi.mock('@/lib/api/hooks', () => ({
   }),
 }))
 
+let fetchMock: Mock<typeof fetch>
+
+beforeEach(() => {
+  fetchMock = installAvatarFetchStubs().fetchMock
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
 function openDetail(name: string): HTMLElement {
   fireEvent.click(screen.getByRole('button', { name: `Aksi untuk ${name}` }))
   fireEvent.click(screen.getByRole('menuitem', { name: 'Lihat detail' }))
@@ -92,17 +104,17 @@ function avatarWrapper(dialog: HTMLElement): HTMLElement {
 }
 
 describe('SecurityUserPanel — avatar pada modal detail', () => {
-  it('membuka "Lihat detail" menampilkan <img> avatar dari avatar_url pengawas', () => {
+  it('membuka "Lihat detail" menampilkan <img> avatar dari object URL blob pengawas', async () => {
+    mockAvatarImage(fetchMock)
     render(<SecurityUserPanel enabled />)
 
     const dialog = openDetail('Joko Susilo')
+    await waitFor(() => {
+      expect(avatarWrapper(dialog)).toHaveAttribute('data-avatar-state', 'image')
+    })
     const wrapper = avatarWrapper(dialog)
 
-    expect(wrapper).toHaveAttribute('data-avatar-state', 'image')
-    expect(wrapper.querySelector('img')).toHaveAttribute(
-      'src',
-      'https://minio.local/avatars/joko.png',
-    )
+    expect(wrapper.querySelector('img')).toHaveAttribute('src', AVATAR_OBJECT_URL)
     expect(dialog.querySelector('dl')?.contains(wrapper)).toBe(false)
 
     const row = dialog.querySelector('div.mb-3') as HTMLElement

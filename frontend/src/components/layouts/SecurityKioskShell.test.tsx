@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { createElement, type ComponentProps } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+
+import { AVATAR_OBJECT_URL, installAvatarFetchStubs, mockAvatarImage } from '@/test-utils/avatarFetch'
 
 import { SecurityKioskShell } from './SecurityKioskShell'
+
+const AVATAR_IMG_SELECTOR = 'header img[src^="blob:"]'
+
+let fetchMock: Mock<typeof fetch>
 
 /** State mutable agar tiap kasus uji bisa menguji visibilitas rute berbeda. */
 const pathnameState = vi.hoisted(() => ({ value: '/gate' }))
@@ -23,7 +29,7 @@ vi.mock('@/lib/auth/session', () => ({
       name: 'Joko Susilo',
       role: 'security',
       location_name: 'POP Pontianak',
-      avatar_url: 'https://minio.local/avatar.png',
+      avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
     },
     status: 'authenticated',
     signOut: vi.fn(),
@@ -41,6 +47,7 @@ afterEach(() => {
 
 beforeEach(() => {
   pathnameState.value = '/gate'
+  fetchMock = installAvatarFetchStubs().fetchMock
 })
 
 /**
@@ -124,11 +131,14 @@ describe('SecurityKioskShell — topbar kios satu baris di semua breakpoint', ()
     expect(nameLink).toHaveAccessibleName('Profil Joko Susilo')
   })
 
-  it('header menampilkan avatar sesi: <img> src avatar_url, wrapper image, aria-hidden, alt kosong', () => {
+  it('header menampilkan avatar sesi: <img> object URL blob, wrapper image, aria-hidden, alt kosong', async () => {
+    mockAvatarImage(fetchMock)
     render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
 
-    const img = document.querySelector('header img[src="https://minio.local/avatar.png"]')
-    expect(img).not.toBeNull()
+    await waitFor(() => {
+      expect(document.querySelector(AVATAR_IMG_SELECTOR)).not.toBeNull()
+    })
+    const img = document.querySelector(AVATAR_IMG_SELECTOR)
     expect(img?.getAttribute('alt')).toBe('')
     expect(img?.getAttribute('aria-hidden')).toBe('true')
 
@@ -138,19 +148,22 @@ describe('SecurityKioskShell — topbar kios satu baris di semua breakpoint', ()
     expect(wrapper?.getAttribute('aria-hidden')).toBe('true')
   })
 
-  it('avatar mendahului nama di DOM dan grupnya hidden md:flex (tak masuk bar ponsel 56px)', () => {
+  it('avatar mendahului nama di DOM dan grupnya hidden md:flex (tak masuk bar ponsel 56px)', async () => {
+    mockAvatarImage(fetchMock)
     render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    await waitFor(() => {
+      expect(document.querySelector(AVATAR_IMG_SELECTOR)).not.toBeNull()
+    })
 
     const nameLink = screen.getByText('Joko Susilo')
     const ordered = Array.from(
-      document.querySelectorAll(
-        'header img[src="https://minio.local/avatar.png"], header a[href="/profile"]',
-      ),
+      document.querySelectorAll('header img[src^="blob:"], header a[href="/profile"]'),
     )
     // querySelectorAll selalu mengembalikan urutan dokumen: avatar dulu,
     // tautan nama menyusul (bukan sebaliknya).
     expect(ordered).toHaveLength(2)
-    expect(ordered[0]?.getAttribute('src')).toBe('https://minio.local/avatar.png')
+    expect(ordered[0]?.getAttribute('src')).toBe(AVATAR_OBJECT_URL)
     expect(ordered[1]).toBe(nameLink)
 
     const group = ordered[0]?.closest('[data-avatar-state]')?.parentElement
@@ -207,8 +220,13 @@ describe('SecurityKioskShell — topbar kios satu baris di semua breakpoint', ()
     expect(screen.queryByTestId('kiosk-status-strip')).toBeNull()
   })
 
-  it('tombol keluar adalah elemen TERAKHIR di cluster kanan (paling kanan)', () => {
+  it('tombol keluar adalah elemen TERAKHIR di cluster kanan (paling kanan)', async () => {
+    mockAvatarImage(fetchMock)
     render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    await waitFor(() => {
+      expect(document.querySelector(AVATAR_IMG_SELECTOR)).not.toBeNull()
+    })
 
     const bell = screen.getByTestId('notif-menu')
     const cluster = bell.parentElement
@@ -222,7 +240,7 @@ describe('SecurityKioskShell — topbar kios satu baris di semua breakpoint', ()
     expect(cluster?.textContent).toContain('Joko Susilo')
 
     const nameGroup = document
-      .querySelector('header img[src="https://minio.local/avatar.png"]')
+      .querySelector(AVATAR_IMG_SELECTOR)
       ?.closest('[data-avatar-state]')?.parentElement
     expect(nameGroup).not.toBeNull()
     expect(children.indexOf(bell)).toBeLessThan(children.indexOf(nameGroup!))

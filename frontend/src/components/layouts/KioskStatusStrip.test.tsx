@@ -1,13 +1,28 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+
+import {
+  AVATAR_OBJECT_URL,
+  errorResponse,
+  flushEffects,
+  installAvatarFetchStubs,
+  mockAvatarImage,
+} from '@/test-utils/avatarFetch'
 
 import { KioskStatusStrip } from './KioskStatusStrip'
 
+let fetchMock: Mock<typeof fetch>
+
+beforeEach(() => {
+  fetchMock = installAvatarFetchStubs().fetchMock
+})
+
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
 })
 
 /**
@@ -72,19 +87,23 @@ describe('KioskStatusStrip — pita identitas kios ponsel', () => {
     expect(strip.className).toContain('md:hidden')
   })
 
-  it('avatarUrl diisi → strip memuat <img> dengan src tersebut (data-avatar-state image)', () => {
+  it('avatarUrl diisi → strip memuat <img> object URL blob (data-avatar-state image)', async () => {
+    mockAvatarImage(fetchMock)
     const { container } = render(
       <KioskStatusStrip
         guardName="Joko Susilo"
         locationName="Kantor Pusat THC (Pontianak)"
-        avatarUrl="https://storage.example/joko.jpg"
+        avatarUrl="/api/v1/avatars/abc?v=deadbeef"
       />,
     )
 
+    await waitFor(() => {
+      expect(container.querySelector('[data-avatar-state="image"]')).not.toBeNull()
+    })
+
     const strip = screen.getByTestId('kiosk-status-strip')
     const img = strip.querySelector('img')
-    expect(img).toHaveAttribute('src', 'https://storage.example/joko.jpg')
-    expect(container.querySelector('[data-avatar-state="image"]')).not.toBeNull()
+    expect(img).toHaveAttribute('src', AVATAR_OBJECT_URL)
   })
 
   it('avatarUrl dihilangkan atau null → inisial, tanpa <img>', () => {
@@ -109,14 +128,19 @@ describe('KioskStatusStrip — pita identitas kios ponsel', () => {
     )
   })
 
-  it('avatar mendahului nama petugas dalam urutan DOM', () => {
+  it('avatar mendahului nama petugas dalam urutan DOM', async () => {
+    mockAvatarImage(fetchMock)
     const { container } = render(
       <KioskStatusStrip
         guardName="Joko Susilo"
         locationName="Kantor Pusat THC (Pontianak)"
-        avatarUrl="https://storage.example/joko.jpg"
+        avatarUrl="/api/v1/avatars/abc?v=deadbeef"
       />,
     )
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-avatar-state="image"]')).not.toBeNull()
+    })
 
     const avatar = container.querySelector('[data-avatar-state]')
     const name = screen.getByText('Joko Susilo')
@@ -127,20 +151,17 @@ describe('KioskStatusStrip — pita identitas kios ponsel', () => {
     ).toBeTruthy()
   })
 
-  it('gagal memuat gambar avatar → jatuh ke inisial', () => {
+  it('gagal memuat avatar → jatuh ke inisial', async () => {
+    fetchMock.mockResolvedValue(errorResponse(404))
     const { container } = render(
       <KioskStatusStrip
         guardName="Joko Susilo"
         locationName="Kantor Pusat THC (Pontianak)"
-        avatarUrl="https://storage.example/joko.jpg"
+        avatarUrl="/api/v1/avatars/abc?v=deadbeef"
       />,
     )
 
-    const img = container.querySelector('img')
-    expect(img).not.toBeNull()
-    if (img === null) return
-
-    fireEvent.error(img)
+    await flushEffects()
 
     expect(container.querySelector('img')).toBeNull()
     expect(container.querySelector('[data-avatar-state="initials"]')).toHaveTextContent('JS')

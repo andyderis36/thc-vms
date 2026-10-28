@@ -4,7 +4,17 @@ import '@testing-library/jest-dom/vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { createElement, type ImgHTMLAttributes, type ReactNode } from 'react'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from 'vitest'
 
 import { COORDINATORS_PAGE_ROLES } from '@/app/coordinators/page'
 import { VENDOR_REGISTRATIONS_PAGE_ROLES } from '@/app/vendor-registrations/page'
@@ -20,6 +30,12 @@ import {
 import type { User } from '@/lib/api/types'
 import { NAV_LABELS } from '@/lib/nav/labels'
 import { TABLE_CLASS, TABLE_WRAPPER_CLASS } from '@/lib/table-styles'
+import {
+  AVATAR_OBJECT_URL,
+  flushEffects,
+  installAvatarFetchStubs,
+  mockAvatarImage,
+} from '@/test-utils/avatarFetch'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -61,7 +77,7 @@ const { managedUsersFixture } = vi.hoisted(() => ({
       status: 'active',
       type: 'internal',
       vendor_name: null,
-      avatar_url: 'https://minio.local/avatars/bayu.png',
+      avatar_url: '/api/v1/avatars/0d1f5f4e-6a0b-4c1d-9e8f-1a2b3c4d5e6f?v=1a2b3c4d',
     },
     {
       id: 'u-super',
@@ -128,6 +144,13 @@ afterAll(() => {
 
 afterEach(() => {
   cleanup()
+})
+
+/** Stub avatar: `fetch` + object URL dipasang ulang tiap uji (jsdom tanpa object URL asli). */
+let fetchMock: Mock<typeof fetch>
+
+beforeEach(() => {
+  fetchMock = installAvatarFetchStubs().fetchMock
 })
 
 function userStub(overrides: Partial<User> = {}): User {
@@ -414,16 +437,16 @@ describe('modal detail user — avatar identitas', () => {
     return screen.getByRole('dialog')
   }
 
-  it('membuka "Lihat detail" menampilkan <img> avatar dari avatar_url baris', () => {
+  it('membuka "Lihat detail" menampilkan <img> avatar dari object URL blob baris', async () => {
+    mockAvatarImage(fetchMock)
     const dialog = openDetail(renderScreen(COORDINATORS_PAGE_ROLES), 'Bayu Santoso')
+
+    await flushEffects()
 
     const wrapper = dialog.querySelector('[data-avatar-state]') as HTMLElement
     expect(wrapper).not.toBeNull()
     expect(wrapper).toHaveAttribute('data-avatar-state', 'image')
-    expect(wrapper.querySelector('img')).toHaveAttribute(
-      'src',
-      'https://minio.local/avatars/bayu.png',
-    )
+    expect(wrapper.querySelector('img')).toHaveAttribute('src', AVATAR_OBJECT_URL)
     expect(dialog.querySelector('dl')?.contains(wrapper)).toBe(false)
 
     const row = dialog.querySelector('div.mb-3') as HTMLElement

@@ -4,6 +4,7 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { installAvatarFetchStubs } from '@/test-utils/avatarFetch'
 import type { User } from '@/lib/api/types'
 
 import { ProfileForm } from './ProfileForm'
@@ -51,9 +52,13 @@ beforeEach(() => {
     file_name: 'avatar.jpg',
   })
   session.user = makeUser()
+  installAvatarFetchStubs()
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 describe('ProfileForm', () => {
   it('vendor (tanpa "name" di editable_fields): input nama absen, input telepon ada', () => {
@@ -103,7 +108,7 @@ describe('ProfileForm', () => {
     const { rerender } = render(<ProfileForm />)
     expect(screen.queryByRole('button', { name: /Hapus foto/i })).not.toBeInTheDocument()
 
-    session.user = makeUser({ avatar_url: 'http://localhost:9000/avatar.jpg' })
+    session.user = makeUser({ avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d' })
     rerender(<ProfileForm />)
 
     const removeButton = screen.getByRole('button', { name: /Hapus foto/i })

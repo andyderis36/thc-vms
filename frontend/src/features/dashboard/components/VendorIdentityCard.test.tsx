@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
+import {
+  AVATAR_OBJECT_URL,
+  errorResponse,
+  flushEffects,
+  installAvatarFetchStubs,
+  mockAvatarImage,
+} from '@/test-utils/avatarFetch'
 import type { User } from '@/lib/api/types'
 
 import { VendorIdentityCard } from './VendorIdentityCard'
@@ -23,6 +30,17 @@ const USER: User = {
   avatar_url: null,
 }
 
+let fetchMock: Mock<typeof fetch>
+
+beforeEach(() => {
+  fetchMock = installAvatarFetchStubs().fetchMock
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
 function renderCard(overrides: Partial<User> = {}) {
   return render(<VendorIdentityCard user={{ ...USER, ...overrides }} />)
 }
@@ -36,16 +54,18 @@ function avatarWrapper(): HTMLElement | null {
 }
 
 describe('VendorIdentityCard', () => {
-  it('menampilkan foto profil sebagai <img> saat avatar_url tersedia', () => {
-    renderCard({ avatar_url: 'https://cdn.example/u.png' })
+  it('menampilkan foto profil sebagai <img> object URL blob saat avatar_url tersedia', async () => {
+    mockAvatarImage(fetchMock)
+    renderCard({ avatar_url: '/api/v1/avatars/abc?v=deadbeef' })
 
     expect(cardSection()).toBeInTheDocument()
-    const wrapper = avatarWrapper()
-    expect(wrapper).toHaveAttribute('data-avatar-state', 'image')
+    await waitFor(() => {
+      expect(avatarWrapper()).toHaveAttribute('data-avatar-state', 'image')
+    })
 
-    const img = wrapper?.querySelector('img')
+    const img = avatarWrapper()?.querySelector('img')
     expect(img).not.toBeNull()
-    expect(img).toHaveAttribute('src', 'https://cdn.example/u.png')
+    expect(img).toHaveAttribute('src', AVATAR_OBJECT_URL)
   })
 
   it('jatuh ke inisial 2 huruf tanpa <img> saat avatar_url kosong', () => {
@@ -57,18 +77,14 @@ describe('VendorIdentityCard', () => {
     expect(cardSection().querySelector('img')).toBeNull()
   })
 
-  it('jatuh ke inisial dan melepas <img> saat foto gagal dimuat', () => {
-    renderCard({ avatar_url: 'https://cdn.example/expired.png' })
+  it('jatuh ke inisial saat foto gagal dimuat', async () => {
+    fetchMock.mockResolvedValue(errorResponse(404))
+    renderCard({ avatar_url: '/api/v1/avatars/abc?v=deadbeef' })
 
-    const wrapper = avatarWrapper()
-    expect(wrapper).toHaveAttribute('data-avatar-state', 'image')
-    const img = wrapper?.querySelector('img')
-    expect(img).not.toBeNull()
+    await flushEffects()
 
-    fireEvent.error(img!)
-
-    expect(wrapper).toHaveAttribute('data-avatar-state', 'initials')
-    expect(wrapper?.textContent).toBe('BS')
+    expect(avatarWrapper()).toHaveAttribute('data-avatar-state', 'initials')
+    expect(avatarWrapper()?.textContent).toBe('BS')
     expect(cardSection().querySelector('img')).toBeNull()
   })
 
