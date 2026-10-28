@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"thc-vms/backend/internal/domain"
+	"thc-vms/backend/internal/usecase/avatar"
 	"thc-vms/backend/internal/usecase/gate"
 	"thc-vms/backend/internal/usecase/visit"
 )
@@ -101,4 +102,13 @@ func gateActor(c *gin.Context) (gate.Actor, error) {
 		return gate.Actor{}, err
 	}
 	return gate.Actor{ID: identity.id, Role: identity.role, LocationID: identity.locationID}, nil
+}
+
+// avatarActor converts the context identity to the avatar usecase Actor.
+func avatarActor(c *gin.Context) (avatar.Actor, error) {
+	identity, err := identityFromContext(c)
+	if err != nil {
+		return avatar.Actor{}, err
+	}
+	return avatar.Actor{ID: identity.id, Role: identity.role, LocationID: identity.locationID}, nil
 }

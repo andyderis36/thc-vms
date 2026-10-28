@@ -1,12 +1,31 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+
+import {
+  AVATAR_OBJECT_URL,
+  errorResponse,
+  flushEffects,
+  installAvatarFetchStubs,
+  mockAvatarImage,
+} from '@/test-utils/avatarFetch'
 
 import { ProfileMenu, type ProfileMenuUser } from './ProfileMenu'
 
 const USER: ProfileMenuUser = { name: 'Budi Santoso', role: 'Admin Cabang' }
+
+let fetchMock: Mock<typeof fetch>
+
+beforeEach(() => {
+  fetchMock = installAvatarFetchStubs().fetchMock
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 function renderMenu(overrides: Partial<Parameters<typeof ProfileMenu>[0]> = {}) {
   const onLogout = vi.fn()
@@ -74,23 +93,26 @@ describe('ProfileMenu', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
-  it('menampilkan foto avatar bila avatarUrl disediakan', () => {
-    renderMenu({ user: { ...USER, avatarUrl: 'https://cdn.example/u.png' } })
+  it('menampilkan foto avatar sebagai object URL blob bila avatarUrl disediakan', async () => {
+    mockAvatarImage(fetchMock)
+    renderMenu({ user: { ...USER, avatarUrl: '/api/v1/avatars/abc?v=deadbeef' } })
     const avatar = screen.getByRole('img', { name: 'Akun Budi Santoso' })
     expect(avatar.tagName).toBe('SPAN')
 
+    await waitFor(() => {
+      expect(avatar.querySelector('img')).not.toBeNull()
+    })
+
     const img = avatar.querySelector('img')
-    expect(img).toHaveAttribute('src', 'https://cdn.example/u.png')
+    expect(img).toHaveAttribute('src', AVATAR_OBJECT_URL)
     expect(avatar.textContent).toBe('')
   })
 
-  it('jatuh ke inisial dan melepas <img> saat foto gagal dimuat (URL kedaluwarsa)', () => {
-    renderMenu({ user: { ...USER, avatarUrl: 'https://cdn.example/expired.png' } })
+  it('jatuh ke inisial saat foto gagal dimuat', async () => {
+    fetchMock.mockResolvedValue(errorResponse(404))
+    renderMenu({ user: { ...USER, avatarUrl: '/api/v1/avatars/abc?v=deadbeef' } })
     const avatar = screen.getByRole('img', { name: 'Akun Budi Santoso' })
-    const img = avatar.querySelector('img')
-    expect(img).not.toBeNull()
-
-    fireEvent.error(img!)
+    await flushEffects()
 
     expect(avatar.querySelector('img')).toBeNull()
     expect(avatar.textContent).toBe('BS')

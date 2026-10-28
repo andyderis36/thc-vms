@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -42,28 +44,18 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, id domain.UUID, update d
 }
 
 // fakeSelfStorage mirrors the MinIO adapter's own-bucket reversal rule for the
-// profile photo namespace and mints deterministic signed URLs.
-type fakeSelfStorage struct {
-	signCalls  int
-	lastKey    string
-	lastExpiry time.Duration
-	presignErr error
-}
+// profile photo namespace. It no longer mints read URLs: avatar reads stream
+// through GET /avatars/{id}.
+type fakeSelfStorage struct{}
 
-func (f *fakeSelfStorage) EnsureBucket(_ context.Context) error { return nil }
+func (fakeSelfStorage) EnsureBucket(_ context.Context) error { return nil }
 
-func (f *fakeSelfStorage) Upload(_ context.Context, _ domain.UploadRequest) (domain.UploadResult, error) {
+func (fakeSelfStorage) Upload(_ context.Context, _ domain.UploadRequest) (domain.UploadResult, error) {
 	return domain.UploadResult{}, domain.ErrStorageRejected
 }
 
-func (f *fakeSelfStorage) PresignedURL(_ context.Context, objectKey string, expiry time.Duration) (string, error) {
-	f.signCalls++
-	f.lastKey = objectKey
-	f.lastExpiry = expiry
-	if f.presignErr != nil {
-		return "", f.presignErr
-	}
-	return "https://signed.example/" + objectKey, nil
+func (fakeSelfStorage) PresignedURL(_ context.Context, _ string, _ time.Duration) (string, error) {
+	return "", domain.ErrNotFound
 }
 
 func (f *fakeSelfStorage) ObjectKeyFromStoredURL(raw string) (string, error) {
@@ -124,11 +116,19 @@ func seedSelfUser(t *testing.T, role domain.RoleName) (*fakeUsers, domain.User) 
 func selfService(users *fakeUsers, profiles *fakeProfiles, storage domain.IStorageService) *Service {
 	deps := loginDeps(users)
 	deps.Profiles = profiles
-	return NewService(deps).WithFileLinks(storage, 15*time.Minute)
+	deps.Storage = storage
+	return NewService(deps)
 }
 
 func selfAvatarURL(userID domain.UUID) string {
 	return selfStorageBase + "/" + domain.ProfilePhotoOwnerPrefix(userID) + "avatar.jpg"
+}
+
+// avatarVersionOf derives the expected cache-busting version the way the
+// contract defines it: the first 8 hex characters of sha256(stored).
+func avatarVersionOf(stored string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(stored)))
+	return hex.EncodeToString(sum[:])[:8]
 }
 
 func stringPtr(value string) *string { return &value }
@@ -396,7 +396,7 @@ func TestUpdateSelf_AuditRecordsNameChange(t *testing.T) {
 	deps := loginDeps(users)
 	deps.Profiles = profiles
 	deps.Audit = audit
-	svc := NewService(deps).WithFileLinks(&fakeSelfStorage{}, 15*time.Minute)
+	svc := NewService(deps)
 
 	newName := "Nama Baru"
 	if _, err := svc.UpdateSelf(auditCtx(),
@@ -446,7 +446,7 @@ func TestUpdateSelf_AuditFailureNeverFailsRequest(t *testing.T) {
 	deps := loginDeps(users)
 	deps.Profiles = profiles
 	deps.Audit = audit
-	svc := NewService(deps).WithFileLinks(&fakeSelfStorage{}, 15*time.Minute)
+	svc := NewService(deps)
 
 	if _, err := svc.UpdateSelf(auditCtx(),
 		SelfIdentity{UserID: user.ID, Role: domain.RoleAdmin},
@@ -458,52 +458,48 @@ func TestUpdateSelf_AuditFailureNeverFailsRequest(t *testing.T) {
 	}
 }
 
-// TestMe_PresignsAvatarAndReportsEditableFields pins the read path: the stored
-// absolute URL becomes a freshly signed URL and the policy list travels with
-// the profile.
-func TestMe_PresignsAvatarAndReportsEditableFields(t *testing.T) {
+// TestMe_ReportsAvatarAPIPathAndEditableFields pins the read path: the stored
+// absolute URL becomes the host-agnostic API path and the policy list travels
+// with the profile.
+func TestMe_ReportsAvatarAPIPathAndEditableFields(t *testing.T) {
 	users, user := seedSelfUser(t, domain.RoleAdmin)
 	user.AvatarURL = selfAvatarURL(user.ID)
 	users.byID[user.ID] = user
-	store := &fakeSelfStorage{}
-	svc := NewService(loginDeps(users)).WithFileLinks(store, 0)
+	svc := NewService(loginDeps(users))
 
 	got, err := svc.Me(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("Me: %v", err)
 	}
-	wantPrefix := "https://signed.example/" + domain.ProfilePhotoOwnerPrefix(user.ID)
-	if !strings.HasPrefix(got.AvatarURL, wantPrefix) {
-		t.Fatalf("avatar_url = %q, want presigned URL under %q", got.AvatarURL, wantPrefix)
+	want := "/api/v1/avatars/" + string(user.ID) + "?v=" + avatarVersionOf(selfAvatarURL(user.ID))
+	if got.AvatarURL != want {
+		t.Fatalf("avatar_url = %q, want the API path %q", got.AvatarURL, want)
 	}
-	if store.lastExpiry != defaultPresignTTL {
-		t.Fatalf("forwarded TTL = %s, want default %s", store.lastExpiry, defaultPresignTTL)
+	if strings.Contains(got.AvatarURL, selfStorageBase) {
+		t.Fatalf("avatar_url = %q, the raw bucket address must never reach the client", got.AvatarURL)
 	}
-	want := []string{FieldPhone, FieldAvatarURL}
-	if len(got.EditableFields) != len(want) {
-		t.Fatalf("editable_fields = %v, want %v", got.EditableFields, want)
+	wantFields := []string{FieldPhone, FieldAvatarURL}
+	if len(got.EditableFields) != len(wantFields) {
+		t.Fatalf("editable_fields = %v, want %v", got.EditableFields, wantFields)
 	}
-	for i := range want {
-		if got.EditableFields[i] != want[i] {
-			t.Fatalf("editable_fields = %v, want %v", got.EditableFields, want)
+	for i := range wantFields {
+		if got.EditableFields[i] != wantFields[i] {
+			t.Fatalf("editable_fields = %v, want %v", got.EditableFields, wantFields)
 		}
 	}
 }
 
-// TestMe_PresignFailureBlanksAvatar proves a signing outage degrades the read
-// to an empty avatar instead of an error or a raw bucket URL.
-func TestMe_PresignFailureBlanksAvatar(t *testing.T) {
+// TestMe_BlankAvatarStaysEmpty pins the no-photo contract: an account without
+// a stored avatar answers an empty avatar_url, never a path.
+func TestMe_BlankAvatarStaysEmpty(t *testing.T) {
 	users, user := seedSelfUser(t, domain.RoleVendor)
-	user.AvatarURL = selfAvatarURL(user.ID)
-	users.byID[user.ID] = user
-	store := &fakeSelfStorage{presignErr: errors.New("storage down")}
-	svc := NewService(loginDeps(users)).WithFileLinks(store, 15*time.Minute)
+	svc := NewService(loginDeps(users))
 
 	got, err := svc.Me(context.Background(), user.ID)
 	if err != nil {
-		t.Fatalf("Me must not fail when presigning fails: %v", err)
+		t.Fatalf("Me: %v", err)
 	}
 	if got.AvatarURL != "" {
-		t.Fatalf("avatar_url = %q, want empty on presign failure", got.AvatarURL)
+		t.Fatalf("avatar_url = %q, want empty without a stored avatar", got.AvatarURL)
 	}
 }

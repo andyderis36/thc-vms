@@ -258,13 +258,10 @@ type fakeStorage struct {
 	result      domain.UploadResult
 	uploadErr   error
 
-	objectKey        string
-	objectKeyErr     error
-	presignURL       string
-	presignErr       error
-	lastPresignKey   string
-	lastPresignTTL   time.Duration
-	presignCallCount int
+	objectKey    string
+	objectKeyErr error
+	presignURL   string
+	presignErr   error
 }
 
 func (f *fakeStorage) EnsureBucket(_ context.Context) error { return nil }
@@ -278,10 +275,7 @@ func (f *fakeStorage) Upload(_ context.Context, in domain.UploadRequest) (domain
 	return f.result, nil
 }
 
-func (f *fakeStorage) PresignedURL(_ context.Context, key string, ttl time.Duration) (string, error) {
-	f.presignCallCount++
-	f.lastPresignKey = key
-	f.lastPresignTTL = ttl
+func (f *fakeStorage) PresignedURL(_ context.Context, _ string, _ time.Duration) (string, error) {
 	if f.presignErr != nil {
 		return "", f.presignErr
 	}

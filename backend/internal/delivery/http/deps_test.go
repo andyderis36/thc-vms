@@ -31,6 +31,7 @@ func fullyWiredDeps() Deps {
 	gate := GateRoutes{CheckIn: wired(), CheckOut: wired()}
 	upload := UploadRoutes{Upload: wired()}
 	file := FileRoutes{File: wired()}
+	avatar := AvatarRoutes{Avatar: wired()}
 	audit := AuditRoutes{List: wired()}
 	notifications := NotificationRoutes{List: wired(), MarkRead: wired(), MarkAllRead: wired()}
 	health := HealthProbes{Health: wired(), Ready: wired()}
@@ -42,7 +43,7 @@ func fullyWiredDeps() Deps {
 	return Deps{
 		Auth: auth, Users: users, SuperAdmin: super, Master: master,
 		Visits: visits, Gate: gate, Upload: upload, File: file,
-		Audit: audit, Notifications: notifications, Health: health, Chain: chain,
+		Avatar: avatar, Audit: audit, Notifications: notifications, Health: health, Chain: chain,
 	}
 }
 

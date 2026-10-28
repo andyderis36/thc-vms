@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+
+import { AVATAR_OBJECT_URL, installAvatarFetchStubs, mockAvatarImage } from '@/test-utils/avatarFetch'
 
 import { DetailModal, isEmptyDetailValue, type DetailField } from './DetailModal'
 import { UserAvatar } from './UserAvatar'
@@ -134,7 +136,17 @@ describe('DetailModal', () => {
 })
 
 describe('DetailModal — slot avatar', () => {
-  const AVATAR_URL = 'https://minio.local/avatars/budi.png'
+  const AVATAR_URL = '/api/v1/avatars/abc?v=deadbeef'
+
+  let fetchMock: Mock<typeof fetch>
+
+  beforeEach(() => {
+    fetchMock = installAvatarFetchStubs().fetchMock
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
 
   function avatarWrapper(dialog: HTMLElement): HTMLElement {
     const wrapper = dialog.querySelector('[data-avatar-state]')
@@ -142,14 +154,17 @@ describe('DetailModal — slot avatar', () => {
     return wrapper as HTMLElement
   }
 
-  it('menampilkan <img> avatar dari URL yang diberikan, di baris header bersama subtitle', () => {
+  it('menampilkan <img> avatar dari object URL blob, di baris header bersama subtitle', async () => {
+    mockAvatarImage(fetchMock)
     renderDetail({ avatar: <UserAvatar name="Budi Santoso" avatarUrl={AVATAR_URL} /> })
 
     const dialog = screen.getByRole('dialog')
+    await waitFor(() => {
+      expect(avatarWrapper(dialog)).toHaveAttribute('data-avatar-state', 'image')
+    })
     const wrapper = avatarWrapper(dialog)
-    expect(wrapper).toHaveAttribute('data-avatar-state', 'image')
     const img = wrapper.querySelector('img')
-    expect(img).toHaveAttribute('src', AVATAR_URL)
+    expect(img).toHaveAttribute('src', AVATAR_OBJECT_URL)
 
     const row = dialog.querySelector('div.mb-3') as HTMLElement
     expect(row).not.toBeNull()

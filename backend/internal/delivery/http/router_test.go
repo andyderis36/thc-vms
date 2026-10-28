@@ -221,7 +221,7 @@ func serve(engine *gin.Engine, method, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 37 wired
+// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 38 wired
 // operations resolves to a registered route: a registered route may answer
 // 401/403/400/500 without credentials, but never 404. The two Phase-2
 // feedback and incident endpoints must 404.
@@ -254,6 +254,7 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodPost, "/api/v1/visits"},
 		{http.MethodGet, "/api/v1/visits/some-id"},
 		{http.MethodGet, "/api/v1/visits/some-id/file"},
+		{http.MethodGet, "/api/v1/avatars/some-id"},
 		{http.MethodPost, "/api/v1/visits/some-id/approve"},
 		{http.MethodPost, "/api/v1/visits/some-id/reject"},
 		{http.MethodPost, "/api/v1/visits/some-id/reschedule"},
@@ -266,8 +267,8 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/notifications"},
 		{http.MethodPost, "/api/v1/uploads"},
 	}
-	if len(wired) != 37 {
-		t.Fatalf("contract drift: wired routes = %d, want 37", len(wired))
+	if len(wired) != 38 {
+		t.Fatalf("contract drift: wired routes = %d, want 38", len(wired))
 	}
 	for _, route := range wired {
 		rec := serve(engine, route.method, route.path)

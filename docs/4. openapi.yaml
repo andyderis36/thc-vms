@@ -568,6 +568,47 @@ paths:
         '404':
           description: Akun pengguna tidak ditemukan
 
+  /avatars/{id}:
+    get:
+      tags: [UserManagement]
+      summary: Streaming foto profil akun (tahan tunnel, tanpa presigned URL)
+      security:
+        - bearerAuth: []
+      description: |
+        Menyajikan isi foto profil satu akun sebagai aliran biner inline langsung dari backend, bukan URL presigned MinIO/S3. URL presigned mengikat host storage internal pada tanda tangannya sehingga rusak saat dibuka lewat tunnel atau domain berbeda; `avatar_url` pada respons API karena itu berupa path API ini (`/api/v1/avatars/{id}?v=...`), dan endpoint ini selalu lewat host API yang sama dengan aplikasi. Cakupan baca fail-closed: akun sendiri, super_admin global, atau akun satu cabang (admin/security); kombinasi lain dijawab 404 tanpa membocorkan keberadaan akun. Vendor tidak punya location_id sehingga hanya pernah melihat dirinya sendiri.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID akun pemilik foto profil.
+      responses:
+        '200':
+          description: "Isi foto profil disajikan inline (`Content-Disposition: inline`, `Cache-Control: private, max-age=300`, `ETag`, `X-Content-Type-Options: nosniff`)"
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: Tidak berubah - `If-None-Match` cocok dengan `ETag` yang disajikan
+        '400':
+          description: 'ID pengguna bukan UUID (kode `VALIDATION_ERROR`, pesan Indonesia). Amplop galat: { success: false, error: { code, message } }.'
+        '401':
+          description: 'JWT tidak ada/tidak valid (kode `UNAUTHORIZED`). Amplop galat: { success: false, error: { code, message } }.'
+        '404':
+          description: 'Akun tidak dikenal, bukan dalam cakupan pemanggil, avatar kosong, atau berkas tidak dapat dibaca (kode `NOT_FOUND`, pesan "Foto profil tidak tersedia."). Amplop galat: { success: false, error: { code, message } }.'
+
   /audit-logs:
     get:
       tags: [UserManagement]
@@ -1381,8 +1422,8 @@ components:
           description: Nama perusahaan vendor akun ini (override ketikan manual bila ada, kalau tidak nama katalog vendor; TIDAK terdaftar di katalog bila diketik manual dan TIDAK pernah tampil di dropdown vendor)
         avatar_url:
           type: [string, "null"]
-          format: uri
-          description: URL presigned berumur pendek yang di-resolve ulang pada setiap respons; URL bucket mentah tidak pernah diekspos. Null bila belum ada foto profil.
+          maxLength: 2048
+          description: Path API host-agnostic `/api/v1/avatars/{id}?v=...` yang isinya dialirkan oleh `GET /avatars/{id}` (bukan URL storage); `v` adalah versi cache yang berubah saat foto diunggah ulang. Null bila belum ada foto profil. URL bucket mentah tidak pernah diekspos.
         editable_fields:
           type: array
           items:

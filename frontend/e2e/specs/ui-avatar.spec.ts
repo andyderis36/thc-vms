@@ -5,7 +5,8 @@
  * - @GG2-01 Security kiosk: top bar desktop (>=1280) menampilkan avatar pengawas
  *   tepat di samping nama (di dalam cluster kontrol profil) dan benar-benar
  *   termuat (`naturalWidth > 0`); pada 375px pita identitas body menampilkan
- *   avatar dengan object key yang SAMA, dan teks lama "Gate Access Control"
+ *   avatar yang sama lewat path `/api/v1/avatars/<uuid>` yang SAMA (dua fetch
+ *   Bearer terpisah, blob URL berbeda), dan teks lama "Gate Access Control"
  *   tidak lagi dirender.
  * - @K3-01 Kartu identitas gerbang (pita identitas kios di `/gate`, K3)
  *   memakai geometri yang identik dengan kartu identitas vendor di
@@ -20,14 +21,21 @@
  * (K3)"), jadi kartu gerbang yang diukur adalah pita identitas kios tersebut.
  *
  * KESELAMATAN DATA: satu-satunya mutasi adalah seed avatar security bila
- * kosong. Snapshot `GET /auth/me` dibaca lebih dulu dan `avatar_url` asli
- * dikembalikan di `finally`; objek hasil unggahan dibersihkan bila ada.
+ * kosong. Snapshot `GET /auth/me` dibaca lebih dulu; `avatar_url` hasil GET
+ * adalah PATH TURUNAN (`/api/v1/avatars/...`) yang read-only, jadi restore
+ * hanya mengirim `null` untuk kasus seed (snapshot kosong), lalu objek hasil
+ * unggahan dibersihkan.
  * Kunjungan K6 dibuat lewat `h.createVisit` sehingga ikut dibersihkan
  * teardown harness.
  */
 
 import type { Locator } from '@playwright/test'
 import { expect, test, type Harness } from '../fixtures'
+import {
+  expectAvatarLoad,
+  expectImageDecoded,
+  trackAvatarLoads,
+} from '../helpers/avatar'
 import {
   apiFetchRaw,
   uploadFileViaApi,
@@ -64,7 +72,7 @@ interface CardGeometry {
   gap: { row: string; column: string }
 }
 
-/** `GET /auth/me` — sumber kebenaran sesi, termasuk avatar presigned. */
+/** `GET /auth/me` — sumber kebenaran sesi, termasuk path avatar backend. */
 async function readMe(h: Harness, role: Role): Promise<MeUser> {
   const token = await h.tokenAs(role)
   const result = await apiFetchRaw<ApiEnvelope<MeUser>>(token, 'GET', '/auth/me')
@@ -121,8 +129,13 @@ async function restoreAvatar(
   role: Role,
   snapshot: AvatarSnapshot,
 ): Promise<void> {
-  const status = await patchAvatar(h, role, snapshot.before.avatar_url ?? null)
-  expect(status, `restore avatar ${role} harus 200`).toBe(200)
+  // `avatar_url` hasil GET adalah path turunan (`/api/v1/avatars/...`) yang
+  // TIDAK bisa ditulis balik lewat PATCH; hanya `null` yang valid. Snapshot
+  // yang sudah punya foto tidak pernah diubah test ini, jadi tidak perlu
+  // direstore — dan path-nya tidak boleh dikirim (PATCH akan 400).
+  if ((snapshot.before.avatar_url ?? null) === null) {
+    expect(await patchAvatar(h, role, null), `restore avatar ${role} harus 200`).toBe(200)
+  }
 
   if (snapshot.uploadedUrl !== null) {
     try {
@@ -132,24 +145,6 @@ async function restoreAvatar(
       console.log(`[ui-avatar] cleanup objek avatar ${role} dilewati: ${reason}`)
     }
   }
-}
-
-/** Avatar harus benar-benar termuat — `src` ada tetapi 403/kedaluwarsa gagal. */
-async function expectImageLoaded(img: Locator, label: string): Promise<void> {
-  await expect(img, `${label} harus terlihat`).toBeVisible()
-  await expect
-    .poll(
-      () => img.evaluate((el) => (el instanceof HTMLImageElement ? el.naturalWidth : 0)),
-      { message: `${label} harus termuat (naturalWidth > 0)` },
-    )
-    .toBeGreaterThan(0)
-}
-
-/** Object key dari URL presigned: pathname tanpa query signature. */
-function objectKey(src: string, label: string): string {
-  expect(src, `${label} harus punya src`).not.toBe('')
-  expect(src, `${label} harus URL absolut`).toMatch(/^https?:\/\//)
-  return new URL(src).pathname
 }
 
 function expectPxClose(actual: string, expected: string, label: string): void {
@@ -209,13 +204,14 @@ function expectSameCardGeometry(gate: CardGeometry, vendor: CardGeometry): void 
   expectPxClose(gate.gap.column, vendor.gap.column, 'column-gap')
 }
 
-test('@GG2-01 avatar pengawas tampil di top bar desktop dan pita body ponsel dengan object key yang sama', async ({
+test('@GG2-01 avatar pengawas tampil di top bar desktop dan pita body ponsel dengan path /api/v1/avatars/ yang sama', async ({
   h,
 }) => {
   const snapshot = await ensureAvatar(h, 'security')
 
   try {
     const page = await h.openAs('security')
+    const avatarLoads = trackAvatarLoads(page)
 
     // ---- A. Desktop 1280x800: avatar tepat di samping nama pengawas --------
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -223,7 +219,8 @@ test('@GG2-01 avatar pengawas tampil di top bar desktop dan pita body ponsel den
 
     const header = page.locator('header').first()
     const headerAvatar = header.locator('[data-avatar-state="image"] img').first()
-    await expectImageLoaded(headerAvatar, 'avatar pengawas di top bar desktop')
+    const desktopLoad = await expectAvatarLoad(avatarLoads, 0, 'avatar top bar desktop')
+    await expectImageDecoded(headerAvatar, 'avatar pengawas di top bar desktop')
 
     const profileLink = header.locator('a[aria-label^="Profil "]').first()
     await expect(profileLink, 'nama pengawas di top bar harus terlihat').toBeVisible()
@@ -264,30 +261,26 @@ test('@GG2-01 avatar pengawas tampil di top bar desktop dan pita body ponsel den
       ).toBeLessThan(avatarBox.y + avatarBox.height)
     }
 
-    const desktopSrc = await headerAvatar.getAttribute('src')
-    expect(desktopSrc, 'avatar top bar harus punya src').not.toBeNull()
-    const desktopKey = objectKey(desktopSrc ?? '', 'avatar top bar')
     await expect(
       page.getByText('Gate Access Control', { exact: true }),
       'label "Gate Access Control" tidak boleh dirender di desktop',
     ).toHaveCount(0)
 
     // ---- B. Ponsel 375x800: pita identitas body memuat avatar yang sama ----
+    const mobileMark = avatarLoads.length
     await page.setViewportSize({ width: 375, height: 800 })
     await page.goto('/gate')
 
     const strip = page.getByTestId('kiosk-status-strip')
     await expect(strip, 'pita identitas ponsel harus terlihat').toBeVisible()
     const stripAvatar = strip.locator('[data-avatar-state="image"] img').first()
-    await expectImageLoaded(stripAvatar, 'avatar pengawas di pita body ponsel')
+    const stripLoad = await expectAvatarLoad(avatarLoads, mobileMark, 'avatar pita ponsel')
+    await expectImageDecoded(stripAvatar, 'avatar pengawas di pita body ponsel')
 
-    const stripSrc = await stripAvatar.getAttribute('src')
-    expect(stripSrc, 'avatar pita ponsel harus punya src').not.toBeNull()
-    const stripKey = objectKey(stripSrc ?? '', 'avatar pita ponsel')
     expect(
-      stripKey,
-      'avatar top bar dan pita body harus memakai object key yang sama',
-    ).toBe(desktopKey)
+      stripLoad.path,
+      'dua placement harus meminta path /api/v1/avatars/<uuid> yang sama',
+    ).toBe(desktopLoad.path)
 
     await expect(
       page.getByText('Gate Access Control', { exact: true }),

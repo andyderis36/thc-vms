@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useUserAvatar } from './useUserAvatar'
 
 export type UserAvatarSize = 'sm' | 'md' | 'lg'
 
@@ -36,7 +36,13 @@ function initialsOf(name: string): string {
   return initials === '' ? '?' : initials
 }
 
-/** Avatar shared untuk navbar, strip kiosk, dan kartu vendor. Inisial bila foto kosong/gagal. */
+/**
+ * Avatar shared untuk navbar, strip kiosk, dan kartu vendor.
+ *
+ * `avatar_url` dari API adalah path terautentikasi, bukan URL storage — foto
+ * diambil sebagai blob lewat `useUserAvatar`, lalu dirender sebagai object URL.
+ * Selama memuat / saat gagal, yang tampil adalah inisial (tanpa galat UI).
+ */
 export function UserAvatar({
   name,
   avatarUrl = null,
@@ -44,15 +50,8 @@ export function UserAvatar({
   tone = 'brand',
   className,
 }: UserAvatarProps) {
-  // Avatar presigned bisa kedaluwarsa: saat `<img>` gagal, jatuh ke inisial.
-  // Reset saat `avatarUrl` berubah agar URL baru selalu dicoba ulang.
-  const [imgError, setImgError] = useState(false)
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset sengaja saat avatarUrl berubah; nilai sudah false pada mount, jadi React membatalkan re-render berlebihan.
-    setImgError(false)
-  }, [avatarUrl])
+  const { objectUrl } = useUserAvatar(avatarUrl)
 
-  const showImage = avatarUrl != null && avatarUrl !== '' && !imgError
   const wrapperClass = [
     'flex shrink-0 items-center justify-center overflow-hidden rounded-badge font-bold',
     SIZE_CLASSES[size],
@@ -65,19 +64,18 @@ export function UserAvatar({
   return (
     <span
       aria-hidden="true"
-      data-avatar-state={showImage ? 'image' : 'initials'}
+      data-avatar-state={objectUrl !== null ? 'image' : 'initials'}
       className={wrapperClass}
     >
-      {showImage ? (
-        // eslint-disable-next-line @next/next/no-img-element -- avatar dari host dinamis (avatarUrl presigned MinIO), di luar images.remotePatterns yang hanya memuat localhost:9000; next/image akan 400 untuk host lain.
+      {objectUrl !== null ? (
+        // eslint-disable-next-line @next/next/no-img-element -- src berupa object URL `blob:`, di luar jangkauan optimizer next/image (dan tidak butuh host di images.remotePatterns).
         <img
-          src={avatarUrl}
+          src={objectUrl}
           alt=""
           aria-hidden="true"
           loading="eager"
           decoding="async"
           className="size-full object-cover"
-          onError={() => setImgError(true)}
         />
       ) : (
         initialsOf(name)

@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createElement, type ImgHTMLAttributes, type ReactNode } from 'react'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi, type Mock } from 'vitest'
+
+import { AVATAR_OBJECT_URL, installAvatarFetchStubs, mockAvatarImage } from '@/test-utils/avatarFetch'
 
 import { SuperadminShell } from './SuperadminShell'
+
+const AVATAR_IMG_SELECTOR = 'button[aria-haspopup="menu"] span[role="img"] img'
+
+let fetchMock: Mock<typeof fetch>
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 
@@ -19,7 +25,7 @@ vi.mock('@/lib/auth/session', () => ({
       name: 'Pusat',
       role: 'super_admin',
       location_name: 'Pontianak',
-      avatar_url: 'https://cdn.example/avatar-super.png',
+      avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
     },
     status: 'authenticated',
     signOut: vi.fn(),
@@ -38,6 +44,7 @@ beforeAll(() => {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   }))
+  fetchMock = installAvatarFetchStubs().fetchMock
 })
 
 afterAll(() => {
@@ -147,12 +154,14 @@ describe('SuperadminShell — regresi defek mobile', () => {
 })
 
 describe('SuperadminShell — foto profil sesi pada pemicu akun', () => {
-  it('pemicu profil merender <img> dengan src avatar_url dari sesi', () => {
+  it('pemicu profil merender <img> dari object URL blob avatar sesi', async () => {
+    mockAvatarImage(fetchMock)
     renderShell()
 
-    const img = document.querySelector('button[aria-haspopup="menu"] span[role="img"] img')
-    expect(img).not.toBeNull()
-    expect(img?.getAttribute('src')).toBe('https://cdn.example/avatar-super.png')
+    await waitFor(() => {
+      expect(document.querySelector(AVATAR_IMG_SELECTOR)).not.toBeNull()
+    })
+    expect(document.querySelector(AVATAR_IMG_SELECTOR)).toHaveAttribute('src', AVATAR_OBJECT_URL)
   })
 })
 

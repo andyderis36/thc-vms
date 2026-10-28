@@ -5,6 +5,7 @@ import { Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { useUserAvatar } from '@/components/ui/useUserAvatar'
 import { useUpdateProfileMutation, useUploadFileMutation } from '@/lib/api/hooks'
 import type { UpdateSelfProfileRequest } from '@/lib/api/types'
 import { useSession } from '@/lib/auth/session'
@@ -46,8 +47,9 @@ export function initialsOf(name: string): string {
  * Form "Profil Saya" — satu-satunya layar swalayan untuk semua peran.
  *
  * Sumber data identitas adalah sesi (`/auth/me` sudah menyertakan
- * `avatar_url` presigned + `editable_fields`), sehingga tidak ada fetch
- * tambahan. Nama hanya dirender bila backend menyatakan `name` editable
+ * `avatar_url` + `editable_fields`); foto profil diambil sebagai blob lewat
+ * `useUserAvatar` karena `avatar_url` adalah path terautentikasi. Nama hanya
+ * dirender bila backend menyatakan `name` editable
  * (`super_admin`); peran lain tidak melihat input itu sama sekali.
  *
  * Setiap perubahan dikirim parsial: hanya field yang benar-benar berbeda dari
@@ -64,6 +66,7 @@ export function ProfileForm() {
   const [phone, setPhone] = useState(user?.phone ?? '')
   const [nameError, setNameError] = useState<string | undefined>(undefined)
   const [phoneError, setPhoneError] = useState<string | undefined>(undefined)
+  const { objectUrl: avatarObjectUrl } = useUserAvatar(user?.avatar_url)
 
   if (user === null) {
     return null
@@ -229,13 +232,13 @@ export function ProfileForm() {
       <form onSubmit={(event) => void handleSubmit(event)} className="flex flex-col gap-4">
         <section className="card flex flex-col items-center gap-4 p-4 sm:flex-row sm:items-start sm:p-6">
           <span
-            aria-hidden={avatarUrl !== null ? undefined : true}
+            aria-hidden={avatarObjectUrl !== null ? undefined : true}
             className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand text-2xl font-bold text-brand-contrast"
           >
-            {avatarUrl !== null ? (
-              // eslint-disable-next-line @next/next/no-img-element -- avatar presigned dari host dinamis (bukan localhost:9000); next/image akan 400 untuk host di luar remotePatterns.
+            {avatarObjectUrl !== null ? (
+              // eslint-disable-next-line @next/next/no-img-element -- src berupa object URL `blob:`, di luar jangkauan optimizer next/image.
               <img
-                src={avatarUrl}
+                src={avatarObjectUrl}
                 alt={`Foto profil ${user.name}`}
                 className="size-full object-cover"
               />

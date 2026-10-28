@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { ChevronDown, LogOut, UserRound } from 'lucide-react'
+import { useUserAvatar } from '@/components/ui/useUserAvatar'
 
 export interface ProfileMenuUser {
   name: string
@@ -84,13 +85,9 @@ export function ProfileMenu({ user, onLogout, roleSlot, alwaysShowName = false }
   const buttonId = `${generatedId}-button`
   const menuId = `${generatedId}-menu`
 
-  // Avatar presigned bisa kedaluwarsa: saat `<img>` gagal, jatuh ke inisial.
-  // Reset saat `avatarUrl` berubah agar URL baru selalu dicoba ulang.
-  const [imgError, setImgError] = useState(false)
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset sengaja saat avatarUrl berubah; nilai sudah false pada mount, jadi React membatalkan re-render berlebihan.
-    setImgError(false)
-  }, [user.avatarUrl])
+  // `avatar_url` adalah path terautentikasi, bukan URL storage — foto diambil
+  // sebagai blob oleh hook; selama memuat/gagal yang tampil adalah inisial.
+  const { objectUrl: avatarObjectUrl } = useUserAvatar(user.avatarUrl)
 
   // Tutup saat klik/tap di luar, atau Escape → refocus pemicu (pola PurposeDropdown/Modal).
   useEffect(() => {
@@ -144,14 +141,13 @@ export function ProfileMenu({ user, onLogout, roleSlot, alwaysShowName = false }
         className={TRIGGER_CLASS}
       >
         <span role="img" aria-label={`Akun ${user.name}`} className={AVATAR_CLASS}>
-          {user.avatarUrl && !imgError ? (
-            // eslint-disable-next-line @next/next/no-img-element -- avatar 36px dari host dinamis (avatarUrl), di luar images.remotePatterns yang hanya memuat localhost:9000; next/image akan 400 untuk host lain, dan avatar ini belum pernah diisi di produksi.
+          {avatarObjectUrl !== null ? (
+            // eslint-disable-next-line @next/next/no-img-element -- src berupa object URL `blob:`, di luar jangkauan optimizer next/image.
             <img
-              src={user.avatarUrl}
+              src={avatarObjectUrl}
               alt=""
               className="size-full object-cover"
               aria-hidden="true"
-              onError={() => setImgError(true)}
             />
           ) : (
             initialsOf(user.name)
