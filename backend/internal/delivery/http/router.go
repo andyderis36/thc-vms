@@ -86,6 +86,11 @@ type FileRoutes struct {
 	File gin.HandlerFunc
 }
 
+// AvatarRoutes carries the bound avatar-stream handler method.
+type AvatarRoutes struct {
+	Avatar gin.HandlerFunc
+}
+
 // AuditRoutes carries the bound audit-trail handler method (super_admin
 // only: the trail is the back-office's own history, never branch-scoped).
 type AuditRoutes struct {
@@ -132,6 +137,7 @@ type Deps struct {
 	Gate          GateRoutes
 	Upload        UploadRoutes
 	File          FileRoutes
+	Avatar        AvatarRoutes
 	Audit         AuditRoutes
 	Notifications NotificationRoutes
 	Health        HealthProbes
@@ -235,6 +241,10 @@ func New(d Deps) *gin.Engine {
 	authed.POST("/visits", withFallback(d.Visits.Create))
 	authed.GET("/visits/:id", withFallback(d.Visits.Get))
 	authed.GET("/visits/:id/file", withFallback(d.File.File))
+	// Avatar reads stream the stored profile photo through the API host (the
+	// usecase scopes the caller and answers 404 otherwise), so no presigned
+	// storage URL is ever exposed.
+	authed.GET("/avatars/:id", withFallback(d.Avatar.Avatar))
 	authed.GET("/visits/:id/qr", withFallback(d.Visits.QR))
 	authed.POST("/visits/:id/reschedule", withFallback(d.Visits.Reschedule))
 	authed.POST("/visits/:id/cancel", withFallback(d.Visits.Cancel))

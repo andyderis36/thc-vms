@@ -29,6 +29,7 @@ import (
 	"thc-vms/backend/internal/infrastructure/storage"
 	"thc-vms/backend/internal/repository"
 	"thc-vms/backend/internal/usecase/auth"
+	"thc-vms/backend/internal/usecase/avatar"
 	"thc-vms/backend/internal/usecase/gate"
 	"thc-vms/backend/internal/usecase/notification"
 	"thc-vms/backend/internal/usecase/visit"
@@ -110,7 +111,10 @@ func run(ctx context.Context) error {
 	authSvc := auth.NewService(auth.Deps{
 		Users: users, Roles: dir.Roles(), Locations: master, Vendors: repository.NewVendorRepository(pool), Issuer: jwtSvc, Clock: clock,
 		Profiles: repository.NewProfileRepository(pool), Audit: audit,
-	}).WithFileLinks(store, cfg.Storage.PresignTTL())
+		// Storage backs the avatar ownership proof on PATCH /auth/me; avatar
+		// reads no longer presign, they stream through GET /avatars/:id.
+		Storage: store,
+	})
 	// File links on visit reads are short-lived presigned URLs of our own
 	// private bucket (never the raw stored address); the TTL comes from
 	// S3_PRESIGN_TTL_MINUTES and is guaranteed positive by config. The object
@@ -155,14 +159,15 @@ func run(ctx context.Context) error {
 	visitHandler := handlers.NewVisitHandler(visitSvc)
 	gateHandler := handlers.NewGateHandler(gateSvc)
 	masterHandler := handlers.NewMasterHandler(master)
-	userHandler := handlers.NewUserHandler(users, master, securityRoleID).
-		WithFileLinks(store, cfg.Storage.PresignTTL())
+	userHandler := handlers.NewUserHandler(users, master, securityRoleID)
 	superAdminHandler := handlers.NewSuperAdminHandler(
 		repository.NewManagedUserRepository(pool),
 		repository.NewLocationAdminRepository(pool),
 		visits,
 		adminRoleID, vendorRoleID,
-	).WithFileLinks(store, cfg.Storage.PresignTTL())
+	)
+	avatarSvc := avatar.NewService(avatar.Deps{Users: users, Objects: store})
+	avatarHandler := handlers.NewAvatarHandler(avatarSvc)
 	uploadHandler := handlers.NewUploadHandler(store, cfg.Upload.MaxIngestBytes)
 	fileHandler := handlers.NewFileHandler(visitSvc)
 	auditHandler := handlers.NewAuditHandler(audit)
@@ -220,6 +225,7 @@ func run(ctx context.Context) error {
 		},
 		Upload: deliveryhttp.UploadRoutes{Upload: uploadHandler.Upload},
 		File:   deliveryhttp.FileRoutes{File: fileHandler.File},
+		Avatar: deliveryhttp.AvatarRoutes{Avatar: avatarHandler.Avatar},
 		Audit:  deliveryhttp.AuditRoutes{List: auditHandler.List},
 		Notifications: deliveryhttp.NotificationRoutes{
 			List:        notificationHandler.List,

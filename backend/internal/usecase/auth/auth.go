@@ -9,8 +9,8 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 
+	"thc-vms/backend/internal/avatarpath"
 	"thc-vms/backend/internal/domain"
 )
 
@@ -40,10 +40,11 @@ type RoleDirectory interface {
 // VendorName resolves best-effort through the vendors port (nil when the
 // caller wires no catalogue, e.g. hermetic tests).
 //
-// AvatarURL is the freshly minted presigned URL ("" when the account has no
-// photo or storage is unavailable), never the raw bucket address stored in
-// the database. EditableFields is the role-derived self-service policy table
-// from EditableFields(role), so the client never has to duplicate it.
+// AvatarURL is the host-agnostic API path (/api/v1/avatars/{id}?v=...) whose
+// bytes GET /avatars/{id} streams ("" when the account has no photo), never
+// the raw bucket address stored in the database. EditableFields is the
+// role-derived self-service policy table from EditableFields(role), so the
+// client never has to duplicate it.
 type Profile struct {
 	ID             domain.UUID
 	Name           string
@@ -69,8 +70,9 @@ type LoginResult struct {
 // Deps bundles the service collaborators in one named struct so the
 // constructor keeps a single parameter. Every field is required except
 // Vendors (nil catalogue means vendor names stay nil), Clock (nil falls back
-// to the wall clock) and Audit (nil disables the login trail: hermetic tests
-// and unwired callers log in exactly as before).
+// to the wall clock), Audit (nil disables the login trail: hermetic tests
+// and unwired callers log in exactly as before) and Storage (nil only
+// disables the avatar ownership proof on PATCH /auth/me).
 type Deps struct {
 	Users     domain.UserRepository
 	Roles     RoleDirectory
@@ -83,6 +85,11 @@ type Deps struct {
 	// separate port from Users so the narrow login fakes keep compiling; a nil
 	// value only disables UpdateSelf (500), never login/logout/me.
 	Profiles domain.ProfileRepository
+	// Storage reverses a submitted avatar URL to its object key so the
+	// self-service write can prove the photo belongs to the caller's own
+	// upload namespace. It never mints read URLs: avatar reads stream through
+	// GET /avatars/{id}.
+	Storage domain.IStorageService
 }
 
 // Service is the authentication usecase.
@@ -95,13 +102,8 @@ type Service struct {
 	clock     domain.Clock
 	audit     domain.AuditRepository
 	profiles  domain.ProfileRepository
-	// storage mints the short-lived avatar URL served on reads. It is wired
-	// after construction via WithFileLinks so existing NewService callers
-	// (tests, workers) keep compiling; a nil store blanks the avatar instead
-	// of leaking a raw private-bucket address.
+	// storage backs the avatar ownership proof on the self-service write path.
 	storage domain.IStorageService
-	// presignTTL is the presigned-URL lifetime forwarded to the adapter.
-	presignTTL time.Duration
 }
 
 // NewService wires the collaborators. A nil Clock defaults to SystemClock;
@@ -119,6 +121,7 @@ func NewService(d Deps) *Service {
 		clock:     d.Clock,
 		audit:     d.Audit,
 		profiles:  d.Profiles,
+		storage:   d.Storage,
 	}
 }
 
@@ -167,6 +170,11 @@ func (s *Service) profile(ctx context.Context, user domain.User) (Profile, error
 			out.VendorName = &name
 		}
 	}
-	out.AvatarURL = s.presignStoredURL(ctx, user.AvatarURL)
+	// The avatar read path is host-agnostic: the stored bucket URL projects
+	// onto the authenticated GET /avatars/{id} stream, so no presigned link
+	// and no raw private-bucket address can ever reach the client.
+	if path := avatarpath.URL(user.ID, user.AvatarURL); path != nil {
+		out.AvatarURL = *path
+	}
 	return out, nil
 }

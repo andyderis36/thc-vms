@@ -39,6 +39,7 @@ func ValidateDeps(d Deps) error {
 		{"gate", d.Gate, nil},
 		{"upload", d.Upload, nil},
 		{"file", d.File, nil},
+		{"avatars", d.Avatar, nil},
 		{"audit", d.Audit, nil},
 		{"notifications", d.Notifications, nil},
 		{"health", d.Health, nil},

@@ -1,9 +1,11 @@
 package handlers_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,29 +13,49 @@ import (
 	"thc-vms/backend/internal/domain"
 )
 
-func TestListSecurity_AvatarURLPresignedOrNull(t *testing.T) {
-	const (
-		stored = "http://localhost:9000/thc-vms-bucket/profile_photos/sec-1/avatar.jpg"
-		signed = "https://bucket.example/thc-vms-bucket/profile_photos/sec-1/avatar.jpg?X-Amz-Signature=abc"
-	)
+// avatarVersion derives the expected cache-busting version the way the
+// contract defines it: the first 8 hex characters of sha256(stored).
+func avatarVersion(stored string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(stored)))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// assertAPIPathAvatar fails when the served avatar_url is not the API path for
+// the account, or leaks any storage address.
+func assertAPIPathAvatar(t *testing.T, got any, userID, stored string) {
+	t.Helper()
+	want := "/api/v1/avatars/" + userID + "?v=" + avatarVersion(stored)
+	if got != want {
+		t.Fatalf("avatar_url = %v, want %q", got, want)
+	}
+	for _, forbidden := range []string{"http://", "https://", "minio"} {
+		if strings.Contains(got.(string), forbidden) {
+			t.Fatalf("avatar_url = %v, must not contain %q", got, forbidden)
+		}
+	}
+}
+
+// TestListSecurity_AvatarURLIsAPIPathOrNull pins the read contract: a stored
+// avatar projects onto the authenticated API path (never a presigned or raw
+// bucket URL) and a blank stored value stays null.
+func TestListSecurity_AvatarURLIsAPIPathOrNull(t *testing.T) {
+	const stored = "http://localhost:9000/thc-vms-bucket/profile_photos/sec-1/avatar.jpg"
 	cases := []struct {
 		name   string
 		stored string
-		want   any
+		null   bool
 	}{
-		{name: "avatar present is presigned", stored: stored, want: signed},
-		{name: "avatar empty is null", stored: "", want: nil},
+		{name: "avatar present is the API path", stored: stored},
+		{name: "avatar empty is null", stored: "", null: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			user := securityUser("sec-1", "s1@thc.local", "loc-own")
 			user.AvatarURL = tc.stored
-			store := &fakeStorage{objectKey: "profile_photos/sec-1/avatar.jpg", presignURL: signed}
 
 			engine := gin.New()
 			engine.Use(withActor(domain.RoleSuperAdmin, ""))
-			h := handlers.NewUserHandler(newStubUserStore(user), &stubMasterStore{}, "role-security").
-				WithFileLinks(store, 5*time.Minute)
+			h := handlers.NewUserHandler(newStubUserStore(user), &stubMasterStore{}, "role-security")
 			engine.GET("/users/security", h.ListSecurity)
 
 			rec := serve(engine, "GET", "/users/security", nil, "")
@@ -42,44 +64,34 @@ func TestListSecurity_AvatarURLPresignedOrNull(t *testing.T) {
 			if len(items) != 1 {
 				t.Fatalf("expected 1 account, got %d", len(items))
 			}
-			if items[0]["avatar_url"] != tc.want {
-				t.Fatalf("avatar_url = %v, want %v", items[0]["avatar_url"], tc.want)
-			}
-			if tc.stored == "" {
-				if store.presignCallCount != 0 {
-					t.Fatalf("empty avatar must not be presigned, calls = %d", store.presignCallCount)
+			if tc.null {
+				if items[0]["avatar_url"] != nil {
+					t.Fatalf("avatar_url = %v, want null", items[0]["avatar_url"])
 				}
 				return
 			}
-			if store.lastPresignKey != "profile_photos/sec-1/avatar.jpg" {
-				t.Fatalf("presigned key = %q, want the stored object key", store.lastPresignKey)
-			}
-			if store.lastPresignTTL != 5*time.Minute {
-				t.Fatalf("presign ttl = %s, want 5m", store.lastPresignTTL)
-			}
+			assertAPIPathAvatar(t, items[0]["avatar_url"], "sec-1", tc.stored)
 		})
 	}
 }
 
-func TestSuperAdminListUsers_AvatarURLPresignedOrNull(t *testing.T) {
-	const (
-		stored = "http://localhost:9000/thc-vms-bucket/profile_photos/u-1/avatar.jpg"
-		signed = "https://bucket.example/thc-vms-bucket/profile_photos/u-1/avatar.jpg?X-Amz-Signature=def"
-	)
+// TestSuperAdminListUsers_AvatarURLIsAPIPathOrNull pins the same read contract
+// on the super_admin console listing.
+func TestSuperAdminListUsers_AvatarURLIsAPIPathOrNull(t *testing.T) {
+	const stored = "http://localhost:9000/thc-vms-bucket/profile_photos/u-1/avatar.jpg"
 	locA := "11111111-1111-1111-1111-111111111111"
 	cases := []struct {
 		name   string
 		stored string
-		want   any
+		null   bool
 	}{
-		{name: "avatar present is presigned", stored: stored, want: signed},
-		{name: "avatar empty is null", stored: "", want: nil},
+		{name: "avatar present is the API path", stored: stored},
+		{name: "avatar empty is null", stored: "", null: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			account := managedAccount("u-1", "admin@thc.local", domain.RoleAdmin, &locA)
 			account.User.AvatarURL = tc.stored
-			store := &fakeStorage{objectKey: "profile_photos/u-1/avatar.jpg", presignURL: signed}
 
 			engine := gin.New()
 			engine.Use(withActor(domain.RoleSuperAdmin, ""))
@@ -88,7 +100,7 @@ func TestSuperAdminListUsers_AvatarURLPresignedOrNull(t *testing.T) {
 				newStubLocationAdmin(),
 				newStubVisitRepos(),
 				"role-admin", "role-vendor",
-			).WithFileLinks(store, 5*time.Minute)
+			)
 			engine.GET("/users", h.ListUsers)
 
 			rec := serve(engine, "GET", "/users", nil, "")
@@ -97,21 +109,13 @@ func TestSuperAdminListUsers_AvatarURLPresignedOrNull(t *testing.T) {
 			if len(items) != 1 {
 				t.Fatalf("expected 1 account, got %d", len(items))
 			}
-			if items[0]["avatar_url"] != tc.want {
-				t.Fatalf("avatar_url = %v, want %v", items[0]["avatar_url"], tc.want)
-			}
-			if tc.stored == "" {
-				if store.presignCallCount != 0 {
-					t.Fatalf("empty avatar must not be presigned, calls = %d", store.presignCallCount)
+			if tc.null {
+				if items[0]["avatar_url"] != nil {
+					t.Fatalf("avatar_url = %v, want null", items[0]["avatar_url"])
 				}
 				return
 			}
-			if store.lastPresignKey != "profile_photos/u-1/avatar.jpg" {
-				t.Fatalf("presigned key = %q, want the stored object key", store.lastPresignKey)
-			}
-			if store.lastPresignTTL != 5*time.Minute {
-				t.Fatalf("presign ttl = %s, want 5m", store.lastPresignTTL)
-			}
+			assertAPIPathAvatar(t, items[0]["avatar_url"], "u-1", tc.stored)
 		})
 	}
 }
