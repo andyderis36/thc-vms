@@ -303,3 +303,54 @@ func TestAudit_UserStatusAuditedWritesBoth(t *testing.T) {
 		t.Fatalf("status trail metadata = %v, want from/to", items[0].Metadata)
 	}
 }
+
+func TestAudit_DeleteUserKeepsTrailWithNullActor(t *testing.T) {
+	pool := testPool(t)
+	actor := auditTestActor(t)
+	users := NewManagedUserRepository(pool)
+	repo := NewAuditRepository(pool)
+	ctx := testContext(t)
+
+	victim := seedUser(t, pool, seedUserParams{
+		Name: "Detached Security", Email: "detached@thc.local", Role: "security",
+		Location: seedLocation(t, pool, "Cabang Detached", "cabang"), Type: "internal",
+	})
+	if _, err := repo.Append(ctx, domain.AuditEntry{
+		ActorID: &victim, Action: domain.AuditActionUserStatus,
+		Entity: domain.AuditEntityUser, EntityID: &victim,
+	}); err != nil {
+		t.Fatalf("seed victim trail: %v", err)
+	}
+
+	audited := users.(domain.AuditedUserRepository)
+	if err := audited.DeleteUserAudited(ctx, victim, domain.AuditEntry{
+		ActorID: &actor, Action: domain.AuditActionUserDelete,
+		Entity: domain.AuditEntityUser, EntityID: &victim,
+	}); err != nil {
+		t.Fatalf("delete user owning audit rows: %v", err)
+	}
+
+	var remaining int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE id = $1`, uuidArg(victim)).Scan(&remaining); err != nil {
+		t.Fatalf("count victim: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("victim rows = %d, want 0", remaining)
+	}
+
+	detached, total, err := repo.List(ctx, domain.AuditFilter{Action: domain.AuditActionUserStatus})
+	if err != nil || total != 1 || len(detached) != 1 {
+		t.Fatalf("detached trail = %d items total %d err %v, want 1/1/nil", len(detached), total, err)
+	}
+	if detached[0].UserID != nil {
+		t.Fatalf("actor user_id = %v, want NULL after delete", *detached[0].UserID)
+	}
+
+	purge, _, err := repo.List(ctx, domain.AuditFilter{Action: domain.AuditActionUserDelete})
+	if err != nil || len(purge) != 1 {
+		t.Fatalf("purge trail = %d items err %v, want 1", len(purge), err)
+	}
+	if purge[0].UserID == nil || *purge[0].UserID != actor {
+		t.Fatalf("purge actor = %v, want surviving admin", purge[0].UserID)
+	}
+}

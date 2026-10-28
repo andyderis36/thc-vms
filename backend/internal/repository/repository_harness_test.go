@@ -117,7 +117,7 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 // yields no error, because a re-applied file raises only "already there"
 // SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL} {
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL} {
 		if err := applyOne(ctx, pool, sql); err != nil {
 			return err
 		}
@@ -161,6 +161,19 @@ func applyOne(ctx context.Context, pool *pgxpool.Pool, sql string) error {
 	}
 	return fmt.Errorf("apply migration: %w", err)
 }
+
+// migrationAuditFKSetNullSQL is the audit_log.user_id ON DELETE SET NULL
+// follow-up, loaded the same way so the scratch schema tracks the embedded
+// migrations the application runs.
+var migrationAuditFKSetNullSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000015_audit_log_user_on_delete_set_null.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
 
 // migrationSQL is loaded once from the migration the application itself runs,
 // so the integration tests can never drift from the shipped schema.
