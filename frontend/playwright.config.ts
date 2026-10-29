@@ -26,7 +26,11 @@ export default defineConfig({
   retries: isCI ? 1 : 0,
   forbidOnly: isCI,
 
-  timeout: 90_000,
+  // Anggaran 180 dtk: gate login live memasang jarak 13 dtk dan kuota 4 login
+  // per 60 dtk, sehingga satu test yang login berkali-kali (@AUTH-01b: 6 peran)
+  // bisa menunggu >90 dtk hanya untuk pacing. `expect.timeout` tetap 10 dtk,
+  // jadi assertion yang benar-benar menggantung tetap gagal cepat.
+  timeout: 180_000,
   expect: { timeout: 10_000 },
 
   reporter: [
@@ -47,7 +51,7 @@ export default defineConfig({
     // 14,7 s, `/qr` 20,3 s), dan `click()` yang memicu navigasi juga memakai
     // batas ini (login UI terukur 2,5–12,4 s). 60 s memberi margin >3x terhadap
     // kasus terburuk yang terukur tanpa menyamarkan navigasi yang benar-benar
-    // menggantung (masih jauh di bawah anggaran test 90 s).
+    // menggantung (masih jauh di bawah anggaran test di atas).
     navigationTimeout: 60_000,
     // `headless` sengaja TIDAK dipaksa di sini: flag `--headed` yang menentukan.
     launchOptions: {
