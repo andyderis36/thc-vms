@@ -11,6 +11,8 @@
       e2e.cmd live-check          # cek production via GET /health saja, tidak menulis data
       e2e.cmd live                # PRODUCTION headed (menulis data nyata; wajib ketik LIVE)
       e2e-live.cmd                # shortcut double-click untuk mode live
+      e2e.cmd sweep               # DRY-RUN daftar artefak E2E sisa di production (tidak menghapus)
+      e2e.cmd sweep -Apply        # HAPUS artefak E2E sisa di production (204/404 saja; lainnya batal)
       e2e.cmd local -DryRun       # cetak command line + env yang akan dipakai, tanpa menjalankan test
 
   Local mode memakai backend :8080 + frontend :3210 yang sudah berjalan. Bila
@@ -34,6 +36,10 @@
   Hanya cetak inventaris suite dari `playwright test --list --reporter=json`
   lalu exit 0. Sama dengan `e2e.cmd list`.
 
+.PARAMETER Apply
+  Hanya untuk mode `sweep`: benar-benar hapus artefak E2E sisa di production.
+  Tanpa flag ini, `sweep` selalu DRY-RUN (hanya mendaftar).
+
 .PARAMETER DryRun
   Cetak command line + env yang akan dieksekusi lalu exit 0. Tidak menyalakan
   docker/backend/frontend, tidak memasang dependency, tidak menjalankan test.
@@ -49,6 +55,7 @@ param(
     [Parameter(Position = 0)][string]$Mode = 'local',
     [int]$SlowMo = 0,
     [switch]$List,
+    [switch]$Apply,
     [Alias('WhatIf')][switch]$DryRun
 )
 
@@ -56,6 +63,7 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $Frontend = Join-Path $RepoRoot 'frontend'
 $PlaywrightCli = Join-Path $Frontend 'node_modules\.bin\playwright.cmd'
+$SweepScript = Join-Path $Frontend 'e2e\sweep.ts'
 $Vms = Join-Path $RepoRoot 'vms.ps1'
 $LiveUrl = 'https://vms.thckalbar.com'
 $LivePacingMs = if ($env:E2E_LIVE_PACING_MS) { $env:E2E_LIVE_PACING_MS } else { '13000' }
@@ -288,6 +296,34 @@ function Assert-LiveTarget {
     Write-Ok "production sehat: $LiveUrl"
 }
 
+# Sapuan artefak E2E sisa (kunjungan/akun/fasilitas) SEBELUM suite live.
+# Tanpa -Apply hanya mendaftar (dry-run); dengan -Apply menghapus 204/404 dan
+# membatalkan seluruh sapuan pada status lain. Kegagalan sweep = test tidak jalan.
+function Invoke-E2ESweep([switch]$Apply) {
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        throw 'node tidak ditemukan di PATH; sweep membutuhkan Node 24+ (type stripping)'
+    }
+    if (-not (Test-Path -LiteralPath $SweepScript)) {
+        throw "script sweep tidak ada: $SweepScript"
+    }
+
+    $cliArgs = @($SweepScript)
+    if ($Apply) { $cliArgs += '--apply' }
+
+    Push-Location $Frontend
+    try {
+        # `.ts` ESM tanpa "type":"module" memicu MODULE_TYPELESS_PACKAGE_JSON;
+        # peringatan itu derau, bukan kegagalan (Node 24 type stripping).
+        & node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON @cliArgs | Out-Host
+        $code = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    if ($code -ne 0) {
+        throw "sweep artefak E2E gagal (exit $code); tidak ada test yang dijalankan"
+    }
+}
+
 function Ensure-Dependencies {
     if (-not (Test-Path -LiteralPath (Join-Path $Frontend 'node_modules\@playwright\test')) -or
         -not (Test-Path -LiteralPath $PlaywrightCli)) {
@@ -391,9 +427,10 @@ $isLive = $mode -in @('live', 'prod', 'production')
 $isCheck = $mode -in @('check', 'status', 'preflight')
 $isLiveCheck = $mode -in @('live-check', 'livecheck', 'prod-check', 'production-check')
 $isList = $List -or ($mode -in @('list', 'ls', 'inventory', 'stats'))
+$isSweep = $mode -eq 'sweep'
 
-if (-not ($isLive -or $isCheck -or $isLiveCheck -or $isList -or $mode -in @('local', 'dev'))) {
-    Write-Err2 "mode tidak dikenal: '$Mode' (pakai: local | live | check | live-check | list)"
+if (-not ($isLive -or $isCheck -or $isLiveCheck -or $isList -or $isSweep -or $mode -in @('local', 'dev'))) {
+    Write-Err2 "mode tidak dikenal: '$Mode' (pakai: local | live | check | live-check | list | sweep)"
     exit 2
 }
 
@@ -431,6 +468,23 @@ if ($isLiveCheck) {
         Write-Err2 $_.Exception.Message
         exit 1
     }
+}
+
+# Mode `sweep` selalu menembak production. Default DRY-RUN; `-Apply` menghapus.
+if ($isSweep) {
+    Set-LiveE2EEnv
+    if ($Apply) {
+        Write-Warn2 "sweep APPLY: menghapus artefak E2E sisa di PRODUCTION $LiveUrl"
+    } else {
+        Write-Step "sweep DRY-RUN: daftar artefak E2E sisa di production $LiveUrl (tidak menghapus)"
+    }
+    try {
+        if ($Apply) { Invoke-E2ESweep -Apply } else { Invoke-E2ESweep }
+    } catch {
+        Write-Err2 $_.Exception.Message
+        exit 1
+    }
+    exit 0
 }
 
 if ($isCheck) {
@@ -485,6 +539,13 @@ if ($isLive) {
     }
 
     Set-LiveE2EEnv
+    Write-Step 'sweep artefak E2E sisa sebelum test (live)'
+    try {
+        Invoke-E2ESweep -Apply
+    } catch {
+        Write-Err2 $_.Exception.Message
+        exit 1
+    }
     Write-Step "menjalankan E2E headed ke $LiveUrl (slowMo $SlowMo ms)"
 } else {
     Ensure-LocalStack

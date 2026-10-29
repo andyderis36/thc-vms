@@ -69,6 +69,7 @@ import type {
   CreateManagedUserRequest,
   CreateSecurityUserRequest,
   CreateVisitRequest,
+  Location,
   ManagedUserListParams,
   NotificationListParams,
   NotificationListResult,
@@ -80,6 +81,7 @@ import type {
   UpdateSelfProfileRequest,
   UpdateUserStatusRequest,
   UploadCategory,
+  User,
   VisitDetail,
   VisitListParams,
   VisitStatus,
@@ -192,6 +194,51 @@ function invalidateVisitStatus(queryClient: QueryClient, visitId: string): void 
 function invalidateVisitPresence(queryClient: QueryClient, visitId: string): void {
   invalidateVisitStatus(queryClient, visitId)
   void queryClient.invalidateQueries({ queryKey: queryKeys.visits.qr(visitId) })
+}
+
+/**
+ * Sisipkan entitas hasil create ke cache daftar yang SUDAH terisi. Invalidasi
+ * saja tidak cukup untuk daftar yang difilter/diurutkan di klien (mis.
+ * `/facilities`): kebijakan global `staleTime: Infinity` membuat layar bisa
+ * tetap memegang cache pra-create sampai reload. Baris baru diletakkan di
+ * depan agar langsung tampil; invalidasi tetap dijalankan supaya konsumen
+ * lain menyegarkan diri ke data server.
+ *
+ * Entri dengan `id` yang sama DIGANTI, bukan diduplikasi — pemanggilan ganda
+ * atau baris yang sudah ada (mis. refetch yang balapan) tetap aman.
+ */
+function withCreatedRow<T extends { id: string }>(rows: T[], created: T): T[] {
+  return [created, ...rows.filter((row) => row.id !== created.id)]
+}
+
+/**
+ * Tulis fasilitas baru ke seluruh varian cache `locations` yang sudah dimuat.
+ * Varian `active_only` (key[1] bukan `false`) hanya menerima fasilitas aktif,
+ * sehingga katalog form pengajuan tidak pernah memuat fasilitas nonaktif.
+ */
+function insertLocationIntoCaches(queryClient: QueryClient, created: Location): void {
+  const entries = queryClient.getQueriesData<Location[]>({ queryKey: LOCATIONS_PREFIX })
+  for (const [key, rows] of entries) {
+    if (!Array.isArray(rows)) continue
+    const activeOnly = key[1] !== false
+    if (activeOnly && created.is_active === false) continue
+    queryClient.setQueryData<Location[]>(key, withCreatedRow(rows, created))
+  }
+}
+
+/**
+ * Tulis pengawas baru hanya ke cache `security-users` yang cakupannya memuat
+ * cabang akun itu: daftar global (`null`, superadmin lintas cabang) atau
+ * daftar cabang yang sama. Cache cabang lain TIDAK disentuh (isolasi cabang).
+ */
+function insertSecurityUserIntoCaches(queryClient: QueryClient, created: User): void {
+  const entries = queryClient.getQueriesData<User[]>({ queryKey: SECURITY_USERS_PREFIX })
+  for (const [key, rows] of entries) {
+    if (!Array.isArray(rows)) continue
+    const scopedLocationId = key[1] ?? null
+    if (scopedLocationId !== null && scopedLocationId !== created.location_id) continue
+    queryClient.setQueryData<User[]>(key, withCreatedRow(rows, created))
+  }
 }
 
 type VisitIdWithBody<TBody> = { visitId: string; body: TBody }
@@ -522,7 +569,8 @@ export function useCreateSecurityUserMutation() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ body }: { body: CreateSecurityUserRequest }) => createSecurityUser(body),
-    onSuccess: () => {
+    onSuccess: (created) => {
+      insertSecurityUserIntoCaches(queryClient, created)
       void queryClient.invalidateQueries({ queryKey: SECURITY_USERS_PREFIX })
     },
   })
@@ -567,7 +615,8 @@ export function useCreateLocationMutation() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ body }: { body: CreateLocationRequest }) => createLocation(body),
-    onSuccess: () => {
+    onSuccess: (created) => {
+      insertLocationIntoCaches(queryClient, created)
       void queryClient.invalidateQueries({ queryKey: LOCATIONS_PREFIX })
     },
   })
