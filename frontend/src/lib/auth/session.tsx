@@ -16,8 +16,13 @@ import { ApiError } from '@/lib/api/fetcher';
 import { clearToken, getToken } from '@/lib/auth/storage';
 import type { User } from '@/lib/api/types';
 
-/** Status sesi client-side. `loading` hanya saat hidrasi awal berjalan. */
-export type SessionStatus = 'loading' | 'authenticated' | 'unauthenticated';
+/**
+ * Status sesi client-side. `loading` hanya saat hidrasi awal berjalan.
+ * `error` = hidrasi gagal karena gangguan sementara (jaringan/429/5xx):
+ * token TETAP tersimpan dan guard menampilkan tombol coba lagi — bukan
+ * pengalihan ke `/login`.
+ */
+export type SessionStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 
 /**
  * Permintaan tidak PERNAH sampai ke server (fetch melempar; tanpa respons
@@ -62,8 +67,9 @@ export const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 /**
  * Kunci flag sekali-pakai "sesi kedaluwarsa" di `sessionStorage`.
- * Dipasang SEBELUM `clearToken()` saat `getMe()` gagal padahal token sempat
- * ada (token basi / 401), lalu dikonsumsi guard menjadi `?expired=1`.
+ * Dipasang SEBELUM `clearToken()` hanya ketika `getMe()` menolak dengan 401
+ * padahal token sempat ada (token basi / kedaluwarsa), lalu dikonsumsi guard
+ * menjadi `?expired=1`. Gangguan jaringan/429/5xx tidak memasang flag ini.
  * Kunjungan pertama tanpa token TIDAK memasang flag -> `/login` polos.
  */
 const EXPIRED_FLAG_KEY = 'thc_vms_expired';
@@ -113,6 +119,14 @@ function fetchMeDeduped(): Promise<User> {
     });
   }
   return inFlightMe;
+}
+
+/**
+ * Hanya HTTP 401 yang berarti token tidak berlaku. Galat jaringan (status 0),
+ * 429, dan 5xx bersifat sementara — sesi TIDAK boleh diakhiri karenanya.
+ */
+function isSessionExpiredError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
 }
 
 /** Ubah error tak dikenal menjadi pesan Indonesia yang aman ditampilkan. */
@@ -187,15 +201,22 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
       }
       setUser(me);
       setStatus('authenticated');
-    } catch {
+    } catch (err: unknown) {
       // Hasil basi tidak boleh mengakhiri sesi yang baru saja ditulis
       // (mis. applyUser setelah PATCH profil berhasil).
       if (epoch !== writeEpochRef.current) {
         return;
       }
-      // Token sempat ada tapi getMe gagal (basi/401/jaringan): tandai sesi
-      // berakhir SEBELUM clearToken agar guard bisa redirect `?expired=1`.
-      // Navigasi + toast tetap tugas guard + layar login, bukan provider ini.
+      // Gangguan sementara (jaringan/429/5xx): pertahankan token & sesi.
+      // Bila hidrasi awal belum selesai, beri kesempatan coba lagi (`error`);
+      // bila sudah punya user, biarkan sesi berjalan dengan data lama.
+      if (!isSessionExpiredError(err)) {
+        setStatus((current) => (current === 'loading' ? 'error' : current));
+        return;
+      }
+      // 401: token sempat ada tapi getMe gagal: tandai sesi berakhir SEBELUM
+      // clearToken agar guard bisa redirect `?expired=1`. Navigasi + toast
+      // tetap tugas guard + layar login, bukan provider ini.
       // Cache ikut dibuang: akun berikutnya wajib mulai dari data kosong.
       writeEpochRef.current += 1;
       markSessionExpired();
@@ -225,11 +246,17 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
           setUser(me);
           setStatus('authenticated');
         }
-      } catch {
+      } catch (err: unknown) {
         if (cancelled || epoch !== writeEpochRef.current) {
           return;
         }
-        // Token sempat ada tapi getMe gagal: tandai expired sebelum clear.
+        // Gangguan sementara (jaringan/429/5xx) BUKAN sesi berakhir: token
+        // dipertahankan dan guard menampilkan tombol coba lagi, bukan /login.
+        if (!isSessionExpiredError(err)) {
+          setStatus('error');
+          return;
+        }
+        // 401: token sempat ada tapi getMe gagal -> tandai expired sebelum clear.
         writeEpochRef.current += 1;
         markSessionExpired();
         clearToken();

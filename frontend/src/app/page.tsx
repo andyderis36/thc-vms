@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from '@/lib/auth/session'
 import { getLoginRedirect } from '@/lib/auth/capabilities'
+import { SessionRecoveryPlaceholder } from '@/lib/auth/guards'
 import { Spinner } from '@/components/ui/Spinner'
 
 /**
@@ -20,7 +21,7 @@ import { Spinner } from '@/components/ui/Spinner'
  */
 export default function HomePage() {
   const router = useRouter()
-  const { user, status } = useSession()
+  const { user, status, refresh } = useSession()
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -31,6 +32,16 @@ export default function HomePage() {
       router.replace(getLoginRedirect(user.role))
     }
   }, [status, user, router])
+
+  // Hidrasi sesi gagal karena gangguan sementara: token masih ada, jadi
+  // tawarkan coba lagi alih-alih spinner abadi atau lempar ke /login.
+  if (status === 'error') {
+    return (
+      <main className="flex min-h-dvh items-center justify-center p-6">
+        <SessionRecoveryPlaceholder onRetry={() => void refresh()} />
+      </main>
+    )
+  }
 
   // Selama status belum selesai, jangan pernah menampilkan tautan ke halaman
   // yang belum siap - hanya spinner yang jujur.

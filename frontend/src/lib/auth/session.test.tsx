@@ -6,8 +6,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { User } from '@/lib/api/types'
+import { ApiError } from '@/lib/api/fetcher'
 
 import { SessionProvider, useSession } from './session'
+import { RequireAuth } from './guards'
 
 const { loginMock, getMeMock, logoutMock, getTokenMock, clearTokenMock } = vi.hoisted(() => ({
   loginMock: vi.fn(),
@@ -15,6 +17,12 @@ const { loginMock, getMeMock, logoutMock, getTokenMock, clearTokenMock } = vi.ho
   logoutMock: vi.fn(),
   getTokenMock: vi.fn(),
   clearTokenMock: vi.fn(),
+}))
+
+const { routerReplaceMock } = vi.hoisted(() => ({ routerReplaceMock: vi.fn() }))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: routerReplaceMock }),
 }))
 
 vi.mock('@/lib/api/client', () => ({
@@ -79,6 +87,22 @@ function renderProvider() {
   )
 }
 
+/** Harness integrasi sesi + guard: membuktikan redirect vs tidak redirect. */
+function renderGuarded() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <SessionProvider>
+        <RequireAuth>
+          <span data-testid="protected">Area terlindungi</span>
+        </RequireAuth>
+      </SessionProvider>
+    </QueryClientProvider>,
+  )
+}
+
 function makeUser(overrides: Partial<User> = {}): User {
   return {
     id: 'u1',
@@ -111,6 +135,8 @@ beforeEach(() => {
   logoutMock.mockReset()
   getTokenMock.mockReset()
   clearTokenMock.mockReset()
+  routerReplaceMock.mockReset()
+  window.sessionStorage.clear()
   logoutMock.mockResolvedValue(undefined)
   getTokenMock.mockReturnValue(null)
   signInState.result = null
@@ -293,5 +319,67 @@ describe('SessionProvider — applyUser mengalahkan hidrasi /auth/me yang basi',
 
     expect(screen.getByTestId('avatar')).toHaveTextContent('new-avatar')
     expect(screen.getByTestId('status')).toHaveTextContent('authenticated')
+  })
+})
+
+describe('SessionProvider — hanya 401 yang mengakhiri sesi', () => {
+  it('401 saat hidrasi awal menghapus token dan mengalihkan ke /login?expired=1', async () => {
+    getTokenMock.mockReturnValue('tok')
+    getMeMock.mockRejectedValue(new ApiError('Sesi habis', 401, 'UNAUTHORIZED'))
+
+    renderGuarded()
+
+    await waitFor(() =>
+      expect(routerReplaceMock).toHaveBeenCalledWith('/login?expired=1'),
+    )
+    expect(clearTokenMock).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('protected')).toBeNull()
+    // Flag sekali-pakai dikonsumsi guard, jadi tidak tertinggal di storage.
+    expect(window.sessionStorage.getItem('thc_vms_expired')).toBeNull()
+  })
+
+  const transientFailures: Array<[string, ApiError]> = [
+    [
+      'koneksi gagal (tanpa respons HTTP)',
+      new ApiError('Tidak dapat terhubung ke server.', 0, 'NETWORK_ERROR'),
+    ],
+    ['rate limit 429', new ApiError('Terlalu banyak permintaan.', 429, 'RATE_LIMITED')],
+    ['gangguan server 500', new ApiError('Gangguan pada server.', 500, 'HTTP_ERROR')],
+  ]
+
+  it.each(transientFailures)(
+    '%s saat hidrasi awal mempertahankan token, tanpa redirect, dan menampilkan coba lagi',
+    async (_label, error) => {
+      getTokenMock.mockReturnValue('tok')
+      getMeMock.mockRejectedValue(error)
+
+      renderGuarded()
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Coba Lagi' })).toBeInTheDocument(),
+      )
+      expect(routerReplaceMock).not.toHaveBeenCalled()
+      expect(clearTokenMock).not.toHaveBeenCalled()
+      expect(screen.queryByTestId('protected')).toBeNull()
+    },
+  )
+
+  it('coba lagi setelah gangguan sementara memulihkan sesi tanpa login ulang', async () => {
+    getTokenMock.mockReturnValue('tok')
+    getMeMock.mockRejectedValueOnce(
+      new ApiError('Gangguan pada server.', 500, 'HTTP_ERROR'),
+    )
+
+    renderGuarded()
+
+    const retry = await screen.findByRole('button', { name: 'Coba Lagi' })
+    getMeMock.mockResolvedValueOnce(makeUser({ email: 'budi@thc.id' }))
+    fireEvent.click(retry)
+
+    await waitFor(() =>
+      expect(screen.getByTestId('protected')).toBeInTheDocument(),
+    )
+    expect(clearTokenMock).not.toHaveBeenCalled()
+    expect(routerReplaceMock).not.toHaveBeenCalled()
   })
 })

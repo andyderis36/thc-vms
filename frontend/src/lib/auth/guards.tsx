@@ -2,8 +2,11 @@
 
 import { useEffect, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { CloudOff } from 'lucide-react';
 import { consumeSessionExpiredFlag, useSession } from '@/lib/auth/session';
 import { getLoginRedirect } from '@/lib/auth/capabilities';
+import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import type { Role } from '@/lib/api/types';
 
 /**
@@ -37,12 +40,39 @@ function LoadingPlaceholder(): React.JSX.Element {
 }
 
 /**
+ * Hidrasi `/auth/me` gagal karena gangguan sementara (jaringan/429/5xx).
+ * Sesi BELUM berakhir dan token masih tersimpan, jadi JANGAN redirect ke
+ * `/login` — cukup beri tombol coba lagi. `refresh()` yang menentukan nasib
+ * berikutnya: sukses -> authenticated, 401 -> guard mengalihkan ke login.
+ */
+export function SessionRecoveryPlaceholder({
+  onRetry,
+}: {
+  onRetry: () => void;
+}): React.JSX.Element {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center">
+      <EmptyState
+        icon={<CloudOff className="size-8" aria-hidden="true" />}
+        title="Sesi belum dapat diverifikasi"
+        description="Koneksi ke server sedang bermasalah. Sesi Anda masih tersimpan — periksa jaringan lalu coba lagi."
+        action={
+          <Button variant="secondary" onClick={onRetry}>
+            Coba Lagi
+          </Button>
+        }
+      />
+    </div>
+  );
+}
+
+/**
  * Wajib login. Tanpa sesi -> `/login` polos, sesi kedaluwarsa ->
  * `/login?expired=1` (toast sekali di layar login); render `null`.
  * Dipakai di `/dashboard`, `/visits/new`, `/visits/[id]`, `/gate`.
  */
 export function RequireAuth({ children }: { children: ReactNode }): React.JSX.Element | null {
-  const { status } = useSession();
+  const { status, refresh } = useSession();
   const router = useRouter();
 
   const unauthenticated = status === 'unauthenticated';
@@ -57,6 +87,9 @@ export function RequireAuth({ children }: { children: ReactNode }): React.JSX.El
 
   if (status === 'loading') {
     return <LoadingPlaceholder />;
+  }
+  if (status === 'error') {
+    return <SessionRecoveryPlaceholder onRetry={() => void refresh()} />;
   }
   if (unauthenticated) {
     return null;
@@ -75,7 +108,7 @@ interface RequireRoleProps {
  * Contoh: Vendor/Mitra yang membuka `/gate` dipulangkan ke `/dashboard`.
  */
 export function RequireRole({ allow, children }: RequireRoleProps): React.JSX.Element | null {
-  const { user, status } = useSession();
+  const { user, status, refresh } = useSession();
   const router = useRouter();
 
   const unauthenticated = status === 'unauthenticated';
@@ -95,6 +128,9 @@ export function RequireRole({ allow, children }: RequireRoleProps): React.JSX.El
 
   if (status === 'loading') {
     return <LoadingPlaceholder />;
+  }
+  if (status === 'error') {
+    return <SessionRecoveryPlaceholder onRetry={() => void refresh()} />;
   }
   if (unauthenticated) {
     return null;
