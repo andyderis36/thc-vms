@@ -39,6 +39,8 @@ func (f *fakeFileStorage) PresignedURL(_ context.Context, objectKey string, expi
 	return "https://signed.example/" + objectKey + "?exp=" + expiry.String(), nil
 }
 
+func (f *fakeFileStorage) DeleteObject(_ context.Context, _ string) error { return nil }
+
 func (f *fakeFileStorage) ObjectKeyFromStoredURL(raw string) (string, error) {
 	if !strings.HasPrefix(raw, presignTestBase+"/") {
 		return "", domain.ValidationFailure("Tautan berkas di luar bucket.")
@@ -67,7 +69,7 @@ func seedVisitWithFiles(repo *fakeVisitRepo) domain.VisitRequest {
 		Status:              domain.VisitStatusApproved,
 		AssignmentLetterURL: &letter,
 		Visitors: []domain.Visitor{
-			{ID: domain.UUID("visitor-1"), Name: "Andi", IDNumber: "ID123", Phone: "0811", IDCardPhotoURL: &ktp, PhotoURL: &selfie},
+			{ID: domain.UUID("visitor-1"), Name: "Andi", IDNumber: "ID123", Phone: "0812345678", IDCardPhotoURL: &ktp, PhotoURL: &selfie},
 		},
 	}
 	seedVisit(repo, visit)
@@ -130,7 +132,7 @@ func TestGetVisit_BlanksForeignFileURLs(t *testing.T) {
 		EndDate:             time.Date(2026, time.October, 1, 17, 0, 0, 0, time.UTC),
 		Status:              domain.VisitStatusApproved,
 		AssignmentLetterURL: &evil,
-		Visitors:            []domain.Visitor{{ID: domain.UUID("visitor-1"), Name: "Andi", IDNumber: "ID123", Phone: "0811", PhotoURL: &evilSelfie}},
+		Visitors:            []domain.Visitor{{ID: domain.UUID("visitor-1"), Name: "Andi", IDNumber: "ID123", Phone: "0812345678", PhotoURL: &evilSelfie}},
 	}
 	seedVisit(repo, visit)
 	svc := newTestService(repo, nil, testNow()).WithFileLinks(&fakeFileStorage{}, 15*time.Minute)

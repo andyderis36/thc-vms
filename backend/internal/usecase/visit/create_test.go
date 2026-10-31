@@ -50,7 +50,7 @@ func TestCreateVisit_RejectsMoreThanTenVisitors(t *testing.T) {
 		ten.Visitors[i] = VisitorInput{
 			Name:     fmt.Sprintf("Pengunjung %d", i+1),
 			IDNumber: fmt.Sprintf("ID%03d", i+1),
-			Phone:    fmt.Sprintf("081%04d", i+1),
+			Phone:    "0812345678",
 		}
 	}
 	if _, err := svc.CreateVisit(context.Background(), actor, ten); err != nil {
@@ -58,7 +58,7 @@ func TestCreateVisit_RejectsMoreThanTenVisitors(t *testing.T) {
 	}
 
 	eleven := validCreateInput()
-	eleven.Visitors = append(ten.Visitors, VisitorInput{Name: "Lebih", IDNumber: "ID999", Phone: "0899"})
+	eleven.Visitors = append(ten.Visitors, VisitorInput{Name: "Lebih", IDNumber: "ID999", Phone: "0812345678"})
 	if _, err := svc.CreateVisit(context.Background(), actor, eleven); err == nil {
 		t.Fatal("11 visitors must be rejected, got nil error")
 	} else if !errors.Is(err, domain.ErrValidation) {

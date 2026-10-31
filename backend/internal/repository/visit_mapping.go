@@ -32,6 +32,7 @@ func visitRowToDomain(row db.VisitRequest) (domain.VisitRequest, error) {
 		PurposeNote:         textPtr(row.PurposeNote),
 		CreatedAt:           row.CreatedAt,
 		UpdatedAt:           row.UpdatedAt,
+		VendorNameOverride:  textPtr(row.VendorNameOverride),
 	}, nil
 }
 
@@ -46,10 +47,10 @@ func detailRowToDomain(row db.GetVisitByIDRow) (domain.VisitRequest, error) {
 		row.ID, row.VisitID, row.VendorUserID, row.VendorID, row.LocationID,
 		row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 		row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-		row.PurposeNote,
+		row.PurposeNote, row.VendorNameOverride,
 		row.CreatedAt, row.UpdatedAt, row.VendorName,
 		row.LocationName, row.LocationType,
-		row.VendorUserName, row.VendorUserEmail,
+		row.VendorUserName, row.VendorUserEmail, row.VendorUserVendorName,
 	)
 }
 
@@ -59,10 +60,10 @@ func visitCodeRowToDomain(row db.GetVisitByVisitCodeRow) (domain.VisitRequest, e
 		row.ID, row.VisitID, row.VendorUserID, row.VendorID, row.LocationID,
 		row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 		row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-		row.PurposeNote,
+		row.PurposeNote, row.VendorNameOverride,
 		row.CreatedAt, row.UpdatedAt, row.VendorName,
 		row.LocationName, row.LocationType,
-		row.VendorUserName, row.VendorUserEmail,
+		row.VendorUserName, row.VendorUserEmail, row.VendorUserVendorName,
 	)
 }
 
@@ -82,6 +83,7 @@ func visitFieldsToDomain(
 	isNDAAccepted bool,
 	notes pgtype.Text,
 	purposeNote pgtype.Text,
+	vendorNameOverride pgtype.Text,
 	createdAt time.Time,
 	updatedAt time.Time,
 	vendorName pgtype.Text,
@@ -89,6 +91,7 @@ func visitFieldsToDomain(
 	locationType string,
 	vendorUserName string,
 	vendorUserEmail string,
+	vendorUserVendorName string,
 ) (domain.VisitRequest, error) {
 	parsed, err := domain.ParseVisitStatus(status)
 	if err != nil {
@@ -104,6 +107,7 @@ func visitFieldsToDomain(
 		LocationType:        domain.LocationType(locationType),
 		VendorUserName:      vendorUserName,
 		VendorUserEmail:     vendorUserEmail,
+		VendorUserVendorName: vendorUserVendorName,
 		StartDate:           startDate,
 		EndDate:             endDate,
 		IsMultiDay:          isMultiDay,
@@ -115,6 +119,7 @@ func visitFieldsToDomain(
 		CreatedAt:           createdAt,
 		UpdatedAt:           updatedAt,
 		VendorName:          textValue(vendorName),
+		VendorNameOverride:  textPtr(vendorNameOverride),
 	}, nil
 }
 
@@ -194,10 +199,10 @@ func locationRowsToDomain(rows []db.ListVisitsForLocationRow) []domain.VisitRequ
 			row.ID, row.VisitID, row.VendorUserID, row.VendorID, row.LocationID,
 			row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 			row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-			row.PurposeNote,
+			row.PurposeNote, row.VendorNameOverride,
 			row.CreatedAt, row.UpdatedAt, row.VendorName,
 			row.LocationName, row.LocationType,
-			row.VendorUserName, row.VendorUserEmail,
+			row.VendorUserName, row.VendorUserEmail, row.VendorUserVendorName,
 		)
 		if err != nil {
 			continue
@@ -217,10 +222,10 @@ func vendorRowsToDomain(rows []db.ListVisitsForVendorUserRow) []domain.VisitRequ
 			row.ID, row.VisitID, row.VendorUserID, row.VendorID, row.LocationID,
 			row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 			row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-			row.PurposeNote,
+			row.PurposeNote, row.VendorNameOverride,
 			row.CreatedAt, row.UpdatedAt, row.VendorName,
 			row.LocationName, row.LocationType,
-			row.VendorUserName, row.VendorUserEmail,
+			row.VendorUserName, row.VendorUserEmail, row.VendorUserVendorName,
 		)
 		if err != nil {
 			continue
@@ -240,10 +245,10 @@ func superAdminRowsToDomain(rows []db.ListVisitsForSuperAdminRow) []domain.Visit
 			row.ID, row.VisitID, row.VendorUserID, row.VendorID, row.LocationID,
 			row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 			row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-			row.PurposeNote,
+			row.PurposeNote, row.VendorNameOverride,
 			row.CreatedAt, row.UpdatedAt, row.VendorName,
 			row.LocationName, row.LocationType,
-			row.VendorUserName, row.VendorUserEmail,
+			row.VendorUserName, row.VendorUserEmail, row.VendorUserVendorName,
 		)
 		if err != nil {
 			continue

@@ -88,6 +88,7 @@ func (r *visitRepository) Create(
 				IsNdaAccepted:       visit.IsNDAAccepted,
 				Notes:               pgText(visit.Notes),
 				PurposeNote:         pgText(visit.PurposeNote),
+				VendorNameOverride:  pgText(visit.VendorNameOverride),
 			})
 			if err != nil {
 				return MapError(err)

@@ -21,10 +21,10 @@ func TestVisitFieldsToDomain_MapsVendorUserNameAndEmail(t *testing.T) {
 		id, "VST-0000000001", vendorUserID, pgtype.UUID{Valid: false}, loc,
 		now, now.Add(4*time.Hour), false, "approved",
 		pgtype.Text{Valid: false}, true, pgtype.Text{Valid: false},
-		pgtype.Text{Valid: false},
+		pgtype.Text{Valid: false}, pgtype.Text{String: "PT Override", Valid: true},
 		now, now, pgtype.Text{Valid: false},
 		"POP Tebet", "pop",
-		"Dimas Prasetyo", "dimas@vendor.example",
+		"Dimas Prasetyo", "dimas@vendor.example", "PT Akun Vendor",
 	)
 	if err != nil {
 		t.Fatalf("visitFieldsToDomain: %v", err)
@@ -37,5 +37,11 @@ func TestVisitFieldsToDomain_MapsVendorUserNameAndEmail(t *testing.T) {
 	}
 	if got.LocationName != "POP Tebet" {
 		t.Fatalf("LocationName = %q, want POP Tebet", got.LocationName)
+	}
+	if got.VendorNameOverride == nil || *got.VendorNameOverride != "PT Override" {
+		t.Fatalf("VendorNameOverride = %v, want PT Override", got.VendorNameOverride)
+	}
+	if got.VendorUserVendorName != "PT Akun Vendor" {
+		t.Fatalf("VendorUserVendorName = %q, want PT Akun Vendor", got.VendorUserVendorName)
 	}
 }

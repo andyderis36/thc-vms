@@ -51,10 +51,22 @@ type RoleName string
 
 const (
 	RoleSuperAdmin RoleName = "super_admin"
-	RoleAdmin      RoleName = "admin"
-	RoleSecurity   RoleName = "security"
-	RoleVendor     RoleName = "vendor"
+	// RoleDevSuperAdmin is the hidden highest role: one internal, global,
+	// always-active account seeded for platform operators. It never appears
+	// in user-facing lists (repository post-filters every listing) and is
+	// never offered as a selectable role in any create/edit surface.
+	RoleDevSuperAdmin RoleName = "dev-superadmin"
+	RoleAdmin         RoleName = "admin"
+	RoleSecurity      RoleName = "security"
+	RoleVendor        RoleName = "vendor"
 )
+
+// IsSuperAdminRole reports whether the role carries the national bypass:
+// super_admin and the hidden dev-superadmin pass every branch scope,
+// listing, and back-office gate alike. Vendor is never included.
+func IsSuperAdminRole(role RoleName) bool {
+	return role == RoleSuperAdmin || role == RoleDevSuperAdmin
+}
 
 // Role mirrors the ROLE table.
 type Role struct {

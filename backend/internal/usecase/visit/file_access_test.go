@@ -104,6 +104,8 @@ func (f *fakeStreamStorage) PresignedURL(_ context.Context, _ string, _ time.Dur
 	return "", domain.ErrValidation
 }
 
+func (f *fakeStreamStorage) DeleteObject(_ context.Context, _ string) error { return nil }
+
 // ObjectKeyFromStoredURL enforces the adapter's own-bucket prefix rule: any URL
 // outside presignTestBase, or one carrying an empty/traversal key, is refused
 // with ErrValidation so the usecase can fail closed instead of fetching.
