@@ -141,13 +141,12 @@ describe('visitFormSchema — nomor HP anggota', () => {
     )
   })
 
-  it('menolak nomor HP 16 digit', () => {
+  it('menerima nomor HP 16 digit', () => {
     const result = visitFormSchema.safeParse(
       formWithTechnician({ phone: '0812345678901234' }),
     )
 
-    expect(result.success).toBe(false)
-    expect(issueAt(result, 'technicians.0.phone')).toBeDefined()
+    expect(result.success).toBe(true)
   })
 
   it('menerima format +62 dengan spasi dan tanda hubung', () => {

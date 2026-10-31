@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 import { requiresManagedLocation } from '@/features/users/managed-user-filters'
@@ -14,8 +15,11 @@ import { getRoleLabel } from '@/lib/auth/capabilities'
 import {
   EMAIL_MAX_LENGTH,
   NAME_MAX_LENGTH,
+  NIK_LENGTH,
   PASSWORD_MAX_BYTES,
+  PHONE_DIGIT_MESSAGE,
   PHONE_MAX_LENGTH,
+  PHONE_MIN_LENGTH,
   isValidEmail,
   isValidPassword,
   isValidPhone,
@@ -82,8 +86,20 @@ export function ManagedUserCreateModal({
     setEmailError(nextEmailError)
     if (nextEmailError !== undefined) return
 
+    const trimmedPhone = phone.trim()
+    const normalizedPhone = trimmedPhone.startsWith('62')
+      ? `0${trimmedPhone.slice(2)}`
+      : trimmedPhone
     const nextPhoneError =
-      phone.trim() === '' || isValidPhone(phone) ? undefined : 'Format nomor telepon tidak valid.'
+      trimmedPhone === ''
+        ? undefined
+        : normalizedPhone.startsWith('0') &&
+            (normalizedPhone.length < PHONE_MIN_LENGTH ||
+              normalizedPhone.length > PHONE_MAX_LENGTH)
+          ? PHONE_DIGIT_MESSAGE
+          : isValidPhone(trimmedPhone)
+            ? undefined
+            : 'Format nomor telepon tidak valid.'
     setPhoneError(nextPhoneError)
     if (nextPhoneError !== undefined) return
 
@@ -190,9 +206,8 @@ export function ManagedUserCreateModal({
             maxLength={PHONE_MAX_LENGTH}
             error={phoneError}
           />
-          <Input
+          <PasswordInput
             label="Kata Sandi"
-            type="password"
             placeholder="Kata sandi awal"
             value={password}
             onChange={(event) => {
@@ -212,7 +227,7 @@ export function ManagedUserCreateModal({
           placeholder="16 digit Nomor Induk Kependudukan"
           value={nik}
           inputMode="numeric"
-          maxLength={16}
+          maxLength={NIK_LENGTH}
           autoComplete="off"
           error={nikError}
           onChange={(event) => {

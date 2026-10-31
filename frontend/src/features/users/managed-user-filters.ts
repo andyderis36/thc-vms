@@ -117,6 +117,8 @@ export function managedServerRoleParam(roles: readonly ManagedPageRole[]): Manag
 /**
  * Saring baris ke set peran efektif. `security` selalu dibuang (rumahnya
  * di `/security`), jadi peran itu tak perlu masuk daftar peran halaman.
+ * `dev-superadmin` yang tersembunyi SELALU dibuang — tak ada layar yang
+ * boleh merendernya, apa pun set peran halamannya.
  */
 export function filterManagedUsersByRoles(
   users: User[],
@@ -125,7 +127,8 @@ export function filterManagedUsersByRoles(
   return users.filter((user) => {
     const role = user.role
     if (role === 'security') return false
-    return roles.includes(role)
+    if (role === 'dev-superadmin') return false
+    return roles.includes(role as ManagedPageRole)
   })
 }
 
@@ -226,8 +229,9 @@ export function managedVendorOptions(users: User[]): SelectOption[] {
 }
 
 /**
- * Filter client-side daftar user: buang security, lalu terapkan status
- * ('all' = tanpa filter) dan vendor exact-match ('all' = tanpa filter).
+ * Filter client-side daftar user: buang security dan `dev-superadmin` yang
+ * tersembunyi, lalu terapkan status ('all' = tanpa filter) dan vendor
+ * exact-match ('all' = tanpa filter).
  */
 export function applyManagedUserFilters(
   users: User[],
@@ -235,6 +239,7 @@ export function applyManagedUserFilters(
 ): User[] {
   return users.filter((user) => {
     if (user.role === 'security') return false
+    if (user.role === 'dev-superadmin') return false
     if (filter.status !== 'all' && user.status !== filter.status) return false
     if (filter.vendor !== VENDOR_FILTER_ALL && (user.vendor_name ?? '') !== filter.vendor) return false
     return true
@@ -246,14 +251,15 @@ export function applyManagedUserFilters(
 // ---------------------------------------------------------------------------
 
 /**
- * Akun yang dilindungi dari aksi merusak: akun sendiri dan akun
- * `super_admin`. Kontrak `PATCH /users/{id}/status` dan `DELETE /users/{id}`
- * sama-sama membalas 403 untuk keduanya, jadi satu guard dipakai dua aksi.
- * Guard peran (`can(role, ...)`) dicek terpisah di layar.
+ * Akun yang dilindungi dari aksi merusak: akun sendiri, akun `super_admin`,
+ * dan akun `dev-superadmin` yang tersembunyi. Kontrak
+ * `PATCH /users/{id}/status` dan `DELETE /users/{id}` sama-sama membalas 403
+ * untuk ketiganya, jadi satu guard dipakai dua aksi. Guard peran
+ * (`can(role, ...)`) dicek terpisah di layar.
  */
 export function isProtectedUser(target: User, currentUserId: string | null): boolean {
   if (currentUserId !== null && target.id === currentUserId) return true
-  return target.role === 'super_admin'
+  return target.role === 'super_admin' || target.role === 'dev-superadmin'
 }
 
 /**

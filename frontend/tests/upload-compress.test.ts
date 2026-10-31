@@ -463,3 +463,80 @@ describe('uploadFile — kompresi terjadi SEBELUM data dikirim', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+describe('prepareUpload — opt-out kompresi (compress: false)', () => {
+  it('returns the same File byte-identically without touching the rasterizer, yet still validates', async () => {
+    const calls = stubRasterizer({
+      pixels: { width: 4000, height: 3000 },
+      encode: () => new Uint8Array(1024),
+    })
+    const bytes = makeJpegBytes(2 * MB)
+    const photo = new File([bytes], 'avatar.jpg', { type: 'image/jpeg' })
+
+    const result = await prepareUpload(photo, { compress: false })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected success')
+    expect(result.file).toBe(photo)
+    expect(calls.decodeCalls).toHaveLength(0)
+    expect(calls.encodeArgs).toBeNull()
+    expect(bytesEqual(new Uint8Array(await result.file.arrayBuffer()), bytes)).toBe(true)
+  })
+
+  it('still rejects a 21 MB photo with the Indonesian 20 MB message before any rasterizer', async () => {
+    const calls = stubRasterizer({
+      pixels: { width: 4000, height: 3000 },
+      encode: () => new Uint8Array(1024),
+    })
+    const oversized = new File([makeJpegBytes(21 * MB)], 'raksasa.jpg', { type: 'image/jpeg' })
+
+    const result = await prepareUpload(oversized, { compress: false })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('expected rejection')
+    expect(result.message).toContain('20 MB')
+    expect(result.message).toContain('raksasa.jpg')
+    expect(calls.decodeCalls).toHaveLength(0)
+  })
+
+  it('rejects a 6 MB photo with the Indonesian 5 MB stored message (nothing shrinks it)', async () => {
+    const calls = stubRasterizer({
+      pixels: { width: 4000, height: 3000 },
+      encode: () => new Uint8Array(1024),
+    })
+    const input = new File([makeJpegBytes(6 * MB)], 'foto-besar.jpg', { type: 'image/jpeg' })
+
+    const result = await prepareUpload(input, { compress: false })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('expected rejection')
+    expect(result.message).toContain('5 MB')
+    expect(result.message).toContain('foto-besar.jpg')
+    expect(calls.decodeCalls).toHaveLength(0)
+  })
+})
+
+describe('uploadFile — opt-out kompresi meneruskan byte asli ke FormData', () => {
+  it('sends the original file bytes and never calls createImageBitmap', async () => {
+    const calls = stubRasterizer({
+      pixels: { width: 4000, height: 3000 },
+      encode: () => new Uint8Array(1024),
+    })
+    const fetchState = stubFetchSuccess()
+    const bytes = makeJpegBytes(2 * MB)
+    const photo = new File([bytes], 'avatar.jpg', { type: 'image/jpeg' })
+
+    await uploadFile(photo, 'profile_photo', { compress: false })
+
+    expect(calls.decodeCalls).toHaveLength(0)
+    expect(fetchState.calls).toHaveLength(1)
+    const body = fetchState.calls[0]?.init?.body
+    expect(body).toBeInstanceOf(FormData)
+    const sent = (body as FormData).get('file')
+    expect(sent).toBeInstanceOf(File)
+    if (!(sent instanceof File)) throw new Error('expected file part')
+    expect(sent.size).toBe(photo.size)
+    expect(bytesEqual(new Uint8Array(await sent.arrayBuffer()), bytes)).toBe(true)
+    expect((body as FormData).get('category')).toBe('profile_photo')
+  })
+})

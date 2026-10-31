@@ -73,9 +73,16 @@ describe('isValidPhone', () => {
   })
 
   it('menolak nomor yang melebihi batas panjang/digit', () => {
-    expect(isValidPhone('0812345678901234')).toBe(false)
-    expect(isValidPhone('62' + '8'.repeat(14))).toBe(false)
-    expect(PHONE_MAX_LENGTH).toBe(15)
+    expect(isValidPhone('08123456789012345')).toBe(false)
+    expect(isValidPhone('62' + '8'.repeat(15))).toBe(false)
+    expect(PHONE_MAX_LENGTH).toBe(16)
+  })
+
+  it('batas digit baru: 9 digit ditolak, 10 dan 16 digit diterima, 17 digit ditolak', () => {
+    expect(isValidPhone('081234567')).toBe(false)
+    expect(isValidPhone('0812345678')).toBe(true)
+    expect(isValidPhone('0812345678901234')).toBe(true)
+    expect(isValidPhone('08123456789012345')).toBe(false)
   })
 })
 
