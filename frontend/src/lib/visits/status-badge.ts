@@ -1,4 +1,5 @@
 import type { User, VisitStatus } from '@/lib/api/types'
+import { isSuperAdminRole } from '@/lib/auth/capabilities'
 
 /**
  * purely data: pemetaan status kunjungan ke label Bahasa Indonesia dan
@@ -24,7 +25,7 @@ export const VISIT_STATUS_META: Record<
 
 /** Nada badge per peran user — dipakai tabel users dan modal edit (satu sumber). */
 export function managedRoleTone(role: User['role']): StatusTone {
-  if (role === 'super_admin') return 'danger'
+  if (isSuperAdminRole(role)) return 'danger'
   if (role === 'admin') return 'info'
   if (role === 'security') return 'warning'
   return 'neutral'

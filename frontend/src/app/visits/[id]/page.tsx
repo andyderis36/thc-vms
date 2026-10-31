@@ -48,6 +48,7 @@ import {
   isReschedulableStatus,
 } from '@/lib/visits/visit-status'
 import { visitVendorUser } from '@/lib/visits/vendor-user'
+import { visitVendorCompany } from '@/lib/visits/visit-company'
 import { toast } from 'sonner'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 
@@ -195,6 +196,7 @@ function RoleShell({ role, visitId, visitStatus, children }: RoleShellProps) {
     case 'security':
       return <SecurityKioskShell>{children}</SecurityKioskShell>
     case 'super_admin':
+    case 'dev-superadmin':
       return <SuperadminShell activeHref={activeHref}>{children}</SuperadminShell>
   }
 }
@@ -313,6 +315,10 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
   // sampai status kembali `approved`. Status lain (requested/cancelled/
   // completed/...) menyembunyikan QR.
   const showQr = isQrVisible(visit.status)
+
+  // Perusahaan pengaju: override manual per kunjungan → perusahaan akun
+  // vendor → nama pemegang akun (lihat `visitVendorCompany`).
+  const vendorCompany = visitVendorCompany(visit)
 
   const purposeChips =
     visit.purposes.length > 0 ? (
@@ -451,8 +457,9 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
             <CardBody>
               <PanelTitle icon={MapPin}>Informasi Kunjungan</PanelTitle>
               <dl className="mt-4 divide-y divide-border-light">
+                <InfoRow label="Vendor/Mitra" value={vendorCompany} />
                 <InfoRow
-                  label="Vendor/Mitra"
+                  label="Nama"
                   value={
                     <>
                       {vendorUser?.name}

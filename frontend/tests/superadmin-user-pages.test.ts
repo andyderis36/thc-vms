@@ -286,6 +286,21 @@ describe('cakupan peran tiap halaman user terkelola', () => {
       filterManagedUsersByRoles(rows, VENDOR_REGISTRATIONS_PAGE_ROLES).map((row) => row.id),
     ).toEqual(['u-vendor'])
   })
+
+  it('baris dev-superadmin yang tersembunyi tak pernah dirender di halaman mana pun', () => {
+    const rows = [
+      userStub({ id: 'u-admin', role: 'admin' }),
+      userStub({ id: 'u-super', role: 'super_admin' }),
+      userStub({ id: 'u-dev', role: 'dev-superadmin', location_id: null, location_name: null }),
+      userStub({ id: 'u-vendor', role: 'vendor' }),
+    ]
+    expect(
+      filterManagedUsersByRoles(rows, COORDINATORS_PAGE_ROLES).map((row) => row.id),
+    ).toEqual(['u-admin', 'u-super'])
+    expect(
+      filterManagedUsersByRoles(rows, VENDOR_REGISTRATIONS_PAGE_ROLES).map((row) => row.id),
+    ).toEqual(['u-vendor'])
+  })
 })
 
 describe('tabel user terkelola — base UI bersama', () => {

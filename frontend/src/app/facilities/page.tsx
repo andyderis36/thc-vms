@@ -715,6 +715,15 @@ function LocationFormModal({ title, submitLabel, locations, initial, onClose }: 
   const pending = create.isPending || update.isPending
   const formId = initial !== undefined ? 'location-edit-form' : 'location-create-form'
 
+  // Saran isian dari cache fasilitas yang sudah dimuat (kota & alamat yang
+  // pernah dipakai) — bebas ketik tetap diizinkan.
+  const citySuggestions = Array.from(
+    new Set(locations.map((location) => location.city).filter((city) => city !== '')),
+  )
+  const addressSuggestions = Array.from(
+    new Set(locations.map((location) => location.address).filter((address) => address !== '')),
+  )
+
   // Aturan penyembunyian `pusat` per modal ada di locationTypeFormOptions.
   const typeOptions = useMemo(
     () => locationTypeFormOptions(locations, initial),
@@ -836,15 +845,29 @@ function LocationFormModal({ title, submitLabel, locations, initial, onClose }: 
           placeholder="Jl. Sukaramai No. 12, Sambas"
           value={form.address}
           onChange={(event) => setForm((prev) => ({ ...prev, address: event.target.value }))}
+          list="facility-address-datalist"
+          autoComplete="off"
           maxLength={FACILITY_ADDRESS_MAX_LENGTH}
         />
+        <datalist id="facility-address-datalist">
+          {addressSuggestions.map((address) => (
+            <option key={address} value={address} />
+          ))}
+        </datalist>
         <Input
           label="Kota"
           placeholder="Sambas"
           value={form.city}
           onChange={(event) => setForm((prev) => ({ ...prev, city: event.target.value }))}
+          list="facility-city-datalist"
+          autoComplete="off"
           maxLength={FACILITY_CITY_MAX_LENGTH}
         />
+        <datalist id="facility-city-datalist">
+          {citySuggestions.map((city) => (
+            <option key={city} value={city} />
+          ))}
+        </datalist>
       </form>
     </Modal>
   )

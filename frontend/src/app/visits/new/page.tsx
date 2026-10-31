@@ -6,6 +6,7 @@ import { VendorMobileShell } from '@/components/layouts/VendorMobileShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { VisitForm } from '@/features/visits/form/VisitForm'
 import { RequireRole } from '@/lib/auth/guards'
+import { isSuperAdminRole } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 import { usePendingApprovalCount } from '@/lib/api/hooks'
 
@@ -26,7 +27,7 @@ function RoleShell({ children }: { children: ReactNode }) {
   if (role === 'vendor') {
     return <VendorMobileShell activeHref="/visits/new">{children}</VendorMobileShell>
   }
-  if (role === 'super_admin') {
+  if (role !== null && isSuperAdminRole(role)) {
     return (
       <SuperadminShell activeHref="/visits/new" pendingCount={pendingCount}>
         {children}

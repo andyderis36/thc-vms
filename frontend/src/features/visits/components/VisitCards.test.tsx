@@ -33,7 +33,7 @@ function buildVisit(overrides: Partial<VisitDetail> = {}): VisitDetail {
       city: 'Jakarta Pusat',
       timezone: 'WIB',
     },
-    purposes: [{ id: 'purp-1', name: 'Splicing FO' }],
+    purposes: [{ id: 'purp-1', name: 'Survey' }],
     vendor_user: {
       id: 'user-1',
       name: 'Budi Santoso',
@@ -201,7 +201,7 @@ describe('VisitCards — kontrak baris "Lihat SPK" (mobile)', () => {
 
     const otherRows: Array<[string, HTMLElement]> = [
       ['lokasi', rowOf(screen.getByTitle(visit.location.name))],
-      ['keperluan', rowOf(screen.getByText('Splicing FO'))],
+      ['keperluan', rowOf(screen.getByText('Survey'))],
       ['teknisi', rowOf(screen.getByTitle('Andi Wijaya'))],
       ['jadwal', rowOf(screen.getByText(schedule.dateLabel))],
     ]

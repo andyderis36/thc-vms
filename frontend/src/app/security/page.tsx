@@ -7,7 +7,7 @@ import { SecurityUserPanel } from '@/features/security/components/SecurityUserMo
 import { usePendingApprovalCount } from '@/lib/api/hooks'
 import type { Role } from '@/lib/api/types'
 import { RequireRole } from '@/lib/auth/guards'
-import { getRoleLabel } from '@/lib/auth/capabilities'
+import { getRoleLabel, isSuperAdminRole } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 
 /**
@@ -25,7 +25,7 @@ export default function SecurityPage() {
 }
 
 function RoleShell({ role, pendingCount, children }: { role: Role; pendingCount: number; children: React.ReactNode }) {
-  if (role === 'super_admin') {
+  if (isSuperAdminRole(role)) {
     return (
       <SuperadminShell pendingCount={pendingCount} activeHref="/security">
         {children}
