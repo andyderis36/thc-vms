@@ -29,20 +29,31 @@ export type Capability =
   | 'deleteSecurity'
   | 'deleteRecords'
 
+/**
+ * `true` iff peran memegang bypass nasional: `super_admin` dan `dev-superadmin`
+ * yang tersembunyi. Vendor tak pernah termasuk.
+ */
+export function isSuperAdminRole(role: Role): boolean {
+  return role === 'super_admin' || role === 'dev-superadmin'
+}
+
+const FULL_ADMIN_CAPABILITIES: ReadonlySet<Capability> = new Set<Capability>([
+  'viewAllBranches',
+  'submitVisit',
+  'approveVisit',
+  'rejectVisit',
+  'rescheduleVisit',
+  'cancelVisit',
+  'checkIn',
+  'checkOut',
+  'manageSecurity',
+  'deleteSecurity',
+  'deleteRecords',
+])
+
 const CAPABILITIES_BY_ROLE: Record<Role, ReadonlySet<Capability>> = {
-  super_admin: new Set<Capability>([
-    'viewAllBranches',
-    'submitVisit',
-    'approveVisit',
-    'rejectVisit',
-    'rescheduleVisit',
-    'cancelVisit',
-    'checkIn',
-    'checkOut',
-    'manageSecurity',
-    'deleteSecurity',
-    'deleteRecords',
-  ]),
+  super_admin: FULL_ADMIN_CAPABILITIES,
+  'dev-superadmin': FULL_ADMIN_CAPABILITIES,
   admin: new Set<Capability>([
     'submitVisit',
     'approveVisit',
@@ -60,6 +71,7 @@ const CAPABILITIES_BY_ROLE: Record<Role, ReadonlySet<Capability>> = {
 
 const LOGIN_REDIRECT_BY_ROLE: Record<Role, '/gate' | '/dashboard'> = {
   super_admin: '/dashboard',
+  'dev-superadmin': '/dashboard',
   admin: '/dashboard',
   security: '/gate',
   vendor: '/dashboard',
@@ -75,6 +87,7 @@ const LOGIN_REDIRECT_BY_ROLE: Record<Role, '/gate' | '/dashboard'> = {
  */
 const ROLE_LABEL_BY_ROLE: Record<Role, string> = {
   super_admin: 'Superadmin',
+  'dev-superadmin': 'Developer Superadmin',
   admin: 'Koordinator Wilayah',
   security: 'Pengawas',
   vendor: 'Vendor/Mitra',

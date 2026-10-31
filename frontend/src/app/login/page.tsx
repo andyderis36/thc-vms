@@ -2,6 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import Image from 'next/image'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef } from 'react'
 import { useForm } from 'react-hook-form'
@@ -9,8 +10,10 @@ import { toast } from 'sonner'
 import { z } from 'zod'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { getLoginRedirect } from '@/lib/auth/capabilities'
 import { SessionNetworkError, useSession } from '@/lib/auth/session'
+import { EMAIL_MAX_LENGTH, PASSWORD_MAX_BYTES } from '@/lib/limits'
 
 /**
  * SCR-01 — Layar Masuk terpadu untuk keempat peran RBAC.
@@ -28,24 +31,61 @@ const loginSchema = z.object({
     .string()
     .trim()
     .min(1, 'Email wajib diisi')
-    .email('Format email tidak valid'),
+    // Akun dev boleh masuk cukup dengan username `dev-superadmin` (tanpa
+    // format email); sisanya tetap wajib email valid. Pemetaan ke email
+    // lengkap terjadi di onSubmit sebelum signIn.
+    .refine(
+      (value) =>
+        value === DEV_LOGIN_USERNAME ||
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value),
+      'Format email tidak valid',
+    ),
   password: z
     .string()
     .min(1, 'Kata sandi wajib diisi')
-    .min(6, 'Kata sandi minimal 6 karakter'),
+    .min(8, 'Kata sandi minimal 8 karakter'),
 })
 
 type LoginFormValues = z.infer<typeof loginSchema>
+
+
+// Username singkat akun dev (boleh diketik tanpa format email).
+const DEV_LOGIN_USERNAME = 'dev-superadmin'
+
+// Email lengkap pasangan username dev di atas.
+const DEV_LOGIN_EMAIL = 'dev-superadmin@transhybrid.net.id'
+
+// Akun dummy khusus pengembangan lokal. Hanya dipakai bila
+// NEXT_PUBLIC_DEMO_ACC_LOGIN === 'true' (lihat render di bawah). Email
+// berasal dari seed backend (docs/5. LOCAL_DEV.md 6.1); password seragam
+// seed = "Password123!" (backend/seeds/seeddata/password.go DemoPassword).
+const DEV_DUMMY_PASSWORD = 'Password123!'
+
+const DEV_DUMMY_ACCOUNTS = [
+  { label: 'Super Admin - superadmin@thc.net.id', email: 'superadmin@thc.net.id' },
+  { label: 'Admin - admin1@thc.com', email: 'admin1@thc.com' },
+  { label: 'Security - security1a@thc.com', email: 'security1a@thc.com' },
+  { label: 'Vendor - vendor1a@thc.com', email: 'vendor1a@thc.com' },
+  // Password dev lokal (khusus dev, bukan seed global) — hanya dipakai
+  // mengisi form saat flag demo aktif, tidak pernah dikirim ke mana pun
+  // selain endpoint login seperti password biasa.
+  { label: 'Dev Superadmin - dev-superadmin', email: DEV_LOGIN_EMAIL, password: 'qwqw1234' },
+] as const
 
 function LoginScreen() {
   const router = useRouter()
   const { user, status, signIn } = useSession()
   const expiredHandled = useRef(false)
 
+  // Gerbang dev-only: dropdown akun dummy hanya muncul bila env flag true.
+  const isDevLoginEnabled =
+    process.env.NEXT_PUBLIC_DEMO_ACC_LOGIN === 'true'
+
   const {
     register,
     handleSubmit,
     setError,
+    setValue,
     // RHF 7.88 tidak menyediakan `isPending`; `isSubmitting` adalah flag
     // pending yang aktif selama `onSubmit` berjalan — dipakai `loading` tombol.
     formState: { errors, isSubmitting },
@@ -80,9 +120,22 @@ function LoginScreen() {
     router.replace('/login')
   }, [status, router])
 
+  const handleDevAccountChange = (email: string): void => {
+    if (email === '') {
+      return
+    }
+    const account = DEV_DUMMY_ACCOUNTS.find((item) => item.email === email)
+    setValue('email', email, { shouldValidate: true })
+    setValue('password', account && 'password' in account ? account.password : DEV_DUMMY_PASSWORD, {
+      shouldValidate: true,
+    })
+  }
+
   const onSubmit = async (values: LoginFormValues): Promise<void> => {
     try {
-      const signedIn = await signIn(values.email, values.password)
+      const email =
+        values.email.trim() === DEV_LOGIN_USERNAME ? DEV_LOGIN_EMAIL : values.email
+      const signedIn = await signIn(email, values.password)
       router.replace(getLoginRedirect(signedIn.role))
     } catch (err: unknown) {
       // Permintaan tidak pernah sampai ke server -> pesan koneksi, BUKAN
@@ -188,6 +241,30 @@ function LoginScreen() {
             noValidate
             className="flex flex-col gap-3 max-[399px]:gap-2 min-[380px]:gap-3 min-[400px]:gap-4"
           >
+            {isDevLoginEnabled ? (
+              <div className="flex flex-col gap-2">
+                <label
+                  htmlFor="dev-dummy-account"
+                  className="text-label font-semibold text-ink"
+                >
+                  Akun dummy (dev)
+                </label>
+                <select
+                  id="dev-dummy-account"
+                  defaultValue=""
+                    onChange={(e) => handleDevAccountChange(e.target.value)}
+                  className="h-10 w-full rounded-control border border-border-mid bg-surface px-3 py-2 text-sm text-ink focus:border-brand focus:ring-4 focus:ring-brand/12 focus:outline-none"
+                >
+                  <option value="">Pilih akun dummy...</option>
+                  {DEV_DUMMY_ACCOUNTS.map((account) => (
+                    <option key={account.email} value={account.email}>
+                      {account.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+
             {/* Registrasi RHF disebar DULU, lalu props semantik eksplisit:
                 field ini wajib tetap textbox email biasa (tanpa list /
                 role=combobox / aria-haspopup yang dibaca sebagai combobox). */}
@@ -200,15 +277,16 @@ function LoginScreen() {
               placeholder="cth. nama@thc.net.id"
               fieldSize="gate"
               required
+              maxLength={EMAIL_MAX_LENGTH}
               error={errors.email?.message}
             />
-            <Input
+            <PasswordInput
               label="Kata Sandi"
-              type="password"
               autoComplete="current-password"
-              placeholder="Minimal 6 karakter"
+              placeholder="Minimal 8 karakter"
               fieldSize="gate"
               required
+              maxLength={PASSWORD_MAX_BYTES}
               error={errors.password?.message}
               {...register('password')}
             />
@@ -217,6 +295,16 @@ function LoginScreen() {
               Masuk
             </Button>
           </form>
+
+          <p className="mt-3 text-center text-sm text-ink-secondary">
+            Vendor / mitra baru?{' '}
+            <Link
+              href="/register"
+              className="font-semibold text-brand underline-offset-4 hover:underline"
+            >
+              Daftar sebagai Vendor/Mitra
+            </Link>
+          </p>
 
           <p className="mt-3 max-[399px]:mt-2 text-center text-xs leading-snug max-[399px]:leading-tight text-ink-muted">
             Dengan masuk, Anda menyetujui Syarat Layanan dan Kebijakan Privasi

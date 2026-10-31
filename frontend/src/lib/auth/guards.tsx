@@ -4,7 +4,7 @@ import { useEffect, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { CloudOff } from 'lucide-react';
 import { consumeSessionExpiredFlag, useSession } from '@/lib/auth/session';
-import { getLoginRedirect } from '@/lib/auth/capabilities';
+import { getLoginRedirect, isSuperAdminRole } from '@/lib/auth/capabilities';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import type { Role } from '@/lib/api/types';
@@ -97,6 +97,15 @@ export function RequireAuth({ children }: { children: ReactNode }): React.JSX.El
   return <>{children}</>;
 }
 
+/**
+ * `true` iff peran boleh melewati gate `allow`: cocok langsung, atau
+ * `dev-superadmin` yang tersembunyi saat gate memuat `super_admin`.
+ */
+export function roleSatisfies(role: Role, allow: readonly Role[]): boolean {
+  if (allow.includes(role)) return true;
+  return isSuperAdminRole(role) && allow.includes('super_admin');
+}
+
 interface RequireRoleProps {
   allow: readonly Role[];
   children: ReactNode;
@@ -114,7 +123,7 @@ export function RequireRole({ allow, children }: RequireRoleProps): React.JSX.El
   const unauthenticated = status === 'unauthenticated';
   const role: Role | null = user?.role ?? null;
   const denied =
-    status === 'authenticated' && role !== null && !allow.includes(role);
+    status === 'authenticated' && role !== null && !roleSatisfies(role, allow);
   const home: string = role !== null ? getLoginRedirect(role) : '/dashboard';
 
   useEffect(() => {
@@ -154,5 +163,5 @@ export function useRequireRole(allow: readonly Role[]): Role | null {
   if (status !== 'authenticated' || user === null) {
     return null;
   }
-  return allow.includes(user.role) ? user.role : null;
+  return roleSatisfies(user.role, allow) ? user.role : null;
 }
