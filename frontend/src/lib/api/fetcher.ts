@@ -7,7 +7,7 @@
  */
 
 import type { UploadCategory, UploadFileResult } from '@/lib/api/types';
-import { prepareUpload } from '@/lib/uploads/compressImage';
+import { prepareUpload, type PrepareUploadOptions } from '@/lib/uploads/compressImage';
 
 /**
  * Basis URL API. Produksi menyajikan FE + BE di satu origin (reverse proxy
@@ -186,12 +186,14 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 export async function uploadFile(
   file: File,
   category: UploadCategory,
+  options?: PrepareUploadOptions,
 ): Promise<UploadFileResult> {
   // Dua langkah sebelum baris byte apa pun menyentuh jaringan: validasi ingest
   // 20 MB + MIME, kompresi foto (≤1600px, JPEG q0.82), lalu validasi stored
   // 5 MB pada hasil foto — plafon stored PDF ditangguhkan ke server. Pesan
-  // penolakan tetap bahasa Indonesia.
-  const prepared = await prepareUpload(file);
+  // penolakan tetap bahasa Indonesia. `options.compress === false` melewati
+  // kompresi untuk berkas yang sudah dioptimalkan pemanggil.
+  const prepared = await prepareUpload(file, options);
   if (!prepared.ok) {
     throw new ApiError(prepared.message, 400, 'VALIDATION_ERROR');
   }

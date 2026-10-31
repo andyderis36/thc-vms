@@ -19,8 +19,12 @@ export type ApiFailure = {
 
 export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 
-/** Peran pengguna (RBAC multi-cabang). */
-export type Role = 'super_admin' | 'admin' | 'security' | 'vendor';
+/**
+ * Peran pengguna (RBAC multi-cabang). `dev-superadmin` adalah peran tertinggi
+ * yang tersembunyi: lolos semua gate `super_admin`, tetapi tak pernah
+ * dirender sebagai opsi peran dan tak pernah muncul di daftar user.
+ */
+export type Role = 'super_admin' | 'dev-superadmin' | 'admin' | 'security' | 'vendor';
 
 /** Siklus hidup kunjungan. */
 export type VisitStatus =
@@ -308,6 +312,25 @@ export interface LoginResult {
   user: User;
 }
 
+/**
+ * `POST /auth/register` — pendaftaran Vendor/Mitra mandiri (publik, tanpa
+ * auth). Tanpa `role`/`location_id`: keduanya diturunkan server (vendor,
+ * tanpa cabang). Akun baru selalu `inactive` dan menunggu persetujuan
+ * superadmin; ikuti aturan vendor-wins yang sama (`vendor_id` menang bila
+ * keduanya ada, nama manual tidak masuk katalog).
+ */
+export interface RegisterVendorRequest {
+  name: string;
+  email: string;
+  password: string;
+  phone?: string;
+  /** NIK KTP tepat 16 digit angka (wajib untuk vendor). */
+  nik: string;
+  vendor_id?: string;
+  /** Nama perusahaan vendor ketikan manual (≤120). */
+  vendor_name?: string;
+}
+
 export interface CreateSecurityUserRequest {
   name: string;
   email: string;
@@ -341,17 +364,30 @@ export interface UpdateSecurityUserRequest {
 /**
  * `PATCH /auth/me` — profil sendiri. `phone` & `avatar_url` untuk semua peran;
  * `name` hanya diterima untuk `super_admin` (peran lain dijawab 403 FORBIDDEN).
- * Field lain ditolak backend 400 VALIDATION_ERROR.
+ * `new_password` bersama `current_password` memutar kata sandi sendiri untuk
+ * semua peran (termasuk `super_admin` dan `dev-superadmin` lewat jalur yang
+ * sama). Kunci `password` lama dan field lain ditolak backend 400
+ * VALIDATION_ERROR.
  */
 export interface UpdateSelfProfileRequest {
   name?: string;
   phone?: string;
   /** `null` menghapus avatar. */
   avatar_url?: string | null;
+  /** Kata sandi baru pengganti milik sendiri; wajib disertai `current_password`. */
+  new_password?: string;
+  /** Bukti kata sandi saat ini (wajib bila `new_password` dikirim). */
+  current_password?: string;
 }
 
 export interface CreateVisitRequest {
   location_id: string;
+  /**
+   * Nama vendor/mitra per kunjungan yang diketik manual (≤120, maks trim).
+   * Hanya bermakna untuk pengajuan admin/superadmin; vendor tetap memakai
+   * nama perusahaan per anggota. Absen/kosong = tanpa perusahaan kunjungan.
+   */
+  vendor_name?: string;
   purpose_ids: string[];
   /** "Tujuan lain" (≤200) — boleh terisi walau `purpose_ids` kosong. */
   purpose_note?: string | null;
