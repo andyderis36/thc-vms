@@ -19,7 +19,7 @@ func CheckUserDelete(actorID domain.UUID, found bool, target domain.ManagedUser)
 	if target.User.ID == actorID {
 		return forbidden("Tidak dapat menghapus akun sendiri.")
 	}
-	if target.Role == domain.RoleSuperAdmin {
+	if domain.IsSuperAdminRole(target.Role) {
 		return forbidden("Akun superadmin tidak dapat dihapus.")
 	}
 	return nil

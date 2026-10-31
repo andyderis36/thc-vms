@@ -101,16 +101,18 @@ LIMIT 500;
 -- projection is byte-for-byte the GetVisitByID one (visits.sql) so the same
 -- domain mapping applies; callers restore sweep order themselves.
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
     l.name AS location_name, l.type AS location_type,
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.id = ANY(sqlc.arg('visit_ids')::uuid[]);
 
 -- name: ListCheckInsByVisitIDs :many

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"thc-vms/backend/internal/domain"
+	"thc-vms/backend/internal/infrastructure/imagecompress"
 )
 
 // prepareTestPolicy loads the documented defaults so the test exercises the
@@ -179,6 +180,97 @@ func TestPrepareStoredContent_KeepsSmallPDFUntouched(t *testing.T) {
 	}
 }
 
+// Given a 2000x1200 PNG uploaded as a profile photo, when it is prepared, then
+// it is normalised to a 512x512 square and stored as image/jpeg regardless of
+// the declared PNG type.
+func TestPrepareStoredContent_NormalisesProfilePhotoToSquareJPEG(t *testing.T) {
+	p := prepareTestPolicy(t)
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, noisyImage(2000, 1200)); err != nil {
+		t.Fatalf("encode PNG fixture: %v", err)
+	}
+
+	content, mimeType, err := prepareStoredContent(domain.UploadRequest{
+		ContentType: "image/png",
+		Content:     bytes.NewReader(encoded.Bytes()),
+		ObjectKey:   CategoryProfilePhoto + "/8f1c1f2e-0000-4000-8000-000000000001",
+	}, p)
+	if err != nil {
+		t.Fatalf("prepare must accept a legal profile photo, got %v", err)
+	}
+	if mimeType != "image/jpeg" {
+		t.Fatalf("prepared profile MIME = %q, want image/jpeg", mimeType)
+	}
+	assertSquareSide(t, content, imagecompress.AvatarMaxEdgePx)
+}
+
+// Given corrupt, non-image bytes uploaded as a profile photo, when they are
+// prepared, then the upload is refused as a storage rejection and no content is
+// returned, because the strict avatar path must never fall back to the original.
+func TestPrepareStoredContent_RejectsCorruptProfilePhoto(t *testing.T) {
+	p := prepareTestPolicy(t)
+
+	content, _, err := prepareStoredContent(domain.UploadRequest{
+		ContentType: "image/png",
+		Content:     bytes.NewReader([]byte("this is not a decodable image")),
+		ObjectKey:   CategoryProfilePhoto + "/8f1c1f2e-0000-4000-8000-000000000001",
+	}, p)
+	if !errors.Is(err, domain.ErrStorageRejected) {
+		t.Fatalf("corrupt profile photo must satisfy errors.Is(err, domain.ErrStorageRejected), got %v", err)
+	}
+	if content != nil {
+		t.Fatalf("a refused profile photo must return no content, got %d bytes", len(content))
+	}
+}
+
+// Given an already compliant 512x512 JPEG with no EXIF orientation, when it is
+// uploaded as a profile photo, then it is stored byte-identical as image/jpeg.
+func TestPrepareStoredContent_PassesThroughCompliantAvatar(t *testing.T) {
+	p := prepareTestPolicy(t)
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, noisyImage(imagecompress.AvatarMaxEdgePx, imagecompress.AvatarMaxEdgePx), &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatalf("encode avatar fixture: %v", err)
+	}
+
+	content, mimeType, err := prepareStoredContent(domain.UploadRequest{
+		ContentType: "image/jpeg",
+		Content:     bytes.NewReader(encoded.Bytes()),
+		ObjectKey:   CategoryProfilePhoto + "/8f1c1f2e-0000-4000-8000-000000000001",
+	}, p)
+	if err != nil {
+		t.Fatalf("prepare must accept a compliant avatar, got %v", err)
+	}
+	if mimeType != "image/jpeg" {
+		t.Fatalf("prepared profile MIME = %q, want image/jpeg", mimeType)
+	}
+	if !bytes.Equal(content, encoded.Bytes()) {
+		t.Fatal("a compliant avatar must be stored byte-identical to the upload")
+	}
+}
+
+// Given the same 2000x1200 PNG uploaded under a non-profile category, when it
+// is prepared, then the generic 1600 px path still applies and PNG stays PNG.
+func TestPrepareStoredContent_KeepsIDCardAt1600(t *testing.T) {
+	p := prepareTestPolicy(t)
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, noisyImage(2000, 1200)); err != nil {
+		t.Fatalf("encode PNG fixture: %v", err)
+	}
+
+	content, mimeType, err := prepareStoredContent(domain.UploadRequest{
+		ContentType: "image/png",
+		Content:     bytes.NewReader(encoded.Bytes()),
+		ObjectKey:   CategoryIDCard + "/8f1c1f2e-0000-4000-8000-000000000001",
+	}, p)
+	if err != nil {
+		t.Fatalf("prepare must accept a legal ID card, got %v", err)
+	}
+	if mimeType != "image/png" {
+		t.Fatalf("prepared ID-card MIME = %q, want image/png", mimeType)
+	}
+	assertLongestSide(t, content, 1600)
+}
+
 // assertLongestSide decodes just the config to prove the re-encoded raster is
 // bounded without materialising the full image again.
 func assertLongestSide(t *testing.T, content []byte, limit int) {
@@ -189,5 +281,18 @@ func assertLongestSide(t *testing.T, content []byte, limit int) {
 	}
 	if longest := max(cfg.Width, cfg.Height); longest > limit {
 		t.Fatalf("prepared longest side = %d px, want <= %d", longest, limit)
+	}
+}
+
+// assertSquareSide decodes just the config to prove the stored avatar is a
+// square raster of exactly the expected side.
+func assertSquareSide(t *testing.T, content []byte, side int) {
+	t.Helper()
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("decode prepared avatar config: %v", err)
+	}
+	if cfg.Width != side || cfg.Height != side {
+		t.Fatalf("prepared avatar side = %dx%d, want %dx%d", cfg.Width, cfg.Height, side, side)
 	}
 }
