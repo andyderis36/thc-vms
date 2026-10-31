@@ -1490,7 +1490,7 @@ components:
         email:
           type: string
           format: email
-          example: admin@thc.local
+          example: admin@transhybrid.net.id
         password:
           type: string
           format: password
@@ -1585,7 +1585,7 @@ components:
           type: string
           format: email
           maxLength: 254
-          example: security.surabaya1@thc.local
+          example: security.surabaya1@transhybrid.net.id
         phone:
           type: string
           pattern: "^(?:62|0)[0-9]{9,15}$"

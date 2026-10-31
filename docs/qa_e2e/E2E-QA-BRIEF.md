@@ -45,16 +45,16 @@ Langkah siap uji lokal:
 
 Password semua akun: `Password123!`
 
-> Label di layar berbeda dari nama enum role: `security` tampil sebagai Pengawas, `admin` tampil sebagai Koordinator Wilayah. Email login dan path API tetap memakai pola lama (`security*@thc.com`, `/users/security`).
+> Label di layar berbeda dari nama enum role: `security` tampil sebagai Pengawas, `admin` tampil sebagai Koordinator Wilayah. Email login dan path API tetap memakai pola lama (`security*@transhybrid.net.id`, `/users/security`).
 
 | Role | Akun | Cakupan |
 |---|---|---|
-| super_admin | superadmin@thc.net.id | Global, HQ. Lintas cabang. Satu-satunya role yang boleh DELETE master. |
-| admin | admin1@thc.com | Pontianak HQ, koordinator cabang sendiri |
-| admin | admin2@thc.com | Sambas |
-| admin | admin3@thc.com | Mempawah |
-| admin | admin4@thc.com | Singkawang |
-| admin | admin5@thc.com | Aruk |
+| super_admin | superadmin@transhybrid.net.id | Global, HQ. Lintas cabang. Satu-satunya role yang boleh DELETE master. |
+| admin | admin1@transhybrid.net.id | Pontianak HQ, koordinator cabang sendiri |
+| admin | admin2@transhybrid.net.id | Sambas |
+| admin | admin3@transhybrid.net.id | Mempawah |
+| admin | admin4@transhybrid.net.id | Singkawang |
+| admin | admin5@transhybrid.net.id | Aruk |
 | security | security1a, security1b | HQ (kios cabang sendiri) |
 | security | security2a, security2b | Sambas |
 | security | security3a, security3b | Mempawah |
