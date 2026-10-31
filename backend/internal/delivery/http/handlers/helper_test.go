@@ -282,6 +282,8 @@ func (f *fakeStorage) PresignedURL(_ context.Context, _ string, _ time.Duration)
 	return f.presignURL, nil
 }
 
+func (f *fakeStorage) DeleteObject(_ context.Context, _ string) error { return nil }
+
 func (f *fakeStorage) ObjectKeyFromStoredURL(_ string) (string, error) {
 	if f.objectKeyErr != nil {
 		return "", f.objectKeyErr

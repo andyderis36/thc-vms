@@ -47,7 +47,7 @@ func TestMasterData_ReturnsCatalogues(t *testing.T) {
 		}
 	})
 
-	t.Run("purposes carry exactly id and name", func(t *testing.T) {
+	t.Run("purposes carry exactly id, name and is_active", func(t *testing.T) {
 		rec := serve(engine, "GET", "/purposes", nil, "")
 		mustStatus(t, rec, http.StatusOK)
 		items := decodeData[[]map[string]any](t, mustSuccess(t, rec))
@@ -56,6 +56,9 @@ func TestMasterData_ReturnsCatalogues(t *testing.T) {
 		}
 		for _, item := range items {
 			assertSubset(t, "Purpose", item)
+		}
+		if items[0]["is_active"] != true {
+			t.Fatalf("purpose is_active wrong: %v", items[0])
 		}
 	})
 

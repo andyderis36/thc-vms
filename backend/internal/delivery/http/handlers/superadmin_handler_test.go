@@ -215,14 +215,26 @@ type stubLocationAdmin struct {
 	countErr     error
 	deletedLocs  []domain.UUID
 	deleteLocErr error
+
+	// Purpose-path state: the write errors, the patches applied per id, the
+	// visit_purpose reference counts, and the deleted ids in order.
+	purposeCreateErr error
+	purposeUpdateErr error
+	purposeUpdatedTo map[domain.UUID]domain.PurposePatch
+	visitsAtPurpose  map[domain.UUID]int64
+	purposeCountErr  error
+	deletedPurposes  []domain.UUID
+	deletePurposeErr error
 }
 
 func newStubLocationAdmin(locations ...domain.Location) *stubLocationAdmin {
 	return &stubLocationAdmin{
-		stubMasterStore: stubMasterStore{locations: locations},
-		updatedTo:       map[domain.UUID]domain.LocationPatch{},
-		usersAt:         map[domain.UUID]int64{},
-		visitsAt:        map[domain.UUID]int64{},
+		stubMasterStore:  stubMasterStore{locations: locations},
+		updatedTo:        map[domain.UUID]domain.LocationPatch{},
+		usersAt:          map[domain.UUID]int64{},
+		visitsAt:         map[domain.UUID]int64{},
+		purposeUpdatedTo: map[domain.UUID]domain.PurposePatch{},
+		visitsAtPurpose:  map[domain.UUID]int64{},
 	}
 }
 
@@ -291,6 +303,73 @@ func (s *stubLocationAdmin) DeleteLocation(_ context.Context, id domain.UUID) er
 	return domain.ErrNotFound
 }
 
+// FindPurposeByID resolves one catalogue purpose, mirroring the adapter's
+// pgx.ErrNoRows mapping with ErrNotFound.
+func (s *stubLocationAdmin) FindPurposeByID(_ context.Context, id domain.UUID) (domain.Purpose, error) {
+	for _, purpose := range s.purposes {
+		if purpose.ID == id {
+			return purpose, nil
+		}
+	}
+	return domain.Purpose{}, domain.ErrNotFound
+}
+
+// CreatePurpose stores one catalogue purpose with a synthetic id.
+func (s *stubLocationAdmin) CreatePurpose(_ context.Context, purpose domain.Purpose) (domain.Purpose, error) {
+	if s.purposeCreateErr != nil {
+		return domain.Purpose{}, s.purposeCreateErr
+	}
+	purpose.ID = "pur-new"
+	s.purposes = append(s.purposes, purpose)
+	return purpose, nil
+}
+
+// UpdatePurpose applies the patch onto the stored row. A missing id is
+// ErrNotFound, mirroring the adapter.
+func (s *stubLocationAdmin) UpdatePurpose(_ context.Context, id domain.UUID, patch domain.PurposePatch) (domain.Purpose, error) {
+	if s.purposeUpdateErr != nil {
+		return domain.Purpose{}, s.purposeUpdateErr
+	}
+	for i, purpose := range s.purposes {
+		if purpose.ID == id {
+			s.purposeUpdatedTo[id] = patch
+			if patch.Name != nil {
+				purpose.Name = *patch.Name
+			}
+			if patch.IsActive != nil {
+				purpose.IsActive = *patch.IsActive
+			}
+			s.purposes[i] = purpose
+			return purpose, nil
+		}
+	}
+	return domain.Purpose{}, domain.ErrNotFound
+}
+
+// CountVisitsByPurpose answers the DELETE /purposes/:id pre-check.
+func (s *stubLocationAdmin) CountVisitsByPurpose(_ context.Context, id domain.UUID) (int64, error) {
+	if s.purposeCountErr != nil {
+		return 0, s.purposeCountErr
+	}
+	return s.visitsAtPurpose[id], nil
+}
+
+// DeletePurpose records the hard removal. A missing id is ErrNotFound,
+// mirroring the MapError pgx.ErrNoRows mapping of the PostgreSQL adapter.
+func (s *stubLocationAdmin) DeletePurpose(_ context.Context, id domain.UUID) error {
+	if s.deletePurposeErr != nil {
+		return s.deletePurposeErr
+	}
+	for i, purpose := range s.purposes {
+		if purpose.ID == id {
+			s.deletedPurposes = append(s.deletedPurposes, id)
+			s.purposes = append(s.purposes[:i], s.purposes[i+1:]...)
+			return nil
+		}
+	}
+	return domain.ErrNotFound
+}
+
 func managedAccount(id, email string, role domain.RoleName, loc *string) domain.ManagedUser {
 	var locationID *domain.UUID
 	if loc != nil {
@@ -314,10 +393,13 @@ func managedAccount(id, email string, role domain.RoleName, loc *string) domain.
 func newSuperAdminEngine(users *stubManagedUsers, locations *stubLocationAdmin, role domain.RoleName) *gin.Engine {
 	engine := gin.New()
 	engine.Use(withActor(role, ""))
-	h := handlers.NewSuperAdminHandler(users, locations, newStubVisitRepos(), "role-admin", "role-vendor")
+	h := handlers.NewSuperAdminHandler(users, locations, locations, newStubVisitRepos(), "role-admin", "role-vendor")
 	engine.POST("/locations", h.CreateLocation)
 	engine.PATCH("/locations/:id", h.UpdateLocation)
 	engine.DELETE("/locations/:id", h.DeleteLocation)
+	engine.POST("/purposes", h.CreatePurpose)
+	engine.PATCH("/purposes/:id", h.UpdatePurpose)
+	engine.DELETE("/purposes/:id", h.DeletePurpose)
 	engine.GET("/users", h.ListUsers)
 	engine.POST("/users", h.CreateUser)
 	engine.PATCH("/users/:id/status", h.UpdateUserStatus)
@@ -335,12 +417,18 @@ func TestSuperAdmin_NonSuperAdminIsForbidden(t *testing.T) {
 	calls := []struct{ method, path, body string }{
 		{"POST", "/locations", `{"name":"X","type":"cabang"}`},
 		{"PATCH", "/locations/loc-1", `{"name":"Y"}`},
+		{"POST", "/purposes", `{"name":"X"}`},
+		{"PATCH", "/purposes/pur-1", `{"name":"Y"}`},
 		{"GET", "/users", ""},
 		// POST /users intentionally absent: since PRD §4.1 it is conditionally
 		// open (admin+vendor → 201 with a custom message on refusal, not the
 		// sentinel). TestSuperAdmin_AdminMayRegisterVendorOnly pins that matrix.
 		{"PATCH", "/users/some-id/status", `{"status":"inactive"}`},
 		{"PATCH", "/users/some-id", `{"name":"X"}`},
+		// Approval (activate) and rejection (delete) stay superadmin-only:
+		// a branch admin can register vendors via POST /users but can never
+		// flip their status or remove them.
+		{"DELETE", "/users/some-id", ""},
 	}
 	for _, tc := range calls {
 		resp := serveJSON(engine, tc.method, tc.path, tc.body)

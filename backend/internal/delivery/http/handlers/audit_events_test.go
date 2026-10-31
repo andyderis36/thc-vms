@@ -55,10 +55,13 @@ func (s *auditVisitStore) FindByID(_ context.Context, id domain.UUID) (domain.Vi
 func newAuditEngine(users *stubManagedUsers, locations *stubLocationAdmin, visits domain.VisitRepository, audit *fakeAuditRepo) *gin.Engine {
 	engine := gin.New()
 	engine.Use(withActor(domain.RoleSuperAdmin, ""))
-	h := handlers.NewSuperAdminHandler(users, locations, visits, "role-admin", "role-vendor").WithAudit(audit)
+	h := handlers.NewSuperAdminHandler(users, locations, locations, visits, "role-admin", "role-vendor").WithAudit(audit)
 	engine.POST("/locations", h.CreateLocation)
 	engine.PATCH("/locations/:id", h.UpdateLocation)
 	engine.DELETE("/locations/:id", h.DeleteLocation)
+	engine.POST("/purposes", h.CreatePurpose)
+	engine.PATCH("/purposes/:id", h.UpdatePurpose)
+	engine.DELETE("/purposes/:id", h.DeletePurpose)
 	engine.POST("/users", h.CreateUser)
 	engine.PATCH("/users/:id/status", h.UpdateUserStatus)
 	engine.PATCH("/users/:id", h.UpdateUser)
@@ -124,6 +127,80 @@ func TestAudit_UserUpdateEmitsChangedFields(t *testing.T) {
 	if entry.Metadata["fields"] != "name" {
 		t.Fatalf("user.update fields = %q, want name", entry.Metadata["fields"])
 	}
+	// The rename keeps the fields CSV byte-identical and gains the flat
+	// before/after pair for the same member (empty sides render as "—"
+	// downstream; both sides here are populated).
+	if entry.Metadata["before.name"] != "Akun target-1" {
+		t.Fatalf("before.name = %q, want the stored pre-rename name", entry.Metadata["before.name"])
+	}
+	if entry.Metadata["after.name"] != "Nama Baru" {
+		t.Fatalf("after.name = %q, want the patched name", entry.Metadata["after.name"])
+	}
+}
+
+// TestAudit_UserUpdateMaxFieldsStayWithinCap pins the additive metadata
+// budget for user.update. The managed-user patch carries eight members; the
+// password member never takes a value pair, so the reachable worst case is
+// this seven-label vendor update: 6 pairs (12 keys) + fields = 13, and in
+// no case more than 7 pairs + fields = 15 keys — one under the domain's
+// 16-key SanitizeMetadata cap.
+func TestAudit_UserUpdateMaxFieldsStayWithinCap(t *testing.T) {
+	users := newStubManagedUsers(managedAccount("vendor-1", "tek@vendor.local", domain.RoleVendor, nil))
+	audit := &fakeAuditRepo{}
+	engine := newAuditEngine(users, newStubLocationAdmin(), newStubVisitRepos(), audit)
+
+	// vendor_id wins over the simultaneous vendor_name, so after.vendor_name
+	// stays empty (renders as "—" downstream) while both labels still ride
+	// in the fields CSV — the maximum label count any role can reach.
+	rec := serveJSON(engine, "PATCH", "/users/vendor-1",
+		`{"name":"Teknisi Baru","email":"baru@vendor.local","phone":"081234567890",`+
+			`"nik":"3578010200000001","vendor_id":"22222222-2222-2222-2222-222222222222",`+
+			`"vendor_name":"PT Subkon Mandiri","password":"Secret123!"}`)
+	mustStatus(t, rec, http.StatusOK)
+	entry := mustAuditEntry(t, audit, domain.AuditActionUserUpdate, domain.AuditEntityUser)
+
+	const wantFields = "name,email,phone,nik,vendor_id,vendor_name,password"
+	if entry.Metadata["fields"] != wantFields {
+		t.Fatalf("fields = %q, want %q (byte-identical CSV)", entry.Metadata["fields"], wantFields)
+	}
+	if len(entry.Metadata) > 15 {
+		t.Fatalf("metadata carries %d keys, want at most 15 (7 pairs + fields <= 16-cap)", len(entry.Metadata))
+	}
+	for _, field := range []string{"name", "email", "phone", "nik", "vendor_id", "vendor_name"} {
+		if _, ok := entry.Metadata["before."+field]; !ok {
+			t.Errorf("missing before.%s in %v", field, entry.Metadata)
+		}
+		if _, ok := entry.Metadata["after."+field]; !ok {
+			t.Errorf("missing after.%s in %v", field, entry.Metadata)
+		}
+	}
+	// The password member contributes its fields label only: no value pair,
+	// never the hash (mustAuditEntry also fails on any secret-shaped key).
+	if _, ok := entry.Metadata["before.password"]; ok {
+		t.Fatal("before.password must never be emitted")
+	}
+	if _, ok := entry.Metadata["after.password"]; ok {
+		t.Fatal("after.password must never be emitted")
+	}
+}
+
+// TestAudit_LegacyFieldsOnlyMetadataStillPasses pins that trail rows written
+// before the additive before/after wave (fields CSV only) survive the
+// sanitisation boundary untouched: the CSV stays byte-identical and no pair
+// keys are invented for them.
+func TestAudit_LegacyFieldsOnlyMetadataStillPasses(t *testing.T) {
+	legacy := domain.AuditEntry{
+		Action:   domain.AuditActionUserUpdate,
+		Entity:   domain.AuditEntityUser,
+		Metadata: map[string]string{"fields": "name,email"},
+	}
+	kept := domain.TruncateAuditEntry(legacy)
+	if kept.Metadata["fields"] != "name,email" {
+		t.Fatalf("fields = %q, want the legacy CSV untouched", kept.Metadata["fields"])
+	}
+	if len(kept.Metadata) != 1 {
+		t.Fatalf("metadata = %v, want exactly the legacy fields key", kept.Metadata)
+	}
 }
 
 func TestAudit_UserStatusEmitsFromTo(t *testing.T) {
@@ -172,6 +249,12 @@ func TestAudit_LocationLifecycleEmitsTrail(t *testing.T) {
 	if entry.Metadata["fields"] != "name" {
 		t.Fatalf("location.update fields = %q, want name", entry.Metadata["fields"])
 	}
+	if entry.Metadata["before.name"] != "POP Lama" {
+		t.Fatalf("before.name = %q, want the stored pre-update name", entry.Metadata["before.name"])
+	}
+	if entry.Metadata["after.name"] != "POP Baru Nama" {
+		t.Fatalf("after.name = %q, want the patched name", entry.Metadata["after.name"])
+	}
 
 	audit.entries = nil
 	rec = serve(engine, "DELETE", "/locations/loc-1", nil, "")
@@ -179,6 +262,30 @@ func TestAudit_LocationLifecycleEmitsTrail(t *testing.T) {
 	entry = mustAuditEntry(t, audit, domain.AuditActionLocationDelete, domain.AuditEntityLocation)
 	if entry.Metadata["name"] != "POP Baru Nama" {
 		t.Fatalf("location.delete metadata = %v", entry.Metadata)
+	}
+}
+
+// TestAudit_PurposeUpdateEmitsBeforeAfterPairs pins purpose.update: the
+// fields CSV stays byte-identical while each changed member gains its flat
+// before/after pair, bools rendered as "true"/"false" strings.
+func TestAudit_PurposeUpdateEmitsBeforeAfterPairs(t *testing.T) {
+	users := newStubManagedUsers()
+	locations := newStubLocationAdmin()
+	locations.purposes = []domain.Purpose{{ID: "pur-1", Name: "Survey", IsActive: true}}
+	audit := &fakeAuditRepo{}
+	engine := newAuditEngine(users, locations, newStubVisitRepos(), audit)
+
+	rec := serveJSON(engine, "PATCH", "/purposes/pur-1", `{"name":"Survey Lanjutan","is_active":false}`)
+	mustStatus(t, rec, http.StatusOK)
+	entry := mustAuditEntry(t, audit, domain.AuditActionPurposeUpdate, domain.AuditEntityPurpose)
+	if entry.Metadata["fields"] != "name,is_active" {
+		t.Fatalf("purpose.update fields = %q, want name,is_active", entry.Metadata["fields"])
+	}
+	if entry.Metadata["before.name"] != "Survey" || entry.Metadata["after.name"] != "Survey Lanjutan" {
+		t.Fatalf("name pair = %q -> %q", entry.Metadata["before.name"], entry.Metadata["after.name"])
+	}
+	if entry.Metadata["before.is_active"] != "true" || entry.Metadata["after.is_active"] != "false" {
+		t.Fatalf("is_active pair = %q -> %q", entry.Metadata["before.is_active"], entry.Metadata["after.is_active"])
 	}
 }
 
@@ -213,7 +320,34 @@ func TestAudit_SecurityCreateEmitsUserCreate(t *testing.T) {
 	mustStatus(t, rec, http.StatusCreated)
 	entry := mustAuditEntry(t, audit, domain.AuditActionUserCreate, domain.AuditEntityUser)
 	if entry.Metadata["role"] != "security" {
-		t.Fatalf("security create role = %v", entry.Metadata)
+		t.Fatalf("security create role = %q", entry.Metadata["role"])
+	}
+}
+
+// TestAudit_SecurityUpdateEmitsBeforeAfterPairs pins the branch-admin
+// reachable user.update mirror in user_handler.go: same action, same
+// byte-identical fields CSV, same additive pair shape as the superadmin
+// writer.
+func TestAudit_SecurityUpdateEmitsBeforeAfterPairs(t *testing.T) {
+	store := newStubSecurityDeleteStore(securityUser("sec-1", "s1@thc.local", "loc-own"))
+	master := &stubMasterStore{locations: []domain.Location{{ID: "loc-own", Name: "Cabang Sendiri"}}}
+	audit := &fakeAuditRepo{}
+	engine := gin.New()
+	engine.Use(withActor(domain.RoleAdmin, "loc-own"))
+	h := handlers.NewUserHandler(store, master, "role-security").WithAudit(audit)
+	engine.PATCH("/users/security/:id", h.UpdateSecurity)
+
+	rec := serveJSON(engine, "PATCH", "/users/security/sec-1", `{"name":"Pengawas Baru"}`)
+	mustStatus(t, rec, http.StatusOK)
+	entry := mustAuditEntry(t, audit, domain.AuditActionUserUpdate, domain.AuditEntityUser)
+	if entry.Metadata["fields"] != "name" {
+		t.Fatalf("security user.update fields = %q, want name", entry.Metadata["fields"])
+	}
+	if entry.Metadata["before.name"] != "Pengawas sec-1" {
+		t.Fatalf("before.name = %q, want the stored pre-edit name", entry.Metadata["before.name"])
+	}
+	if entry.Metadata["after.name"] != "Pengawas Baru" {
+		t.Fatalf("after.name = %q, want the patched name", entry.Metadata["after.name"])
 	}
 }
 
@@ -235,7 +369,7 @@ func TestAudit_UserAgentTravelsToTheTrail(t *testing.T) {
 	audit := &fakeAuditRepo{}
 	engine := gin.New()
 	engine.Use(withActor(domain.RoleSuperAdmin, ""))
-	h := handlers.NewSuperAdminHandler(users, newStubLocationAdmin(), newStubVisitRepos(), "role-admin", "role-vendor").WithAudit(audit)
+	h := handlers.NewSuperAdminHandler(users, newStubLocationAdmin(), newStubLocationAdmin(), newStubVisitRepos(), "role-admin", "role-vendor").WithAudit(audit)
 	engine.DELETE("/users/:id", h.DeleteUser)
 
 	req := httptest.NewRequest(http.MethodDelete, "/users/target-1", nil)
@@ -265,7 +399,7 @@ func TestAudit_StatusTransitionsEmitNothing(t *testing.T) {
 			t.Fatalf("audit event %q overlaps the status lifecycle", event)
 		}
 	}
-	if len(domain.AuditMVPEvents()) != 10 {
+	if len(domain.AuditMVPEvents()) != 13 {
 		t.Fatalf("event set drifted: %v", domain.AuditMVPEvents())
 	}
 }

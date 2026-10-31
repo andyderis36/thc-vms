@@ -47,7 +47,7 @@ func TestValidateUserNIKMatrix(t *testing.T) {
 			}
 		}
 	}
-	for _, role := range []domain.RoleName{domain.RoleSecurity, domain.RoleSuperAdmin} {
+	for _, role := range []domain.RoleName{domain.RoleSecurity, domain.RoleSuperAdmin, domain.RoleDevSuperAdmin} {
 		if err := superadmin.ValidateUserNIK(role, ""); err != nil {
 			t.Errorf("role %s without a NIK: %v", role, err)
 		}

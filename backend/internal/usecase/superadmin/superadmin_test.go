@@ -109,6 +109,7 @@ func TestValidateManagedUserCreate(t *testing.T) {
 		{"admin with vendor", superadmin.ManagedUserInput{Name: base.Name, Email: base.Email, Password: base.Password, Role: domain.RoleAdmin, LocationID: &loc, VendorID: &vendor}},
 		{"vendor with branch", superadmin.ManagedUserInput{Name: base.Name, Email: base.Email, Password: base.Password, Role: domain.RoleVendor, LocationID: &loc}},
 		{"super_admin refused", superadmin.ManagedUserInput{Name: base.Name, Email: base.Email, Password: base.Password, Role: domain.RoleSuperAdmin}},
+		{"dev-superadmin refused", superadmin.ManagedUserInput{Name: base.Name, Email: base.Email, Password: base.Password, Role: domain.RoleDevSuperAdmin}},
 		{"security refused", superadmin.ManagedUserInput{Name: base.Name, Email: base.Email, Password: base.Password, Role: domain.RoleSecurity, LocationID: &loc}},
 		{"unknown role", superadmin.ManagedUserInput{Name: base.Name, Email: base.Email, Password: base.Password, Role: "owner"}},
 	}
@@ -133,6 +134,7 @@ func TestValidateUserListRole(t *testing.T) {
 		}
 	}
 	mustAppError(t, func() error { _, err := superadmin.ValidateUserListRole("super_admin"); return err }(), 400, "VALIDATION_ERROR")
+	mustAppError(t, func() error { _, err := superadmin.ValidateUserListRole("dev-superadmin"); return err }(), 400, "VALIDATION_ERROR")
 	mustAppError(t, func() error { _, err := superadmin.ValidateUserListRole("owner"); return err }(), 400, "VALIDATION_ERROR")
 }
 
@@ -170,4 +172,12 @@ func TestCheckUserStatusChange(t *testing.T) {
 	}
 	err = superadmin.CheckUserStatusChange(actor, true, otherSuperAdmin, domain.UserStatusInactive)
 	mustAppError(t, err, 403, "FORBIDDEN")
+
+	hiddenDev := domain.ManagedUser{
+		User: domain.User{ID: "target-dev", Status: domain.UserStatusActive},
+		Role: domain.RoleDevSuperAdmin,
+	}
+	mustAppError(t,
+		superadmin.CheckUserStatusChange(actor, true, hiddenDev, domain.UserStatusInactive),
+		403, "FORBIDDEN")
 }

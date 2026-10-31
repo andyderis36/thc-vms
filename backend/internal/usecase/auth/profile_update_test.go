@@ -39,23 +39,36 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, id domain.UUID, update d
 	user.Name = update.Name
 	user.Phone = update.Phone
 	user.AvatarURL = update.AvatarURL
+	if update.PasswordHash != "" {
+		user.PasswordHash = update.PasswordHash
+	}
 	f.users.byID[id] = user
 	return user, nil
 }
 
 // fakeSelfStorage mirrors the MinIO adapter's own-bucket reversal rule for the
 // profile photo namespace. It no longer mints read URLs: avatar reads stream
-// through GET /avatars/{id}.
-type fakeSelfStorage struct{}
+// through GET /avatars/{id}. Every DeleteObject call is recorded (keys in call
+// order) so delete-on-replace tests can pin exactly what was reclaimed;
+// deleteErr forces the best-effort failure path.
+type fakeSelfStorage struct {
+	deleted   []string
+	deleteErr error
+}
 
-func (fakeSelfStorage) EnsureBucket(_ context.Context) error { return nil }
+func (f *fakeSelfStorage) EnsureBucket(_ context.Context) error { return nil }
 
-func (fakeSelfStorage) Upload(_ context.Context, _ domain.UploadRequest) (domain.UploadResult, error) {
+func (f *fakeSelfStorage) Upload(_ context.Context, _ domain.UploadRequest) (domain.UploadResult, error) {
 	return domain.UploadResult{}, domain.ErrStorageRejected
 }
 
-func (fakeSelfStorage) PresignedURL(_ context.Context, _ string, _ time.Duration) (string, error) {
+func (f *fakeSelfStorage) PresignedURL(_ context.Context, _ string, _ time.Duration) (string, error) {
 	return "", domain.ErrNotFound
+}
+
+func (f *fakeSelfStorage) DeleteObject(_ context.Context, key string) error {
+	f.deleted = append(f.deleted, key)
+	return f.deleteErr
 }
 
 func (f *fakeSelfStorage) ObjectKeyFromStoredURL(raw string) (string, error) {
@@ -76,6 +89,8 @@ func roleIDFor(role domain.RoleName) domain.UUID {
 	switch role {
 	case domain.RoleSuperAdmin:
 		return "role-superadmin"
+	case domain.RoleDevSuperAdmin:
+		return "role-devsuperadmin"
 	case domain.RoleAdmin:
 		return "role-admin"
 	case domain.RoleSecurity:
@@ -294,13 +309,15 @@ func TestUpdateSelf_RejectsInvalidAvatarURL(t *testing.T) {
 }
 
 // TestUpdateSelf_ClearAvatarResolvesToEmpty proves the explicit clear flag
-// reaches the repository as "" (SQL NULL in the adapter).
+// reaches the repository as "" (SQL NULL in the adapter), and that the object
+// behind the blanked photo is reclaimed after the commit.
 func TestUpdateSelf_ClearAvatarResolvesToEmpty(t *testing.T) {
 	users, user := seedSelfUser(t, domain.RoleSecurity)
 	user.AvatarURL = selfAvatarURL(user.ID)
 	users.byID[user.ID] = user
 	profiles := &fakeProfiles{users: users}
-	svc := selfService(users, profiles, &fakeSelfStorage{})
+	storage := &fakeSelfStorage{}
+	svc := selfService(users, profiles, storage)
 
 	got, err := svc.UpdateSelf(context.Background(),
 		SelfIdentity{UserID: user.ID, Role: domain.RoleSecurity},
@@ -316,6 +333,10 @@ func TestUpdateSelf_ClearAvatarResolvesToEmpty(t *testing.T) {
 	}
 	if got.AvatarURL != "" {
 		t.Fatalf("response avatar = %q, want empty", got.AvatarURL)
+	}
+	wantKey := domain.ProfilePhotoOwnerPrefix(user.ID) + "avatar.jpg"
+	if len(storage.deleted) != 1 || storage.deleted[0] != wantKey {
+		t.Fatalf("deleted = %v, want [%q]", storage.deleted, wantKey)
 	}
 }
 
@@ -354,6 +375,10 @@ func TestUpdateSelf_PhoneValidationAndNormalisation(t *testing.T) {
 		{"kosong", "   ", "", true},
 		{"awalan internasional", "+62 812-3456-7890", "081234567890", false},
 		{"awalan lokal berspasi", "0812 3456 7890", "081234567890", false},
+		{"9 digit", "081234567", "", true},
+		{"10 digit", "0812345678", "0812345678", false},
+		{"16 digit", "0812345678901234", "0812345678901234", false},
+		{"17 digit", "08123456789012345", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -489,7 +514,7 @@ func TestMe_ReportsAvatarAPIPathAndEditableFields(t *testing.T) {
 	}
 }
 
-// TestMe_BlankAvatarStaysEmpty pins the no-photo contract: an account without
+// TestUpdateSelf_BlankAvatarStaysEmpty pins the no-photo contract: an account without
 // a stored avatar answers an empty avatar_url, never a path.
 func TestMe_BlankAvatarStaysEmpty(t *testing.T) {
 	users, user := seedSelfUser(t, domain.RoleVendor)
@@ -501,5 +526,104 @@ func TestMe_BlankAvatarStaysEmpty(t *testing.T) {
 	}
 	if got.AvatarURL != "" {
 		t.Fatalf("avatar_url = %q, want empty without a stored avatar", got.AvatarURL)
+	}
+}
+
+// TestUpdateSelf_ReplacedAvatarDeletesOldObject pins delete-on-replace: a
+// successful swap reclaims the object behind the previous photo and never
+// touches the object the new URL points at.
+func TestUpdateSelf_ReplacedAvatarDeletesOldObject(t *testing.T) {
+	users, user := seedSelfUser(t, domain.RoleVendor)
+	user.AvatarURL = selfAvatarURL(user.ID)
+	users.byID[user.ID] = user
+	profiles := &fakeProfiles{users: users}
+	storage := &fakeSelfStorage{}
+	svc := selfService(users, profiles, storage)
+	newAvatar := selfStorageBase + "/" + domain.ProfilePhotoOwnerPrefix(user.ID) + "avatar-baru.jpg"
+
+	got, err := svc.UpdateSelf(context.Background(),
+		SelfIdentity{UserID: user.ID, Role: domain.RoleVendor},
+		SelfUpdate{AvatarURL: &newAvatar})
+	if err != nil {
+		t.Fatalf("UpdateSelf replace avatar: %v", err)
+	}
+	if profiles.calls != 1 {
+		t.Fatalf("UpdateProfile calls = %d, want 1", profiles.calls)
+	}
+	oldKey := domain.ProfilePhotoOwnerPrefix(user.ID) + "avatar.jpg"
+	newKey := domain.ProfilePhotoOwnerPrefix(user.ID) + "avatar-baru.jpg"
+	if len(storage.deleted) != 1 || storage.deleted[0] != oldKey {
+		t.Fatalf("deleted = %v, want [%q]", storage.deleted, oldKey)
+	}
+	for _, key := range storage.deleted {
+		if key == newKey {
+			t.Fatalf("new object %q must never be deleted", newKey)
+		}
+	}
+	if profiles.lastUpdate.AvatarURL != newAvatar {
+		t.Fatalf("stored avatar = %q, want %q", profiles.lastUpdate.AvatarURL, newAvatar)
+	}
+	if got.AvatarURL == "" {
+		t.Fatal("response avatar is empty, want the refreshed projection")
+	}
+}
+
+// TestUpdateSelf_SameKeyAvatarSkipsDelete pins the same-key guard: raw URLs
+// that differ only by the cache-busting version reverse to one object key, and
+// because PutObject already overwrote that key in place the delete must be
+// skipped entirely.
+func TestUpdateSelf_SameKeyAvatarSkipsDelete(t *testing.T) {
+	users, user := seedSelfUser(t, domain.RoleAdmin)
+	stored := selfAvatarURL(user.ID)
+	user.AvatarURL = stored
+	users.byID[user.ID] = user
+	profiles := &fakeProfiles{users: users}
+	storage := &fakeSelfStorage{}
+	svc := selfService(users, profiles, storage)
+	versioned := stored + "?v=" + avatarVersionOf(stored)
+
+	if _, err := svc.UpdateSelf(context.Background(),
+		SelfIdentity{UserID: user.ID, Role: domain.RoleAdmin},
+		SelfUpdate{AvatarURL: &versioned}); err != nil {
+		t.Fatalf("UpdateSelf same-key avatar: %v", err)
+	}
+	if profiles.calls != 1 {
+		t.Fatalf("UpdateProfile calls = %d, want 1", profiles.calls)
+	}
+	if len(storage.deleted) != 0 {
+		t.Fatalf("deleted = %v, want zero deletes for a same-key replace", storage.deleted)
+	}
+}
+
+// TestUpdateSelf_AvatarDeleteFailureNeverFailsRequest proves the delete is
+// best-effort: a storage outage after the commit is logged and the caller
+// still gets a successful (HTTP 200) response with the new avatar stored.
+func TestUpdateSelf_AvatarDeleteFailureNeverFailsRequest(t *testing.T) {
+	users, user := seedSelfUser(t, domain.RoleAdmin)
+	user.AvatarURL = selfAvatarURL(user.ID)
+	users.byID[user.ID] = user
+	profiles := &fakeProfiles{users: users}
+	storage := &fakeSelfStorage{deleteErr: errors.New("minio unreachable")}
+	svc := selfService(users, profiles, storage)
+	newAvatar := selfStorageBase + "/" + domain.ProfilePhotoOwnerPrefix(user.ID) + "avatar-baru.jpg"
+
+	got, err := svc.UpdateSelf(context.Background(),
+		SelfIdentity{UserID: user.ID, Role: domain.RoleAdmin},
+		SelfUpdate{AvatarURL: &newAvatar})
+	if err != nil {
+		t.Fatalf("delete failure must not fail the request (HTTP 200): %v", err)
+	}
+	if profiles.calls != 1 {
+		t.Fatalf("UpdateProfile calls = %d, want 1", profiles.calls)
+	}
+	oldKey := domain.ProfilePhotoOwnerPrefix(user.ID) + "avatar.jpg"
+	if len(storage.deleted) != 1 || storage.deleted[0] != oldKey {
+		t.Fatalf("deleted = %v, want the attempt on [%q]", storage.deleted, oldKey)
+	}
+	if profiles.lastUpdate.AvatarURL != newAvatar {
+		t.Fatalf("stored avatar = %q, want %q despite the delete failure", profiles.lastUpdate.AvatarURL, newAvatar)
+	}
+	if got.AvatarURL == "" {
+		t.Fatal("response avatar is empty, want the refreshed projection")
 	}
 }

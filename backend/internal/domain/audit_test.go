@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-func TestAuditMVPEvents_IsAClosedSetOfTen(t *testing.T) {
+func TestAuditMVPEvents_IsAClosedSetOfThirteen(t *testing.T) {
 	events := AuditMVPEvents()
-	if len(events) != 10 {
-		t.Fatalf("MVP events = %d, want 10: %v", len(events), events)
+	if len(events) != 13 {
+		t.Fatalf("MVP events = %d, want 13: %v", len(events), events)
 	}
 	seen := map[string]bool{}
 	for _, event := range events {
@@ -26,6 +26,7 @@ func TestAuditMVPEvents_IsAClosedSetOfTen(t *testing.T) {
 		AuditActionLoginSuccess, AuditActionLoginFailed,
 		AuditActionUserCreate, AuditActionUserUpdate, AuditActionUserStatus, AuditActionUserDelete,
 		AuditActionLocationCreate, AuditActionLocationUpdate, AuditActionLocationDelete,
+		AuditActionPurposeCreate, AuditActionPurposeUpdate, AuditActionPurposeDelete,
 		AuditActionVisitDelete,
 	} {
 		if !seen[want] {

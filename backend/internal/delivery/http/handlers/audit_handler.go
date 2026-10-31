@@ -17,7 +17,12 @@ import (
 // history, and RequireRoles(super_admin) on the route is the only gate).
 // Role gating is defence in depth: the router mounts this behind
 // SuperAdminOnly, and List re-asserts the role so direct handler tests prove
-// the 403 without the middleware.
+// the 403 without the middleware. The hidden dev-superadmin passes the gate
+// like super_admin, but its rows never reach the wire: the repository drops
+// actor rows of the hidden role (and adjusts the total), and the frontend
+// audit page additionally drops any item whose actor cannot be resolved
+// through GET /users — which never lists the hidden account — so a stale
+// cached trail can never render it either.
 type AuditHandler struct {
 	audit domain.AuditRepository
 }

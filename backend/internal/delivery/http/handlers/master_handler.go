@@ -14,9 +14,9 @@ import (
 )
 
 // MasterHandler serves the catalogues the visit form consumes:
-// GET /locations and GET /purposes. Purposes always return active rows
-// only; locations default to active-only but honour ?active_only=false for
-// the super_admin console. Every location row carries its is_active flag.
+// GET /locations and GET /purposes. Both default to active rows only but
+// honour ?active_only=false for the super_admin console. Every location and
+// purpose row carries its is_active flag.
 type MasterHandler struct {
 	master domain.MasterDataRepository
 }
@@ -42,10 +42,12 @@ type masterLocationDTO struct {
 	IsActive bool   `json:"is_active"`
 }
 
-// masterPurposeDTO mirrors the openapi Purpose schema exactly: id and name.
+// masterPurposeDTO mirrors the openapi Purpose schema: id, name and the
+// is_active flag the super_admin console renders.
 type masterPurposeDTO struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	IsActive bool   `json:"is_active"`
 }
 
 // masterVendorDTO is the [{id, name}] company dropdown the vendor/admin forms
@@ -94,20 +96,33 @@ func (h *MasterHandler) ListLocations(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// ListPurposes serves GET /purposes with the active visit-reason catalogue.
+// ListPurposes serves GET /purposes with the visit-reason catalogue. The
+// ?active_only= query defaults to TRUE (backward compatible: the SCR-03
+// visit form keeps receiving the active-only catalogue); active_only=false
+// lists every row including deactivated ones so the super_admin console can
+// show and reactivate them. An unparseable value is 400.
 func (h *MasterHandler) ListPurposes(c *gin.Context) {
 	if _, ok := deliveryhttp.IdentityFrom(c); !ok {
 		response.Fail(c, domain.ErrUnauthorized)
 		return
 	}
-	purposes, err := h.master.ListPurposes(c.Request.Context(), true)
+	activeOnly := true
+	if raw := strings.TrimSpace(c.Query("active_only")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "active_only harus true atau false.")
+			return
+		}
+		activeOnly = parsed
+	}
+	purposes, err := h.master.ListPurposes(c.Request.Context(), activeOnly)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
 	out := make([]masterPurposeDTO, 0, len(purposes))
 	for _, p := range purposes {
-		out = append(out, masterPurposeDTO{ID: string(p.ID), Name: p.Name})
+		out = append(out, masterPurposeDTO{ID: string(p.ID), Name: p.Name, IsActive: p.IsActive})
 	}
 	response.OK(c, out)
 }

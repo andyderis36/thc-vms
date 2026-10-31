@@ -44,6 +44,7 @@ var (
 	_ domain.AuditRepository           = (*auditRepository)(nil)
 	_ domain.AuditedUserRepository     = (*userRepository)(nil)
 	_ domain.AuditedLocationRepository = (*masterRepository)(nil)
+	_ domain.AuditedPurposeRepository  = (*masterRepository)(nil)
 	_ domain.AuditedVisitRepository    = (*visitRepository)(nil)
 )
 
@@ -155,14 +156,46 @@ func appendInTxFunc(ctx context.Context, pool *pgxpool.Pool, tx pgx.Tx, entry do
 	return err
 }
 
+// hiddenActorIDs returns the user ids the trail must never expose: the hidden
+// dev-superadmin operator account(s). The role travels as a bound parameter,
+// never as interpolated SQL text. An empty map is the fast path: no hidden
+// account, no extra work, byte-for-byte the old behaviour.
+func hiddenActorIDs(ctx context.Context, pool *pgxpool.Pool) (map[domain.UUID]struct{}, error) {
+	rows, err := pool.Query(ctx, `SELECT u.id FROM users u JOIN role r ON r.id = u.role_id WHERE r.name = $1`, string(domain.RoleDevSuperAdmin))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	hidden := map[domain.UUID]struct{}{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		if ptr := domainUUIDPtr(id); ptr != nil {
+			hidden[*ptr] = struct{}{}
+		}
+	}
+	return hidden, rows.Err()
+}
+
 // List serves the filtered trail read with its companion count. Filters travel
 // as bound NULLable parameters (the audit.sql FILTER INVARIANT); pagination
-// defaults come from NormaliseAuditFilter.
+// defaults come from NormaliseAuditFilter. Rows written by the hidden
+// dev-superadmin account are dropped before the response, and the companion
+// total is reduced by exactly the hidden matches, so the {items,total}
+// envelope stays consistent. Frontend additionally drops any item whose actor
+// cannot be resolved through GET /users (which never lists the hidden
+// account): see the audit page users memo.
 func (r *auditRepository) List(ctx context.Context, filter domain.AuditFilter) ([]domain.AuditLog, int64, error) {
 	filter = domain.NormaliseAuditFilter(filter)
 	scope, err := pgNullUUIDPtr(filter.UserID)
 	if err != nil {
 		return nil, 0, err
+	}
+	hidden, err := hiddenActorIDs(ctx, r.pool)
+	if err != nil {
+		return nil, 0, MapError(err)
 	}
 	var entity, action, search pgtype.Text
 	if strings.TrimSpace(filter.Entity) != "" {
@@ -202,7 +235,36 @@ func (r *auditRepository) List(ctx context.Context, filter domain.AuditFilter) (
 	}
 	out := make([]domain.AuditLog, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, auditLogToDomain(row))
+		item := auditLogToDomain(row)
+		if item.UserID != nil {
+			if _, hide := hidden[*item.UserID]; hide {
+				continue
+			}
+		}
+		out = append(out, item)
+	}
+	if len(hidden) > 0 {
+		var hiddenTotal int64
+		for hid := range hidden {
+			hid := hid
+			hidScope, err := pgNullUUIDPtr(&hid)
+			if err != nil {
+				return nil, 0, err
+			}
+			n, err := q.CountAuditLogs(ctx, db.CountAuditLogsParams{
+				UserID:   hidScope,
+				Entity:   entity,
+				Action:   action,
+				Q:        search,
+				DateFrom: pgTimestamptz(filter.From),
+				DateTo:   pgTimestamptz(filter.To),
+			})
+			if err != nil {
+				return nil, 0, MapError(err)
+			}
+			hiddenTotal += n
+		}
+		total -= hiddenTotal
 	}
 	return out, total, nil
 }
@@ -487,6 +549,72 @@ func (r *masterRepository) DeleteLocationAudited(ctx context.Context, id domain.
 	return WithTx(ctx, r.pool, func(tx pgx.Tx) error {
 		q := db.New(r.pool).WithTx(tx)
 		if _, err := q.DeleteLocation(ctx, db.DeleteLocationParams{ID: parsed}); err != nil {
+			return MapError(err)
+		}
+		return appendInTxFunc(ctx, r.pool, tx, audit)
+	})
+}
+
+// CreatePurposeAudited persists one catalogue purpose and its purpose.create
+// audit row in ONE transaction (same InsertPurpose statement as
+// masterRepository.CreatePurpose).
+func (r *masterRepository) CreatePurposeAudited(ctx context.Context, purpose domain.Purpose, audit domain.AuditEntry) (domain.Purpose, error) {
+	var created domain.Purpose
+	err := WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		q := db.New(r.pool).WithTx(tx)
+		row, err := q.InsertPurpose(ctx, db.InsertPurposeParams{Name: purpose.Name})
+		if err != nil {
+			return MapError(err)
+		}
+		created = purposeRowToDomain(row)
+		return appendInTxFunc(ctx, r.pool, tx, audit)
+	})
+	if err != nil {
+		return domain.Purpose{}, err
+	}
+	return created, nil
+}
+
+// UpdatePurposeAudited applies one catalogue patch and its purpose.update
+// audit row in ONE transaction (same UpdatePurpose statement as
+// masterRepository.UpdatePurpose; nil members keep the stored columns).
+func (r *masterRepository) UpdatePurposeAudited(ctx context.Context, id domain.UUID, patch domain.PurposePatch, audit domain.AuditEntry) (domain.Purpose, error) {
+	parsed, err := fromDomainUUID(id)
+	if err != nil {
+		return domain.Purpose{}, err
+	}
+	var updated domain.Purpose
+	err = WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		q := db.New(r.pool).WithTx(tx)
+		row, err := q.UpdatePurpose(ctx, db.UpdatePurposeParams{
+			ID:       parsed,
+			Name:     patchMemberText(patch.Name),
+			IsActive: patchBool(patch.IsActive),
+		})
+		if err != nil {
+			return MapError(err)
+		}
+		updated = purposeRowToDomain(row)
+		return appendInTxFunc(ctx, r.pool, tx, audit)
+	})
+	if err != nil {
+		return domain.Purpose{}, err
+	}
+	return updated, nil
+}
+
+// DeletePurposeAudited removes one catalogue purpose row and its
+// purpose.delete audit row in ONE transaction (same DeletePurpose statement
+// as masterRepository.DeletePurpose; a raced reference is ErrConflict via
+// 23503).
+func (r *masterRepository) DeletePurposeAudited(ctx context.Context, id domain.UUID, audit domain.AuditEntry) error {
+	parsed, err := fromDomainUUID(id)
+	if err != nil {
+		return err
+	}
+	return WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		q := db.New(r.pool).WithTx(tx)
+		if _, err := q.DeletePurpose(ctx, db.DeletePurposeParams{ID: parsed}); err != nil {
 			return MapError(err)
 		}
 		return appendInTxFunc(ctx, r.pool, tx, audit)

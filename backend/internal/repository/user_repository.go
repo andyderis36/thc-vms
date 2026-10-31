@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -82,23 +83,52 @@ func (r *userRepository) FindByID(ctx context.Context, id domain.UUID) (domain.U
 // UpdateProfile stores the caller's own resolved profile fields and returns the
 // refreshed row. An empty phone or avatar is written as SQL NULL (mirroring
 // nikPtr); the generated statement re-reads the same joined projection as
-// GetUserByID, so the row maps through profileRowToUser unchanged.
+// GetUserByID, so the row maps through profileRowToUser unchanged. A non-empty
+// PasswordHash rotates the bcrypt hash in the same transaction (empty keeps
+// the stored hash); the plaintext password never reaches this adapter.
 func (r *userRepository) UpdateProfile(ctx context.Context, id domain.UUID, update domain.ProfileUpdate) (domain.User, error) {
 	parsed, err := fromDomainUUID(id)
 	if err != nil {
 		return domain.User{}, err
 	}
-	row, err := r.queries().UpdateUserProfile(ctx, db.UpdateUserProfileParams{
-		ID:        parsed,
-		Name:      update.Name,
-		Phone:     pgText(phonePtr(update.Phone)),
-		AvatarUrl: pgText(avatarPtr(update.AvatarURL)),
+	if update.PasswordHash == "" {
+		row, err := r.queries().UpdateUserProfile(ctx, db.UpdateUserProfileParams{
+			ID:        parsed,
+			Name:      update.Name,
+			Phone:     pgText(phonePtr(update.Phone)),
+			AvatarUrl: pgText(avatarPtr(update.AvatarURL)),
+		})
+		if err != nil {
+			return domain.User{}, MapError(err)
+		}
+		// UpdateUserProfileRow and GetUserByIDRow are the same projection, so the
+		// conversion keeps profileRowToUser the single source of row->domain.
+		return profileRowToUser(db.GetUserByIDRow(row)), nil
+	}
+	var row db.UpdateUserProfileRow
+	err = WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		queries := db.New(tx)
+		affected, err := queries.UpdateUserPasswordHash(ctx, db.UpdateUserPasswordHashParams{
+			PasswordHash: update.PasswordHash,
+			ID:           parsed,
+		})
+		if err != nil {
+			return MapError(err)
+		}
+		if affected == 0 {
+			return domain.ErrNotFound
+		}
+		row, err = queries.UpdateUserProfile(ctx, db.UpdateUserProfileParams{
+			ID:        parsed,
+			Name:      update.Name,
+			Phone:     pgText(phonePtr(update.Phone)),
+			AvatarUrl: pgText(avatarPtr(update.AvatarURL)),
+		})
+		return MapError(err)
 	})
 	if err != nil {
-		return domain.User{}, MapError(err)
+		return domain.User{}, err
 	}
-	// UpdateUserProfileRow and GetUserByIDRow are the same projection, so the
-	// conversion keeps profileRowToUser the single source of row->domain.
 	return profileRowToUser(db.GetUserByIDRow(row)), nil
 }
 
@@ -174,7 +204,10 @@ func (r *userRepository) UpdateLastLogin(ctx context.Context, id domain.UUID, _ 
 
 // ListSecurity returns the gate staff of one branch, or of every branch when
 // locationID is nil (super_admin only). The branch predicate lives in the
-// generated query as a bound parameter, never in Go string code.
+// generated query as a bound parameter, never in Go string code. The hidden
+// dev-superadmin account never surfaces here: rows carrying it are dropped
+// after the read (the role has no branch scope, so no SQL branch predicate
+// could express the exclusion without a second join).
 func (r *userRepository) ListSecurity(ctx context.Context, locationID *domain.UUID) ([]domain.User, error) {
 	scope, err := pgNullUUIDPtr(locationID)
 	if err != nil {
@@ -186,6 +219,9 @@ func (r *userRepository) ListSecurity(ctx context.Context, locationID *domain.UU
 	}
 	out := make([]domain.User, 0, len(rows))
 	for _, row := range rows {
+		if domain.RoleName(row.Role) == domain.RoleDevSuperAdmin {
+			continue
+		}
 		out = append(out, securityRowToUser(row))
 	}
 	return out, nil
@@ -219,6 +255,9 @@ func (r *userRepository) ListManagedUsers(ctx context.Context, filter domain.Use
 	}
 	out := make([]domain.ManagedUser, 0, len(rows))
 	for _, row := range rows {
+		if domain.RoleName(row.Role) == domain.RoleDevSuperAdmin {
+			continue
+		}
 		out = append(out, managedListRowToUser(row))
 	}
 	return out, nil
