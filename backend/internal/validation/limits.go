@@ -19,9 +19,11 @@ const (
 	// IDNumberMaxLength is the stored identity-document ceiling.
 	IDNumberMaxLength = 20
 	// PhonePattern is the Indonesian phone shape after normalization.
-	PhonePattern = `^(?:62|0)[0-9]{8,13}$`
+	PhonePattern = `^(?:62|0)[0-9]{9,15}$`
+	// PhoneMinLength is the minimum normalized phone digit count.
+	PhoneMinLength = 10
 	// PhoneMaxLength caps the normalized phone string.
-	PhoneMaxLength = 15
+	PhoneMaxLength = 16
 	// PasswordMinLength is the minimum password rune count.
 	PasswordMinLength = 8
 	// PasswordMaxBytes is bcrypt's hard input ceiling.
@@ -37,7 +39,9 @@ const (
 	// FacilityAddressMaxLength caps a facility address.
 	FacilityAddressMaxLength = 255
 	// FacilityCityMaxLength caps a facility city.
-	FacilityCityMaxLength = 255
+	FacilityCityMaxLength = 100
+	// PurposeNameMaxLength caps a visit-purpose catalogue name.
+	PurposeNameMaxLength = 100
 	// VisitIDInputMaxLength caps the manual visit-ID scanner input.
 	VisitIDInputMaxLength = 64
 	// BadgeCodeMaxLength caps a badge code.

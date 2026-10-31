@@ -36,8 +36,12 @@ func TestValidPhone(t *testing.T) {
 		{"landline number", "0211234567", true},
 		{"country code form", "+62 812-3456-7890", true},
 		{"letters only", "abcdefghij", false},
-		{"too many digits", "0812345678901234", false},
+		{"too many digits", "08123456789012345", false},
 		{"empty", "", false},
+		{"9 digits", "081234567", false},
+		{"10 digits", "0812345678", true},
+		{"16 digits", "0812345678901234", true},
+		{"17 digits", "08123456789012345", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

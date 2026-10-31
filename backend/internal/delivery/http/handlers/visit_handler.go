@@ -312,6 +312,14 @@ func checkCreateBody(body createVisitBody) string {
 	if validation.RuneLen(strings.TrimSpace(body.PurposeNote)) > validation.PurposeNoteMaxLength {
 		return "Tujuan lain kunjungan maksimal " + strconv.Itoa(validation.PurposeNoteMaxLength) + " karakter."
 	}
+	// Manual visit-level company (migration 000017): trimmed server-side by
+	// the usecase; the over-long case is rejected here with the FE-aligned
+	// wording, like the per-technician company below.
+	if body.VendorName != nil {
+		if validation.RuneLen(strings.TrimSpace(*body.VendorName)) > validation.VendorNameMaxLength {
+			return "Nama perusahaan vendor/mitra maksimal " + strconv.Itoa(validation.VendorNameMaxLength) + " karakter."
+		}
+	}
 	if validation.RuneLen(strings.TrimSpace(body.Notes)) > validation.TextMaxLength {
 		return "Catatan kunjungan maksimal " + strconv.Itoa(validation.TextMaxLength) + " karakter."
 	}
@@ -340,6 +348,9 @@ func checkCreateBody(body createVisitBody) string {
 		phone := strings.TrimSpace(visitor.Phone)
 		if phone == "" {
 			return "Nomor telepon pengunjung ke-" + strconv.Itoa(n) + " wajib diisi."
+		}
+		if validation.PhoneLengthViolation(phone) {
+			return "Nomor telepon pengunjung ke-" + strconv.Itoa(n) + " harus 10–16 digit angka."
 		}
 		if !validation.ValidPhone(phone) {
 			return "Nomor telepon pengunjung ke-" + strconv.Itoa(n) + " tidak valid."
