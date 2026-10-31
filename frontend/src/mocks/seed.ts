@@ -142,8 +142,8 @@ function buildSeed(): MockDb {
 
   /**
    * 26 akun demo skema baru (cermin kontrak BE paralel):
-   * 1 superadmin + 5 admin (`admin1..5@thc.com`) + 10 security
-   * (`security{N}A/B@thc.com`, N=1..5) + 10 Vendor/Mitra (`vendor{N}A/B@thc.com`).
+   * 1 superadmin + 5 admin (`admin1..5@transhybrid.net.id`) + 10 security
+   * (`security{N}A/B@transhybrid.net.id`, N=1..5) + 10 Vendor/Mitra (`vendor{N}A/B@transhybrid.net.id`).
    * NIK 16 digit wajib untuk admin/vendor, `null` untuk security/superadmin
    * (BE menolak NIK untuk keduanya). Password semua = DEMO_PASSWORD.
    */
@@ -151,7 +151,7 @@ function buildSeed(): MockDb {
     {
       id: demoUserId(1),
       name: 'Hendra Wijaya',
-      email: 'superadmin@thc.net.id',
+      email: 'superadmin@transhybrid.net.id',
       phone: '0811-3000-001',
       nik: null,
       role: 'super_admin',
@@ -174,7 +174,7 @@ function buildSeed(): MockDb {
         return {
           id: demoUserId(2 + index),
           name,
-          email: `admin${index + 1}@thc.com`,
+          email: `admin${index + 1}@transhybrid.net.id`,
           phone: `0811-3000-0${String(10 + index)}`,
           nik: demoNik(index + 1, 1, index + 1),
           role: 'admin',
@@ -206,7 +206,7 @@ function buildSeed(): MockDb {
       return {
         id: demoUserId(7 + index),
         name,
-        email: `security${branch + 1}${variant}@thc.com`,
+        email: `security${branch + 1}${variant}@transhybrid.net.id`,
         phone: `0811-3000-0${String(20 + index)}`,
         nik: null,
         role: 'security',
@@ -237,7 +237,7 @@ function buildSeed(): MockDb {
       return {
         id: demoUserId(17 + index),
         name,
-          email: `vendor${branch + 1}${variant}@thc.com`,
+          email: `vendor${branch + 1}${variant}@transhybrid.net.id`,
           phone: `0812-4100-0${String(30 + index)}`,
           nik: demoNik(branch + 1, 2, index + 1),
         role: 'vendor',
@@ -275,8 +275,8 @@ function buildSeed(): MockDb {
     return found;
   };
 
-  const vendorSplicing = userByEmail('vendor1a@thc.com');
-  const vendorGenset = userByEmail('vendor2a@thc.com');
+  const vendorSplicing = userByEmail('vendor1a@transhybrid.net.id');
+  const vendorGenset = userByEmail('vendor2a@transhybrid.net.id');
 
   const visits: VisitDetail[] = [
     {

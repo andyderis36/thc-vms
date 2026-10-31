@@ -48,9 +48,9 @@ describe('LoginPage dev dummy account dropdown', () => {
     vi.stubEnv('NEXT_PUBLIC_DEMO_ACC_LOGIN', 'true')
     render(createElement(LoginPage))
     const select = screen.getByRole('combobox')
-    fireEvent.change(select, { target: { value: 'vendor1a@thc.com' } })
+    fireEvent.change(select, { target: { value: 'vendor1a@transhybrid.net.id' } })
     await waitFor(() => {
-      expect(screen.getByLabelText(/email/i)).toHaveValue('vendor1a@thc.com')
+      expect(screen.getByLabelText(/email/i)).toHaveValue('vendor1a@transhybrid.net.id')
       expect(screen.getByPlaceholderText('Minimal 8 karakter')).toHaveValue('Password123!')
     })
   })
