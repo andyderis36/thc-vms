@@ -1,15 +1,14 @@
-import type { User } from '@/lib/api/types'
-
 /**
  * Bentuk minimum yang dibaca helper ini dari objek kunjungan — sengaja
  * dilepas dari `VisitDetail` penuh agar bisa dipakai fixture/parameter
- * parsial tanpa memutar seluruh type.
+ * parsial tanpa memutar seluruh type. Generik supaya pemanggil cukup
+ * membawa kunci yang dibaca (`name`, `vendor_name`, …), bukan seluruh `User`.
  */
-interface VendorUserSource {
-  vendor_user?: User
+interface VendorUserSource<T = { name?: unknown; vendor_name?: unknown }> {
+  vendor_user?: T
   /** @deprecated Fase-1 rename `pic_user`→`vendor_user`: backend masih
    *  dual-emit kedua kunci dengan nilai sama sampai Fase 2. */
-  pic_user?: User
+  pic_user?: T
 }
 
 /**
@@ -27,6 +26,6 @@ interface VendorUserSource {
  *   runtime, jadi kunci hilang menjadi `undefined` — penjaga null di
  *   pemanggil wajib dipertahankan).
  */
-export function visitVendorUser(visit: VendorUserSource): User | undefined {
+export function visitVendorUser<T>(visit: VendorUserSource<T>): T | undefined {
   return visit.vendor_user ?? visit.pic_user
 }

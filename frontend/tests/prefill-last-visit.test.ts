@@ -21,8 +21,8 @@ function makeVisit(overrides: Partial<VisitDetail> = {}): VisitDetail {
       timezone: 'WIB',
     },
     purposes: [
-      { id: 'pur-splicing', name: 'Splicing FO' },
-      { id: 'pur-genset', name: 'Maintenance Genset' },
+      { id: 'pur-survey', name: 'Survey' },
+      { id: 'pur-ops', name: 'Operation & Maintenance' },
     ],
     vendor_user: {
       id: 'usr-vendor-1',

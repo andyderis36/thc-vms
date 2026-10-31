@@ -16,6 +16,9 @@ import {
   PURPOSE_NOTE_MAX_LENGTH,
   TECHNICIANS_MAX,
   TEXT_MAX_LENGTH,
+  PHONE_DIGIT_MESSAGE,
+  PHONE_MAX_LENGTH,
+  PHONE_MIN_LENGTH,
   VENDOR_NAME_MAX_LENGTH,
   isValidPhone,
 } from '@/lib/limits'
@@ -55,8 +58,26 @@ export const technicianSchema = z.object({
       'Nomor HP tidak boleh mengandung huruf.',
     )
     .refine(
+      (value) => {
+        const digits = value.replace(/[^0-9]/g, '')
+        const normalized = digits.startsWith('62')
+          ? `0${digits.slice(2)}`
+          : digits
+        if (
+          !/[A-Za-z]/.test(value) &&
+          normalized.startsWith('0') &&
+          (normalized.length < PHONE_MIN_LENGTH ||
+            normalized.length > PHONE_MAX_LENGTH)
+        ) {
+          return false
+        }
+        return true
+      },
+      PHONE_DIGIT_MESSAGE,
+    )
+    .refine(
       isValidPhone,
-      'Nomor HP anggota tidak valid (9-15 digit angka, diawali 0 atau 62).',
+      'Nomor HP anggota tidak valid (10-16 digit angka, diawali 0 atau 62).',
     ),
   // Foto KTP WAJIB (keputusan pemilik produk): tanpa foto identitas, anggota
   // tak bisa diverifikasi pengawas pas. Bentuknya mirror `selfie` — baris baru
@@ -123,6 +144,16 @@ export const assignmentLetterSchema = z.object({
 export const visitFormSchema = z
   .object({
     location_id: z.string().min(1, 'Fasilitas tujuan wajib dipilih.'),
+    // Nama vendor/mitra per kunjungan (admin/superadmin): teks bebas +
+    // saran `<datalist>` katalog; kosong = tanpa perusahaan kunjungan.
+    vendor_name: z
+      .string()
+      .trim()
+      .max(
+        VENDOR_NAME_MAX_LENGTH,
+        `Nama vendor/mitra maksimal ${VENDOR_NAME_MAX_LENGTH} karakter.`,
+      )
+      .optional(),
     // Chip tujuan boleh kosong ASALKAN `purpose_note` terisi — divalidasi
     // bersama di `superRefine` di akhir rantai.
     purpose_ids: z.array(z.string()),
@@ -171,6 +202,18 @@ export const visitFormSchema = z
         path: ['purpose_ids'],
         message:
           'Pilih minimal satu tujuan kunjungan atau isi kolom Tujuan lain.',
+      })
+    }
+
+    // "Other" selalu memakai teks bebas purpose_note.
+    if (
+      value.purpose_ids.includes('Other') &&
+      (value.purpose_note ?? '').trim() === ''
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['purpose_note'],
+        message: 'Tujuan lain wajib diisi bila memilih "Other".',
       })
     }
 
