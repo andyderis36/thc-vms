@@ -137,7 +137,7 @@ test('@DASH-04 dashboard vendor hanya memuat kunjungan sendiri tanpa kontrol app
     throw new Error('[DASH-04] purpose seed untuk vendor pembanding tidak ditemukan.')
   }
 
-  const vendorB = await loginViaApi('vendor1b@thc.com', DEFAULT_PASSWORD)
+  const vendorB = await loginViaApi('vendor1b@transhybrid.net.id', DEFAULT_PASSWORD)
   let foreignVisitId: string | null = null
 
   try {

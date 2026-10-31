@@ -342,7 +342,7 @@ test('@SYS-06 status akun security nonaktif memblokir login, aktif kembali lalu 
   h,
 }) => {
   const token = await superToken()
-  const email = `${h.unique('sys06').toLowerCase()}@thc.com`
+  const email = `${h.unique('sys06').toLowerCase()}@transhybrid.net.id`
   const created: CreatedAccount[] = []
 
   try {
@@ -400,7 +400,7 @@ test('@SYS-06 status akun security nonaktif memblokir login, aktif kembali lalu 
 // ---------------------------------------------------------------------------
 test('@SYS-07 admin HQ tidak boleh mengubah status akun security cabang Sambas', async ({ h }) => {
   const token = await superToken()
-  const email = `${h.unique('sys07').toLowerCase()}@thc.com`
+  const email = `${h.unique('sys07').toLowerCase()}@transhybrid.net.id`
   const created: CreatedAccount[] = []
 
   try {
@@ -446,7 +446,7 @@ test('@SYS-08 superadmin menonaktifkan akun non-security lewat PATCH /users/{id}
   h,
 }) => {
   const token = await superToken()
-  const email = `${h.unique('sys08').toLowerCase()}@thc.com`
+  const email = `${h.unique('sys08').toLowerCase()}@transhybrid.net.id`
   const created: CreatedAccount[] = []
 
   try {

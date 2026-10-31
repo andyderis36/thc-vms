@@ -69,11 +69,11 @@ function uniqueNik(): string {
 }
 
 /**
- * Email unik berformat `<prefix>.<unique>@thc.com` sesuai skenario AUTH-07.
+ * Email unik berformat `<prefix>.<unique>@transhybrid.net.id` sesuai skenario AUTH-07.
  * `h.unique` sudah mengandung timestamp + nomor urut + sufiks acak.
  */
 function uniqueEmail(h: Harness, prefix: string): string {
-  return `${prefix}.${h.unique(prefix).toLowerCase()}@thc.com`
+  return `${prefix}.${h.unique(prefix).toLowerCase()}@transhybrid.net.id`
 }
 
 function expectData<T>(body: ApiEnvelope<T>, context: string): T {
@@ -294,7 +294,7 @@ test('@NAV-02 admin membuka /security: form tambah + daftar pengawas cabangnya s
   await expect(page.getByRole('button', { name: 'Tambah Pengawas' })).toBeVisible()
 
   // Daftar pengawas cabang HQ tampil.
-  await expect(page.getByText('security1a@thc.com', { exact: true })).toBeVisible()
+  await expect(page.getByText('security1a@transhybrid.net.id', { exact: true })).toBeVisible()
 
   // Modal tambah: field terlihat, cabang terkunci (admin tak punya select cabang).
   await page.getByRole('button', { name: 'Tambah Pengawas' }).click()
@@ -415,8 +415,8 @@ test('@NAV-04 /coordinators memuat admin + super_admin dan filter peran bekerja'
   const rows = page.locator('tbody tr')
 
   // Tanpa filter: admin cabang & super_admin tampil berdampingan.
-  await expect(tableRowWith(page, 'admin1@thc.com')).toHaveCount(1)
-  await expect(tableRowWith(page, 'superadmin@thc.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin1@transhybrid.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'superadmin@transhybrid.net.id')).toHaveCount(1)
 
   // Filter peran di header kolom "Peran" (desktop) -> hanya Superadmin.
   const roleFilter = page.locator('thead select[aria-label="Filter peran"]')
@@ -425,13 +425,13 @@ test('@NAV-04 /coordinators memuat admin + super_admin dan filter peran bekerja'
 
   await expect(rows).toHaveCount(1)
   await expect(rows.first()).toContainText('Superadmin')
-  await expect(tableRowWith(page, 'superadmin@thc.net.id')).toHaveCount(1)
-  await expect(tableRowWith(page, 'admin1@thc.com')).toHaveCount(0)
+  await expect(tableRowWith(page, 'superadmin@transhybrid.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin1@transhybrid.net.id')).toHaveCount(0)
 
   // Kembali ke semua peran -> tombol tambah muncul lagi.
   await roleFilter.selectOption({ label: 'Semua Peran' })
   await expect(page.getByRole('button', { name: 'Tambah Koordinator Wilayah' })).toBeVisible()
-  await expect(tableRowWith(page, 'admin1@thc.com')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin1@transhybrid.net.id')).toHaveCount(1)
 })
 
 test('@NAV-05 /vendor-registrations hanya akun vendor dan filter vendor bekerja', async ({
@@ -463,7 +463,7 @@ test('@NAV-05 /vendor-registrations hanya akun vendor dan filter vendor bekerja'
   for (let index = 0; index < 5; index += 1) {
     await expect(rows.nth(index)).toContainText('PT Lintas Fiber')
   }
-  await expect(page.getByText('vendor1b@thc.com', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('vendor1b@transhybrid.net.id', { exact: true })).toHaveCount(0)
 })
 
 test('@NAV-06 /users 404 dan filter Superadmin menyembunyikan tombol tambah', async ({ h }) => {
@@ -664,10 +664,10 @@ test('@EDT-03 admin ubah pengawas se-cabang; lintas cabang ditolak (UI & API)', 
 test('@SEED akun seed tetap bisa login dengan peran & lokasi yang benar', async () => {
   // Guard terakhir: memastikan tidak ada test back-office yang menyentuh seed.
   const seeds = [
-    { role: 'super', email: 'superadmin@thc.net.id', apiRole: 'super_admin', location: null },
-    { role: 'admin', email: 'admin1@thc.com', apiRole: 'admin', location: LOCATIONS.hq },
-    { role: 'security', email: 'security1a@thc.com', apiRole: 'security', location: LOCATIONS.hq },
-    { role: 'vendor', email: 'vendor1a@thc.com', apiRole: 'vendor', location: null },
+    { role: 'super', email: 'superadmin@transhybrid.net.id', apiRole: 'super_admin', location: null },
+    { role: 'admin', email: 'admin1@transhybrid.net.id', apiRole: 'admin', location: LOCATIONS.hq },
+    { role: 'security', email: 'security1a@transhybrid.net.id', apiRole: 'security', location: LOCATIONS.hq },
+    { role: 'vendor', email: 'vendor1a@transhybrid.net.id', apiRole: 'vendor', location: null },
   ] as const
 
   for (const seed of seeds) {

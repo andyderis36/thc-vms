@@ -32,37 +32,37 @@ export interface Account {
 
 export const ACCOUNTS: Record<Role, Account> = {
   super: {
-    email: 'superadmin@thc.net.id',
+    email: 'superadmin@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'super_admin',
     locationId: null,
   },
   admin: {
-    email: 'admin1@thc.com',
+    email: 'admin1@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'admin',
     locationId: '868430ab-ed33-552b-8619-0b7376537262',
   },
   'admin-sambas': {
-    email: 'admin2@thc.com',
+    email: 'admin2@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'admin',
     locationId: '7a6ce73e-2759-572d-bfe9-c5c4c7faee67',
   },
   security: {
-    email: 'security1a@thc.com',
+    email: 'security1a@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'security',
     locationId: '868430ab-ed33-552b-8619-0b7376537262',
   },
   'security-sambas': {
-    email: 'security2a@thc.com',
+    email: 'security2a@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'security',
     locationId: '7a6ce73e-2759-572d-bfe9-c5c4c7faee67',
   },
   vendor: {
-    email: 'vendor1a@thc.com',
+    email: 'vendor1a@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'vendor',
     locationId: null,
