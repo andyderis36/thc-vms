@@ -157,17 +157,17 @@ if ($health.Status -ne 200) {
 
 $tokens = @{}
 foreach ($e in @(
-        "superadmin@thc.net.id", "admin.sby@thc.net.id", "admin.mlg@thc.net.id",
-        "security.sby@thc.net.id", "security.sawojajar@thc.net.id",
+        "superadmin@transhybrid.net.id", "admin.sby@transhybrid.net.id", "admin.mlg@transhybrid.net.id",
+        "security.sby@transhybrid.net.id", "security.sawojajar@transhybrid.net.id",
         "vendor.splicing@mitra-fo.com", "vendor.genset@dayapower.co.id")) {
     $t = Login $e
     if ($t) { $tokens[$e] = $t } else { Write-Log "FATAL: cannot authenticate $e"; $script:Log | Set-Content -Path $OutFile; exit 1 }
 }
-$sa = $tokens["superadmin@thc.net.id"]
-$adminSby = $tokens["admin.sby@thc.net.id"]
-$adminMlg = $tokens["admin.mlg@thc.net.id"]
-$secSby = $tokens["security.sby@thc.net.id"]
-$secSwj = $tokens["security.sawojajar@thc.net.id"]
+$sa = $tokens["superadmin@transhybrid.net.id"]
+$adminSby = $tokens["admin.sby@transhybrid.net.id"]
+$adminMlg = $tokens["admin.mlg@transhybrid.net.id"]
+$secSby = $tokens["security.sby@transhybrid.net.id"]
+$secSwj = $tokens["security.sawojajar@transhybrid.net.id"]
 $vendor1 = $tokens["vendor.splicing@mitra-fo.com"]
 $vendor2 = $tokens["vendor.genset@dayapower.co.id"]
 
@@ -200,11 +200,11 @@ $now = [DateTime]::UtcNow
 Write-Log "`n--- AUTH ---"
 Assert-True "AUTH-01" "all 7 seeded roles authenticate and receive a JWT" ($tokens.Count -eq 7) "got $($tokens.Count)"
 
-$bad = Invoke-Api -Method POST -Path "/auth/login" -Body @{ email = "admin.sby@thc.net.id"; password = "salah" }
+$bad = Invoke-Api -Method POST -Path "/auth/login" -Body @{ email = "admin.sby@transhybrid.net.id"; password = "salah" }
 Assert-True "AUTH-02" "wrong password is 401 'Kredensial tidak valid'" `
     ($bad.Status -eq 401 -and $bad.Body.error.message -eq "Kredensial tidak valid") "HTTP $($bad.Status) $($bad.Raw)"
 
-$unknown = Invoke-Api -Method POST -Path "/auth/login" -Body @{ email = "nobody@thc.net.id"; password = "x" }
+$unknown = Invoke-Api -Method POST -Path "/auth/login" -Body @{ email = "nobody@transhybrid.net.id"; password = "x" }
 Assert-True "AUTH-02b" "unknown email returns the IDENTICAL error (no account enumeration)" `
     ($unknown.Status -eq 401 -and $unknown.Body.error.message -eq "Kredensial tidak valid") "HTTP $($unknown.Status)"
 
@@ -242,7 +242,7 @@ $vendorLeak = @($vendorA.items | Where-Object { $_.id -eq $mlgVisitId -or $_.id 
 Assert-True "AUTH-06" "vendor sees only its OWN visits, never another vendor's" `
     ($vendorLeak.Count -eq 0) "leaked=$($vendorLeak.Count)"
 
-$newSecEmail = "qa.security.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())@thc.net.id"
+$newSecEmail = "qa.security.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())@transhybrid.net.id"
 $cs = Invoke-Api -Method POST -Path "/users/security" -Headers (Auth $adminSby) -Body @{
     name = "Pengawas QA"; email = $newSecEmail; password = "Password123!"; location_id = $locMlg
 }

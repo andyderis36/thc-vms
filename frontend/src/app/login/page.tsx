@@ -62,10 +62,10 @@ const DEV_LOGIN_EMAIL = 'dev-superadmin@transhybrid.net.id'
 const DEV_DUMMY_PASSWORD = 'Password123!'
 
 const DEV_DUMMY_ACCOUNTS = [
-  { label: 'Super Admin - superadmin@thc.net.id', email: 'superadmin@thc.net.id' },
-  { label: 'Admin - admin1@thc.com', email: 'admin1@thc.com' },
-  { label: 'Security - security1a@thc.com', email: 'security1a@thc.com' },
-  { label: 'Vendor - vendor1a@thc.com', email: 'vendor1a@thc.com' },
+  { label: 'Super Admin - superadmin@transhybrid.net.id', email: 'superadmin@transhybrid.net.id' },
+  { label: 'Admin - admin1@transhybrid.net.id', email: 'admin1@transhybrid.net.id' },
+  { label: 'Security - security1a@transhybrid.net.id', email: 'security1a@transhybrid.net.id' },
+  { label: 'Vendor - vendor1a@transhybrid.net.id', email: 'vendor1a@transhybrid.net.id' },
   // Password dev lokal (khusus dev, bukan seed global) — hanya dipakai
   // mengisi form saat flag demo aktif, tidak pernah dikirim ke mana pun
   // selain endpoint login seperti password biasa.

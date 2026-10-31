@@ -39,7 +39,7 @@ interface ManagedUserRow {
 }
 
 function uniqueEmail(h: Harness, label: string): string {
-  return `${h.unique(label).toLowerCase()}@thc.com`
+  return `${h.unique(label).toLowerCase()}@transhybrid.net.id`
 }
 
 function uniqueNik(): string {
@@ -115,12 +115,12 @@ test('@USR-01 pencarian email di /coordinators menyaring baris dan Reset Filter 
   await expect(
     page.getByRole('heading', { name: 'Koordinator Wilayah & Superadmin', exact: true }),
   ).toBeVisible()
-  await expect(tableRowWith(page, 'admin1@thc.com')).toHaveCount(1)
-  await expect(tableRowWith(page, 'admin2@thc.com')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin1@transhybrid.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin2@transhybrid.net.id')).toHaveCount(1)
 
-  await fillSearch(page, 'admin1@thc.com')
-  await expect(tableRowWith(page, 'admin1@thc.com')).toHaveCount(1)
-  await expect(tableRowWith(page, 'admin2@thc.com')).toHaveCount(0)
+  await fillSearch(page, 'admin1@transhybrid.net.id')
+  await expect(tableRowWith(page, 'admin1@transhybrid.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin2@transhybrid.net.id')).toHaveCount(0)
 
   await fillSearch(page, h.unique('tidak-ada'))
   await expect(page.getByText('Tidak ada user yang cocok', { exact: true })).toBeVisible()
@@ -128,8 +128,8 @@ test('@USR-01 pencarian email di /coordinators menyaring baris dan Reset Filter 
 
   await page.getByRole('button', { name: 'Reset Filter', exact: true }).click()
   await expect(page.getByLabel('Cari user')).toHaveValue('')
-  await expect(tableRowWith(page, 'admin1@thc.com')).toHaveCount(1)
-  await expect(tableRowWith(page, 'admin2@thc.com')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin1@transhybrid.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin2@transhybrid.net.id')).toHaveCount(1)
 })
 
 test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 404', async ({
@@ -192,17 +192,17 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
 test('@USR-03 filter Cabang hanya menampilkan koordinator cabang terpilih', async ({ h }) => {
   const page = await h.openAs('super')
   await gotoApp(page, '/coordinators')
-  await expect(tableRowWith(page, 'admin1@thc.com')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin1@transhybrid.net.id')).toHaveCount(1)
 
   // Tombol aksi baris berlabel "… (Admin Cabang …)" juga cocok dengan "Cabang".
   await page.getByLabel('Cabang', { exact: true }).selectOption(LOCATIONS.hq)
-  await expect(tableRowWith(page, 'admin1@thc.com')).toHaveCount(1)
-  await expect(tableRowWith(page, 'admin2@thc.com')).toHaveCount(0)
-  await expect(tableRowWith(page, 'superadmin@thc.net.id')).toHaveCount(0)
+  await expect(tableRowWith(page, 'admin1@transhybrid.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin2@transhybrid.net.id')).toHaveCount(0)
+  await expect(tableRowWith(page, 'superadmin@transhybrid.net.id')).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Reset Filter', exact: true }).click()
-  await expect(tableRowWith(page, 'admin2@thc.com')).toHaveCount(1)
-  await expect(tableRowWith(page, 'superadmin@thc.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin2@transhybrid.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'superadmin@transhybrid.net.id')).toHaveCount(1)
 })
 
 test('@USR-04 filter peran Koordinator Wilayah menyembunyikan Superadmin dan mempertahankan tombol tambah', async ({
@@ -210,15 +210,15 @@ test('@USR-04 filter peran Koordinator Wilayah menyembunyikan Superadmin dan mem
 }) => {
   const page = await h.openAs('super')
   await gotoApp(page, '/coordinators')
-  await expect(tableRowWith(page, 'superadmin@thc.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'superadmin@transhybrid.net.id')).toHaveCount(1)
 
   await page
     .locator('thead select[aria-label="Filter peran"]')
     .selectOption({ label: 'Koordinator Wilayah' })
 
-  await expect(tableRowWith(page, 'admin1@thc.com')).toHaveCount(1)
-  await expect(tableRowWith(page, 'admin2@thc.com')).toHaveCount(1)
-  await expect(tableRowWith(page, 'superadmin@thc.net.id')).toHaveCount(0)
+  await expect(tableRowWith(page, 'admin1@transhybrid.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'admin2@transhybrid.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'superadmin@transhybrid.net.id')).toHaveCount(0)
   await expect(
     page.getByRole('button', { name: 'Tambah Koordinator Wilayah', exact: true }),
   ).toBeVisible()
@@ -226,5 +226,5 @@ test('@USR-04 filter peran Koordinator Wilayah menyembunyikan Superadmin dan mem
   await page
     .locator('thead select[aria-label="Filter peran"]')
     .selectOption({ label: 'Semua Peran' })
-  await expect(tableRowWith(page, 'superadmin@thc.net.id')).toHaveCount(1)
+  await expect(tableRowWith(page, 'superadmin@transhybrid.net.id')).toHaveCount(1)
 })

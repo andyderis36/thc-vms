@@ -14,8 +14,8 @@ import { FRONTEND_BASE, TOKEN_STORAGE_KEY, awaitLoginSlot } from '../helpers/api
 import { gotoApp } from '../helpers/nav'
 
 const DEMO_PASSWORD = 'Password123!'
-const SECURITY_EMAIL = 'security1a@thc.com'
-const ADMIN_EMAIL = 'admin1@thc.com'
+const SECURITY_EMAIL = 'security1a@transhybrid.net.id'
+const ADMIN_EMAIL = 'admin1@transhybrid.net.id'
 
 /** Semua rute yang diproteksi guard client-side pada skenario NAV-03. */
 const PROTECTED_PATHS = [

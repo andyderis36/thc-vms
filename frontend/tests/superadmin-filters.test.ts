@@ -9,12 +9,14 @@ import {
   locationTypeFormOptions,
 } from '@/app/facilities/page'
 import {
+  DEV_SUPERADMIN_EMAIL,
   USER_FILTER_DEP_KEYS,
   applyManagedUserFilters,
   canShowDeleteUser,
   effectiveManagedRoles,
   filterManagedUsersByRoles,
   isDeletableUser,
+  isHiddenDevUser,
   isProtectedUser,
   managedCreateRole,
   managedLocationFilterApplies,
@@ -380,6 +382,53 @@ describe('dev-superadmin tersembunyi (hidden highest role)', () => {
     expect(isDeletableUser(hidden, 'me-id')).toBe(false)
     expect(canShowDeleteUser('super_admin', hidden, 'me-id')).toBe(false)
     expect(canShowDeleteUser('dev-superadmin', hidden, 'me-id')).toBe(false)
+  })
+})
+
+describe('email-fallback hiding (drifted prod account)', () => {
+  const lower = userStub({
+    id: 'u-drift-lower',
+    role: 'super_admin',
+    email: 'dev-superadmin@transhybrid.net.id',
+    location_id: null,
+    location_name: null,
+  })
+  const upper = userStub({
+    id: 'u-drift-upper',
+    role: 'super_admin',
+    email: 'DEV-SUPERADMIN@TRANSHYBRID.NET.ID',
+    location_id: null,
+    location_name: null,
+  })
+  const control = userStub({
+    id: 'u-control',
+    role: 'super_admin',
+    email: 'superadmin@thc.net.id',
+    location_id: null,
+    location_name: null,
+  })
+
+  it('DEV_SUPERADMIN_EMAIL diekspor dengan nilai yang diharapkan', () => {
+    expect(DEV_SUPERADMIN_EMAIL).toBe('dev-superadmin@transhybrid.net.id')
+  })
+
+  it('isHiddenDevUser mendeteksi drift via email (case-insensitive)', () => {
+    expect(isHiddenDevUser(lower)).toBe(true)
+    expect(isHiddenDevUser(upper)).toBe(true)
+    expect(isHiddenDevUser(control)).toBe(false)
+  })
+
+  it('filterManagedUsersByRoles membuang drift lower & upper, mempertahankan control', () => {
+    const rows = [control, lower, upper]
+    expect(filterManagedUsersByRoles(rows, ['super_admin']).map((u) => u.id)).toEqual(['u-control'])
+    expect(filterManagedUsersByRoles(rows, ['admin', 'super_admin']).map((u) => u.id)).toEqual(['u-control'])
+  })
+
+  it('applyManagedUserFilters membuang drift lower & upper, mempertahankan control', () => {
+    const rows = [control, lower, upper]
+    expect(applyManagedUserFilters(rows, { status: 'all', vendor: 'all' }).map((u) => u.id)).toEqual([
+      'u-control',
+    ])
   })
 })
 

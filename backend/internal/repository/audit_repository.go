@@ -156,12 +156,14 @@ func appendInTxFunc(ctx context.Context, pool *pgxpool.Pool, tx pgx.Tx, entry do
 	return err
 }
 
-// hiddenActorIDs returns the user ids the trail must never expose: the hidden
-// dev-superadmin operator account(s). The role travels as a bound parameter,
-// never as interpolated SQL text. An empty map is the fast path: no hidden
-// account, no extra work, byte-for-byte the old behaviour.
+// hiddenActorIDs returns the user ids the trail must never expose: accounts
+// carrying the hidden dev-superadmin role, plus any account whose lower(email)
+// equals the seeded dev-superadmin address (the drifted super_admin copy of
+// that operator). Both discriminators travel as bound parameters, never as
+// interpolated SQL text. An empty map is the fast path: no hidden account, no
+// extra work, byte-for-byte the old behaviour.
 func hiddenActorIDs(ctx context.Context, pool *pgxpool.Pool) (map[domain.UUID]struct{}, error) {
-	rows, err := pool.Query(ctx, `SELECT u.id FROM users u JOIN role r ON r.id = u.role_id WHERE r.name = $1`, string(domain.RoleDevSuperAdmin))
+	rows, err := pool.Query(ctx, `SELECT u.id FROM users u JOIN role r ON r.id = u.role_id WHERE r.name = $1 OR lower(u.email) = lower($2)`, string(domain.RoleDevSuperAdmin), domain.DevSuperadminEmail)
 	if err != nil {
 		return nil, err
 	}

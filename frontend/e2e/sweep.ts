@@ -13,9 +13,9 @@
  * Aturan aman:
  * - Hanya baris yang cocok pola nama harness yang disentuh:
  *   kunjungan: visit_id/notes/visitor name berawalan `E2E-`
- *   pengguna : `<prefix>.e2e-...@thc.com` atau `e2e-...@thc.com`
- *   fasilitas: nama berawalan `E2E-FAC`
- * - Akun seed (`vendor1a@thc.com`, `security1a@thc.com`, dst.) tidak pernah
+  *   pengguna : `<prefix>.e2e-...@transhybrid.net.id` atau `e2e-...@transhybrid.net.id`
+  *   fasilitas: nama berawalan `E2E-FAC`
+  * - Akun seed (`vendor1a@transhybrid.net.id`, `security1a@transhybrid.net.id`, dst.) tidak pernah
  *   cocok dengan pola di atas.
  * - Respons hapus yang bukan 204/404 menghentikan seluruh sapuan (exit 1)
  *   supaya runner tidak lanjut menembak suite di atas state yang tidak bersih.
@@ -51,7 +51,7 @@ const APPLY = process.argv.includes('--apply')
 const API_MODULE_URL = new URL('./helpers/api.ts', import.meta.url).href
 const MAX_VISIT_PAGES = 200
 const VISIT_MARKER = /(?:^|\|\s*)E2E-[A-Za-z0-9]/
-const USER_MARKER = /^(?:[a-z0-9]+\.)?e2e-[a-z0-9][a-z0-9-]*@thc\.com$/i
+const USER_MARKER = /^(?:[a-z0-9]+\.)?e2e-[a-z0-9][a-z0-9-]*@transhybrid\.net\.id$/i
 const FACILITY_MARKER = /^E2E-FAC/i
 
 function log(message: string): void {

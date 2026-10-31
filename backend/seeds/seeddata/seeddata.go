@@ -372,7 +372,7 @@ func Plan() SeedPlan {
 		// Kalimantan Barat move and is kept as-is for demo stability.
 		Users: []SeedUser{
 			{
-				Name: "Hendra Wijaya (Super Admin)", Email: "superadmin@thc.net.id", Role: RoleSuperAdmin,
+				Name: "Hendra Wijaya (Super Admin)", Email: "superadmin@transhybrid.net.id", Role: RoleSuperAdmin,
 				LocationCode: "", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
@@ -380,117 +380,117 @@ func Plan() SeedPlan {
 				LocationCode: "", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Agus Setiawan (Admin Kantor Pusat Pontianak)", Email: "admin1@thc.com", Role: RoleAdmin,
+				Name: "Agus Setiawan (Admin Kantor Pusat Pontianak)", Email: "admin1@transhybrid.net.id", Role: RoleAdmin,
 				LocationCode: "HQ-PTK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 				NIK: demoNIK(1, RoleCodeAdmin, 1),
 			},
 			{
-				Name: "Rina Kartika (Admin Cabang Sambas)", Email: "admin2@thc.com", Role: RoleAdmin,
+				Name: "Rina Kartika (Admin Cabang Sambas)", Email: "admin2@transhybrid.net.id", Role: RoleAdmin,
 				LocationCode: "BR-SBS-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 				NIK: demoNIK(2, RoleCodeAdmin, 2),
 			},
 			{
-				Name: "Dedi Kurniawan (Admin POP Mempawah)", Email: "admin3@thc.com", Role: RoleAdmin,
+				Name: "Dedi Kurniawan (Admin POP Mempawah)", Email: "admin3@transhybrid.net.id", Role: RoleAdmin,
 				LocationCode: "POP-MPW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 				NIK: demoNIK(3, RoleCodeAdmin, 3),
 			},
 			{
-				Name: "Siti Rahayu (Admin POP Singkawang)", Email: "admin4@thc.com", Role: RoleAdmin,
+				Name: "Siti Rahayu (Admin POP Singkawang)", Email: "admin4@transhybrid.net.id", Role: RoleAdmin,
 				LocationCode: "POP-SKW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 				NIK: demoNIK(4, RoleCodeAdmin, 4),
 			},
 			{
-				Name: "Bambang Sutrisno (Admin miniPOP Aruk)", Email: "admin5@thc.com", Role: RoleAdmin,
+				Name: "Bambang Sutrisno (Admin miniPOP Aruk)", Email: "admin5@transhybrid.net.id", Role: RoleAdmin,
 				LocationCode: "MPOP-ARK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 				NIK: demoNIK(5, RoleCodeAdmin, 5),
 			},
 			{
-				Name: "Joko Susilo (Pengawas Kantor Pusat Pontianak)", Email: "security1a@thc.com", Role: RoleSecurity,
+				Name: "Joko Susilo (Pengawas Kantor Pusat Pontianak)", Email: "security1a@transhybrid.net.id", Role: RoleSecurity,
 				LocationCode: "HQ-PTK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Sutrisno Hadi (Pengawas Kantor Pusat Pontianak)", Email: "security1b@thc.com", Role: RoleSecurity,
+				Name: "Sutrisno Hadi (Pengawas Kantor Pusat Pontianak)", Email: "security1b@transhybrid.net.id", Role: RoleSecurity,
 				LocationCode: "HQ-PTK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Rahmat Hidayat (Pengawas Cabang Sambas)", Email: "security2a@thc.com", Role: RoleSecurity,
+				Name: "Rahmat Hidayat (Pengawas Cabang Sambas)", Email: "security2a@transhybrid.net.id", Role: RoleSecurity,
 				LocationCode: "BR-SBS-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Wahyu Saputra (Pengawas Cabang Sambas)", Email: "security2b@thc.com", Role: RoleSecurity,
+				Name: "Wahyu Saputra (Pengawas Cabang Sambas)", Email: "security2b@transhybrid.net.id", Role: RoleSecurity,
 				LocationCode: "BR-SBS-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Slamet Riyadi (Pengawas POP Mempawah)", Email: "security3a@thc.com", Role: RoleSecurity,
+				Name: "Slamet Riyadi (Pengawas POP Mempawah)", Email: "security3a@transhybrid.net.id", Role: RoleSecurity,
 				LocationCode: "POP-MPW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Andi Wijaya (Pengawas POP Mempawah)", Email: "security3b@thc.com", Role: RoleSecurity,
+				Name: "Andi Wijaya (Pengawas POP Mempawah)", Email: "security3b@transhybrid.net.id", Role: RoleSecurity,
 				LocationCode: "POP-MPW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Herman Yusuf (Pengawas POP Singkawang)", Email: "security4a@thc.com", Role: RoleSecurity,
+				Name: "Herman Yusuf (Pengawas POP Singkawang)", Email: "security4a@transhybrid.net.id", Role: RoleSecurity,
 				LocationCode: "POP-SKW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Tono Prasetyo (Pengawas POP Singkawang)", Email: "security4b@thc.com", Role: RoleSecurity,
+				Name: "Tono Prasetyo (Pengawas POP Singkawang)", Email: "security4b@transhybrid.net.id", Role: RoleSecurity,
 				LocationCode: "POP-SKW-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Mulyadi Santoso (Pengawas miniPOP Aruk)", Email: "security5a@thc.com", Role: RoleSecurity,
+				Name: "Mulyadi Santoso (Pengawas miniPOP Aruk)", Email: "security5a@transhybrid.net.id", Role: RoleSecurity,
 				LocationCode: "MPOP-ARK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Dadang Firmansyah (Pengawas miniPOP Aruk)", Email: "security5b@thc.com", Role: RoleSecurity,
+				Name: "Dadang Firmansyah (Pengawas miniPOP Aruk)", Email: "security5b@transhybrid.net.id", Role: RoleSecurity,
 				LocationCode: "MPOP-ARK-01", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{
-				Name: "Dimas Prasetyo (Teknisi PT Lintas Fiber)", Email: "vendor1a@thc.com", Role: RoleVendor,
+				Name: "Dimas Prasetyo (Teknisi PT Lintas Fiber)", Email: "vendor1a@transhybrid.net.id", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Lintas Fiber",
 				NIK: demoNIK(1, RoleCodeVendor, 1),
 			},
 			{
-				Name: "Eko Gunawan (Teknisi PT Daya Power Mandiri)", Email: "vendor1b@thc.com", Role: RoleVendor,
+				Name: "Eko Gunawan (Teknisi PT Daya Power Mandiri)", Email: "vendor1b@transhybrid.net.id", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Daya Power Mandiri",
 				NIK: demoNIK(1, RoleCodeVendor, 2),
 			},
 			{
-				Name: "Fajar Nugroho (Teknisi PT Lintas Fiber)", Email: "vendor2a@thc.com", Role: RoleVendor,
+				Name: "Fajar Nugroho (Teknisi PT Lintas Fiber)", Email: "vendor2a@transhybrid.net.id", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Lintas Fiber",
 				NIK: demoNIK(2, RoleCodeVendor, 3),
 			},
 			{
-				Name: "Yoga Pratama (Teknisi PT Daya Power Mandiri)", Email: "vendor2b@thc.com", Role: RoleVendor,
+				Name: "Yoga Pratama (Teknisi PT Daya Power Mandiri)", Email: "vendor2b@transhybrid.net.id", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Daya Power Mandiri",
 				NIK: demoNIK(2, RoleCodeVendor, 4),
 			},
 			{
-				Name: "Rudi Hartono (Teknisi PT Lintas Fiber)", Email: "vendor3a@thc.com", Role: RoleVendor,
+				Name: "Rudi Hartono (Teknisi PT Lintas Fiber)", Email: "vendor3a@transhybrid.net.id", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Lintas Fiber",
 				NIK: demoNIK(3, RoleCodeVendor, 5),
 			},
 			{
-				Name: "Asep Saepudin (Teknisi PT Daya Power Mandiri)", Email: "vendor3b@thc.com", Role: RoleVendor,
+				Name: "Asep Saepudin (Teknisi PT Daya Power Mandiri)", Email: "vendor3b@transhybrid.net.id", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Daya Power Mandiri",
 				NIK: demoNIK(3, RoleCodeVendor, 6),
 			},
 			{
-				Name: "Budi Santoso (Teknisi PT Lintas Fiber)", Email: "vendor4a@thc.com", Role: RoleVendor,
+				Name: "Budi Santoso (Teknisi PT Lintas Fiber)", Email: "vendor4a@transhybrid.net.id", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Lintas Fiber",
 				NIK: demoNIK(4, RoleCodeVendor, 7),
 			},
 			{
-				Name: "Irfan Maulana (Teknisi PT Daya Power Mandiri)", Email: "vendor4b@thc.com", Role: RoleVendor,
+				Name: "Irfan Maulana (Teknisi PT Daya Power Mandiri)", Email: "vendor4b@transhybrid.net.id", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Daya Power Mandiri",
 				NIK: demoNIK(4, RoleCodeVendor, 8),
 			},
 			{
-				Name: "Hendra Saputra (Teknisi PT Lintas Fiber)", Email: "vendor5a@thc.com", Role: RoleVendor,
+				Name: "Hendra Saputra (Teknisi PT Lintas Fiber)", Email: "vendor5a@transhybrid.net.id", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Lintas Fiber",
 				NIK: demoNIK(5, RoleCodeVendor, 9),
 			},
 			{
-				Name: "Teguh Laksmana (Teknisi PT Daya Power Mandiri)", Email: "vendor5b@thc.com", Role: RoleVendor,
+				Name: "Teguh Laksmana (Teknisi PT Daya Power Mandiri)", Email: "vendor5b@transhybrid.net.id", Role: RoleVendor,
 				LocationCode: "", Type: UserTypeExternal, Status: UserStatusActive, VendorName: "PT Daya Power Mandiri",
 				NIK: demoNIK(5, RoleCodeVendor, 10),
 			},

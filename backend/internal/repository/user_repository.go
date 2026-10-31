@@ -205,9 +205,10 @@ func (r *userRepository) UpdateLastLogin(ctx context.Context, id domain.UUID, _ 
 // ListSecurity returns the gate staff of one branch, or of every branch when
 // locationID is nil (super_admin only). The branch predicate lives in the
 // generated query as a bound parameter, never in Go string code. The hidden
-// dev-superadmin account never surfaces here: rows carrying it are dropped
-// after the read (the role has no branch scope, so no SQL branch predicate
-// could express the exclusion without a second join).
+// dev-superadmin account never surfaces here: rows matching
+// domain.IsHiddenDevAccount are dropped after the read (the role has no
+// branch scope, so no SQL branch predicate could express the exclusion
+// without a second join).
 func (r *userRepository) ListSecurity(ctx context.Context, locationID *domain.UUID) ([]domain.User, error) {
 	scope, err := pgNullUUIDPtr(locationID)
 	if err != nil {
@@ -219,7 +220,10 @@ func (r *userRepository) ListSecurity(ctx context.Context, locationID *domain.UU
 	}
 	out := make([]domain.User, 0, len(rows))
 	for _, row := range rows {
-		if domain.RoleName(row.Role) == domain.RoleDevSuperAdmin {
+		// Role name is the primary signal; the email fallback covers
+		// pre-000016/data-drift rows whose role no longer reads
+		// dev-superadmin but still hold the seeded operator account.
+		if domain.IsHiddenDevAccount(domain.RoleName(row.Role), row.Email) {
 			continue
 		}
 		out = append(out, securityRowToUser(row))
@@ -255,7 +259,10 @@ func (r *userRepository) ListManagedUsers(ctx context.Context, filter domain.Use
 	}
 	out := make([]domain.ManagedUser, 0, len(rows))
 	for _, row := range rows {
-		if domain.RoleName(row.Role) == domain.RoleDevSuperAdmin {
+		// Role name is the primary signal; the email fallback covers
+		// pre-000016/data-drift rows whose role no longer reads
+		// dev-superadmin but still hold the seeded operator account.
+		if domain.IsHiddenDevAccount(domain.RoleName(row.Role), row.Email) {
 			continue
 		}
 		out = append(out, managedListRowToUser(row))
