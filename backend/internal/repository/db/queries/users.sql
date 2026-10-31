@@ -98,6 +98,17 @@ JOIN role r ON r.id = u.role_id
 LEFT JOIN location l ON l.id = u.location_id
 LEFT JOIN vendor v ON v.id = u.vendor_id;
 
+-- Self-service password rotation (PATCH /auth/me). A plain UPDATE on purpose:
+-- the named-parameter form is proven by UpdateManagedUser, while the CTE
+-- projection above only accepts positional parameters. The caller passes the
+-- fresh bcrypt hash the usecase minted, never a plaintext password; the row
+-- must exist (a missing id surfaces no rows, mapped to ErrNotFound upstream).
+-- name: UpdateUserPasswordHash :execrows
+UPDATE users
+SET password_hash = sqlc.arg('password_hash'),
+    updated_at    = now()
+WHERE id = sqlc.arg('id');
+
 -- Successful login bookkeeping. Also refreshes updated_at (see the migration
 -- header: the repository layer owns this column).
 -- name: UpdateUserLastLogin :exec

@@ -8,6 +8,12 @@
 import { delay, http, HttpResponse } from 'msw';
 import type { RequestHandler } from 'msw';
 import { db, DEMO_PASSWORD } from './seed';
+import { isSuperAdminRole } from '@/lib/auth/capabilities';
+import {
+  PHONE_DIGIT_MESSAGE,
+  PHONE_MAX_LENGTH,
+  PHONE_MIN_LENGTH,
+} from '@/lib/limits';
 import {
   getCheckinBlockReason,
   isWithinCheckinWindow,
@@ -143,11 +149,11 @@ function unauthorized(): Response {
 const PROFILE_EDITABLE_FIELDS = new Set(['name', 'phone', 'avatar_url']);
 
 /** Nomor telepon kanonik: hanya digit, awalan `62` diganti `0` (cermin BE). */
-const PHONE_PATTERN = /^(?:62|0)[0-9]{8,13}$/;
+const PHONE_PATTERN = /^(?:62|0)[0-9]{9,15}$/;
 
 /** Daftar field yang boleh diubah sendiri, dihitung dari peran pemanggil. */
 function editableFieldsFor(role: User['role']): string[] {
-  return role === 'super_admin'
+  return isSuperAdminRole(role)
     ? ['name', 'phone', 'avatar_url']
     : ['phone', 'avatar_url'];
 }
@@ -170,7 +176,7 @@ function scopeVisits(
   user: User,
   locationQuery: string | null,
 ): VisitDetail[] {
-  if (user.role === 'super_admin') {
+  if (isSuperAdminRole(user.role)) {
     if (locationQuery !== null && locationQuery !== '') {
       return db.visits.filter(
         (visit) => visit.location.id === locationQuery,
@@ -288,7 +294,7 @@ function notificationsFor(
 
 /** `true` bila satu kunjungan boleh dilihat/diaksi pemanggil. */
 function isVisitInScope(user: User, visit: VisitDetail): boolean {
-  if (user.role === 'super_admin') {
+  if (isSuperAdminRole(user.role)) {
     return true;
   }
   if (user.role === 'admin' || user.role === 'security') {
@@ -452,7 +458,7 @@ export const handlers: RequestHandler[] = [
     }
     const next: Partial<Pick<User, 'name' | 'phone' | 'avatar_url'>> = {};
     if ('name' in body) {
-      if (auth.role !== 'super_admin') {
+      if (!isSuperAdminRole(auth.role)) {
         return fail(
           'FORBIDDEN',
           'Hanya Superadmin yang dapat mengubah nama sendiri.',
@@ -472,6 +478,30 @@ export const handlers: RequestHandler[] = [
     if ('phone' in body) {
       const raw = stringField(body, 'phone') ?? '';
       const canonical = raw.startsWith('62') ? `0${raw.slice(2)}` : raw;
+      const normalizedDigits = raw.replace(/[^0-9]/g, '');
+      const normalized = normalizedDigits.startsWith('62')
+        ? `0${normalizedDigits.slice(2)}`
+        : normalizedDigits;
+      let hasLetter = false;
+      for (const ch of raw.trim()) {
+        if (/[A-Za-z]/.test(ch)) {
+          hasLetter = true;
+          break;
+        }
+      }
+      if (
+        raw.trim() !== '' &&
+        !hasLetter &&
+        normalized.startsWith('0') &&
+        (normalized.length < PHONE_MIN_LENGTH ||
+          normalized.length > PHONE_MAX_LENGTH)
+      ) {
+        return fail(
+          'VALIDATION_ERROR',
+          PHONE_DIGIT_MESSAGE,
+          400,
+        );
+      }
       if (!PHONE_PATTERN.test(canonical)) {
         return fail(
           'VALIDATION_ERROR',
@@ -792,7 +822,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin' && auth.role !== 'admin') {
+    if (!isSuperAdminRole(auth.role) && auth.role !== 'admin') {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk menyetujui kunjungan',
@@ -825,7 +855,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin' && auth.role !== 'admin') {
+    if (!isSuperAdminRole(auth.role) && auth.role !== 'admin') {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk menolak kunjungan',
@@ -1313,7 +1343,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin') {
+    if (!isSuperAdminRole(auth.role)) {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk mengelola fasilitas.',
@@ -1359,7 +1389,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin') {
+    if (!isSuperAdminRole(auth.role)) {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk mengelola fasilitas.',
@@ -1422,7 +1452,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin') {
+    if (!isSuperAdminRole(auth.role)) {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk melihat data pengguna.',
@@ -1456,7 +1486,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin') {
+    if (!isSuperAdminRole(auth.role)) {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk menambah pengguna.',
@@ -1551,7 +1581,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin') {
+    if (!isSuperAdminRole(auth.role)) {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk mengubah status pengguna.',
@@ -1573,7 +1603,7 @@ export const handlers: RequestHandler[] = [
         403,
       );
     }
-    if (target.role === 'super_admin') {
+    if (isSuperAdminRole(target.role)) {
       return fail(
         'FORBIDDEN',
         'Tidak dapat mengubah status akun super_admin.',
@@ -1601,7 +1631,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin') {
+    if (!isSuperAdminRole(auth.role)) {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk mengubah pengguna.',
@@ -1685,7 +1715,7 @@ export const handlers: RequestHandler[] = [
     // Anti-pengambilalihan (cermin BE): super_admin lain tak tersentuh;
     // reset diri sendiri wajib buktikan password saat ini (mock: DEMO_PASSWORD).
     if (password !== undefined) {
-      if (target.role === 'super_admin' && target.id !== auth.id) {
+      if (isSuperAdminRole(target.role) && target.id !== auth.id) {
         return fail('FORBIDDEN', 'Tidak dapat me-reset password super_admin lain.', 403);
       }
       if (target.id === auth.id) {
@@ -1732,7 +1762,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin' && auth.role !== 'admin') {
+    if (!isSuperAdminRole(auth.role) && auth.role !== 'admin') {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk mengubah pengawas.',
@@ -1747,7 +1777,7 @@ export const handlers: RequestHandler[] = [
     if (target === undefined || target.role !== 'security') {
       return fail('NOT_FOUND', 'Akun security tidak ditemukan.', 404);
     }
-    if (auth.role !== 'super_admin' && target.location_id !== auth.location_id) {
+    if (!isSuperAdminRole(auth.role) && target.location_id !== auth.location_id) {
       return fail(
         'FORBIDDEN_BRANCH',
         'Tidak berhak mengubah akun security dari cabang lain.',
@@ -1798,7 +1828,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin') {
+    if (!isSuperAdminRole(auth.role)) {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk menghapus kunjungan.',
@@ -1825,7 +1855,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin') {
+    if (!isSuperAdminRole(auth.role)) {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk menghapus pengguna.',
@@ -1848,7 +1878,7 @@ export const handlers: RequestHandler[] = [
         403,
       );
     }
-    if (target.role === 'super_admin') {
+    if (isSuperAdminRole(target.role)) {
       return fail(
         'FORBIDDEN',
         'Tidak dapat menghapus akun super_admin.',
@@ -1873,7 +1903,7 @@ export const handlers: RequestHandler[] = [
     if (auth === null) {
       return unauthorized();
     }
-    if (auth.role !== 'super_admin') {
+    if (!isSuperAdminRole(auth.role)) {
       return fail(
         'FORBIDDEN',
         'Anda tidak memiliki izin untuk menghapus fasilitas.',

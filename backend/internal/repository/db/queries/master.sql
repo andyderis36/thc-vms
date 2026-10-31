@@ -123,3 +123,59 @@ WHERE location_id = $1;
 DELETE FROM location
 WHERE id = $1
 RETURNING id;
+
+-- =============================================================================
+-- SUPER_ADMIN PURPOSE WRITES (PRD §4: kelola tujuan kunjungan). New purposes
+-- start active; the soft removal stays deactivation via is_active, while the
+-- hard removal is DELETE /purposes/:id (super_admin only, with the Count*
+-- pre-check below refusing with 409 while visit_purpose rows still reference
+-- the row; the DELETE itself is the second line of defence, 23503 -> 409).
+-- The SCR-03 picker keeps reading the active-only catalogue via
+-- ListActivePurposes; the super_admin console reads every row via
+-- ListAllPurposes so a switched-off purpose stays visible and reactivatable.
+-- =============================================================================
+
+-- name: ListAllPurposes :many
+-- GET /purposes?active_only=false (super_admin console only): every purpose
+-- row including deactivated ones, with the is_active flag the console renders.
+SELECT id, name, is_active
+FROM purpose
+ORDER BY name ASC;
+
+-- name: GetPurposeByID :one
+SELECT id, name, is_active
+FROM purpose
+WHERE id = $1;
+
+-- name: InsertPurpose :one
+-- POST /purposes (super_admin only). New rows start active; a blank name is
+-- rejected in Go before this runs so no CHECK is needed.
+INSERT INTO purpose (name, is_active)
+VALUES ($1, true)
+RETURNING id, name, is_active;
+
+-- name: UpdatePurpose :one
+-- PATCH /purposes/:id (super_admin only). Every column is a NULLable bound
+-- value: a NULL keeps the stored column via COALESCE, so the body may carry
+-- any subset of fields. is_active flips here are the deactivation path that
+-- replaces DELETE.
+UPDATE purpose
+SET name      = COALESCE(sqlc.narg('name'), name),
+    is_active = COALESCE(sqlc.narg('is_active')::boolean, is_active)
+WHERE id = $1
+RETURNING id, name, is_active;
+
+-- name: CountVisitsByPurpose :one
+-- DELETE /purposes/:id pre-check: visit_purpose links still pointing at the
+-- catalogue row (no cascade, so a remaining row blocks the delete).
+SELECT count(*)
+FROM visit_purpose
+WHERE purpose_id = $1;
+
+-- name: DeletePurpose :one
+-- DELETE /purposes/:id (super_admin only). A missing id surfaces
+-- pgx.ErrNoRows (-> 404 via MapError); a raced reference surfaces 23503
+-- (-> 409).
+DELETE FROM purpose
+WHERE id = $1
+RETURNING id;

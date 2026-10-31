@@ -34,7 +34,7 @@ import { jpegBuffer, pdfBuffer, pngBuffer } from './helpers/assets'
 import { deleteUploadedFiles } from './helpers/storage'
 
 /** Purpose default untuk kunjungan buatan harness. */
-const DEFAULT_PURPOSE_ID = PURPOSES['Splicing & Maintenance Kabel Fiber Optik']
+const DEFAULT_PURPOSE_ID = PURPOSES.Survey
 
 /**
  * Surat Tugas pengganti saat `withFiles:false`. Backend mewajibkan

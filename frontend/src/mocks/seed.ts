@@ -25,12 +25,10 @@ export const LOC_RKT = 'd44fb8e3-0a50-4b8d-6f40-0000000000d4';
 export const LOC_LWG = 'e55ac9f4-1b61-4c9e-5a51-0000000000e5';
 
 /** ID tujuan kunjungan (bentuk UUID sesuai skema OpenAPI). */
-export const PRP_SPLICING = 'f1010101-1a2b-4c3d-8e4f-000000000001';
-export const PRP_GENSET = 'f2020202-2b3c-4d4e-9f50-000000000002';
-export const PRP_SERVER = 'f3030303-3c4d-4e5f-8051-000000000003';
-export const PRP_PREVENTIVE = 'f4040404-4d5e-4f50-9152-000000000004';
-export const PRP_LOGISTICS = 'f5050505-5e6f-4051-a253-000000000005';
-export const PRP_AUDIT = 'f6060606-6f70-4162-b364-000000000006';
+export const PRP_SURVEY = 'f1010101-1a2b-4c3d-8e4f-000000000001';
+export const PRP_OPS = 'f2020202-2b3c-4d4e-9f50-000000000002';
+export const PRP_PROJECT = 'f3030303-3c4d-4e5f-8051-000000000003';
+export const PRP_OTHER = 'f4040404-4d5e-4f50-9152-000000000004';
 
 /** ID vendor mitra (bentuk UUID sesuai skema OpenAPI; `GET /vendors`). */
 export const VND_LINTAS = 'e1000001-1a2b-4c3d-8e4f-000000000001';
@@ -115,12 +113,10 @@ function buildSeed(): MockDb {
   ];
 
   const purposes: Purpose[] = [
-    { id: PRP_SPLICING, name: 'Splicing & Maintenance Kabel Fiber Optik' },
-    { id: PRP_GENSET, name: 'Maintenance Genset & Sistem Catu Daya UPS' },
-    { id: PRP_SERVER, name: 'Troubleshooting Perangkat Server & Router ISP' },
-    { id: PRP_PREVENTIVE, name: 'Preventive Maintenance & Kebersihan Shelter' },
-    { id: PRP_LOGISTICS, name: 'Pengantaran / Penarikan Perangkat & Sparepart' },
-    { id: PRP_AUDIT, name: 'Survey Jalur / Audit Infrastruktur' },
+    { id: PRP_SURVEY, name: 'Survey' },
+    { id: PRP_OPS, name: 'Operation & Maintenance' },
+    { id: PRP_PROJECT, name: 'Project' },
+    { id: PRP_OTHER, name: 'Other' },
   ];
 
   const vendors: Vendor[] = [
@@ -289,7 +285,7 @@ function buildSeed(): MockDb {
       visit_id: 'VST-2026SBY001',
       status: 'approved',
       location: locationById(LOC_SBY),
-      purposes: [purposeById(PRP_SPLICING)],
+      purposes: [purposeById(PRP_SURVEY)],
       vendor_user: vendorSplicing,
       vendor_name: 'PT Lintas Fiber',
       start_date: isoHoursFromNow(1.5),
@@ -323,7 +319,7 @@ function buildSeed(): MockDb {
       visit_id: 'VST-2026MLG002',
       status: 'approved',
       location: locationById(LOC_MLG),
-      purposes: [purposeById(PRP_GENSET)],
+      purposes: [purposeById(PRP_OPS)],
       vendor_user: vendorGenset,
       vendor_name: 'PT Daya Power Mandiri',
       start_date: isoHoursFromNow(3),
@@ -346,7 +342,7 @@ function buildSeed(): MockDb {
       visit_id: 'VST-2026SBY003',
       status: 'approved',
       location: locationById(LOC_SBY),
-      purposes: [purposeById(PRP_SERVER), purposeById(PRP_PREVENTIVE)],
+      purposes: [purposeById(PRP_PROJECT), purposeById(PRP_OTHER)],
       vendor_user: vendorSplicing,
       vendor_name: 'PT Lintas Fiber',
       start_date: isoHoursFromNow(-2),
@@ -381,7 +377,7 @@ function buildSeed(): MockDb {
       visit_id: 'VST-2026SBY004',
       status: 'visiting',
       location: locationById(LOC_SBY),
-      purposes: [purposeById(PRP_LOGISTICS)],
+      purposes: [purposeById(PRP_PROJECT)],
       vendor_user: vendorSplicing,
       vendor_name: 'PT Lintas Fiber',
       start_date: isoHoursFromNow(-3),
@@ -403,7 +399,7 @@ function buildSeed(): MockDb {
       visit_id: 'VST-2026SBY005',
       status: 'completed',
       location: locationById(LOC_SBY),
-      purposes: [purposeById(PRP_PREVENTIVE)],
+      purposes: [purposeById(PRP_OTHER)],
       vendor_user: vendorGenset,
       vendor_name: 'PT Daya Power Mandiri',
       start_date: isoHoursFromNow(-26),
@@ -431,7 +427,7 @@ function buildSeed(): MockDb {
       visit_id: 'VST-2026SWJ006',
       status: 'requested',
       location: locationById(LOC_SWJ),
-      purposes: [purposeById(PRP_SPLICING)],
+      purposes: [purposeById(PRP_SURVEY)],
       vendor_user: vendorGenset,
       vendor_name: 'PT Daya Power Mandiri',
       start_date: isoHoursFromNow(26),
@@ -453,7 +449,7 @@ function buildSeed(): MockDb {
       visit_id: 'VST-2026MLG007',
       status: 'rejected',
       location: locationById(LOC_MLG),
-      purposes: [purposeById(PRP_AUDIT)],
+      purposes: [purposeById(PRP_SURVEY)],
       vendor_user: vendorSplicing,
       vendor_name: 'PT Lintas Fiber',
       start_date: isoHoursFromNow(30),
@@ -476,7 +472,7 @@ function buildSeed(): MockDb {
       visit_id: 'VST-2026SBY008',
       status: 'cancelled',
       location: locationById(LOC_SBY),
-      purposes: [purposeById(PRP_LOGISTICS)],
+      purposes: [purposeById(PRP_PROJECT)],
       vendor_user: vendorGenset,
       vendor_name: 'PT Daya Power Mandiri',
       start_date: isoHoursFromNow(-50),
@@ -498,7 +494,7 @@ function buildSeed(): MockDb {
       visit_id: 'VST-2026RKT009',
       status: 'rescheduled',
       location: locationById(LOC_RKT),
-      purposes: [purposeById(PRP_SERVER)],
+      purposes: [purposeById(PRP_PROJECT)],
       vendor_user: vendorSplicing,
       vendor_name: 'PT Lintas Fiber',
       start_date: isoHoursFromNow(50),
@@ -526,7 +522,7 @@ function buildSeed(): MockDb {
       visit_id: 'VST-2026LWG010',
       status: 'not_visit',
       location: locationById(LOC_LWG),
-      purposes: [purposeById(PRP_AUDIT)],
+      purposes: [purposeById(PRP_SURVEY)],
       vendor_user: vendorGenset,
       vendor_name: 'PT Daya Power Mandiri',
       start_date: isoHoursFromNow(-72),

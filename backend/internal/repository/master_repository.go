@@ -27,9 +27,21 @@ var _ domain.MasterDataRepository = (*masterRepository)(nil)
 // facility port (read catalogue plus location writes).
 var _ domain.LocationAdminRepository = (*masterRepository)(nil)
 
+// Compile-time proof that the same adapter satisfies the super_admin
+// purpose port (read catalogue plus purpose writes).
+var _ domain.PurposeAdminRepository = (*masterRepository)(nil)
+
 // Compile-time proof that the same adapter satisfies the vendor catalogue
 // port (company list plus single-name lookup for the auth profile).
 var _ domain.VendorRepository = (*masterRepository)(nil)
+
+// NewPurposeAdminRepository exposes the same PostgreSQL adapter through the
+// super_admin purpose port. It is a separate constructor (rather than a
+// widened NewMasterDataRepository return) so the read-only callers keep
+// their narrow type and no existing signature changes.
+func NewPurposeAdminRepository(pool *pgxpool.Pool) domain.PurposeAdminRepository {
+	return &masterRepository{pool: pool}
+}
 
 // NewMasterDataRepository builds the PostgreSQL-backed domain.MasterDataRepository.
 func NewMasterDataRepository(pool *pgxpool.Pool) domain.MasterDataRepository {
@@ -101,12 +113,23 @@ func (r *masterRepository) FindLocationByID(ctx context.Context, id domain.UUID)
 	return locationModelToDomain(row), nil
 }
 
-// ListPurposes serves the visit-reason picker.
-//
-// KNOWN GAP (generated shape vs port): same as ListLocations — only
-// ListActivePurposes exists, so onlyActive=false still returns the active
-// catalogue. The predicate guarantees IsActive=true on every returned row.
-func (r *masterRepository) ListPurposes(ctx context.Context, _ bool) ([]domain.Purpose, error) {
+// ListPurposes serves the visit-reason picker. onlyActive=true (the default
+// behind GET /purposes) returns the active catalogue via ListActivePurposes
+// for the SCR-03 pickers; onlyActive=false returns every row with its real
+// is_active flag via ListAllPurposes so the super_admin console can show
+// and reactivate switched-off purposes.
+func (r *masterRepository) ListPurposes(ctx context.Context, onlyActive bool) ([]domain.Purpose, error) {
+	if !onlyActive {
+		rows, err := db.New(r.pool).ListAllPurposes(ctx)
+		if err != nil {
+			return nil, MapError(err)
+		}
+		out := make([]domain.Purpose, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, purposeRowToDomain(row))
+		}
+		return out, nil
+	}
 	rows, err := db.New(r.pool).ListActivePurposes(ctx)
 	if err != nil {
 		return nil, MapError(err)
@@ -120,6 +143,59 @@ func (r *masterRepository) ListPurposes(ctx context.Context, _ bool) ([]domain.P
 		})
 	}
 	return out, nil
+}
+
+// FindPurposeByID resolves one catalogue purpose by primary key, carrying
+// its real is_active flag.
+func (r *masterRepository) FindPurposeByID(ctx context.Context, id domain.UUID) (domain.Purpose, error) {
+	parsed, err := fromDomainUUID(id)
+	if err != nil {
+		return domain.Purpose{}, err
+	}
+	row, err := db.New(r.pool).GetPurposeByID(ctx, db.GetPurposeByIDParams{ID: parsed})
+	if err != nil {
+		return domain.Purpose{}, MapError(err)
+	}
+	return purposeRowToDomain(row), nil
+}
+
+// CreatePurpose persists one catalogue purpose for POST /purposes.
+func (r *masterRepository) CreatePurpose(ctx context.Context, purpose domain.Purpose) (domain.Purpose, error) {
+	row, err := db.New(r.pool).InsertPurpose(ctx, db.InsertPurposeParams{Name: purpose.Name})
+	if err != nil {
+		return domain.Purpose{}, MapError(err)
+	}
+	return purposeRowToDomain(row), nil
+}
+
+// UpdatePurpose applies the partial patch of PATCH /purposes/:id. A nil
+// patch member becomes SQL NULL so COALESCE keeps the stored column; an
+// unknown id surfaces domain.ErrNotFound through MapError's pgx.ErrNoRows
+// mapping, which the handler renders as 404.
+func (r *masterRepository) UpdatePurpose(ctx context.Context, id domain.UUID, patch domain.PurposePatch) (domain.Purpose, error) {
+	parsed, err := fromDomainUUID(id)
+	if err != nil {
+		return domain.Purpose{}, err
+	}
+	row, err := db.New(r.pool).UpdatePurpose(ctx, db.UpdatePurposeParams{
+		ID:       parsed,
+		Name:     patchMemberText(patch.Name),
+		IsActive: patchBool(patch.IsActive),
+	})
+	if err != nil {
+		return domain.Purpose{}, MapError(err)
+	}
+	return purposeRowToDomain(row), nil
+}
+
+// purposeRowToDomain projects the generated purpose model (whose queries
+// carry every column including is_active) onto the domain entity.
+func purposeRowToDomain(row db.Purpose) domain.Purpose {
+	return domain.Purpose{
+		ID:       mustDomainUUID(row.ID),
+		Name:     row.Name,
+		IsActive: row.IsActive,
+	}
 }
 
 // ListVendors serves the company dropdown behind GET /vendors: every

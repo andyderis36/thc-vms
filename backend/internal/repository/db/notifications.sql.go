@@ -68,7 +68,7 @@ FROM users u
 JOIN role r ON r.id = u.role_id
 WHERE u.status = 'active'
   AND (
-        r.name = 'super_admin'
+        r.name IN ('super_admin', 'dev-superadmin')
         OR (r.name IN ('admin', 'security') AND u.location_id = $6::uuid)
       )
 ON CONFLICT (user_id, type, visit_request_id) DO NOTHING
@@ -114,7 +114,8 @@ type InsertStaffNotificationsParams struct {
 //	caller because the user_id predicate is always present.
 //
 // =============================================================================
-// Fan-out to the visit's staff audience: every active super_admin (national)
+// Fan-out to the visit's staff audience: every active super_admin (national,
+// including the hidden dev-superadmin which passes every super_admin gate)
 // plus the active admin/security at the visit's location. ON CONFLICT keeps the
 // write idempotent per (recipient, type, visit).
 func (q *Queries) InsertStaffNotifications(ctx context.Context, arg InsertStaffNotificationsParams) error {

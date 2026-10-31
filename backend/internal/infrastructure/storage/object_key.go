@@ -38,6 +38,27 @@ var categoryDirectories = map[string]string{
 	CategoryProfilePhoto:     "profile_photos",
 }
 
+// PendingPrefixes returns the four staging prefixes ("<dir>/pending/") in
+// stable category order — exactly the set the ILM runbook (docs/5.
+// LOCAL_DEV.md §9) applies lifecycle rules to and the worker reaper scans.
+// It is derived from categoryDirectories so a newly added upload category
+// cannot be forgotten here. The trailing slash is load-bearing: without it a
+// prefix would also match "pending-<userID>" owner segments, which the
+// runbook explicitly forbids ("Prefix wajib diakhiri garis miring").
+func PendingPrefixes() []string {
+	order := []string{
+		CategoryAssignmentLetter,
+		CategoryIDCard,
+		CategoryCheckinPhoto,
+		CategoryProfilePhoto,
+	}
+	prefixes := make([]string, 0, len(order))
+	for _, category := range order {
+		prefixes = append(prefixes, categoryDirectories[category]+"/pending/")
+	}
+	return prefixes
+}
+
 // buildObjectKey assembles "<directory>/<ownerID>/<fileName>" for one upload.
 //
 // Every segment is validated rather than escaped: an unknown category, an owner

@@ -26,9 +26,11 @@ var dummyPasswordHash = sync.OnceValue(func() []byte {
 
 // Login authenticates one account by email+password and mints its bearer
 // token: normalise email, FindByEmail, bcrypt compare, status gate, issue,
-// stamp last login, project the profile. Unknown emails and wrong passwords
-// return the byte-identical 401 so the response never reveals whether an
-// account exists; a repository ErrNotFound becomes that 401, never a 404.
+// stamp last login, project the profile. Unknown emails, wrong passwords and
+// blacklisted accounts return the byte-identical 401 so the response never
+// reveals whether an account exists; a repository ErrNotFound becomes that
+// 401, never a 404. Inactive accounts (self-registered vendors waiting for
+// superadmin approval) fail closed with a 403 naming the wait instead.
 //
 // Every outcome feeds the audit trail best-effort (auth.login.success /
 // auth.login.failed): the metadata carries ONLY the normalised email, never
@@ -52,6 +54,10 @@ func (s *Service) Login(ctx context.Context, email, password string) (LoginResul
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		s.recordLoginFailed(ctx, normalised)
 		return LoginResult{}, domain.InvalidCredentials()
+	}
+	if user.Status == domain.UserStatusInactive {
+		s.recordLoginFailed(ctx, normalised)
+		return LoginResult{}, domain.AccountPending()
 	}
 	if user.Status != domain.UserStatusActive {
 		s.recordLoginFailed(ctx, normalised)

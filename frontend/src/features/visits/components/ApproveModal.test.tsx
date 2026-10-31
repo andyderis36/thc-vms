@@ -37,7 +37,7 @@ function buildVisit(overrides: Partial<VisitDetail> & Pick<VisitDetail, 'id' | '
       city: 'Jakarta Pusat',
       timezone: 'WIB',
     },
-    purposes: [{ id: 'purp-1', name: 'Splicing FO' }],
+    purposes: [{ id: 'purp-1', name: 'Survey' }],
     vendor_user: {
       id: 'user-1',
       name: 'Budi Santoso',

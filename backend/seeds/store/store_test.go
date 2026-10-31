@@ -177,8 +177,8 @@ func TestApplySendsTriggerSatisfyingArguments(t *testing.T) {
 			t.Errorf("nik arg is an empty string: absence must be SQL NULL, never ''")
 		}
 	}
-	if inserts != 26 {
-		t.Errorf("recorded %d user inserts, want 26", inserts)
+	if inserts != 27 {
+		t.Errorf("recorded %d user inserts, want 27", inserts)
 	}
 }
 

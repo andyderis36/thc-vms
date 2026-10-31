@@ -168,7 +168,7 @@ func TestValidateManagedUserUpdate_ManualVendorNameIsVendorOnly(t *testing.T) {
 	vendorName := "PT Subkon Mandiri"
 
 	for _, role := range []domain.RoleName{
-		domain.RoleAdmin, domain.RoleSecurity, domain.RoleSuperAdmin,
+		domain.RoleAdmin, domain.RoleSecurity, domain.RoleSuperAdmin, domain.RoleDevSuperAdmin,
 	} {
 		if err := superadmin.ValidateManagedUserUpdate(superadmin.ManagedUserPatchInput{
 			Role: role, VendorName: &vendorName,

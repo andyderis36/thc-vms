@@ -177,10 +177,10 @@ func batchVisitRowToDomain(row db.GetVisitsByIDsRow) (domain.VisitRequest, error
 		row.ID, row.VisitID, row.VendorUserID, row.VendorID, row.LocationID,
 		row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 		row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
-		row.PurposeNote,
+		row.PurposeNote, row.VendorNameOverride,
 		row.CreatedAt, row.UpdatedAt, row.VendorName,
 		row.LocationName, row.LocationType,
-		row.VendorUserName, row.VendorUserEmail,
+		row.VendorUserName, row.VendorUserEmail, row.VendorUserVendorName,
 	)
 }
 

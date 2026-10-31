@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -18,7 +19,8 @@ import (
 )
 
 // SuperAdminHandler serves the super_admin back-office endpoints (PRD §4):
-// facility CRUD (POST/PATCH/DELETE /locations), account management
+// facility CRUD (POST/PATCH/DELETE /locations), purpose CRUD
+// (POST/PATCH/DELETE /purposes), account management
 // (GET/POST/DELETE /users, PATCH /users/:id/status) and the visit purge
 // (DELETE /visits/:id). Every answer reuses the openapi-pinned accountDTO
 // and masterLocationDTO shapes, so no new JSON key is invented; the three
@@ -29,18 +31,42 @@ import (
 type SuperAdminHandler struct {
 	users        domain.ManagedUserRepository
 	locations    domain.LocationAdminRepository
+	purposes     domain.PurposeAdminRepository
 	visits       domain.VisitRepository
 	adminRoleID  domain.UUID
 	vendorRoleID domain.UUID
 	// audit is the optional trail writer: nil disables emission so hermetic
 	// tests and unwired callers behave exactly as before.
 	audit domain.AuditRepository
+	// storage is the optional object-storage port behind the delete-path
+	// cleanup (avatar, assignment letter, visitor photos, check-in photo):
+	// nil keeps the DELETEs DB-only, exactly as before Wave-2.
+	storage domain.IStorageService
+	// checkins resolves a visit's gate photo before the purge cascades the
+	// check_in row away; nil skips that key kind.
+	checkins domain.CheckInOutRepository
 }
 
 // WithAudit attaches the trail writer and returns the handler for chaining.
 // Production passes repository.NewAuditRepository(pool); tests pass a fake.
 func (h *SuperAdminHandler) WithAudit(audit domain.AuditRepository) *SuperAdminHandler {
 	h.audit = audit
+	return h
+}
+
+// WithStorage attaches the object-storage port and returns the handler for
+// chaining. Production passes the MinIO/S3 adapter; a nil port (the zero
+// value) disables the second cleanup phase so the delete paths stay DB-only.
+func (h *SuperAdminHandler) WithStorage(storage domain.IStorageService) *SuperAdminHandler {
+	h.storage = storage
+	return h
+}
+
+// WithCheckIns attaches the gate-record port used to collect the check-in
+// photo key before a visit purge cascades the check_in row away; nil skips
+// that key kind.
+func (h *SuperAdminHandler) WithCheckIns(checkins domain.CheckInOutRepository) *SuperAdminHandler {
+	h.checkins = checkins
 	return h
 }
 
@@ -129,23 +155,168 @@ func managedUserChangedFields(patch domain.ManagedUserPatch) string {
 	return strings.Join(fields, ",")
 }
 
-// NewSuperAdminHandler wires the handler to the managed-account, facility
-// and visit ports. adminRoleID and vendorRoleID are the role rows resolved once
-// at startup (like the security role id of UserHandler); the account type is
-// derived server-side from the role and never read from the body.
-func NewSuperAdminHandler(users domain.ManagedUserRepository, locations domain.LocationAdminRepository, visits domain.VisitRepository, adminRoleID, vendorRoleID domain.UUID) *SuperAdminHandler {
-	return &SuperAdminHandler{users: users, locations: locations, visits: visits, adminRoleID: adminRoleID, vendorRoleID: vendorRoleID}
+// purposeChangedFields names the PATCH /purposes/:id members being changed,
+// for the purpose.update metadata. Nil members keep the stored columns.
+func purposeChangedFields(patch domain.PurposePatch) string {
+	var fields []string
+	if patch.Name != nil {
+		fields = append(fields, "name")
+	}
+	if patch.IsActive != nil {
+		fields = append(fields, "is_active")
+	}
+	return strings.Join(fields, ",")
+}
+
+// maxUpdateAuditPairs caps the before/after pairs one update trail row
+// carries: seven pairs = 14 keys plus the fields CSV = 15, one under the
+// domain's 16-key SanitizeMetadata cap (domain/audit.go maxAuditMetaKeys).
+// The managed-user patch has eight members, but the password member never
+// takes a pair, so seven is also the reachable worst case.
+const maxUpdateAuditPairs = 7
+
+// updatePair is one changed member's flat before/after values for the
+// additive before.<field>/after.<field> metadata keys. Sides stay raw
+// flat strings (never nested); a missing/NULL side is the empty string and
+// renders as "—" downstream.
+type updatePair struct {
+	field  string
+	before string
+	after  string
+}
+
+// secretAuditField reports whether a field label is password/token/secret
+// shaped. Such members contribute only their fields-CSV label and never a
+// value pair; SanitizeMetadata strips the same shapes again at the
+// repository boundary (defence in depth).
+func secretAuditField(field string) bool {
+	lowered := strings.ToLower(field)
+	for _, banned := range []string{"password", "passwd", "pwd", "token", "secret", "hash", "authorization"} {
+		if strings.Contains(lowered, banned) {
+			return true
+		}
+	}
+	return false
+}
+
+// addUpdatePairs merges the before/after pairs into meta beside the
+// unchanged fields CSV, skipping secret-shaped members and stopping at
+// maxUpdateAuditPairs so the row can never exceed the 16-key cap.
+func addUpdatePairs(meta map[string]string, pairs ...updatePair) {
+	emitted := 0
+	for _, p := range pairs {
+		if emitted >= maxUpdateAuditPairs || secretAuditField(p.field) {
+			continue
+		}
+		meta["before."+p.field] = p.before
+		meta["after."+p.field] = p.after
+		emitted++
+	}
+}
+
+// locationUpdatePairs pairs each changed LocationPatch member with the
+// stored column it replaces, for location.update.
+func locationUpdatePairs(stored domain.Location, patch domain.LocationPatch) []updatePair {
+	pairs := make([]updatePair, 0, 6)
+	if patch.Name != nil {
+		pairs = append(pairs, updatePair{field: "name", before: stored.Name, after: *patch.Name})
+	}
+	if patch.Type != nil {
+		pairs = append(pairs, updatePair{field: "type", before: string(stored.Type), after: string(*patch.Type)})
+	}
+	if patch.Address != nil {
+		pairs = append(pairs, updatePair{field: "address", before: stored.Address, after: *patch.Address})
+	}
+	if patch.City != nil {
+		pairs = append(pairs, updatePair{field: "city", before: stored.City, after: *patch.City})
+	}
+	if patch.Timezone != nil {
+		pairs = append(pairs, updatePair{field: "timezone", before: string(stored.Timezone), after: string(*patch.Timezone)})
+	}
+	if patch.IsActive != nil {
+		pairs = append(pairs, updatePair{
+			field: "is_active", before: strconv.FormatBool(stored.IsActive), after: strconv.FormatBool(*patch.IsActive),
+		})
+	}
+	return pairs
+}
+
+// purposeUpdatePairs pairs each changed PurposePatch member with the
+// stored column it replaces, for purpose.update.
+func purposeUpdatePairs(stored domain.Purpose, patch domain.PurposePatch) []updatePair {
+	pairs := make([]updatePair, 0, 2)
+	if patch.Name != nil {
+		pairs = append(pairs, updatePair{field: "name", before: stored.Name, after: *patch.Name})
+	}
+	if patch.IsActive != nil {
+		pairs = append(pairs, updatePair{
+			field: "is_active", before: strconv.FormatBool(stored.IsActive), after: strconv.FormatBool(*patch.IsActive),
+		})
+	}
+	return pairs
+}
+
+// managedUserUpdatePairs pairs each changed ManagedUserPatch member with
+// the stored column it replaces, for user.update (superadmin and the
+// branch-admin security mirror). The password member is deliberately
+// absent: its label stays in the fields CSV and its value (hash or
+// plaintext) never enters the trail.
+func managedUserUpdatePairs(stored domain.User, patch domain.ManagedUserPatch) []updatePair {
+	pairs := make([]updatePair, 0, 7)
+	if patch.Name != nil {
+		pairs = append(pairs, updatePair{field: "name", before: stored.Name, after: *patch.Name})
+	}
+	if patch.Email != nil {
+		pairs = append(pairs, updatePair{field: "email", before: stored.Email, after: *patch.Email})
+	}
+	if patch.Phone != nil {
+		pairs = append(pairs, updatePair{field: "phone", before: stored.Phone, after: *patch.Phone})
+	}
+	if patch.NIK != nil {
+		pairs = append(pairs, updatePair{field: "nik", before: stored.NIK, after: *patch.NIK})
+	}
+	if patch.LocationID != nil {
+		pairs = append(pairs, updatePair{field: "location_id", before: auditUUID(stored.LocationID), after: string(*patch.LocationID)})
+	}
+	if patch.VendorID != nil {
+		pairs = append(pairs, updatePair{field: "vendor_id", before: auditUUID(stored.VendorID), after: string(*patch.VendorID)})
+	}
+	if patch.VendorName != nil {
+		pairs = append(pairs, updatePair{field: "vendor_name", before: stringOrEmpty(stored.VendorNameOverride), after: *patch.VendorName})
+	}
+	return pairs
+}
+
+// auditUUID renders an optional UUID column as a flat string; NULL becomes
+// the empty string, which renders as "—" downstream.
+func auditUUID(id *domain.UUID) string {
+	if id == nil {
+		return ""
+	}
+	return string(*id)
+}
+
+// NewSuperAdminHandler wires the handler to the managed-account, facility,
+// purpose and visit ports. adminRoleID and vendorRoleID are the role rows
+// resolved once at startup (like the security role id of UserHandler); the
+// account type is derived server-side from the role and never read from the
+// body.
+func NewSuperAdminHandler(users domain.ManagedUserRepository, locations domain.LocationAdminRepository, purposes domain.PurposeAdminRepository, visits domain.VisitRepository, adminRoleID, vendorRoleID domain.UUID) *SuperAdminHandler {
+	return &SuperAdminHandler{users: users, locations: locations, purposes: purposes, visits: visits, adminRoleID: adminRoleID, vendorRoleID: vendorRoleID}
 }
 
 // requireSuperAdmin refuses anonymous callers with 401 and non-super_admin
 // roles with the 403 sentinel, mirroring the router's SuperAdminOnly chain.
+// The hidden dev-superadmin passes like super_admin; it is never exposed
+// through these endpoints' destructive controls (see the superadmin usecase
+// guards, which refuse any touch of either top-level account).
 func requireSuperAdmin(c *gin.Context) (deliveryhttp.Identity, bool) {
 	id, ok := deliveryhttp.IdentityFrom(c)
 	if !ok {
 		response.Fail(c, domain.ErrUnauthorized)
 		return deliveryhttp.Identity{}, false
 	}
-	if id.Role != domain.RoleSuperAdmin {
+	if !domain.IsSuperAdminRole(id.Role) {
 		response.Fail(c, domain.ErrForbiddenBranch)
 		return deliveryhttp.Identity{}, false
 	}
@@ -165,6 +336,17 @@ func toMasterLocation(loc domain.Location) masterLocationDTO {
 		City:     loc.City,
 		Timezone: string(loc.Timezone),
 		IsActive: loc.IsActive,
+	}
+}
+
+// toMasterPurpose projects one stored catalogue purpose onto the Purpose
+// response shape: the openapi field set plus the is_active flag the
+// super_admin console renders.
+func toMasterPurpose(purpose domain.Purpose) masterPurposeDTO {
+	return masterPurposeDTO{
+		ID:       string(purpose.ID),
+		Name:     purpose.Name,
+		IsActive: purpose.IsActive,
 	}
 }
 
@@ -318,17 +500,19 @@ func (h *SuperAdminHandler) UpdateLocation(c *gin.Context) {
 	}
 	targetID := domain.UUID(strings.TrimSpace(c.Param("id")))
 	ctx := c.Request.Context()
-	if _, err := h.locations.FindLocationByID(ctx, targetID); err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+	existing, lookupErr := h.locations.FindLocationByID(ctx, targetID)
+	if lookupErr != nil {
+		if errors.Is(lookupErr, domain.ErrNotFound) {
 			response.Fail(c, domain.NotFoundEntity("Fasilitas"))
 			return
 		}
-		response.Fail(c, err)
+		response.Fail(c, lookupErr)
 		return
 	}
+	meta := map[string]string{"fields": locationChangedFields(patch)}
+	addUpdatePairs(meta, locationUpdatePairs(existing, patch)...)
 	entry := auditEntry(c, actor.UserID, domain.AuditActionLocationUpdate,
-		domain.AuditEntityLocation, &targetID,
-		map[string]string{"fields": locationChangedFields(patch)})
+		domain.AuditEntityLocation, &targetID, meta)
 	var updated domain.Location
 	var err error
 	audited := false
@@ -412,7 +596,7 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 		response.Fail(c, domain.ErrUnauthorized)
 		return
 	}
-	if actor.Role != domain.RoleSuperAdmin && actor.Role != domain.RoleAdmin {
+	if !domain.IsSuperAdminRole(actor.Role) && actor.Role != domain.RoleAdmin {
 		response.Fail(c, domain.ErrForbiddenBranch)
 		return
 	}
@@ -717,9 +901,10 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 	if !h.checkPasswordReset(c, id.UserID, target, body, patch) {
 		return
 	}
+	meta := map[string]string{"fields": managedUserChangedFields(patch)}
+	addUpdatePairs(meta, managedUserUpdatePairs(target.User, patch)...)
 	entry := auditEntry(c, id.UserID, domain.AuditActionUserUpdate,
-		domain.AuditEntityUser, &targetID,
-		map[string]string{"fields": managedUserChangedFields(patch)})
+		domain.AuditEntityUser, &targetID, meta)
 	audited := false
 	if store, ok := h.users.(domain.AuditedUserRepository); ok {
 		_, err = store.UpdateManagedUserAudited(ctx, targetID, patch, entry)
@@ -818,16 +1003,20 @@ func (h *SuperAdminHandler) DeleteUser(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
+	// Collect the avatar key while the row is still readable (row-first);
+	// the batch below runs only after a successful commit (object-second).
+	keys := superadmin.CollectUserStorageKeys(h.storage, target)
 	entry := auditEntry(c, id.UserID, domain.AuditActionUserDelete,
 		domain.AuditEntityUser, &targetID,
 		map[string]string{"email": target.User.Email, "role": string(target.Role)})
 	audited := false
-	if store, ok := h.users.(domain.AuditedUserRepository); ok {
-		err = store.DeleteUserAudited(ctx, targetID, entry)
-		audited = true
-	} else {
-		err = h.users.DeleteUser(ctx, targetID)
-	}
+	err = superadmin.DeleteRowThenObjects(ctx, h.storage, keys, func() error {
+		if store, ok := h.users.(domain.AuditedUserRepository); ok {
+			audited = true
+			return store.DeleteUserAudited(ctx, targetID, entry)
+		}
+		return h.users.DeleteUser(ctx, targetID)
+	})
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Fail(c, domain.NotFoundEntity("Akun"))
@@ -900,6 +1089,175 @@ func (h *SuperAdminHandler) DeleteLocation(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// createPurposeBody mirrors the POST /purposes body: the catalogue name is
+// the only member; new rows start active.
+type createPurposeBody struct {
+	Name string `json:"name"`
+}
+
+// CreatePurpose serves POST /purposes with 201. Validation rejects a blank
+// or overlong name with 400 before any write.
+// The success feeds purpose.create: same-transaction via the audited port,
+// best-effort fallback otherwise.
+func (h *SuperAdminHandler) CreatePurpose(c *gin.Context) {
+	actor, ok := requireSuperAdmin(c)
+	if !ok {
+		return
+	}
+	var body createPurposeBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Format isi permintaan tidak valid.")
+		return
+	}
+	if err := superadmin.ValidatePurposeCreate(body.Name); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	pending := domain.Purpose{
+		Name:     strings.TrimSpace(body.Name),
+		IsActive: true,
+	}
+	ctx := c.Request.Context()
+	var created domain.Purpose
+	var err error
+	audited := false
+	if store, ok := h.purposes.(domain.AuditedPurposeRepository); ok {
+		created, err = store.CreatePurposeAudited(ctx, pending, auditEntry(c, actor.UserID,
+			domain.AuditActionPurposeCreate, domain.AuditEntityPurpose, nil,
+			map[string]string{"name": pending.Name}))
+		audited = true
+	} else {
+		created, err = h.purposes.CreatePurpose(ctx, pending)
+	}
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, auditEntry(c, actor.UserID,
+			domain.AuditActionPurposeCreate, domain.AuditEntityPurpose, &created.ID,
+			map[string]string{"name": created.Name}))
+	}
+	response.Created(c, toMasterPurpose(created))
+}
+
+// updatePurposeBody mirrors the PATCH /purposes/:id body: every member is
+// a pointer so an absent key leaves its column unchanged.
+type updatePurposeBody struct {
+	Name     *string `json:"name"`
+	IsActive *bool   `json:"is_active"`
+}
+
+// UpdatePurpose serves PATCH /purposes/:id with 200. Unknown ids are 404,
+// an empty patch and a blank or overlong name are 400. Deactivation via
+// is_active:false is the supported soft removal; the hard removal lives on
+// DELETE /purposes/:id (refused with 409 while visits still reference it).
+func (h *SuperAdminHandler) UpdatePurpose(c *gin.Context) {
+	actor, ok := requireSuperAdmin(c)
+	if !ok {
+		return
+	}
+	var body updatePurposeBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Format isi permintaan tidak valid.")
+		return
+	}
+	patch := domain.PurposePatch{IsActive: body.IsActive}
+	if body.Name != nil {
+		name := strings.TrimSpace(*body.Name)
+		patch.Name = &name
+	}
+	if err := superadmin.ValidatePurposePatch(patch); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	targetID := domain.UUID(strings.TrimSpace(c.Param("id")))
+	ctx := c.Request.Context()
+	existing, lookupErr := h.purposes.FindPurposeByID(ctx, targetID)
+	if lookupErr != nil {
+		if errors.Is(lookupErr, domain.ErrNotFound) {
+			response.Fail(c, domain.NotFoundEntity("Tujuan kunjungan"))
+			return
+		}
+		response.Fail(c, lookupErr)
+		return
+	}
+	meta := map[string]string{"fields": purposeChangedFields(patch)}
+	addUpdatePairs(meta, purposeUpdatePairs(existing, patch)...)
+	entry := auditEntry(c, actor.UserID, domain.AuditActionPurposeUpdate,
+		domain.AuditEntityPurpose, &targetID, meta)
+	var updated domain.Purpose
+	var err error
+	audited := false
+	if store, ok := h.purposes.(domain.AuditedPurposeRepository); ok {
+		updated, err = store.UpdatePurposeAudited(ctx, targetID, patch, entry)
+		audited = true
+	} else {
+		updated, err = h.purposes.UpdatePurpose(ctx, targetID, patch)
+	}
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, entry)
+	}
+	response.OK(c, toMasterPurpose(updated))
+}
+
+// DeletePurpose serves DELETE /purposes/:id with 204 and no body. Unknown
+// ids are 404; a purpose still linked from visits is 409. The database FK
+// (23503 -> 409 via MapError) is the second line of defence for a reference
+// that races the pre-check.
+func (h *SuperAdminHandler) DeletePurpose(c *gin.Context) {
+	actor, ok := requireSuperAdmin(c)
+	if !ok {
+		return
+	}
+	ctx := c.Request.Context()
+	targetID := domain.UUID(strings.TrimSpace(c.Param("id")))
+	stored, err := h.purposes.FindPurposeByID(ctx, targetID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Fail(c, domain.NotFoundEntity("Tujuan kunjungan"))
+			return
+		}
+		response.Fail(c, err)
+		return
+	}
+	visits, err := h.purposes.CountVisitsByPurpose(ctx, targetID)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	if err := superadmin.CheckPurposeReferences(visits); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	entry := auditEntry(c, actor.UserID, domain.AuditActionPurposeDelete,
+		domain.AuditEntityPurpose, &targetID,
+		map[string]string{"name": stored.Name})
+	audited := false
+	if store, ok := h.purposes.(domain.AuditedPurposeRepository); ok {
+		err = store.DeletePurposeAudited(ctx, targetID, entry)
+		audited = true
+	} else {
+		err = h.purposes.DeletePurpose(ctx, targetID)
+	}
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Fail(c, domain.NotFoundEntity("Tujuan kunjungan"))
+			return
+		}
+		response.Fail(c, err)
+		return
+	}
+	if !audited {
+		h.appendAuditFallback(ctx, entry)
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // DeleteVisit serves DELETE /visits/:id (super_admin only, any status) with
 // 204 and no body. Unknown ids are 404. The child tables (visitor,
 // visit_purpose, status_history, check_in, check_out) all carry ON DELETE
@@ -912,22 +1270,28 @@ func (h *SuperAdminHandler) DeleteVisit(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	targetID := domain.UUID(strings.TrimSpace(c.Param("id")))
-	// Best-effort visit code for the metadata: the delete below stays the
-	// 404 authority, so a read failure only leaves the code out.
+	// Best-effort visit read feeds BOTH the audit metadata and the storage
+	// cleanup: the delete below stays the 404 authority, so a read failure
+	// only leaves the code and the object keys out (a missed key degrades to
+	// an orphan a sweep can retry, never a dangling reference).
 	meta := map[string]string{}
-	if visit, err := h.visits.FindByID(ctx, targetID); err == nil && visit.VisitID != "" {
-		meta["visit_code"] = visit.VisitID
+	var keys []string
+	if visit, err := h.visits.FindByID(ctx, targetID); err == nil {
+		if visit.VisitID != "" {
+			meta["visit_code"] = visit.VisitID
+		}
+		keys = superadmin.CollectVisitStorageKeys(h.storage, visit, h.findCheckIn(ctx, targetID))
 	}
 	entry := auditEntry(c, actor.UserID, domain.AuditActionVisitDelete,
 		domain.AuditEntityVisit, &targetID, meta)
-	var err error
 	audited := false
-	if store, ok := h.visits.(domain.AuditedVisitRepository); ok {
-		err = store.DeleteVisitAudited(ctx, targetID, entry)
-		audited = true
-	} else {
-		err = h.visits.DeleteVisit(ctx, targetID)
-	}
+	err := superadmin.DeleteRowThenObjects(ctx, h.storage, keys, func() error {
+		if store, ok := h.visits.(domain.AuditedVisitRepository); ok {
+			audited = true
+			return store.DeleteVisitAudited(ctx, targetID, entry)
+		}
+		return h.visits.DeleteVisit(ctx, targetID)
+	})
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Fail(c, domain.NotFoundEntity("Kunjungan"))
@@ -940,4 +1304,23 @@ func (h *SuperAdminHandler) DeleteVisit(c *gin.Context) {
 		h.appendAuditFallback(ctx, entry)
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// findCheckIn loads the visit's gate record for storage-key collection: nil
+// when the cleanup is unwired, the visit never checked in (ErrNotFound), or
+// the read fails. A non-NotFound failure is logged; the purge stays
+// best-effort and the delete remains the 404 authority, mirroring the visit
+// read above.
+func (h *SuperAdminHandler) findCheckIn(ctx context.Context, visitID domain.UUID) *domain.CheckIn {
+	if h.checkins == nil {
+		return nil
+	}
+	checkIn, err := h.checkins.FindCheckInByVisit(ctx, visitID)
+	if err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			slog.Warn("superadmin: check-in read skipped for storage cleanup", "visit_id", visitID, "error", err)
+		}
+		return nil
+	}
+	return &checkIn
 }

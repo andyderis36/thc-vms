@@ -141,7 +141,7 @@ func canReadAvatar(actor Actor, target domain.User) bool {
 	if actor.ID == target.ID {
 		return true
 	}
-	if actor.Role == domain.RoleSuperAdmin {
+	if domain.IsSuperAdminRole(actor.Role) {
 		return true
 	}
 	return actor.LocationID != nil && target.LocationID != nil && *actor.LocationID == *target.LocationID

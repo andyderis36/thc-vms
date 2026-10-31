@@ -64,7 +64,7 @@ func (s *Service) ListVisits(ctx context.Context, actor Actor, in ListVisitsInpu
 		vendorUserID := actor.ID
 		filter.VendorUserID = &vendorUserID
 		filter.LocationID = nil
-	case domain.RoleSuperAdmin:
+	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:
 		// Global scope; the optional branch filter is the only narrowing allowed.
 		filter.LocationID = in.LocationID
 	default:

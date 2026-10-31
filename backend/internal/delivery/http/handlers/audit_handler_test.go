@@ -156,6 +156,14 @@ func TestAuditList_DefaultLimitIsDomainDefault(t *testing.T) {
 	}
 }
 
+func TestAuditList_DevSuperadminIsAdmitted(t *testing.T) {
+	store := &stubAuditStore{items: []domain.AuditLog{cannedAuditLog()}, total: 1}
+	engine := newAuditListEngine(store, domain.RoleDevSuperAdmin)
+
+	rec := serve(engine, "GET", "/audit-logs", nil, "")
+	mustStatus(t, rec, http.StatusOK)
+}
+
 func TestAuditList_NonSuperAdminIsForbidden(t *testing.T) {
 	for _, role := range []domain.RoleName{domain.RoleAdmin, domain.RoleSecurity, domain.RoleVendor} {
 		store := &stubAuditStore{items: []domain.AuditLog{cannedAuditLog()}, total: 1}

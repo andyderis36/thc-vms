@@ -13,7 +13,7 @@ func TestLimitsValues(t *testing.T) {
 	}{
 		{"NameMaxLength", NameMaxLength, 100},
 		{"IDNumberMaxLength", IDNumberMaxLength, 20},
-		{"PhoneMaxLength", PhoneMaxLength, 15},
+		{"PhoneMaxLength", PhoneMaxLength, 16},
 		{"PasswordMinLength", PasswordMinLength, 8},
 		{"PasswordMaxBytes", PasswordMaxBytes, 72},
 		{"EmailMaxLength", EmailMaxLength, 254},
@@ -21,7 +21,7 @@ func TestLimitsValues(t *testing.T) {
 		{"RejectReasonMinLength", RejectReasonMinLength, 5},
 		{"FacilityNameMaxLength", FacilityNameMaxLength, 100},
 		{"FacilityAddressMaxLength", FacilityAddressMaxLength, 255},
-		{"FacilityCityMaxLength", FacilityCityMaxLength, 255},
+		{"FacilityCityMaxLength", FacilityCityMaxLength, 100},
 		{"VisitIDInputMaxLength", VisitIDInputMaxLength, 64},
 		{"BadgeCodeMaxLength", BadgeCodeMaxLength, 64},
 		{"CheckinNotesMaxLength", CheckinNotesMaxLength, 500},
@@ -47,7 +47,7 @@ func TestLimitsValues(t *testing.T) {
 		want string
 	}{
 		{"IDNumberPattern", IDNumberPattern, `^[A-Za-z0-9]{8,20}$`},
-		{"PhonePattern", PhonePattern, `^(?:62|0)[0-9]{8,13}$`},
+		{"PhonePattern", PhonePattern, `^(?:62|0)[0-9]{9,15}$`},
 	}
 	for _, tc := range patterns {
 		t.Run(tc.name, func(t *testing.T) {

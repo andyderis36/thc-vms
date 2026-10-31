@@ -25,8 +25,9 @@ x-limits:
   name_max_length: 100
   id_number_pattern: "^[A-Za-z0-9]{8,20}$"
   id_number_max_length: 20
-  phone_pattern: "^(?:62|0)[0-9]{8,13}$"
-  phone_max_length: 15
+  phone_pattern: "^(?:62|0)[0-9]{9,15}$"
+  phone_min_length: 10
+  phone_max_length: 16
   password_min_length: 8
   password_max_bytes: 72
   email_max_length: 254
@@ -34,7 +35,8 @@ x-limits:
   reject_reason_min_length: 5
   facility_name_max_length: 100
   facility_address_max_length: 255
-  facility_city_max_length: 255
+  facility_city_max_length: 100
+  purpose_name_max_length: 100
   visit_id_input_max_length: 64
   badge_code_max_length: 64
   checkin_notes_max_length: 500
@@ -126,6 +128,41 @@ paths:
                 $ref: '#/components/schemas/LoginResponse'
         '401':
           description: Kredensial tidak valid
+        '403':
+          description: 'Akun belum aktif — pendaftaran vendor menunggu persetujuan superadmin (ACCOUNT_PENDING). Amplop galat: { success: false, error: { code, message } }.'
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Pendaftaran akun Vendor/Mitra mandiri (publik, tanpa auth)
+      description: |
+        Formulir publik dari halaman masuk ("Daftar sebagai Vendor/Mitra").
+        Tanpa autentikasi, dibatasi rate limiter yang sama dengan login.
+        Akun BARU SELALU berstatus `inactive` dan tidak dapat masuk sampai
+        superadmin mengaktifkannya (`PATCH /users/{id}/status`). Aktivasi dan
+        penolakan (hapus) hanya boleh dilakukan superadmin/dev-superadmin lewat
+        endpoint manajemen yang sudah ada; peran `role` dan `location_id`
+        tidak diterima dari body (diturunkan server: vendor, tanpa cabang).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterVendorRequest'
+      responses:
+        '201':
+          description: Pendaftaran diterima — akun menunggu persetujuan (status inactive)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterVendorResponse'
+        '400':
+          description: Format data tidak valid (nama/email/password/NIK/telepon/vendor)
+        '409':
+          description: Email sudah terdaftar
+        '429':
+          description: 'Terlalu banyak percobaan (rate limiter login). Amplop galat: { success: false, error: { code: "RATE_LIMITED", message } }.'
 
   /auth/me:
     get:
@@ -142,14 +179,21 @@ paths:
     patch:
       tags: [Auth]
       operationId: updateSelfProfile
-      summary: Perbarui profil sendiri (telepon & foto untuk semua peran; nama khusus Superadmin)
+      summary: Perbarui profil sendiri (telepon & foto untuk semua peran; nama khusus Superadmin; ganti kata sandi sendiri)
       description: |
         Memperbarui profil pengguna yang sedang login. Semua peran boleh mengubah
         `phone` dan `avatar_url`. Hanya `super_admin` yang boleh mengubah `name`
         miliknya sendiri; peran lain yang mengirim `name` ditolak 403 `FORBIDDEN`.
-        Email, password, nik, role, user type, status, dan location tidak diterima.
-        Perubahan nama dicatat sebagai `user.update` pada audit_log dengan metadata
-        nama lama dan nama baru (audit_log tidak memiliki snapshot nama).
+        Semua peran (termasuk `super_admin` dan `dev-superadmin`) boleh mengganti
+        kata sandinya sendiri dengan mengirim `new_password` bersama
+        `current_password` sebagai bukti anti-pengambilalihan: `current_password`
+        salah dijawab 401 `INVALID_CREDENTIALS`, `new_password` yang melanggar
+        kebijakan kata sandi (minimal 8 karakter) dijawab 400 `VALIDATION_ERROR`.
+        Kunci `password` lama tidak diterima (400). Email, nik, role, user type,
+        status, dan location tidak diterima. Perubahan nama dicatat sebagai
+        `user.update` pada audit_log dengan metadata nama lama dan nama baru
+        (audit_log tidak memiliki snapshot nama); rotasi kata sandi dicatat
+        dengan metadata `fields` berisi `password` tanpa nilai rahasia apa pun.
       security:
         - bearerAuth: []
       requestBody:
@@ -166,9 +210,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserResponse'
         '400':
-          description: 'Body kosong, field tidak dikenal, atau panjang/format melanggar x-limits (VALIDATION_ERROR). Amplop galat: { success: false, error: { code, message } }.'
+          description: 'Body kosong, field tidak dikenal, `current_password` absen saat `new_password` dikirim, atau panjang/format melanggar x-limits (VALIDATION_ERROR). Amplop galat: { success: false, error: { code, message } }.'
         '401':
-          description: 'Tanpa token atau token kedaluwarsa (UNAUTHORIZED). Amplop galat: { success: false, error: { code, message } }.'
+          description: 'Tanpa token atau token kedaluwarsa (UNAUTHORIZED), atau `current_password` salah saat ganti kata sandi (INVALID_CREDENTIALS, pesan "Password saat ini salah."). Amplop galat: { success: false, error: { code, message } }.'
         '403':
           description: 'Peran selain super_admin mengirim `name` (FORBIDDEN). Amplop galat: { success: false, error: { code, message } }.'
 
@@ -756,6 +800,13 @@ paths:
     get:
       tags: [MasterData]
       summary: Daftar opsi tujuan kunjungan (Survey, Maintenance, dll)
+      parameters:
+        - name: active_only
+          in: query
+          description: true (default) hanya tujuan aktif; false menyertakan nonaktif (halaman admin)
+          schema:
+            type: boolean
+            default: true
       responses:
         '200':
           description: Daftar opsi tujuan kunjungan berhasil diambil
@@ -763,6 +814,86 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PurposeListResponse'
+
+    post:
+      tags: [MasterData]
+      summary: Tambah tujuan kunjungan baru (Superadmin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePurposeRequest'
+      responses:
+        '201':
+          description: Tujuan kunjungan berhasil ditambahkan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurposeResponse'
+        '400':
+          description: Format data tidak valid
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal. Amplop galat: { success: false, error: { code, message } }.'
+
+  /purposes/{id}:
+    patch:
+      tags: [MasterData]
+      summary: Ubah parsial tujuan kunjungan / toggle aktif-nonaktif (Superadmin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePurposeRequest'
+      responses:
+        '200':
+          description: Tujuan kunjungan berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurposeResponse'
+        '400':
+          description: Format data tidak valid
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+        '404':
+          description: Tujuan kunjungan tidak ditemukan
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal. Amplop galat: { success: false, error: { code, message } }.'
+
+    delete:
+      tags: [MasterData]
+      summary: Hapus permanen tujuan kunjungan (Superadmin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Tujuan kunjungan dihapus permanen (tanpa body)
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+        '404':
+          description: Tujuan kunjungan tidak ditemukan
+        '409':
+          description: Tujuan kunjungan masih dipakai oleh kunjungan
 
   /vendors:
     get:
@@ -806,6 +937,9 @@ paths:
 
         1. Kompresi sebelum penyimpanan: gambar diperkecil hingga sisi terpanjang
            <= 1600 px lalu di-encode ulang (JPEG kualitas 82; PNG tetap PNG).
+           Khusus `profile_photo`, gambar selalu dipusatkan lalu dipotong persegi
+           dan disimpan sebagai JPEG kualitas 82 dengan sisi maksimum 512 px
+           (orientasi EXIF diterapkan; area transparan menjadi putih).
            PDF yang lebih besar dari 5 MB dioptimasi (struktur, xref, resource
            duplikat) dan HANYA byte hasil optimasi yang disimpan; bila optimasi
            tidak memperkecil berkas, PDF asli TIDAK disimpan.
@@ -1392,8 +1526,8 @@ components:
           maxLength: 254
         phone:
           type: string
-          pattern: "^(?:62|0)[0-9]{8,13}$"
-          maxLength: 15
+          pattern: "^(?:62|0)[0-9]{9,15}$"
+          maxLength: 16
         nik:
           type: [string, "null"]
           pattern: ^\d{16}$
@@ -1454,8 +1588,8 @@ components:
           example: security.surabaya1@thc.local
         phone:
           type: string
-          pattern: "^(?:62|0)[0-9]{8,13}$"
-          maxLength: 15
+          pattern: "^(?:62|0)[0-9]{9,15}$"
+          maxLength: 16
           example: 081234567890
         password:
           type: string
@@ -1507,8 +1641,8 @@ components:
           maxLength: 254
         phone:
           type: [string, "null"]
-          pattern: "^(?:62|0)[0-9]{8,13}$"
-          maxLength: 15
+          pattern: "^(?:62|0)[0-9]{9,15}$"
+          maxLength: 16
         password:
           type: string
           format: password
@@ -1526,8 +1660,11 @@ components:
       description: |
         Profil mandiri pengguna yang sedang login. `phone` dan `avatar_url`
         diterima untuk semua peran; `name` HANYA diterima untuk peran
-        `super_admin` (peran lain dijawab 403 FORBIDDEN). Email, password, nik,
-        role, user type, status, dan location TIDAK diterima.
+        `super_admin` (peran lain dijawab 403 FORBIDDEN). `new_password` bersama
+        `current_password` memutar kata sandi sendiri untuk semua peran
+        (termasuk `super_admin` dan `dev-superadmin` lewat jalur yang sama).
+        Kunci `password` lama, email, nik, role, user type, status, dan location
+        TIDAK diterima.
       properties:
         name:
           type: string
@@ -1535,14 +1672,24 @@ components:
           description: Hanya diterima untuk peran `super_admin`; peran lain dijawab 403 FORBIDDEN. Perubahan dicatat sebagai `user.update` dengan metadata nama lama dan nama baru.
         phone:
           type: string
-          pattern: "^(?:62|0)[0-9]{8,13}$"
-          maxLength: 15
+          pattern: "^(?:62|0)[0-9]{9,15}$"
+          maxLength: 16
           description: Nomor telepon kanonik (hanya digit, awalan 62 diganti 0).
         avatar_url:
           type: [string, "null"]
           format: uri
           maxLength: 2048
           description: URL yang dikembalikan oleh `POST /uploads` dengan kategori `profile_photo`; null menghapus avatar.
+        new_password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          description: Kata sandi baru pengganti milik sendiri (semua peran). Wajib disertai `current_password`; tanpa bukti itu dijawab 400, bukti salah dijawab 401. Tidak pernah dikembalikan pada respons.
+        current_password:
+          type: string
+          format: password
+          description: Bukti kata sandi saat ini untuk rotasi milik sendiri (wajib bila `new_password` dikirim); salah dijawab 401 dengan pesan "Password saat ini salah.". Tidak pernah disimpan atau dikembalikan.
 
     Location:
       type: object
@@ -1652,8 +1799,8 @@ components:
           maxLength: 72
         phone:
           type: string
-          pattern: "^(?:62|0)[0-9]{8,13}$"
-          maxLength: 15
+          pattern: "^(?:62|0)[0-9]{9,15}$"
+          maxLength: 16
         nik:
           type: string
           pattern: ^\d{16}$
@@ -1674,6 +1821,50 @@ components:
           maxLength: 120
           description: Opsional — nama perusahaan vendor akun vendor yang diketik manual (maks 120 karakter setelah trim); mengikuti semantik phone (absen = biarkan); bila vendor_id dikirim maka vendor_id menang (katalog); TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor
 
+    RegisterVendorRequest:
+      type: object
+      required: [name, email, password, nik]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          example: Bayu Santoso
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          example: Password123!
+        phone:
+          type: string
+          pattern: "^(?:62|0)[0-9]{9,15}$"
+          maxLength: 16
+          example: 081234567890
+        nik:
+          type: string
+          pattern: ^\d{16}$
+          description: Wajib tepat 16 digit angka (400 bila absen atau format salah)
+        vendor_id:
+          type: string
+          description: Opsional — relasi vendor bila perusahaan terdaftar di katalog
+        vendor_name:
+          type: string
+          maxLength: 120
+          description: Opsional — nama perusahaan vendor yang diketik manual (maks 120 karakter setelah trim); bila vendor_id dikirim maka vendor_id menang (katalog); TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor
+
+    RegisterVendorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/User'
+
     UpdateManagedUserRequest:
       type: object
       description: Parsial — member absen berarti biarkan kolom; role/type/status tak punya member
@@ -1687,8 +1878,8 @@ components:
           maxLength: 254
         phone:
           type: [string, "null"]
-          pattern: "^(?:62|0)[0-9]{8,13}$"
-          maxLength: 15
+          pattern: "^(?:62|0)[0-9]{9,15}$"
+          maxLength: 16
           description: String kosong dibersihkan menjadi null
         nik:
           type: [string, "null"]
@@ -1878,7 +2069,11 @@ components:
           format: uuid
         name:
           type: string
+          maxLength: 100
           example: Maintenance
+        is_active:
+          type: boolean
+          description: false berarti dinonaktifkan superadmin (disembunyikan dari katalog form)
 
     PurposeListResponse:
       type: object
@@ -1889,6 +2084,33 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Purpose'
+
+    PurposeResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Purpose'
+
+    CreatePurposeRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          example: Splicing Fiber Optik
+
+    UpdatePurposeRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+          description: Toggle aktif/nonaktif tujuan kunjungan
 
     Vendor:
       type: object
@@ -1942,8 +2164,8 @@ components:
           description: KTP / SIM / Passport
         phone:
           type: string
-          pattern: "^(?:62|0)[0-9]{8,13}$"
-          maxLength: 15
+          pattern: "^(?:62|0)[0-9]{9,15}$"
+          maxLength: 16
         id_card_photo_url:
           type: [string, "null"]
           format: uri
@@ -1972,6 +2194,10 @@ components:
         location_id:
           type: string
           format: uuid
+        vendor_name:
+          type: string
+          maxLength: 120
+          description: Opsional — nama perusahaan vendor/mitra per kunjungan yang diketik manual (maks 120 karakter setelah trim, admin/superadmin); kosong/absen = tanpa perusahaan kunjungan; TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor
         purpose_ids:
           type: array
           items:
@@ -2035,7 +2261,7 @@ components:
           description: User vendor (mitra) yang mengajukan kunjungan ini.
         vendor_name:
           type: string
-          description: Nama vendor tampilan kunjungan (override ketikan manual bila ada, kalau tidak nama katalog)
+          description: Nama vendor/mitra tampilan kunjungan — override manual per kunjungan (vendor_name request) bila terisi, kalau tidak nama katalog vendor kunjungan, kalau tidak perusahaan akun vendor pengaju
         start_date:
           type: string
           format: date-time

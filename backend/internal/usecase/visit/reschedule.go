@@ -39,7 +39,7 @@ func (s *Service) Reschedule(ctx context.Context, actor Actor, visitID domain.UU
 		if err := actor.requireBranch(visit.LocationID); err != nil {
 			return err
 		}
-	case domain.RoleSuperAdmin:
+	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:
 	default:
 		return domain.ForbiddenBranch()
 	}

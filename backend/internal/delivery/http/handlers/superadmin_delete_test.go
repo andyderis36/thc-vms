@@ -22,6 +22,10 @@ type stubVisitRepos struct {
 	existing  map[domain.UUID]bool
 	deleted   []domain.UUID
 	deleteErr error
+	// seeded carries full visit rows (letter URL, visitor roster) for the
+	// storage-cleanup tests; FindByID prefers a seeded row over the bare
+	// id shell and stays behaviour-identical when the map is nil.
+	seeded map[domain.UUID]domain.VisitRequest
 }
 
 func newStubVisitRepos(ids ...domain.UUID) *stubVisitRepos {
@@ -39,6 +43,9 @@ func (s *stubVisitRepos) Create(_ context.Context, visit domain.VisitRequest, _ 
 func (s *stubVisitRepos) FindByID(_ context.Context, id domain.UUID) (domain.VisitRequest, error) {
 	if !s.existing[id] {
 		return domain.VisitRequest{}, domain.ErrNotFound
+	}
+	if row, ok := s.seeded[id]; ok {
+		return row, nil
 	}
 	return domain.VisitRequest{ID: id}, nil
 }
@@ -80,9 +87,10 @@ func (s *stubVisitRepos) DeleteVisit(_ context.Context, id domain.UUID) error {
 func newDeleteEngine(users *stubManagedUsers, locations *stubLocationAdmin, visits *stubVisitRepos, role domain.RoleName) *gin.Engine {
 	engine := gin.New()
 	engine.Use(withActor(role, ""))
-	h := handlers.NewSuperAdminHandler(users, locations, visits, "role-admin", "role-vendor")
+	h := handlers.NewSuperAdminHandler(users, locations, locations, visits, "role-admin", "role-vendor")
 	engine.DELETE("/users/:id", h.DeleteUser)
 	engine.DELETE("/locations/:id", h.DeleteLocation)
+	engine.DELETE("/purposes/:id", h.DeletePurpose)
 	engine.DELETE("/visits/:id", h.DeleteVisit)
 	return engine
 }

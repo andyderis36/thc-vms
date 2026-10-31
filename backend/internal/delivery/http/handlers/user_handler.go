@@ -77,8 +77,13 @@ func validateAccountIdentity(name, email, phone string) string {
 			return "Format email tidak valid."
 		}
 	}
-	if trimmed := strings.TrimSpace(phone); trimmed != "" && !validation.ValidPhone(trimmed) {
-		return "Nomor telepon tidak valid."
+	if trimmed := strings.TrimSpace(phone); trimmed != "" {
+		if validation.PhoneLengthViolation(trimmed) {
+			return "Nomor telepon harus 10–16 digit angka."
+		}
+		if !validation.ValidPhone(trimmed) {
+			return "Nomor telepon tidak valid."
+		}
 	}
 	return ""
 }
@@ -146,12 +151,12 @@ func (h *UserHandler) ListSecurity(c *gin.Context) {
 		response.Fail(c, domain.ErrUnauthorized)
 		return
 	}
-	if id.Role != domain.RoleSuperAdmin && id.Role != domain.RoleAdmin {
+	if !domain.IsSuperAdminRole(id.Role) && id.Role != domain.RoleAdmin {
 		response.Fail(c, domain.ErrForbiddenBranch)
 		return
 	}
 	var scope *domain.UUID
-	if id.Role == domain.RoleSuperAdmin {
+	if domain.IsSuperAdminRole(id.Role) {
 		if raw := strings.TrimSpace(c.Query("location_id")); raw != "" {
 			locationID := domain.UUID(raw)
 			scope = &locationID
@@ -198,7 +203,7 @@ func (h *UserHandler) CreateSecurity(c *gin.Context) {
 		response.Fail(c, domain.ErrUnauthorized)
 		return
 	}
-	if id.Role != domain.RoleSuperAdmin && id.Role != domain.RoleAdmin {
+	if !domain.IsSuperAdminRole(id.Role) && id.Role != domain.RoleAdmin {
 		response.Fail(c, domain.ErrForbiddenBranch)
 		return
 	}
@@ -292,7 +297,7 @@ func (h *UserHandler) UpdateSecurityStatus(c *gin.Context) {
 		response.Fail(c, domain.ErrUnauthorized)
 		return
 	}
-	if id.Role != domain.RoleSuperAdmin && id.Role != domain.RoleAdmin {
+	if !domain.IsSuperAdminRole(id.Role) && id.Role != domain.RoleAdmin {
 		response.Fail(c, domain.ErrForbiddenBranch)
 		return
 	}
@@ -329,7 +334,7 @@ func (h *UserHandler) UpdateSecurityStatus(c *gin.Context) {
 			response.Fail(c, err)
 			return
 		}
-	} else if id.Role != domain.RoleSuperAdmin {
+	} else if !domain.IsSuperAdminRole(id.Role) {
 		response.Fail(c, domain.ErrForbiddenBranch)
 		return
 	}
@@ -389,7 +394,7 @@ func (h *UserHandler) DeleteSecurity(c *gin.Context) {
 		response.Fail(c, domain.ErrUnauthorized)
 		return
 	}
-	if id.Role != domain.RoleSuperAdmin && id.Role != domain.RoleAdmin {
+	if !domain.IsSuperAdminRole(id.Role) && id.Role != domain.RoleAdmin {
 		response.Fail(c, domain.ErrForbiddenBranch)
 		return
 	}
@@ -413,7 +418,7 @@ func (h *UserHandler) DeleteSecurity(c *gin.Context) {
 			response.FailWith(c, http.StatusForbidden, "FORBIDDEN_BRANCH", "Tidak berhak menghapus akun security dari cabang lain.")
 			return
 		}
-	} else if id.Role != domain.RoleSuperAdmin {
+	} else if !domain.IsSuperAdminRole(id.Role) {
 		response.FailWith(c, http.StatusForbidden, "FORBIDDEN_BRANCH", "Tidak berhak menghapus akun security dari cabang lain.")
 		return
 	}
@@ -489,7 +494,7 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 		response.Fail(c, domain.ErrUnauthorized)
 		return
 	}
-	if id.Role != domain.RoleSuperAdmin && id.Role != domain.RoleAdmin {
+	if !domain.IsSuperAdminRole(id.Role) && id.Role != domain.RoleAdmin {
 		response.Fail(c, domain.ErrForbiddenBranch)
 		return
 	}
@@ -527,7 +532,7 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 			response.FailWith(c, http.StatusForbidden, "FORBIDDEN_BRANCH", "Tidak berhak mengubah akun security dari cabang lain.")
 			return
 		}
-	} else if id.Role != domain.RoleSuperAdmin {
+	} else if !domain.IsSuperAdminRole(id.Role) {
 		response.FailWith(c, http.StatusForbidden, "FORBIDDEN_BRANCH", "Tidak berhak mengubah akun security dari cabang lain.")
 		return
 	}
@@ -591,11 +596,12 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 		return
 	}
 	var updated domain.User
+	meta := map[string]string{"fields": managedUserChangedFields(patch)}
+	addUpdatePairs(meta, managedUserUpdatePairs(target, patch)...)
 	audited := false
 	if auditedStore, ok := h.users.(domain.AuditedUserRepository); ok {
 		updated, err = auditedStore.UpdateManagedUserAudited(ctx, targetID, patch, auditEntry(c, id.UserID,
-			domain.AuditActionUserUpdate, domain.AuditEntityUser, &targetID,
-			map[string]string{"fields": managedUserChangedFields(patch)}))
+			domain.AuditActionUserUpdate, domain.AuditEntityUser, &targetID, meta))
 		audited = true
 	} else {
 		updated, err = store.UpdateManagedUser(ctx, targetID, patch)
@@ -606,8 +612,7 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 	}
 	if !audited {
 		h.appendAuditFallback(ctx, auditEntry(c, id.UserID,
-			domain.AuditActionUserUpdate, domain.AuditEntityUser, &targetID,
-			map[string]string{"fields": managedUserChangedFields(patch)}))
+			domain.AuditActionUserUpdate, domain.AuditEntityUser, &targetID, meta))
 	}
 	response.OK(c, h.userToAccount(updated, h.branchName(c, updated.LocationID)))
 }

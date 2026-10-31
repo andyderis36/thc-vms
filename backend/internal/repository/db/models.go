@@ -142,6 +142,8 @@ type VisitRequest struct {
 	UpdatedAt           time.Time   `json:"updated_at"`
 	// Tujuan kunjungan tambahan yang diketik bebas (tujuan lain); TIDAK terdaftar di katalog purpose dan TIDAK pernah tampil di dropdown tujuan
 	PurposeNote pgtype.Text `json:"purpose_note"`
+	// Nama perusahaan vendor/mitra yang diketik manual per kunjungan (admin/superadmin); TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor (hanya dipakai sebagai vendor_name tampilan bila terisi)
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
 }
 
 type Visitor struct {

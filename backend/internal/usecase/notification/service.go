@@ -65,7 +65,7 @@ func (s *Service) List(ctx context.Context, actor Actor, in ListNotificationsInp
 	switch actor.Role {
 	case domain.RoleAdmin, domain.RoleSecurity:
 		filter.LocationID = actor.LocationID
-	case domain.RoleSuperAdmin:
+	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:
 		filter.LocationID = in.LocationID
 	case domain.RoleVendor:
 		filter.LocationID = nil

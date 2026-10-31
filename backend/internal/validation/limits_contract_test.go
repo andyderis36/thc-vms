@@ -47,6 +47,7 @@ func TestLimitsMatchOpenAPI(t *testing.T) {
 		{"facility_name_max_length", strconv.Itoa(FacilityNameMaxLength)},
 		{"facility_address_max_length", strconv.Itoa(FacilityAddressMaxLength)},
 		{"facility_city_max_length", strconv.Itoa(FacilityCityMaxLength)},
+		{"purpose_name_max_length", strconv.Itoa(PurposeNameMaxLength)},
 		{"visit_id_input_max_length", strconv.Itoa(VisitIDInputMaxLength)},
 		{"badge_code_max_length", strconv.Itoa(BadgeCodeMaxLength)},
 		{"checkin_notes_max_length", strconv.Itoa(CheckinNotesMaxLength)},
@@ -59,6 +60,7 @@ func TestLimitsMatchOpenAPI(t *testing.T) {
 		{"json_body_max_bytes", strconv.Itoa(JSONBodyMaxBytes)},
 		{"upload_stored_max_bytes", strconv.Itoa(UploadStoredMaxBytes)},
 		{"upload_ingest_max_bytes", strconv.Itoa(UploadIngestMaxBytes)},
+		{"phone_min_length", "10"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {

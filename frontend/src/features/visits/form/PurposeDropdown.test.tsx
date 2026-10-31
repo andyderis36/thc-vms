@@ -4,14 +4,7 @@ import '@testing-library/jest-dom/vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { Purpose } from '@/lib/api/types'
-
-import { PurposeDropdown } from './PurposeDropdown'
-
-const PURPOSES: Purpose[] = [
-  { id: 'p1', name: 'Splicing FO' },
-  { id: 'p2', name: 'Maintenance Genset' },
-]
+import { PURPOSE_OPTIONS, PurposeDropdown } from './PurposeDropdown'
 
 const PLACEHOLDER = 'Pilih tujuan kunjungan'
 
@@ -20,7 +13,6 @@ function renderDropdown(overrides: Partial<Parameters<typeof PurposeDropdown>[0]
   const result = render(
     <PurposeDropdown
       label="Tujuan Kunjungan"
-      purposes={PURPOSES}
       selectedIds={[]}
       onToggle={onToggle}
       placeholder={PLACEHOLDER}
@@ -42,24 +34,38 @@ describe('PurposeDropdown', () => {
     expect(screen.getByRole('button')).toHaveTextContent(PLACEHOLDER)
   })
 
+  it('merender tepat empat opsi hardcoded keputusan produk', () => {
+    renderDropdown()
+    openPanel()
+    expect(PURPOSE_OPTIONS).toEqual([
+      'Survey',
+      'Operation & Maintenance',
+      'Project',
+      'Other',
+    ])
+    for (const option of PURPOSE_OPTIONS) {
+      expect(screen.getByRole('checkbox', { name: option })).toBeInTheDocument()
+    }
+    expect(screen.getAllByRole('option')).toHaveLength(4)
+  })
+
   it('menampilkan ringkasan jumlah tujuan yang dipilih', () => {
-    renderDropdown({ selectedIds: ['p1', 'p2'] })
+    renderDropdown({ selectedIds: ['Survey', 'Project'] })
     expect(screen.getByRole('button')).toHaveTextContent('2 tujuan dipilih')
   })
 
-  it('memanggil onToggle dengan id tujuan saat checkbox diklik lalu ringkasan ikut berubah', () => {
+  it('memanggil onToggle dengan nama tujuan saat checkbox diklik lalu ringkasan ikut berubah', () => {
     const { onToggle, rerender } = renderDropdown()
     openPanel()
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Maintenance Genset' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Survey' }))
     expect(onToggle).toHaveBeenCalledTimes(1)
-    expect(onToggle).toHaveBeenCalledWith('p2')
+    expect(onToggle).toHaveBeenCalledWith('Survey')
 
     rerender(
       <PurposeDropdown
         label="Tujuan Kunjungan"
-        purposes={PURPOSES}
-        selectedIds={['p2']}
+        selectedIds={['Survey']}
         onToggle={onToggle}
         placeholder={PLACEHOLDER}
         isLoading={false}
@@ -67,8 +73,8 @@ describe('PurposeDropdown', () => {
       />,
     )
     expect(screen.getByRole('button')).toHaveTextContent('1 tujuan dipilih')
-    expect(screen.getByRole('checkbox', { name: 'Maintenance Genset' })).toBeChecked()
-    expect(screen.getByRole('option', { name: 'Maintenance Genset' })).toHaveAttribute(
+    expect(screen.getByRole('checkbox', { name: 'Survey' })).toBeChecked()
+    expect(screen.getByRole('option', { name: 'Survey' })).toHaveAttribute(
       'aria-selected',
       'true',
     )

@@ -5,6 +5,7 @@ import { Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { useUserAvatar } from '@/components/ui/useUserAvatar'
 import { useUpdateProfileMutation, useUploadFileMutation } from '@/lib/api/hooks'
 import type { UpdateSelfProfileRequest } from '@/lib/api/types'
@@ -12,11 +13,18 @@ import { useSession } from '@/lib/auth/session'
 import { getRoleLabel } from '@/lib/auth/capabilities'
 import {
   NAME_MAX_LENGTH,
+  PASSWORD_MAX_BYTES,
+  PASSWORD_MIN_LENGTH,
+  PHONE_DIGIT_MESSAGE,
   PHONE_MAX_LENGTH,
+  PHONE_MIN_LENGTH,
+  isValidPassword,
   isValidPhone,
   sanitizePhoneInput,
 } from '@/lib/limits'
-import { MAX_UPLOAD_BYTES } from '@/lib/uploads/validation'
+import { MAX_UPLOAD_INGEST_BYTES } from '@/lib/uploads/validation'
+
+import { AvatarCropDialog } from './AvatarCropDialog'
 
 /** MIME yang boleh dipilih untuk foto profil (cermin backend `profile_photo`). */
 const AVATAR_MIME_TYPES = ['image/jpeg', 'image/png'] as const
@@ -66,6 +74,14 @@ export function ProfileForm() {
   const [phone, setPhone] = useState(user?.phone ?? '')
   const [nameError, setNameError] = useState<string | undefined>(undefined)
   const [phoneError, setPhoneError] = useState<string | undefined>(undefined)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [currentPasswordError, setCurrentPasswordError] = useState<string | undefined>(undefined)
+  const [newPasswordError, setNewPasswordError] = useState<string | undefined>(undefined)
+  const [confirmPasswordError, setConfirmPasswordError] = useState<string | undefined>(undefined)
+  // Berkas yang menunggu pemotongan 1:1; unggah baru terjadi setelah konfirmasi.
+  const [cropFile, setCropFile] = useState<File | null>(null)
   const { objectUrl: avatarObjectUrl } = useUserAvatar(user?.avatar_url)
 
   if (user === null) {
@@ -94,7 +110,7 @@ export function ProfileForm() {
     fileInputRef.current?.click()
   }
 
-  async function handleFileChange(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>): void {
     const file = event.target.files?.[0]
     // Kosongkan agar berkas yang sama dapat dipilih ulang.
     event.target.value = ''
@@ -105,21 +121,30 @@ export function ProfileForm() {
       toast.error('Format foto tidak didukung. Gunakan JPG atau PNG.')
       return
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      toast.error('Ukuran foto melebihi batas 5 MB.')
+    if (file.size > MAX_UPLOAD_INGEST_BYTES) {
+      toast.error('Ukuran foto melebihi batas 20 MB.')
       return
     }
-    try {
-      const uploaded = await uploadFile.mutateAsync({
-        file,
-        category: 'profile_photo',
-      })
-      await updateProfile.mutateAsync({ avatar_url: uploaded.file_url })
-      toast.success('Foto profil berhasil diperbarui.')
-    } catch (error) {
-      // Galat unggah DAN galat patch sama-sama tampil apa adanya dari server.
-      toast.error(apiErrorMessage(error))
+    setCropFile(file)
+  }
+
+  function handleCropCancel(): void {
+    if (busy) {
+      return
     }
+    setCropFile(null)
+  }
+
+  // Galat unggah/patch diteruskan apa adanya: AvatarCropDialog menampilkannya
+  // sebagai galat inline dan menutup dialog hanya bila induk membersihkan state.
+  async function handleCropConfirm(cropped: File): Promise<void> {
+    const uploaded = await uploadFile.mutateAsync({
+      file: cropped,
+      category: 'profile_photo',
+    })
+    await updateProfile.mutateAsync({ avatar_url: uploaded.file_url })
+    toast.success('Foto profil berhasil diperbarui.')
+    setCropFile(null)
   }
 
   async function handleRemovePhoto(): Promise<void> {
@@ -158,6 +183,13 @@ export function ProfileForm() {
         setPhoneError('Nomor telepon wajib diisi.')
         return
       }
+      if (
+        nextPhone.length < PHONE_MIN_LENGTH ||
+        nextPhone.length > PHONE_MAX_LENGTH
+      ) {
+        setPhoneError(PHONE_DIGIT_MESSAGE)
+        return
+      }
       if (!isValidPhone(nextPhone)) {
         setPhoneError('Format nomor telepon tidak valid (contoh: 081234567890).')
         return
@@ -183,6 +215,110 @@ export function ProfileForm() {
     }
   }
 
+  function clearPasswordFields(): void {
+    setCurrentPassword('')
+    setNewPassword('')
+    setConfirmPassword('')
+  }
+
+  async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    if (busy) {
+      return
+    }
+
+    if (currentPassword === '') {
+      setCurrentPasswordError('Kata sandi saat ini wajib diisi.')
+      return
+    }
+    if (!isValidPassword(newPassword)) {
+      setNewPasswordError('Kata sandi minimal 8 karakter dan maksimal 72 byte.')
+      return
+    }
+    if (confirmPassword !== newPassword) {
+      setConfirmPasswordError('Konfirmasi kata sandi tidak sama.')
+      return
+    }
+
+    try {
+      await updateProfile.mutateAsync({
+        new_password: newPassword,
+        current_password: currentPassword,
+      })
+      toast.success('Kata sandi berhasil diubah.')
+      clearPasswordFields()
+    } catch (error) {
+      toast.error(apiErrorMessage(error))
+    }
+  }
+
+  // Ganti kata sandi milik sendiri — tersedia untuk SEMUA peran (termasuk
+  // super_admin dan dev-superadmin) lewat PATCH /auth/me yang sama. Form
+  // terpisah dari profil agar validasi dan pengiriman tidak tercampur; nilai
+  // tidak pernah ditampilkan kembali dan dibersihkan setiap sukses.
+  const passwordSection = (
+    <section className="card flex flex-col gap-4 p-4 sm:p-6" aria-label="Ganti kata sandi">
+      <div>
+        <h2 className="text-base font-semibold text-ink">Ganti kata sandi</h2>
+        <p className="mt-1 text-sm text-ink-secondary">
+          Masukkan kata sandi saat ini lalu kata sandi baru Anda.
+        </p>
+      </div>
+      <form onSubmit={(event) => void handlePasswordSubmit(event)} className="flex flex-col gap-4">
+        <PasswordInput
+          label="Kata sandi saat ini"
+          placeholder="Kata sandi yang sedang dipakai"
+          value={currentPassword}
+          onChange={(event) => {
+            setCurrentPassword(event.target.value)
+            if (currentPasswordError !== undefined) setCurrentPasswordError(undefined)
+          }}
+          autoComplete="current-password"
+          className="min-h-touch"
+          maxLength={PASSWORD_MAX_BYTES}
+          error={currentPasswordError}
+        />
+        <PasswordInput
+          label="Kata sandi baru"
+          placeholder="Minimal 8 karakter"
+          value={newPassword}
+          onChange={(event) => {
+            setNewPassword(event.target.value)
+            if (newPasswordError !== undefined) setNewPasswordError(undefined)
+          }}
+          autoComplete="new-password"
+          className="min-h-touch"
+          maxLength={PASSWORD_MAX_BYTES}
+          hint={`Minimal ${PASSWORD_MIN_LENGTH} karakter.`}
+          error={newPasswordError}
+        />
+        <PasswordInput
+          label="Konfirmasi kata sandi baru"
+          placeholder="Ulangi kata sandi baru"
+          value={confirmPassword}
+          onChange={(event) => {
+            setConfirmPassword(event.target.value)
+            if (confirmPasswordError !== undefined) setConfirmPasswordError(undefined)
+          }}
+          autoComplete="new-password"
+          className="min-h-touch"
+          maxLength={PASSWORD_MAX_BYTES}
+          error={confirmPasswordError}
+        />
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            type="submit"
+            className="min-h-touch-lg focus-visible:outline-brand-contrast"
+            disabled={currentPassword === '' || newPassword === '' || confirmPassword === '' || busy}
+            loading={updateProfile.isPending}
+          >
+            Ubah Kata Sandi
+          </Button>
+        </div>
+      </form>
+    </section>
+  )
+
   const heading = (
     <div className="min-w-0">
       <h1 className="text-2xl font-bold tracking-tight text-ink">Profil Saya</h1>
@@ -196,6 +332,7 @@ export function ProfileForm() {
     return (
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
         {heading}
+        {passwordSection}
         <section className="card p-4 sm:p-6" aria-label="Informasi akun">
           <h2 className="text-base font-semibold text-ink">Informasi Akun</h2>
           <p className="mt-1 text-sm text-ink-secondary">
@@ -279,14 +416,15 @@ export function ProfileForm() {
               </div>
             ) : null}
 
-            <p className="text-xs text-ink-muted">JPG atau PNG, maksimal 5 MB.</p>
+            <p className="text-xs text-ink-muted">JPG atau PNG. Foto dikompresi otomatis (hasil ≤5 MB).</p>
             <input
               ref={fileInputRef}
               type="file"
               accept="image/jpeg,image/png"
               className="hidden"
               tabIndex={-1}
-              onChange={(event) => void handleFileChange(event)}
+              aria-label="Pilih foto profil"
+              onChange={handleFileChange}
             />
           </div>
         </section>
@@ -340,6 +478,16 @@ export function ProfileForm() {
           </Button>
         </div>
       </form>
+
+      {passwordSection}
+
+      <AvatarCropDialog
+        open={cropFile !== null}
+        file={cropFile}
+        busy={busy}
+        onCancel={handleCropCancel}
+        onConfirm={handleCropConfirm}
+      />
     </div>
   )
 }

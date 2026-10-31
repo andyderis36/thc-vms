@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"thc-vms/backend/internal/domain"
 	"thc-vms/backend/internal/validation"
 )
@@ -29,12 +31,17 @@ type SelfIdentity struct {
 // ClearAvatar exists because JSON null (the openapi way to remove the photo)
 // and an absent member both decode to a nil *string — the delivery layer
 // records the explicit null in ClearAvatar instead. Sending ClearAvatar and a
-// non-nil AvatarURL in one request is rejected as ambiguous.
+// non-nil AvatarURL in one request is rejected as ambiguous. A non-nil
+// NewPassword rotates the caller's own password (all roles, including
+// super_admin and dev-superadmin, through this same path); CurrentPassword
+// must then carry the current password as takeover proof.
 type SelfUpdate struct {
-	Name        *string
-	Phone       *string
-	AvatarURL   *string
-	ClearAvatar bool
+	Name            *string
+	Phone           *string
+	AvatarURL       *string
+	ClearAvatar     bool
+	NewPassword     *string
+	CurrentPassword *string
 }
 
 // selfValidation builds the 400 VALIDATION_ERROR the delivery layer renders for
@@ -61,7 +68,7 @@ func (s *Service) UpdateSelf(ctx context.Context, actor SelfIdentity, in SelfUpd
 	if err != nil {
 		return Profile{}, domain.FromError(err)
 	}
-	if in.Name == nil && in.Phone == nil && in.AvatarURL == nil && !in.ClearAvatar {
+	if in.Name == nil && in.Phone == nil && in.AvatarURL == nil && !in.ClearAvatar && in.NewPassword == nil {
 		return Profile{}, selfValidation("Tidak ada perubahan yang diberikan.")
 	}
 	if in.ClearAvatar && in.AvatarURL != nil {
@@ -110,16 +117,100 @@ func (s *Service) UpdateSelf(ctx context.Context, actor SelfIdentity, in SelfUpd
 		finalAvatar = avatar
 	}
 
+	newHash, passwordChanged, err := s.resolveSelfPassword(ctx, current, in.NewPassword, in.CurrentPassword)
+	if err != nil {
+		return Profile{}, err
+	}
+
+	// The previous photo is captured before the row write: its object may only
+	// be reclaimed once the commit succeeds (row first, object second).
+	oldAvatarURL := current.AvatarURL
+
 	updated, err := s.profiles.UpdateProfile(ctx, actor.UserID, domain.ProfileUpdate{
-		Name:      finalName,
-		Phone:     finalPhone,
-		AvatarURL: finalAvatar,
+		Name:         finalName,
+		Phone:        finalPhone,
+		AvatarURL:    finalAvatar,
+		PasswordHash: newHash,
 	})
 	if err != nil {
 		return Profile{}, domain.FromError(err)
 	}
-	s.recordSelfUpdate(ctx, actor.UserID, current.Name, finalName, current.Phone, finalPhone, current.AvatarURL, finalAvatar)
+	s.deleteReplacedAvatar(ctx, actor.UserID, oldAvatarURL, finalAvatar)
+	s.recordSelfUpdate(ctx, actor.UserID, current.Name, finalName, current.Phone, finalPhone, current.AvatarURL, finalAvatar, passwordChanged)
 	return s.profile(ctx, updated)
+}
+
+// deleteReplacedAvatar reclaims the storage object behind the previous avatar
+// after a successful profile commit. It is strictly best-effort: the row is
+// already written, so a failed delete is logged and the request still succeeds
+// (the same log-and-continue shape as the audit trail). Nothing is deleted when
+// the old URL is blank or the storage port is unwired, and never when the old
+// and new URLs reverse to the same object key — a same-filename upload
+// overwrites that key in place via PutObject, so deleting it would destroy the
+// photo just stored. The comparison runs on recovered keys, never on raw URLs,
+// because avatar read URLs carry a cache-busting version (avatarpath) that
+// changes while the underlying object key stays the same.
+func (s *Service) deleteReplacedAvatar(ctx context.Context, userID domain.UUID, oldURL, newURL string) {
+	if s.storage == nil || strings.TrimSpace(oldURL) == "" {
+		return
+	}
+	oldKey, err := s.storage.ObjectKeyFromStoredURL(oldURL)
+	if err != nil {
+		slog.Warn("auth: reverse old avatar URL failed", "user_id", string(userID), "error", err)
+		return
+	}
+	if newURL != "" {
+		newKey, err := s.storage.ObjectKeyFromStoredURL(newURL)
+		if err != nil {
+			slog.Warn("auth: reverse new avatar URL failed", "user_id", string(userID), "error", err)
+			return
+		}
+		if newKey == oldKey {
+			return
+		}
+	}
+	if err := s.storage.DeleteObject(ctx, oldKey); err != nil {
+		slog.Warn("auth: delete replaced avatar failed", "user_id", string(userID), "old_key", oldKey, "error", err)
+	}
+}
+
+// resolveSelfPassword validates a self-service password rotation and mints
+// the fresh bcrypt hash. A nil new password means "keep the stored hash" (""
+// returned). Otherwise the current password is mandatory takeover proof:
+// it is compared with bcrypt against the stored hash (wrong is 401, the same
+// INVALID_CREDENTIALS shape as PATCH /users/:id self-reset, naming only the
+// failure, never whether the account exists beyond what login already
+// reveals), and the new value must pass the shared password policy (the same
+// validation.ValidPassword the managed-user create enforces). Only the hash
+// leaves this function; plaintext passwords are never logged or stored.
+func (s *Service) resolveSelfPassword(ctx context.Context, current domain.User, newPassword, currentPassword *string) (string, bool, error) {
+	if newPassword == nil {
+		return "", false, nil
+	}
+	if strings.TrimSpace(*newPassword) == "" {
+		return "", false, selfValidation("Password baru tidak boleh kosong.")
+	}
+	if currentPassword == nil || *currentPassword == "" {
+		return "", false, selfValidation("Password saat ini wajib diisi untuk mengubah password sendiri.")
+	}
+	// FindByID carries no password hash (the profile projection never
+	// selects it), so the stored hash is re-read through the login lookup,
+	// which does. The email is normalised exactly like Login.
+	Stored, err := s.users.FindByEmail(ctx, strings.ToLower(strings.TrimSpace(current.Email)))
+	if err != nil {
+		return "", false, domain.InvalidCredentials()
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(Stored.PasswordHash), []byte(*currentPassword)); err != nil {
+		return "", false, &domain.AppError{Status: http.StatusUnauthorized, Code: "INVALID_CREDENTIALS", Message: "Password saat ini salah."}
+	}
+	if err := validation.ValidPassword(*newPassword); err != nil {
+		return "", false, selfValidation(err.Error())
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(*newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return "", false, domain.FromError(err)
+	}
+	return string(hash), true, nil
 }
 
 // validateSelfName trims the proposed name and applies the shared account-name
@@ -144,6 +235,9 @@ func validateSelfPhone(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", selfValidation("Nomor telepon tidak boleh kosong.")
+	}
+	if validation.PhoneLengthViolation(trimmed) {
+		return "", selfValidation("Nomor telepon harus 10–16 digit angka.")
 	}
 	if !validation.ValidPhone(trimmed) {
 		return "", selfValidation("Nomor telepon tidak valid.")
@@ -182,12 +276,12 @@ func (s *Service) validateSelfAvatarURL(actorID domain.UUID, raw string) (string
 // disables the trail. Metadata names only the fields that actually changed;
 // a name change also carries the old and new values because audit_log stores
 // no name snapshot.
-func (s *Service) recordSelfUpdate(ctx context.Context, userID domain.UUID, oldName, newName, oldPhone, newPhone, oldAvatar, newAvatar string) {
+func (s *Service) recordSelfUpdate(ctx context.Context, userID domain.UUID, oldName, newName, oldPhone, newPhone, oldAvatar, newAvatar string, passwordChanged bool) {
 	if s.audit == nil {
 		return
 	}
 	metadata := map[string]string{"source": "self"}
-	changed := make([]string, 0, 3)
+	changed := make([]string, 0, 4)
 	if oldName != newName {
 		changed = append(changed, FieldName)
 		metadata["old_name"] = oldName
@@ -198,6 +292,9 @@ func (s *Service) recordSelfUpdate(ctx context.Context, userID domain.UUID, oldN
 	}
 	if oldAvatar != newAvatar {
 		changed = append(changed, FieldAvatarURL)
+	}
+	if passwordChanged {
+		changed = append(changed, "password")
 	}
 	metadata["fields"] = strings.Join(changed, ",")
 	ip, userAgent := loginMeta(ctx)

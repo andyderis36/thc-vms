@@ -25,6 +25,13 @@ const PHOTO_MIME_TYPES: readonly string[] = ['image/jpeg', 'image/png']
 
 export type PreparedUpload = { ok: true; file: File } | { ok: false; message: string }
 
+/**
+ * Opsi `prepareUpload`. `compress: false` melewati encode ulang untuk berkas
+ * yang SUDAH diproses pemanggil (mis. avatar 512px hasil crop) — byte asli
+ * dikirim apa adanya. Default (undefined/true) tetap mengompres seperti biasa.
+ */
+export type PrepareUploadOptions = { compress?: boolean }
+
 /** Ekstensi `.png`/`.PNG` diganti `.jpg` agar nama berkas cocok dengan MIME hasil encode. */
 function jpegName(name: string): string {
   return name.replace(/\.png$/i, '.jpg')
@@ -85,20 +92,31 @@ export async function compressImage(file: File): Promise<File> {
  * ke server yang mengompresi dan memutuskannya. Dipakai `uploadFile` sebelum
  * FormData dibuat — berkas tidak pernah menyentuh jaringan dalam bentuk
  * mentahnya.
+ *
+ * `options.compress === false` melewati langkah (2) sepenuhnya: berkas yang
+ * sudah dioptimalkan pemanggil dikirim byte-identik, tetapi validasi ingest dan
+ * stored tetap berjalan. Default tetap mengompres.
  */
-export async function prepareUpload(file: File): Promise<PreparedUpload> {
+export async function prepareUpload(
+  file: File,
+  options?: PrepareUploadOptions,
+): Promise<PreparedUpload> {
   const before = validateUploadIngest(file)
   if (!before.ok) {
     return before
   }
 
   let prepared: File
-  try {
-    prepared = await compressImage(file)
-  } catch {
-    return {
-      ok: false,
-      message: `Gambar "${file.name}" tidak dapat diproses. Coba unggah foto atau berkas lain.`,
+  if (options?.compress === false) {
+    prepared = file
+  } else {
+    try {
+      prepared = await compressImage(file)
+    } catch {
+      return {
+        ok: false,
+        message: `Gambar "${file.name}" tidak dapat diproses. Coba unggah foto atau berkas lain.`,
+      }
     }
   }
 

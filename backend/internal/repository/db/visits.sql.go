@@ -145,10 +145,11 @@ const createVisit = `-- name: CreateVisit :one
 INSERT INTO visit_request (
     visit_id, vendor_user_id, vendor_id, location_id,
     start_date, end_date, is_multi_day, status,
-    assignment_letter_url, is_nda_accepted, notes, purpose_note
+    assignment_letter_url, is_nda_accepted, notes, purpose_note,
+    vendor_name_override
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10, $11)
-RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10, $11, $12)
+RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note, vendor_name_override
 `
 
 type CreateVisitParams struct {
@@ -163,6 +164,7 @@ type CreateVisitParams struct {
 	IsNdaAccepted       bool        `json:"is_nda_accepted"`
 	Notes               pgtype.Text `json:"notes"`
 	PurposeNote         pgtype.Text `json:"purpose_note"`
+	VendorNameOverride  pgtype.Text `json:"vendor_name_override"`
 }
 
 // =============================================================================
@@ -210,6 +212,7 @@ func (q *Queries) CreateVisit(ctx context.Context, arg CreateVisitParams) (Visit
 		arg.IsNdaAccepted,
 		arg.Notes,
 		arg.PurposeNote,
+		arg.VendorNameOverride,
 	)
 	var i VisitRequest
 	err := row.Scan(
@@ -228,6 +231,7 @@ func (q *Queries) CreateVisit(ctx context.Context, arg CreateVisitParams) (Visit
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PurposeNote,
+		&i.VendorNameOverride,
 	)
 	return i, err
 }
@@ -257,16 +261,18 @@ func (q *Queries) DeleteVisit(ctx context.Context, arg DeleteVisitParams) (uuid.
 
 const getVisitByID = `-- name: GetVisitByID :one
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
     l.name AS location_name, l.type AS location_type,
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.id = $1
 `
 
@@ -275,30 +281,32 @@ type GetVisitByIDParams struct {
 }
 
 type GetVisitByIDRow struct {
-	ID                  uuid.UUID   `json:"id"`
-	VisitID             string      `json:"visit_id"`
-	VendorUserID        uuid.UUID   `json:"vendor_user_id"`
-	VendorID            pgtype.UUID `json:"vendor_id"`
-	LocationID          uuid.UUID   `json:"location_id"`
-	StartDate           time.Time   `json:"start_date"`
-	EndDate             time.Time   `json:"end_date"`
-	IsMultiDay          bool        `json:"is_multi_day"`
-	Status              string      `json:"status"`
-	AssignmentLetterUrl pgtype.Text `json:"assignment_letter_url"`
-	IsNdaAccepted       bool        `json:"is_nda_accepted"`
-	Notes               pgtype.Text `json:"notes"`
-	CreatedAt           time.Time   `json:"created_at"`
-	UpdatedAt           time.Time   `json:"updated_at"`
-	PurposeNote         pgtype.Text `json:"purpose_note"`
-	LocationName        string      `json:"location_name"`
-	LocationType        string      `json:"location_type"`
-	LocationAddress     pgtype.Text `json:"location_address"`
-	LocationCity        pgtype.Text `json:"location_city"`
-	LocationTimezone    string      `json:"location_timezone"`
-	VendorName          pgtype.Text `json:"vendor_name"`
-	VendorUserName      string      `json:"vendor_user_name"`
-	VendorUserEmail     string      `json:"vendor_user_email"`
-	VendorUserPhone     pgtype.Text `json:"vendor_user_phone"`
+	ID                   uuid.UUID   `json:"id"`
+	VisitID              string      `json:"visit_id"`
+	VendorUserID         uuid.UUID   `json:"vendor_user_id"`
+	VendorID             pgtype.UUID `json:"vendor_id"`
+	LocationID           uuid.UUID   `json:"location_id"`
+	StartDate            time.Time   `json:"start_date"`
+	EndDate              time.Time   `json:"end_date"`
+	IsMultiDay           bool        `json:"is_multi_day"`
+	Status               string      `json:"status"`
+	AssignmentLetterUrl  pgtype.Text `json:"assignment_letter_url"`
+	IsNdaAccepted        bool        `json:"is_nda_accepted"`
+	Notes                pgtype.Text `json:"notes"`
+	CreatedAt            time.Time   `json:"created_at"`
+	UpdatedAt            time.Time   `json:"updated_at"`
+	PurposeNote          pgtype.Text `json:"purpose_note"`
+	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	LocationName         string      `json:"location_name"`
+	LocationType         string      `json:"location_type"`
+	LocationAddress      pgtype.Text `json:"location_address"`
+	LocationCity         pgtype.Text `json:"location_city"`
+	LocationTimezone     string      `json:"location_timezone"`
+	VendorName           pgtype.Text `json:"vendor_name"`
+	VendorUserName       string      `json:"vendor_user_name"`
+	VendorUserEmail      string      `json:"vendor_user_email"`
+	VendorUserPhone      pgtype.Text `json:"vendor_user_phone"`
+	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
 }
 
 // Detail read for GET /visits/{id} (openapi L309-327) and for every
@@ -323,6 +331,7 @@ func (q *Queries) GetVisitByID(ctx context.Context, arg GetVisitByIDParams) (Get
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PurposeNote,
+		&i.VendorNameOverride,
 		&i.LocationName,
 		&i.LocationType,
 		&i.LocationAddress,
@@ -332,20 +341,23 @@ func (q *Queries) GetVisitByID(ctx context.Context, arg GetVisitByIDParams) (Get
 		&i.VendorUserName,
 		&i.VendorUserEmail,
 		&i.VendorUserPhone,
+		&i.VendorUserVendorName,
 	)
 	return i, err
 }
 
 const getVisitByIDForUpdate = `-- name: GetVisitByIDForUpdate :one
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
     l.name AS location_name, l.type AS location_type,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name
+    pu.name AS vendor_user_name,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.id = $1
 FOR UPDATE OF vr
 `
@@ -355,25 +367,27 @@ type GetVisitByIDForUpdateParams struct {
 }
 
 type GetVisitByIDForUpdateRow struct {
-	ID                  uuid.UUID   `json:"id"`
-	VisitID             string      `json:"visit_id"`
-	VendorUserID        uuid.UUID   `json:"vendor_user_id"`
-	VendorID            pgtype.UUID `json:"vendor_id"`
-	LocationID          uuid.UUID   `json:"location_id"`
-	StartDate           time.Time   `json:"start_date"`
-	EndDate             time.Time   `json:"end_date"`
-	IsMultiDay          bool        `json:"is_multi_day"`
-	Status              string      `json:"status"`
-	AssignmentLetterUrl pgtype.Text `json:"assignment_letter_url"`
-	IsNdaAccepted       bool        `json:"is_nda_accepted"`
-	Notes               pgtype.Text `json:"notes"`
-	CreatedAt           time.Time   `json:"created_at"`
-	UpdatedAt           time.Time   `json:"updated_at"`
-	PurposeNote         pgtype.Text `json:"purpose_note"`
-	LocationName        string      `json:"location_name"`
-	LocationType        string      `json:"location_type"`
-	VendorName          pgtype.Text `json:"vendor_name"`
-	VendorUserName      string      `json:"vendor_user_name"`
+	ID                   uuid.UUID   `json:"id"`
+	VisitID              string      `json:"visit_id"`
+	VendorUserID         uuid.UUID   `json:"vendor_user_id"`
+	VendorID             pgtype.UUID `json:"vendor_id"`
+	LocationID           uuid.UUID   `json:"location_id"`
+	StartDate            time.Time   `json:"start_date"`
+	EndDate              time.Time   `json:"end_date"`
+	IsMultiDay           bool        `json:"is_multi_day"`
+	Status               string      `json:"status"`
+	AssignmentLetterUrl  pgtype.Text `json:"assignment_letter_url"`
+	IsNdaAccepted        bool        `json:"is_nda_accepted"`
+	Notes                pgtype.Text `json:"notes"`
+	CreatedAt            time.Time   `json:"created_at"`
+	UpdatedAt            time.Time   `json:"updated_at"`
+	PurposeNote          pgtype.Text `json:"purpose_note"`
+	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	LocationName         string      `json:"location_name"`
+	LocationType         string      `json:"location_type"`
+	VendorName           pgtype.Text `json:"vendor_name"`
+	VendorUserName       string      `json:"vendor_user_name"`
+	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
 }
 
 // Row lock for the status-write path. `FOR UPDATE OF vr` is required (not the
@@ -398,26 +412,30 @@ func (q *Queries) GetVisitByIDForUpdate(ctx context.Context, arg GetVisitByIDFor
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PurposeNote,
+		&i.VendorNameOverride,
 		&i.LocationName,
 		&i.LocationType,
 		&i.VendorName,
 		&i.VendorUserName,
+		&i.VendorUserVendorName,
 	)
 	return i, err
 }
 
 const getVisitByVisitCode = `-- name: GetVisitByVisitCode :one
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
     l.name AS location_name, l.type AS location_type,
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.visit_id = $1
 `
 
@@ -426,30 +444,32 @@ type GetVisitByVisitCodeParams struct {
 }
 
 type GetVisitByVisitCodeRow struct {
-	ID                  uuid.UUID   `json:"id"`
-	VisitID             string      `json:"visit_id"`
-	VendorUserID        uuid.UUID   `json:"vendor_user_id"`
-	VendorID            pgtype.UUID `json:"vendor_id"`
-	LocationID          uuid.UUID   `json:"location_id"`
-	StartDate           time.Time   `json:"start_date"`
-	EndDate             time.Time   `json:"end_date"`
-	IsMultiDay          bool        `json:"is_multi_day"`
-	Status              string      `json:"status"`
-	AssignmentLetterUrl pgtype.Text `json:"assignment_letter_url"`
-	IsNdaAccepted       bool        `json:"is_nda_accepted"`
-	Notes               pgtype.Text `json:"notes"`
-	CreatedAt           time.Time   `json:"created_at"`
-	UpdatedAt           time.Time   `json:"updated_at"`
-	PurposeNote         pgtype.Text `json:"purpose_note"`
-	LocationName        string      `json:"location_name"`
-	LocationType        string      `json:"location_type"`
-	LocationAddress     pgtype.Text `json:"location_address"`
-	LocationCity        pgtype.Text `json:"location_city"`
-	LocationTimezone    string      `json:"location_timezone"`
-	VendorName          pgtype.Text `json:"vendor_name"`
-	VendorUserName      string      `json:"vendor_user_name"`
-	VendorUserEmail     string      `json:"vendor_user_email"`
-	VendorUserPhone     pgtype.Text `json:"vendor_user_phone"`
+	ID                   uuid.UUID   `json:"id"`
+	VisitID              string      `json:"visit_id"`
+	VendorUserID         uuid.UUID   `json:"vendor_user_id"`
+	VendorID             pgtype.UUID `json:"vendor_id"`
+	LocationID           uuid.UUID   `json:"location_id"`
+	StartDate            time.Time   `json:"start_date"`
+	EndDate              time.Time   `json:"end_date"`
+	IsMultiDay           bool        `json:"is_multi_day"`
+	Status               string      `json:"status"`
+	AssignmentLetterUrl  pgtype.Text `json:"assignment_letter_url"`
+	IsNdaAccepted        bool        `json:"is_nda_accepted"`
+	Notes                pgtype.Text `json:"notes"`
+	CreatedAt            time.Time   `json:"created_at"`
+	UpdatedAt            time.Time   `json:"updated_at"`
+	PurposeNote          pgtype.Text `json:"purpose_note"`
+	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	LocationName         string      `json:"location_name"`
+	LocationType         string      `json:"location_type"`
+	LocationAddress      pgtype.Text `json:"location_address"`
+	LocationCity         pgtype.Text `json:"location_city"`
+	LocationTimezone     string      `json:"location_timezone"`
+	VendorName           pgtype.Text `json:"vendor_name"`
+	VendorUserName       string      `json:"vendor_user_name"`
+	VendorUserEmail      string      `json:"vendor_user_email"`
+	VendorUserPhone      pgtype.Text `json:"vendor_user_phone"`
+	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
 }
 
 // Triple-Mode Scanner mode 3 (PRD L119): the guard types the printed code
@@ -474,6 +494,7 @@ func (q *Queries) GetVisitByVisitCode(ctx context.Context, arg GetVisitByVisitCo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PurposeNote,
+		&i.VendorNameOverride,
 		&i.LocationName,
 		&i.LocationType,
 		&i.LocationAddress,
@@ -483,20 +504,23 @@ func (q *Queries) GetVisitByVisitCode(ctx context.Context, arg GetVisitByVisitCo
 		&i.VendorUserName,
 		&i.VendorUserEmail,
 		&i.VendorUserPhone,
+		&i.VendorUserVendorName,
 	)
 	return i, err
 }
 
 const getVisitByVisitCodeForUpdate = `-- name: GetVisitByVisitCodeForUpdate :one
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
     l.name AS location_name, l.type AS location_type,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name
+    pu.name AS vendor_user_name,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.visit_id = $1
 FOR UPDATE OF vr
 `
@@ -506,25 +530,27 @@ type GetVisitByVisitCodeForUpdateParams struct {
 }
 
 type GetVisitByVisitCodeForUpdateRow struct {
-	ID                  uuid.UUID   `json:"id"`
-	VisitID             string      `json:"visit_id"`
-	VendorUserID        uuid.UUID   `json:"vendor_user_id"`
-	VendorID            pgtype.UUID `json:"vendor_id"`
-	LocationID          uuid.UUID   `json:"location_id"`
-	StartDate           time.Time   `json:"start_date"`
-	EndDate             time.Time   `json:"end_date"`
-	IsMultiDay          bool        `json:"is_multi_day"`
-	Status              string      `json:"status"`
-	AssignmentLetterUrl pgtype.Text `json:"assignment_letter_url"`
-	IsNdaAccepted       bool        `json:"is_nda_accepted"`
-	Notes               pgtype.Text `json:"notes"`
-	CreatedAt           time.Time   `json:"created_at"`
-	UpdatedAt           time.Time   `json:"updated_at"`
-	PurposeNote         pgtype.Text `json:"purpose_note"`
-	LocationName        string      `json:"location_name"`
-	LocationType        string      `json:"location_type"`
-	VendorName          pgtype.Text `json:"vendor_name"`
-	VendorUserName      string      `json:"vendor_user_name"`
+	ID                   uuid.UUID   `json:"id"`
+	VisitID              string      `json:"visit_id"`
+	VendorUserID         uuid.UUID   `json:"vendor_user_id"`
+	VendorID             pgtype.UUID `json:"vendor_id"`
+	LocationID           uuid.UUID   `json:"location_id"`
+	StartDate            time.Time   `json:"start_date"`
+	EndDate              time.Time   `json:"end_date"`
+	IsMultiDay           bool        `json:"is_multi_day"`
+	Status               string      `json:"status"`
+	AssignmentLetterUrl  pgtype.Text `json:"assignment_letter_url"`
+	IsNdaAccepted        bool        `json:"is_nda_accepted"`
+	Notes                pgtype.Text `json:"notes"`
+	CreatedAt            time.Time   `json:"created_at"`
+	UpdatedAt            time.Time   `json:"updated_at"`
+	PurposeNote          pgtype.Text `json:"purpose_note"`
+	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	LocationName         string      `json:"location_name"`
+	LocationType         string      `json:"location_type"`
+	VendorName           pgtype.Text `json:"vendor_name"`
+	VendorUserName       string      `json:"vendor_user_name"`
+	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
 }
 
 // Same lock, entered via the scanned/manual visit code.
@@ -547,10 +573,12 @@ func (q *Queries) GetVisitByVisitCodeForUpdate(ctx context.Context, arg GetVisit
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PurposeNote,
+		&i.VendorNameOverride,
 		&i.LocationName,
 		&i.LocationType,
 		&i.VendorName,
 		&i.VendorUserName,
+		&i.VendorUserVendorName,
 	)
 	return i, err
 }
@@ -859,14 +887,16 @@ func (q *Queries) ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]L
 
 const listVisitsForLocation = `-- name: ListVisitsForLocation :many
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.location_id = $1::uuid
   AND ($2::text IS NULL OR vr.status = $2::text)
   AND ($3::timestamptz IS NULL OR vr.start_date >= $3::timestamptz)
@@ -904,28 +934,30 @@ type ListVisitsForLocationParams struct {
 }
 
 type ListVisitsForLocationRow struct {
-	ID                  uuid.UUID   `json:"id"`
-	VisitID             string      `json:"visit_id"`
-	VendorUserID        uuid.UUID   `json:"vendor_user_id"`
-	VendorID            pgtype.UUID `json:"vendor_id"`
-	LocationID          uuid.UUID   `json:"location_id"`
-	StartDate           time.Time   `json:"start_date"`
-	EndDate             time.Time   `json:"end_date"`
-	IsMultiDay          bool        `json:"is_multi_day"`
-	Status              string      `json:"status"`
-	AssignmentLetterUrl pgtype.Text `json:"assignment_letter_url"`
-	IsNdaAccepted       bool        `json:"is_nda_accepted"`
-	Notes               pgtype.Text `json:"notes"`
-	CreatedAt           time.Time   `json:"created_at"`
-	UpdatedAt           time.Time   `json:"updated_at"`
-	PurposeNote         pgtype.Text `json:"purpose_note"`
-	LocationName        string      `json:"location_name"`
-	LocationType        string      `json:"location_type"`
-	LocationTimezone    string      `json:"location_timezone"`
-	VendorName          pgtype.Text `json:"vendor_name"`
-	VendorUserName      string      `json:"vendor_user_name"`
-	VendorUserEmail     string      `json:"vendor_user_email"`
-	VendorUserPhone     pgtype.Text `json:"vendor_user_phone"`
+	ID                   uuid.UUID   `json:"id"`
+	VisitID              string      `json:"visit_id"`
+	VendorUserID         uuid.UUID   `json:"vendor_user_id"`
+	VendorID             pgtype.UUID `json:"vendor_id"`
+	LocationID           uuid.UUID   `json:"location_id"`
+	StartDate            time.Time   `json:"start_date"`
+	EndDate              time.Time   `json:"end_date"`
+	IsMultiDay           bool        `json:"is_multi_day"`
+	Status               string      `json:"status"`
+	AssignmentLetterUrl  pgtype.Text `json:"assignment_letter_url"`
+	IsNdaAccepted        bool        `json:"is_nda_accepted"`
+	Notes                pgtype.Text `json:"notes"`
+	CreatedAt            time.Time   `json:"created_at"`
+	UpdatedAt            time.Time   `json:"updated_at"`
+	PurposeNote          pgtype.Text `json:"purpose_note"`
+	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	LocationName         string      `json:"location_name"`
+	LocationType         string      `json:"location_type"`
+	LocationTimezone     string      `json:"location_timezone"`
+	VendorName           pgtype.Text `json:"vendor_name"`
+	VendorUserName       string      `json:"vendor_user_name"`
+	VendorUserEmail      string      `json:"vendor_user_email"`
+	VendorUserPhone      pgtype.Text `json:"vendor_user_phone"`
+	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
 }
 
 // Admin scope (PRD L110) and Security scope (PRD L111, L97). location_id is a
@@ -969,6 +1001,7 @@ func (q *Queries) ListVisitsForLocation(ctx context.Context, arg ListVisitsForLo
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.PurposeNote,
+			&i.VendorNameOverride,
 			&i.LocationName,
 			&i.LocationType,
 			&i.LocationTimezone,
@@ -976,6 +1009,7 @@ func (q *Queries) ListVisitsForLocation(ctx context.Context, arg ListVisitsForLo
 			&i.VendorUserName,
 			&i.VendorUserEmail,
 			&i.VendorUserPhone,
+			&i.VendorUserVendorName,
 		); err != nil {
 			return nil, err
 		}
@@ -989,14 +1023,16 @@ func (q *Queries) ListVisitsForLocation(ctx context.Context, arg ListVisitsForLo
 
 const listVisitsForSuperAdmin = `-- name: ListVisitsForSuperAdmin :many
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE ($1::uuid IS NULL OR vr.location_id = $1::uuid)
   AND ($2::text IS NULL OR vr.status = $2::text)
   AND ($3::timestamptz IS NULL OR vr.start_date >= $3::timestamptz)
@@ -1034,28 +1070,30 @@ type ListVisitsForSuperAdminParams struct {
 }
 
 type ListVisitsForSuperAdminRow struct {
-	ID                  uuid.UUID   `json:"id"`
-	VisitID             string      `json:"visit_id"`
-	VendorUserID        uuid.UUID   `json:"vendor_user_id"`
-	VendorID            pgtype.UUID `json:"vendor_id"`
-	LocationID          uuid.UUID   `json:"location_id"`
-	StartDate           time.Time   `json:"start_date"`
-	EndDate             time.Time   `json:"end_date"`
-	IsMultiDay          bool        `json:"is_multi_day"`
-	Status              string      `json:"status"`
-	AssignmentLetterUrl pgtype.Text `json:"assignment_letter_url"`
-	IsNdaAccepted       bool        `json:"is_nda_accepted"`
-	Notes               pgtype.Text `json:"notes"`
-	CreatedAt           time.Time   `json:"created_at"`
-	UpdatedAt           time.Time   `json:"updated_at"`
-	PurposeNote         pgtype.Text `json:"purpose_note"`
-	LocationName        string      `json:"location_name"`
-	LocationType        string      `json:"location_type"`
-	LocationTimezone    string      `json:"location_timezone"`
-	VendorName          pgtype.Text `json:"vendor_name"`
-	VendorUserName      string      `json:"vendor_user_name"`
-	VendorUserEmail     string      `json:"vendor_user_email"`
-	VendorUserPhone     pgtype.Text `json:"vendor_user_phone"`
+	ID                   uuid.UUID   `json:"id"`
+	VisitID              string      `json:"visit_id"`
+	VendorUserID         uuid.UUID   `json:"vendor_user_id"`
+	VendorID             pgtype.UUID `json:"vendor_id"`
+	LocationID           uuid.UUID   `json:"location_id"`
+	StartDate            time.Time   `json:"start_date"`
+	EndDate              time.Time   `json:"end_date"`
+	IsMultiDay           bool        `json:"is_multi_day"`
+	Status               string      `json:"status"`
+	AssignmentLetterUrl  pgtype.Text `json:"assignment_letter_url"`
+	IsNdaAccepted        bool        `json:"is_nda_accepted"`
+	Notes                pgtype.Text `json:"notes"`
+	CreatedAt            time.Time   `json:"created_at"`
+	UpdatedAt            time.Time   `json:"updated_at"`
+	PurposeNote          pgtype.Text `json:"purpose_note"`
+	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	LocationName         string      `json:"location_name"`
+	LocationType         string      `json:"location_type"`
+	LocationTimezone     string      `json:"location_timezone"`
+	VendorName           pgtype.Text `json:"vendor_name"`
+	VendorUserName       string      `json:"vendor_user_name"`
+	VendorUserEmail      string      `json:"vendor_user_email"`
+	VendorUserPhone      pgtype.Text `json:"vendor_user_phone"`
+	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
 }
 
 // Superadmin scope (PRD L109): no location filter, or one optional location
@@ -1101,6 +1139,7 @@ func (q *Queries) ListVisitsForSuperAdmin(ctx context.Context, arg ListVisitsFor
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.PurposeNote,
+			&i.VendorNameOverride,
 			&i.LocationName,
 			&i.LocationType,
 			&i.LocationTimezone,
@@ -1108,6 +1147,7 @@ func (q *Queries) ListVisitsForSuperAdmin(ctx context.Context, arg ListVisitsFor
 			&i.VendorUserName,
 			&i.VendorUserEmail,
 			&i.VendorUserPhone,
+			&i.VendorUserVendorName,
 		); err != nil {
 			return nil, err
 		}
@@ -1121,14 +1161,16 @@ func (q *Queries) ListVisitsForSuperAdmin(ctx context.Context, arg ListVisitsFor
 
 const listVisitsForVendorUser = `-- name: ListVisitsForVendorUser :many
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.vendor_user_id = $1::uuid
   AND ($2::text IS NULL OR vr.status = $2::text)
   AND ($3::timestamptz IS NULL OR vr.start_date >= $3::timestamptz)
@@ -1166,28 +1208,30 @@ type ListVisitsForVendorUserParams struct {
 }
 
 type ListVisitsForVendorUserRow struct {
-	ID                  uuid.UUID   `json:"id"`
-	VisitID             string      `json:"visit_id"`
-	VendorUserID        uuid.UUID   `json:"vendor_user_id"`
-	VendorID            pgtype.UUID `json:"vendor_id"`
-	LocationID          uuid.UUID   `json:"location_id"`
-	StartDate           time.Time   `json:"start_date"`
-	EndDate             time.Time   `json:"end_date"`
-	IsMultiDay          bool        `json:"is_multi_day"`
-	Status              string      `json:"status"`
-	AssignmentLetterUrl pgtype.Text `json:"assignment_letter_url"`
-	IsNdaAccepted       bool        `json:"is_nda_accepted"`
-	Notes               pgtype.Text `json:"notes"`
-	CreatedAt           time.Time   `json:"created_at"`
-	UpdatedAt           time.Time   `json:"updated_at"`
-	PurposeNote         pgtype.Text `json:"purpose_note"`
-	LocationName        string      `json:"location_name"`
-	LocationType        string      `json:"location_type"`
-	LocationTimezone    string      `json:"location_timezone"`
-	VendorName          pgtype.Text `json:"vendor_name"`
-	VendorUserName      string      `json:"vendor_user_name"`
-	VendorUserEmail     string      `json:"vendor_user_email"`
-	VendorUserPhone     pgtype.Text `json:"vendor_user_phone"`
+	ID                   uuid.UUID   `json:"id"`
+	VisitID              string      `json:"visit_id"`
+	VendorUserID         uuid.UUID   `json:"vendor_user_id"`
+	VendorID             pgtype.UUID `json:"vendor_id"`
+	LocationID           uuid.UUID   `json:"location_id"`
+	StartDate            time.Time   `json:"start_date"`
+	EndDate              time.Time   `json:"end_date"`
+	IsMultiDay           bool        `json:"is_multi_day"`
+	Status               string      `json:"status"`
+	AssignmentLetterUrl  pgtype.Text `json:"assignment_letter_url"`
+	IsNdaAccepted        bool        `json:"is_nda_accepted"`
+	Notes                pgtype.Text `json:"notes"`
+	CreatedAt            time.Time   `json:"created_at"`
+	UpdatedAt            time.Time   `json:"updated_at"`
+	PurposeNote          pgtype.Text `json:"purpose_note"`
+	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	LocationName         string      `json:"location_name"`
+	LocationType         string      `json:"location_type"`
+	LocationTimezone     string      `json:"location_timezone"`
+	VendorName           pgtype.Text `json:"vendor_name"`
+	VendorUserName       string      `json:"vendor_user_name"`
+	VendorUserEmail      string      `json:"vendor_user_email"`
+	VendorUserPhone      pgtype.Text `json:"vendor_user_phone"`
+	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
 }
 
 // Vendor-user / external-staff scope (PRD L112, AGENTS.md rule 6.1): strictly
@@ -1229,6 +1273,7 @@ func (q *Queries) ListVisitsForVendorUser(ctx context.Context, arg ListVisitsFor
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.PurposeNote,
+			&i.VendorNameOverride,
 			&i.LocationName,
 			&i.LocationType,
 			&i.LocationTimezone,
@@ -1236,6 +1281,7 @@ func (q *Queries) ListVisitsForVendorUser(ctx context.Context, arg ListVisitsFor
 			&i.VendorUserName,
 			&i.VendorUserEmail,
 			&i.VendorUserPhone,
+			&i.VendorUserVendorName,
 		); err != nil {
 			return nil, err
 		}
@@ -1254,7 +1300,7 @@ SET start_date = $2,
     status     = $4,
     updated_at = now()
 WHERE id = $1
-RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note
+RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note, vendor_name_override
 `
 
 type UpdateVisitScheduleParams struct {
@@ -1291,6 +1337,7 @@ func (q *Queries) UpdateVisitSchedule(ctx context.Context, arg UpdateVisitSchedu
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PurposeNote,
+		&i.VendorNameOverride,
 	)
 	return i, err
 }
@@ -1300,7 +1347,7 @@ UPDATE visit_request
 SET status     = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note
+RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note, vendor_name_override
 `
 
 type UpdateVisitStatusParams struct {
@@ -1333,6 +1380,7 @@ func (q *Queries) UpdateVisitStatus(ctx context.Context, arg UpdateVisitStatusPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PurposeNote,
+		&i.VendorNameOverride,
 	)
 	return i, err
 }

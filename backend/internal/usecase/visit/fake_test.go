@@ -268,8 +268,8 @@ func validCreateInput() CreateVisitInput {
 		LocationID: domain.UUID("loc-A"),
 		PurposeIDs: []domain.UUID{domain.UUID("pur-1"), domain.UUID("pur-2")},
 		Visitors: []VisitorInput{
-			{Name: "Andi", IDNumber: "ID123", Phone: "0811"},
-			{Name: "Budi", IDNumber: "ID456", Phone: "0812"},
+{Name: "Andi", IDNumber: "ID123", Phone: "0812345678"},
+{Name: "Budi", IDNumber: "ID456", Phone: "0812345679"},
 		},
 		StartDate:     time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC),
 		EndDate:       time.Date(2026, time.October, 1, 17, 0, 0, 0, time.UTC),

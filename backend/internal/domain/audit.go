@@ -42,6 +42,9 @@ const (
 	AuditActionLocationCreate = "location.create"
 	AuditActionLocationUpdate = "location.update"
 	AuditActionLocationDelete = "location.delete"
+	AuditActionPurposeCreate  = "purpose.create"
+	AuditActionPurposeUpdate  = "purpose.update"
+	AuditActionPurposeDelete  = "purpose.delete"
 	AuditActionVisitDelete    = "visit.delete"
 )
 
@@ -50,12 +53,13 @@ const (
 	AuditEntityAuth     = "auth"
 	AuditEntityUser     = "user"
 	AuditEntityLocation = "location"
+	AuditEntityPurpose  = "purpose"
 	AuditEntityVisit    = "visit"
 )
 
 // AuditMVPEvents is the canonical closed list: 2 auth + 4 user + 3 location +
-// 1 visit-delete. Tests pin it so a new event (notably any status-transition
-// duplicate) cannot slip in unnoticed.
+// 3 purpose + 1 visit-delete. Tests pin it so a new event (notably any
+// status-transition duplicate) cannot slip in unnoticed.
 func AuditMVPEvents() []string {
 	return []string{
 		AuditActionLoginSuccess,
@@ -67,6 +71,9 @@ func AuditMVPEvents() []string {
 		AuditActionLocationCreate,
 		AuditActionLocationUpdate,
 		AuditActionLocationDelete,
+		AuditActionPurposeCreate,
+		AuditActionPurposeUpdate,
+		AuditActionPurposeDelete,
 		AuditActionVisitDelete,
 	}
 }
@@ -236,6 +243,13 @@ type AuditedLocationRepository interface {
 	CreateLocationAudited(ctx context.Context, loc Location, audit AuditEntry) (Location, error)
 	UpdateLocationAudited(ctx context.Context, id UUID, patch LocationPatch, audit AuditEntry) (Location, error)
 	DeleteLocationAudited(ctx context.Context, id UUID, audit AuditEntry) error
+}
+
+// AuditedPurposeRepository is the optional same-transaction purpose port.
+type AuditedPurposeRepository interface {
+	CreatePurposeAudited(ctx context.Context, purpose Purpose, audit AuditEntry) (Purpose, error)
+	UpdatePurposeAudited(ctx context.Context, id UUID, patch PurposePatch, audit AuditEntry) (Purpose, error)
+	DeletePurposeAudited(ctx context.Context, id UUID, audit AuditEntry) error
 }
 
 // AuditedVisitRepository is the optional same-transaction purge port: the only

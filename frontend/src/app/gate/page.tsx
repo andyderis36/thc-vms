@@ -14,6 +14,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { RequireRole } from '@/lib/auth/guards'
+import { isSuperAdminRole } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 import { SEARCH_QUERY_MAX_LENGTH } from '@/lib/limits'
 import {
@@ -525,7 +526,7 @@ function GateContent() {
       </AdminBranchShell>
     )
   }
-  if (role === 'super_admin') {
+  if (role !== null && isSuperAdminRole(role)) {
     return (
       <SuperadminShell activeHref="/gate" pendingCount={pendingCount}>
         {gateContent}

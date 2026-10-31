@@ -42,6 +42,7 @@ import {
   type ManagedRoleFilter,
   type ManagedStatusFilter,
   type UserFilterSnapshot,
+  userAffiliationLabel,
 } from '@/features/users/managed-user-filters'
 import {
   useDeleteManagedUserMutation,
@@ -49,6 +50,7 @@ import {
   useManagedUsersQuery,
   usePendingApprovalCount,
   useUpdateManagedUserMutation,
+  useUpdateManagedUserStatusMutation,
 } from '@/lib/api/hooks'
 import type { User } from '@/lib/api/types'
 import { getRoleLabel } from '@/lib/auth/capabilities'
@@ -69,6 +71,13 @@ export interface ManagedUsersScreenProps {
   title: string
   /** Subjudul layar. */
   subtitle: string
+  /**
+   * Tampilkan antrean "Menunggu persetujuan" (akun inactive) di atas daftar.
+   * Dipakai layar `/vendor-registrations`: akun pendaftar mandiri harus
+   * disetujui (status→active) atau ditolak (hapus) eksplisit oleh
+   * superadmin — bukan lewat filter status biasa.
+   */
+  showPendingSection?: boolean
 }
 
 const STATUS_FILTER_OPTIONS: SelectOption[] = [
@@ -97,6 +106,7 @@ export function ManagedUsersScreen({
   activeHref,
   title,
   subtitle,
+  showPendingSection = false,
 }: ManagedUsersScreenProps) {
   const [locationId, setLocationId] = useState('all')
   const [searchInput, setSearchInput] = useState('')
@@ -115,6 +125,7 @@ export function ManagedUsersScreen({
   const { user: currentUser, refresh: refreshSession } = useSession()
   const deleteMutation = useDeleteManagedUserMutation()
   const updateUser = useUpdateManagedUserMutation()
+  const updateStatus = useUpdateManagedUserStatusMutation()
   const currentUserId = currentUser !== null ? currentUser.id : null
   const viewerRole = currentUser !== null ? currentUser.role : null
 
@@ -172,6 +183,17 @@ export function ManagedUsersScreen({
     }
     return options
   }, [usersQuery.data, vendorFilter])
+
+  // Antrean persetujuan: akun inactive pada peran halaman ini, dihitung dari
+  // data server (hanya filter peran) supaya stabil walau filter status/tabel
+  // diubah. dev-superadmin tetap dibuang oleh filter peran.
+  const pendingRows: User[] = useMemo(
+    () =>
+      filterManagedUsersByRoles(usersQuery.data ?? [], effectiveRoles).filter(
+        (user) => user.status === 'inactive',
+      ),
+    [usersQuery.data, effectiveRoles],
+  )
 
   // Rows: status & vendor difilter di KLIEN karena `GET /users` hanya
   // mendukung role/search/location_id; peran juga difilter di klien
@@ -235,6 +257,21 @@ export function ManagedUsersScreen({
     setVendorFilter(VENDOR_FILTER_ALL)
   }
 
+  /** Setujui pendaftar: status inactive → active (audit user.status milik server). */
+  const handleApprovePending = (target: User): void => {
+    updateStatus.mutate(
+      { userId: target.id, body: { status: 'active' } },
+      {
+        onSuccess: () => {
+          toast.success(`${target.name} disetujui — akun kini aktif`)
+        },
+        onError: (error) => {
+          toast.error(apiErrorMessage(error))
+        },
+      },
+    )
+  }
+
   return (
     <SuperadminShell
       pendingCount={pendingCount}
@@ -253,6 +290,61 @@ export function ManagedUsersScreen({
           </Button>
         ) : null}
       </div>
+
+      {showPendingSection && pendingRows.length > 0 ? (
+        <section aria-label="Menunggu persetujuan" className="card mb-4 p-4">
+          <h2 className="text-sm font-bold text-ink">
+            Menunggu persetujuan ({pendingRows.length})
+          </h2>
+          <p className="mt-1 text-xs text-ink-secondary">
+            Akun pendaftar mandiri belum dapat masuk. Setujui untuk
+            mengaktifkan, atau tolak untuk menghapus permanen.
+          </p>
+          <ul className="mt-3 flex flex-col gap-3">
+            {pendingRows.map((target) => {
+              const approving =
+                updateStatus.isPending && updateStatus.variables?.userId === target.id
+              return (
+                <li
+                  key={target.id}
+                  className="flex flex-col gap-3 rounded-control border border-border-mid bg-surface p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-ink" title={target.name}>
+                      {target.name}
+                    </p>
+                    <p className="truncate text-xs text-ink-muted" title={target.email}>
+                      {target.email}
+                      {target.nik !== null ? ` · NIK ${target.nik}` : null}
+                    </p>
+                    <p className="truncate text-xs text-ink-muted" title={userAffiliationLabel(target)}>
+                      {userAffiliationLabel(target)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      size="sm"
+                      className="min-h-touch"
+                      loading={approving}
+                      onClick={() => handleApprovePending(target)}
+                    >
+                      Setujui
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="min-h-touch"
+                      onClick={() => setDeleting(target)}
+                    >
+                      Tolak
+                    </Button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="card flex flex-wrap items-end gap-3 p-4">
         {/*

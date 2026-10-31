@@ -33,7 +33,7 @@ func ValidateSecurityLocationMove(actorRole domain.RoleName, raw *string) (*doma
 	if raw == nil {
 		return nil, nil
 	}
-	if actorRole != domain.RoleSuperAdmin {
+	if !domain.IsSuperAdminRole(actorRole) {
 		return nil, forbiddenBranch("Hanya Superadmin yang dapat memindahkan akun security ke cabang lain.")
 	}
 	trimmed := strings.TrimSpace(*raw)

@@ -271,4 +271,24 @@ describe('ActionMenu', () => {
 
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
+
+  it('pemicu adalah tombol ikon polos: border-0/bg-transparent, tanpa bingkai/hover bg, ring fokus eksplisit, target sentuh 44px', () => {
+    renderActionMenu()
+
+    const trigger = screen.getByRole('button', { name: LABEL })
+    const className = trigger.className
+
+    expect(className).toContain('border-0')
+    expect(className).toContain('bg-transparent')
+    expect(className).toContain('shadow-none')
+    expect(className).not.toContain('border-border-light')
+    expect(className).not.toMatch(/hover:bg-/)
+
+    expect(className).toContain('focus-visible:ring-4')
+    expect(className).toContain('focus-visible:ring-brand/12')
+    expect(className).toContain('focus-visible:outline-none')
+
+    expect(className).toContain('min-h-touch')
+    expect(className).toContain('min-w-touch')
+  })
 })

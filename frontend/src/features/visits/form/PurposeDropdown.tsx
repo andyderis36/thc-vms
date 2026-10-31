@@ -5,17 +5,30 @@ import { ChevronDown } from 'lucide-react'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { FIELD_BASE_CLASS, FIELD_HEIGHT } from '@/components/ui/Input'
 import { Spinner } from '@/components/ui/Spinner'
-import type { Purpose } from '@/lib/api/types'
+
+/**
+ * Opsi "Tujuan Kunjungan" — keputusan produk: empat label hardcoded.
+ * Katalog `GET /purposes` tetap dipakai `VisitForm` untuk pemetaan
+ * label -> purpose_id saat submit, tetapi dropdown TIDAK merender katalog.
+ */
+export const PURPOSE_OPTIONS = [
+  'Survey',
+  'Operation & Maintenance',
+  'Project',
+  'Other',
+] as const
+
+export type PurposeOption = (typeof PURPOSE_OPTIONS)[number]
 
 export interface PurposeDropdownProps {
   id?: string
   label: string
-  purposes: Purpose[]
+  /** Nama tujuan yang dipilih (label hardcoded, dicocokkan ke katalog saat submit). */
   selectedIds: readonly string[]
-  onToggle: (purposeId: string) => void
+  onToggle: (purposeName: string) => void
   placeholder: string
-  isLoading: boolean
-  isError: boolean
+  isLoading?: boolean
+  isError?: boolean
   error?: string
   required?: boolean
 }
@@ -41,12 +54,11 @@ export interface PurposeDropdownProps {
 export function PurposeDropdown({
   id,
   label,
-  purposes,
   selectedIds,
   onToggle,
   placeholder,
-  isLoading,
-  isError,
+  isLoading = false,
+  isError = false,
   error,
   required = false,
 }: PurposeDropdownProps) {
@@ -139,19 +151,19 @@ export function PurposeDropdown({
             aria-labelledby={buttonId}
             className="absolute inset-x-0 top-full z-40 mt-1 flex max-h-64 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-card border border-border-mid bg-surface p-1.5 shadow-dropdown"
           >
-            {purposes.map((purpose) => (
+            {PURPOSE_OPTIONS.map((option) => (
               <div
-                key={purpose.id}
+                key={option}
                 role="option"
-                aria-selected={selectedIds.includes(purpose.id)}
+                aria-selected={selectedIds.includes(option)}
                 className="rounded-control hover:bg-neutral-bg"
               >
                 <Checkbox
-                  label={purpose.name}
+                  label={option}
                   name="purpose_ids"
-                  value={purpose.id}
-                  checked={selectedIds.includes(purpose.id)}
-                  onChange={() => onToggle(purpose.id)}
+                  value={option}
+                  checked={selectedIds.includes(option)}
+                  onChange={() => onToggle(option)}
                 />
               </div>
             ))}

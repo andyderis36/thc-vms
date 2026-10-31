@@ -50,11 +50,57 @@ func NormalizePhone(raw string) string {
 	return normalized
 }
 
-// ValidPhone reports whether raw is an Indonesian phone number. The
-// normalized form must match PhonePattern and stay within PhoneMaxLength.
+// PhoneDigitCount returns the number of digits in the normalized form of raw,
+// i.e. after NormalizePhone. It is the count the length bounds apply to.
+func PhoneDigitCount(raw string) int {
+	return RuneLen(NormalizePhone(strings.TrimSpace(raw)))
+}
+
+// ValidPhoneLength reports whether the normalized phone's digit count sits
+// inside PhoneMinLength..PhoneMaxLength. It says nothing about prefix or
+// non-digit content; pair it with ValidPhone for the full shape check.
+func ValidPhoneLength(raw string) bool {
+	n := PhoneDigitCount(raw)
+	return n >= PhoneMinLength && n <= PhoneMaxLength
+}
+
+// PhoneLengthViolation reports whether raw's only problem (relative to the
+// phone rules) is its digit count: the value carries a valid Indonesian
+// prefix (0/62), contains no letters, and its normalized digit count falls
+// outside PhoneMinLength..PhoneMaxLength. A true result means the caller
+// should render the digit-count message; a false result means any failure is a
+// prefix/format problem and the generic "tidak valid" message applies.
+func PhoneLengthViolation(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return false
+	}
+	for _, r := range trimmed {
+		if unicode.IsLetter(r) {
+			return false
+		}
+	}
+	normalized := NormalizePhone(trimmed)
+	if !strings.HasPrefix(normalized, "0") {
+		return false
+	}
+	n := RuneLen(normalized)
+	return n < PhoneMinLength || n > PhoneMaxLength
+}
 func ValidPhone(raw string) bool {
+	digits := 0
+	for _, r := range raw {
+		if r >= '0' && r <= '9' {
+			digits++
+		}
+	}
+	if digits > PhoneMaxLength {
+		return false
+	}
 	normalized := NormalizePhone(raw)
-	return RuneLen(normalized) <= PhoneMaxLength && phoneRe.MatchString(normalized)
+	return RuneLen(normalized) >= PhoneMinLength &&
+		RuneLen(normalized) <= PhoneMaxLength &&
+		phoneRe.MatchString(normalized)
 }
 
 // ValidIDNumber reports whether the trimmed identity-document number matches

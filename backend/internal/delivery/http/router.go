@@ -18,10 +18,11 @@ import (
 
 // AuthRoutes carries the bound auth-handler methods.
 type AuthRoutes struct {
-	Login   gin.HandlerFunc
-	Me      gin.HandlerFunc
-	PatchMe gin.HandlerFunc
-	Logout  gin.HandlerFunc
+	Login    gin.HandlerFunc
+	Register gin.HandlerFunc
+	Me       gin.HandlerFunc
+	PatchMe  gin.HandlerFunc
+	Logout   gin.HandlerFunc
 }
 
 // UserRoutes carries the bound security-account handler methods.
@@ -34,14 +35,17 @@ type UserRoutes struct {
 }
 
 // SuperAdminRoutes carries the bound super_admin back-office methods (PRD
-// §4): facility CRUD (including the hard delete), account management
-// (including the hard delete) and the visit purge. The fields stay separate
-// from UserRoutes/MasterRoutes so a nil member degrades to pass-through in
-// tests mounting a subset.
+// §4): facility CRUD (including the hard delete), purpose CRUD (including
+// the hard delete), account management (including the hard delete) and the
+// visit purge. The fields stay separate from UserRoutes/MasterRoutes so a
+// nil member degrades to pass-through in tests mounting a subset.
 type SuperAdminRoutes struct {
 	CreateLocation   gin.HandlerFunc
 	UpdateLocation   gin.HandlerFunc
 	DeleteLocation   gin.HandlerFunc
+	CreatePurpose    gin.HandlerFunc
+	UpdatePurpose    gin.HandlerFunc
+	DeletePurpose    gin.HandlerFunc
 	ListUsers        gin.HandlerFunc
 	CreateUser       gin.HandlerFunc
 	UpdateUserStatus gin.HandlerFunc
@@ -159,8 +163,8 @@ func withFallback(next gin.HandlerFunc) gin.HandlerFunc {
 }
 
 // New builds the Gin engine serving the whole MVP API under /api/v1.
-// Unauthenticated: POST /auth/login (behind the rate limiter), GET /health,
-// GET /ready. Everything else mounts Authenticate (JWT -> RequireIdentity),
+// Unauthenticated: POST /auth/login and POST /auth/register (both behind the
+// rate limiter), GET /health, GET /ready. Everything else mounts Authenticate (JWT -> RequireIdentity),
 // with AdminOnly narrowing the security-account routes, SuperAdminOnly
 // narrowing the back-office facility and account routes to super_admin,
 // ApproveOnly narrowing approve/reject to super_admin and admin (a vendor is
@@ -192,6 +196,7 @@ func New(d Deps) *gin.Engine {
 	// opts out inside the middleware because that handler owns its own ceiling.
 	v1.Use(withFallback(d.Chain.BodyLimit))
 	v1.POST("/auth/login", withFallback(d.Chain.LoginLimiter), withFallback(d.Auth.Login))
+	v1.POST("/auth/register", withFallback(d.Chain.LoginLimiter), withFallback(d.Auth.Register))
 	v1.GET("/health", withFallback(d.Health.Health))
 	v1.GET("/ready", withFallback(d.Health.Ready))
 
@@ -217,6 +222,9 @@ func New(d Deps) *gin.Engine {
 	super.POST("/locations", withFallback(d.SuperAdmin.CreateLocation))
 	super.PATCH("/locations/:id", withFallback(d.SuperAdmin.UpdateLocation))
 	super.DELETE("/locations/:id", withFallback(d.SuperAdmin.DeleteLocation))
+	super.POST("/purposes", withFallback(d.SuperAdmin.CreatePurpose))
+	super.PATCH("/purposes/:id", withFallback(d.SuperAdmin.UpdatePurpose))
+	super.DELETE("/purposes/:id", withFallback(d.SuperAdmin.DeletePurpose))
 	super.GET("/users", withFallback(d.SuperAdmin.ListUsers))
 	super.PATCH("/users/:id/status", withFallback(d.SuperAdmin.UpdateUserStatus))
 	super.PATCH("/users/:id", withFallback(d.SuperAdmin.UpdateUser))

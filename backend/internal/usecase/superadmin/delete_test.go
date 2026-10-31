@@ -40,6 +40,16 @@ func TestCheckUserDelete(t *testing.T) {
 	if err.Error() != "Akun superadmin tidak dapat dihapus." {
 		t.Fatalf("superadmin-delete message = %q, want the contract sentence", err.Error())
 	}
+
+	hiddenDev := domain.ManagedUser{
+		User: domain.User{ID: "target-dev", Status: domain.UserStatusActive},
+		Role: domain.RoleDevSuperAdmin,
+	}
+	err = superadmin.CheckUserDelete(actor, true, hiddenDev)
+	mustAppError(t, err, 403, "FORBIDDEN")
+	if err.Error() != "Akun superadmin tidak dapat dihapus." {
+		t.Fatalf("dev-superadmin-delete message = %q, want the contract sentence", err.Error())
+	}
 }
 
 func TestCheckUserReferences(t *testing.T) {

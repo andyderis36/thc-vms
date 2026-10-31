@@ -186,12 +186,61 @@ func (a *MinIOAdapter) OpenObject(ctx context.Context, objectKey string) (domain
 	}, nil
 }
 
-// RemoveObject deletes a stored object. It is not part of the port: the MVP API
-// exposes no delete, and an unused exported method on the adapter would be
-// speculative surface. The test suite uses it to clean up after itself.
-func (a *MinIOAdapter) RemoveObject(ctx context.Context, objectKey string) error {
-	if err := a.client.RemoveObject(ctx, a.bucket, objectKey, minio.RemoveObjectOptions{}); err != nil {
-		return fmt.Errorf("storage: remove %q: %w", objectKey, err)
+// DeleteObject removes one stored object by its bucket key.
+func (a *MinIOAdapter) DeleteObject(ctx context.Context, key string) error {
+	if err := a.client.RemoveObject(ctx, a.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("storage: delete %q: %w", key, err)
+	}
+	return nil
+}
+
+// ListObjects returns every object under prefix, recursively, with its
+// last-modified time. The prefix is mandatory: an empty one would enumerate
+// the whole bucket, which no caller needs and no caller shall get (the same
+// fail-closed stance OpenObject takes on an empty key). A driver-side
+// listing error aborts with no partial result — a consumer that cannot see
+// the whole prefix must not act on a fragment of it (the reaper would
+// otherwise delete the visible orphans and miss the rest of the prefix,
+// pretending the pass was complete).
+func (a *MinIOAdapter) ListObjects(ctx context.Context, prefix string) ([]domain.ObjectInfo, error) {
+	if prefix == "" {
+		return nil, fmt.Errorf("storage: list requires a prefix: %w", domain.ErrValidation)
+	}
+	objectCh := a.client.ListObjects(ctx, a.bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	})
+	var objects []domain.ObjectInfo
+	for obj := range objectCh {
+		if obj.Err != nil {
+			return nil, fmt.Errorf("storage: list %q: %w", prefix, obj.Err)
+		}
+		objects = append(objects, domain.ObjectInfo{Key: obj.Key, ModTime: obj.LastModified})
+	}
+	return objects, nil
+}
+
+// RemoveObjects deletes every key in one batched pass. minio-go groups the
+// feed into S3 multi-object-delete requests of at most 1000 keys per API
+// call itself; the reaper additionally chunks its calls at 1000 so the
+// discipline is visible and testable at the port, not just inside the SDK.
+// An empty batch is a no-op. Any per-key failure is joined into one error:
+// the caller counts the whole batch as failed and never as deleted.
+func (a *MinIOAdapter) RemoveObjects(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	objectsCh := make(chan minio.ObjectInfo, len(keys))
+	for _, key := range keys {
+		objectsCh <- minio.ObjectInfo{Key: key}
+	}
+	close(objectsCh)
+	var failures []error
+	for failure := range a.client.RemoveObjects(ctx, a.bucket, objectsCh, minio.RemoveObjectsOptions{}) {
+		failures = append(failures, fmt.Errorf("remove %q: %w", failure.ObjectName, failure.Err))
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("storage: remove %d of %d objects: %w", len(failures), len(keys), errors.Join(failures...))
 	}
 	return nil
 }

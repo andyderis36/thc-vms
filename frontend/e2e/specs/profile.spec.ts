@@ -26,6 +26,9 @@
  *   di 375x800 & 320x800; bottom-nav "Kunjungan Saya" tetap berfungsi.
  * - @PROF-15 chip profil vendor SHELL-04: ikon saja di desktop & ponsel,
  *   nama penuh tampil di tablet.
+ * - @PROF-16 `profile_photo` 1200x800 yang diunggah lewat API dinormalisasi
+ *   backend menjadi JPEG 512x512 dan byte tersimpannya benar-benar didekode
+ *   di browser dengan Bearer token.
  *
  * KESELAMATAN DATA: setiap test yang memutasi profil membaca `GET /auth/me`
  * lebih dulu, lalu mengembalikan `name`/`phone` di `finally`. `name` hanya ikut
@@ -57,7 +60,7 @@ import {
   type ApiEnvelope,
   type Role,
 } from '../helpers/api'
-import { pngBuffer } from '../helpers/assets'
+import { jpegBuffer, pngBuffer } from '../helpers/assets'
 import { gotoApp } from '../helpers/nav'
 
 /** Bentuk `User` dari openapi yang dipakai spec ini. */
@@ -427,6 +430,17 @@ test('@PROF-02 vendor mengunggah foto profil PNG lewat file chooser dan avatar_u
       buffer: pngBuffer(),
     })
 
+    // Alur baru: berkas dipilih -> dialog crop terbuka -> unggah/PATCH baru
+    // dimulai setelah "Gunakan foto" diklik. Menunggu Promise.all sebelum
+    // konfirmasi akan deadlock karena unggah belum pernah dipicu.
+    await expect(
+      page.getByRole('dialog', { name: 'Sesuaikan Foto Profil' }),
+    ).toBeVisible()
+    const confirmCrop = page.getByRole('button', { name: 'Gunakan foto', exact: true })
+    // Tetap disabled sampai cropper melaporkan area potong (gambar termuat).
+    await expect(confirmCrop).toBeEnabled()
+    await confirmCrop.click()
+
     const [uploadResponse, patchResponse] = await Promise.all([
       uploadPromise,
       patchPromise,
@@ -576,8 +590,8 @@ test('@PROF-06 field email, role, nik, dan location_id ditolak 400 VALIDATION_ER
     await openProfilePage(page)
     await expect(page.getByLabel('Email')).toHaveCount(0)
     await expect(page.getByLabel('Peran')).toHaveCount(0)
-    await expect(page.getByLabel('Kata Sandi')).toHaveCount(0)
-    await expect(page.locator('input[type="password"]')).toHaveCount(0)
+    // Baris "kata sandi" TIDAK lagi diasertikan nol: halaman profil kini
+    // sengaja memuat seksi "Ganti kata sandi" untuk semua peran.
     await expect(page.locator('input[type="email"]')).toHaveCount(0)
     await expect(page.locator('select')).toHaveCount(0)
   } finally {
@@ -721,6 +735,15 @@ test('@PROF-10 unggah foto profil lewat UI memperbarui avatar sidebar tanpa relo
       buffer: pngBuffer(),
     })
 
+    // Sama seperti @PROF-02: unggah hanya dimulai setelah dialog crop
+    // dikonfirmasi; Promise.all sebelum klik akan menggantung.
+    await expect(
+      page.getByRole('dialog', { name: 'Sesuaikan Foto Profil' }),
+    ).toBeVisible()
+    const confirmCrop = page.getByRole('button', { name: 'Gunakan foto', exact: true })
+    await expect(confirmCrop).toBeEnabled()
+    await confirmCrop.click()
+
     const [uploadResponse, patchResponse] = await Promise.all([
       uploadPromise,
       patchPromise,
@@ -735,6 +758,54 @@ test('@PROF-10 unggah foto profil lewat UI memperbarui avatar sidebar tanpa relo
     await expectImageDecoded(avatar, 'avatar sidebar setelah unggah')
 
     await expectToast(page, 'Foto profil berhasil diperbarui.')
+  } finally {
+    await restoreProfile(h, snapshot)
+  }
+})
+
+test('@PROF-16 foto profil 1200x800 tersimpan sebagai JPEG 512x512 yang benar-benar dapat didekode', async ({
+  h,
+}) => {
+  const snapshot = await snapshotProfile(h, 'vendor')
+  requireEmptyAvatar(snapshot, 'PROF-16')
+
+  try {
+    // 1200x800 (bukan persegi) memaksa backend melakukan crop-tengah + skala,
+    // sehingga hasil 512x512 membuktikan normalisasi nyata, bukan pass-through.
+    const token = await h.tokenAs('vendor')
+    const uploaded = await uploadFileViaApi(token, 'profile_photo', {
+      name: `profil-${h.unique('PROF16')}.jpg`,
+      mimeType: 'image/jpeg',
+      buffer: jpegBuffer(1200, 800),
+    })
+    const patched = await patchMe(h, 'vendor', { avatar_url: uploaded.fileUrl })
+    expect(patched.status, 'PATCH avatar PROF-16').toBe(200)
+
+    const me = await readMe(h, 'vendor')
+    const avatarPath = requireAvatarPath(me.avatar_url ?? null, 'avatar vendor PROF-16')
+
+    // Byte avatar diambil lewat jalur yang sama dengan aplikasi (Bearer token),
+    // lalu didekode di browser — bukan sekadar memeriksa header/URL.
+    const page = await h.openAs('vendor')
+    // Halaman harus berada di origin aplikasi dulu: fetch dari `about:blank`
+    // ber-origin "null" dan ditolak CORS backend.
+    await gotoApp(page, '/profile')
+    const decoded = await page.evaluate(
+      async ({ url, bearer }) => {
+        const response = await fetch(url, {
+          headers: { authorization: `Bearer ${bearer}` },
+        })
+        if (!response.ok) throw new Error(`avatar fetch HTTP ${response.status}`)
+        const blob = await response.blob()
+        const bitmap = await createImageBitmap(blob)
+        return { type: blob.type, width: bitmap.width, height: bitmap.height }
+      },
+      { url: `${API_BASE}${avatarPath.replace(/^\/api\/v1/, '')}`, bearer: token },
+    )
+
+    expect(decoded.type, 'avatar PROF-16 harus JPEG').toBe('image/jpeg')
+    expect(decoded.width, 'avatar PROF-16 harus 512 px').toBe(512)
+    expect(decoded.height, 'avatar PROF-16 harus 512 px').toBe(512)
   } finally {
     await restoreProfile(h, snapshot)
   }

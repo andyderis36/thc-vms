@@ -48,7 +48,7 @@ func (s *Service) WithObjectReader(reader domain.ObjectReader) *Service {
 // visit never reaches storage at all.
 func authorizeVisitRead(actor Actor, visit domain.VisitRequest) error {
 	switch actor.Role {
-	case domain.RoleSuperAdmin:
+	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:
 		return nil
 	case domain.RoleAdmin, domain.RoleSecurity:
 		return actor.requireBranch(visit.LocationID)

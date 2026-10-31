@@ -7,6 +7,7 @@ import { VendorMobileShell } from '@/components/layouts/VendorMobileShell'
 import { ProfileBackLink } from '@/features/profile/components/ProfileBackLink'
 import { ProfileForm } from '@/features/profile/components/ProfileForm'
 import { usePendingApprovalCount } from '@/lib/api/hooks'
+import { isSuperAdminRole } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
 
@@ -31,7 +32,7 @@ function ProfileScreen() {
   const { user } = useSession()
   // Badge antrean hanya bermakna untuk shell yang menampilkannya
   // (admin/superadmin); peran lain tidak menembak query tambahan.
-  const isApprover = user?.role === 'admin' || user?.role === 'super_admin'
+  const isApprover = user !== null && (user.role === 'admin' || isSuperAdminRole(user.role))
   const { pendingCount } = usePendingApprovalCount(isApprover)
 
   if (user === null) {
@@ -53,7 +54,7 @@ function ProfileScreen() {
     )
   }
 
-  if (user.role === 'super_admin') {
+  if (isSuperAdminRole(user.role)) {
     return (
       <SuperadminShell activeHref="/profile" pendingCount={pendingCount}>
         {content}

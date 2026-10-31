@@ -23,11 +23,11 @@ func TestPlanCounts(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"roles", len(p.Roles), 4},
+		{"roles", len(p.Roles), 5},
 		{"locations", len(p.Locations), 5},
-		{"purposes", len(p.Purposes), 6},
+		{"purposes", len(p.Purposes), 4},
 		{"vendors", len(p.Vendors), 2},
-		{"users", len(p.Users), 26},
+		{"users", len(p.Users), 27},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s: got %d rows, want %d", c.what, c.got, c.want)
@@ -109,6 +109,8 @@ func TestRoleLocationInvariantMatrix(t *testing.T) {
 		userType string
 	}{
 		{"super_admin with a location", RoleSuperAdmin, loc, UserTypeInternal},
+		{"dev-superadmin with a location", RoleDevSuperAdmin, loc, UserTypeInternal},
+		{"dev-superadmin typed external", RoleDevSuperAdmin, nil, UserTypeExternal},
 		{"admin without a location", RoleAdmin, nil, UserTypeInternal},
 		{"security without a location", RoleSecurity, nil, UserTypeInternal},
 		{"vendor with a location", RoleVendor, loc, UserTypeExternal},
@@ -129,6 +131,7 @@ func TestRoleLocationInvariantMatrix(t *testing.T) {
 		userType string
 	}{
 		{"super_admin is global", RoleSuperAdmin, nil, UserTypeInternal},
+		{"dev-superadmin is global and internal", RoleDevSuperAdmin, nil, UserTypeInternal},
 		{"admin is bound to a facility", RoleAdmin, loc, UserTypeInternal},
 		{"security is bound to a facility", RoleSecurity, loc, UserTypeInternal},
 		{"vendor is global and external", RoleVendor, nil, UserTypeExternal},

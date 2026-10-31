@@ -41,7 +41,10 @@ async function fillAndSubmitLogin(
 ): Promise<void> {
   await awaitLoginSlot()
   await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Kata Sandi').fill(password)
+  // Field password memakai PasswordInput (ada tombol show/hide dengan
+  // aria-label "Tampilkan kata sandi"), jadi persempit ke role textbox agar
+  // tidak menabrak tombol toggle.
+  await page.getByRole('textbox', { name: 'Kata Sandi' }).fill(password)
   await page.getByRole('button', { name: 'Masuk', exact: true }).click()
 }
 

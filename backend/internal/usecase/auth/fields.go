@@ -19,10 +19,11 @@ const (
 // Me projection and the UpdateSelf gate read it through EditableFields, so no
 // role decision is scattered elsewhere.
 var editableFieldsByRole = map[domain.RoleName][]string{
-	domain.RoleSuperAdmin: {FieldName, FieldPhone, FieldAvatarURL},
-	domain.RoleAdmin:      {FieldPhone, FieldAvatarURL},
-	domain.RoleSecurity:   {FieldPhone, FieldAvatarURL},
-	domain.RoleVendor:     {FieldPhone, FieldAvatarURL},
+	domain.RoleSuperAdmin:    {FieldName, FieldPhone, FieldAvatarURL},
+	domain.RoleDevSuperAdmin: {FieldName, FieldPhone, FieldAvatarURL},
+	domain.RoleAdmin:         {FieldPhone, FieldAvatarURL},
+	domain.RoleSecurity:      {FieldPhone, FieldAvatarURL},
+	domain.RoleVendor:        {FieldPhone, FieldAvatarURL},
 }
 
 // EditableFields returns a copy of the fields the role may change on its own

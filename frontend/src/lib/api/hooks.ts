@@ -722,7 +722,8 @@ export function useDeleteLocationMutation() {
 /** Unggahan mengembalikan URL, bukan daftar — tidak ada cache yang perlu disegarkan. */
 export function useUploadFileMutation() {
   return useMutation({
-    mutationFn: ({ file, category }: { file: File; category: UploadCategory }) => uploadFile(file, category),
+    mutationFn: ({ file, category, compress }: { file: File; category: UploadCategory; compress?: boolean }) =>
+      uploadFile(file, category, { compress }),
   });
 }
 

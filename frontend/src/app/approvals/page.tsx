@@ -20,6 +20,7 @@ import { VisitTable } from '@/features/visits/components/VisitTable'
 import { useLocationsQuery, usePendingApprovalCount, useVisitsQuery } from '@/lib/api/hooks'
 import type { Role, VisitDetail, VisitListParams, VisitOrder, VisitSortField } from '@/lib/api/types'
 import { RequireRole } from '@/lib/auth/guards'
+import { isSuperAdminRole } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 import { SEARCH_QUERY_MAX_LENGTH } from '@/lib/limits'
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination'
@@ -85,7 +86,7 @@ export default function ApprovalsPage() {
 }
 
 function RoleShell({ role, pendingCount, children }: { role: Role; pendingCount: number; children: React.ReactNode }) {
-  if (role === 'super_admin') {
+  if (isSuperAdminRole(role)) {
     return (
       <SuperadminShell pendingCount={pendingCount} activeHref="/approvals">
         {children}
@@ -102,7 +103,7 @@ function RoleShell({ role, pendingCount, children }: { role: Role; pendingCount:
 function ApprovalsScreen() {
   const { user } = useSession()
   const role = user !== null ? user.role : null
-  const isSuperAdmin = role === 'super_admin'
+  const isSuperAdmin = role !== null && isSuperAdminRole(role)
 
   const [approveTarget, setApproveTarget] = useState<VisitDetail | null>(null)
   const [rejectTarget, setRejectTarget] = useState<VisitDetail | null>(null)

@@ -302,7 +302,7 @@ test('@NAV-02 admin membuka /security: form tambah + daftar pengawas cabangnya s
   await expect(dialog).toBeVisible()
   await expect(dialog.getByLabel('Nama Lengkap')).toBeVisible()
   await expect(dialog.getByLabel('Email')).toBeVisible()
-  await expect(dialog.getByLabel('Kata Sandi')).toBeVisible()
+  await expect(dialog.getByRole('textbox', { name: 'Kata Sandi' })).toBeVisible()
   await expect(dialog.locator('select')).toHaveCount(0)
   await expect(dialog.getByText('(terkunci)')).toBeVisible()
   await dialog.getByRole('button', { name: 'Batal' }).click()
@@ -336,7 +336,7 @@ test('@AUTH-07 admin menambah pengawas baru via UI dan lokasinya = cabang admin'
     const dialog = page.getByRole('dialog')
     await dialog.getByLabel('Nama Lengkap').fill(name)
     await dialog.getByLabel('Email').fill(email)
-    await dialog.getByLabel('Kata Sandi').fill(PASSWORD)
+    await dialog.getByRole('textbox', { name: 'Kata Sandi' }).fill(PASSWORD)
     await dialog.getByRole('button', { name: 'Tambah Pengawas' }).click()
 
     await expectToast(page, `Pengawas ${name} berhasil ditambahkan`)
@@ -568,7 +568,7 @@ test('@EDT-02 reset kata sandi lewat modal Ubah lalu login dengan sandi baru', a
 
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: `Ubah User — ${name}` })).toBeVisible()
-    await dialog.getByLabel('Kata Sandi Baru').fill(NEW_PASSWORD)
+    await dialog.getByRole('textbox', { name: 'Kata Sandi Baru' }).fill(NEW_PASSWORD)
     await dialog.getByRole('button', { name: 'Simpan Perubahan' }).click()
 
     await expectToast(page, `Perubahan ${name} tersimpan`)

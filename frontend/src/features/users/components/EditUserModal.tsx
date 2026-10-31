@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { useVendorsQuery } from '@/lib/api/hooks'
 import type { UpdateManagedUserRequest, User } from '@/lib/api/types'
@@ -17,8 +18,11 @@ import { validateNik } from '@/lib/users/nik'
 import {
   EMAIL_MAX_LENGTH,
   NAME_MAX_LENGTH,
+  NIK_LENGTH,
   PASSWORD_MAX_BYTES,
+  PHONE_DIGIT_MESSAGE,
   PHONE_MAX_LENGTH,
+  PHONE_MIN_LENGTH,
   isValidEmail,
   isValidPassword,
   isValidPhone,
@@ -95,8 +99,20 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
     setEmailError(nextEmailError)
     if (nextEmailError !== undefined) return
 
+    const trimmedPhone = phone.trim()
+    const normalizedPhone = trimmedPhone.startsWith('62')
+      ? `0${trimmedPhone.slice(2)}`
+      : trimmedPhone
     const nextPhoneError =
-      phone.trim() === '' || isValidPhone(phone) ? undefined : 'Format nomor telepon tidak valid.'
+      trimmedPhone === ''
+        ? undefined
+        : normalizedPhone.startsWith('0') &&
+            (normalizedPhone.length < PHONE_MIN_LENGTH ||
+              normalizedPhone.length > PHONE_MAX_LENGTH)
+          ? PHONE_DIGIT_MESSAGE
+          : isValidPhone(trimmedPhone)
+            ? undefined
+            : 'Format nomor telepon tidak valid.'
     setPhoneError(nextPhoneError)
     if (nextPhoneError !== undefined) return
 
@@ -209,9 +225,8 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
             error={phoneError}
             hint="Kosongkan untuk menghapus nomor."
           />
-          <Input
+          <PasswordInput
             label="Kata Sandi Baru"
-            type="password"
             placeholder="Kosongkan bila tak diubah"
             value={password}
             onChange={(event) => {
@@ -224,9 +239,8 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
             error={passwordError}
           />
           {isSelf ? (
-            <Input
+            <PasswordInput
               label="Kata Sandi Saat Ini"
-              type="password"
               placeholder="Wajib bila mengganti sandi sendiri"
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
@@ -242,7 +256,7 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
             placeholder="16 digit Nomor Induk Kependudukan"
             value={nik}
             inputMode="numeric"
-            maxLength={16}
+            maxLength={NIK_LENGTH}
             autoComplete="off"
             error={nikError}
             onChange={(event) => {

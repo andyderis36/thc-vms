@@ -11,8 +11,11 @@ import {
 import {
   USER_FILTER_DEP_KEYS,
   applyManagedUserFilters,
+  canShowDeleteUser,
   effectiveManagedRoles,
   filterManagedUsersByRoles,
+  isDeletableUser,
+  isProtectedUser,
   managedCreateRole,
   managedLocationFilterApplies,
   managedRoleFilterOptions,
@@ -342,6 +345,41 @@ describe('applyManagedUserFilters', () => {
       applyManagedUserFilters(rows, { status: 'inactive', vendor: 'PT Lintas Fiber' }).map((u) => u.id),
     ).toEqual(['u2'])
     expect(applyManagedUserFilters(rows, { status: 'blacklisted', vendor: 'PT Lintas Fiber' })).toEqual([])
+  })
+})
+
+describe('dev-superadmin tersembunyi (hidden highest role)', () => {
+  const hidden = userStub({
+    id: 'u-dev',
+    role: 'dev-superadmin',
+    location_id: null,
+    location_name: null,
+  })
+  const admin = userStub({ id: 'u-admin', role: 'admin' })
+
+  it('filterManagedUsersByRoles selalu membuang dev-superadmin', () => {
+    expect(
+      filterManagedUsersByRoles([admin, hidden], ['admin', 'super_admin']).map((u) => u.id),
+    ).toEqual(['u-admin'])
+    expect(filterManagedUsersByRoles([hidden], ['super_admin'])).toEqual([])
+  })
+
+  it('applyManagedUserFilters selalu membuang dev-superadmin', () => {
+    expect(
+      applyManagedUserFilters([admin, hidden], { status: 'all', vendor: 'all' }).map((u) => u.id),
+    ).toEqual(['u-admin'])
+  })
+
+  it('parseManagedRoleFilter memetakan dev-superadmin ke "Semua Peran" (tak terkirim ke server)', () => {
+    expect(parseManagedRoleFilter('dev-superadmin')).toBe('')
+  })
+
+  it('akun tersembunyi dilindungi dari aksi merusak untuk semua pemanggil', () => {
+    expect(isProtectedUser(hidden, 'me-id')).toBe(true)
+    expect(isProtectedUser(hidden, null)).toBe(true)
+    expect(isDeletableUser(hidden, 'me-id')).toBe(false)
+    expect(canShowDeleteUser('super_admin', hidden, 'me-id')).toBe(false)
+    expect(canShowDeleteUser('dev-superadmin', hidden, 'me-id')).toBe(false)
   })
 })
 

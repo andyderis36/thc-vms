@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { can, getLoginRedirect, getRoleLabel } from '@/lib/auth/capabilities'
+import { can, getLoginRedirect, getRoleLabel, isSuperAdminRole } from '@/lib/auth/capabilities'
 import type { Capability, Role } from '@/lib/auth/capabilities'
 
-const ROLES: readonly Role[] = ['super_admin', 'admin', 'security', 'vendor']
+const ROLES: readonly Role[] = ['super_admin', 'dev-superadmin', 'admin', 'security', 'vendor']
 
 const CAPABILITIES: readonly Capability[] = [
   'viewAllBranches',
@@ -23,6 +23,7 @@ const CAPABILITIES: readonly Capability[] = [
  */
 const EXPECTED: Record<Role, readonly Capability[]> = {
   super_admin: CAPABILITIES,
+  'dev-superadmin': CAPABILITIES,
   admin: [
     'submitVisit',
     'approveVisit',
@@ -40,6 +41,7 @@ const EXPECTED: Record<Role, readonly Capability[]> = {
 /** Expected landing page after login, per role. */
 const EXPECTED_REDIRECT: Record<Role, string> = {
   super_admin: '/dashboard',
+  'dev-superadmin': '/dashboard',
   admin: '/dashboard',
   security: '/gate',
   vendor: '/dashboard',
@@ -62,8 +64,8 @@ describe('can', () => {
     },
   )
 
-  it('covers the full 4 roles x 9 capabilities grid', () => {
-    expect(CELLS).toHaveLength(36)
+  it('covers the full 5 roles x 9 capabilities grid', () => {
+    expect(CELLS).toHaveLength(45)
   })
 })
 
@@ -98,8 +100,32 @@ describe('getLoginRedirect', () => {
   it('sends security to the gate kiosk and everyone else to the dashboard', () => {
     expect(getLoginRedirect('security')).toBe('/gate')
     expect(getLoginRedirect('super_admin')).toBe('/dashboard')
+    expect(getLoginRedirect('dev-superadmin')).toBe('/dashboard')
     expect(getLoginRedirect('admin')).toBe('/dashboard')
     expect(getLoginRedirect('vendor')).toBe('/dashboard')
+  })
+})
+
+describe('isSuperAdminRole', () => {
+  it('admits super_admin and the hidden dev-superadmin only', () => {
+    expect(isSuperAdminRole('super_admin')).toBe(true)
+    expect(isSuperAdminRole('dev-superadmin')).toBe(true)
+    expect(isSuperAdminRole('admin')).toBe(false)
+    expect(isSuperAdminRole('security')).toBe(false)
+    expect(isSuperAdminRole('vendor')).toBe(false)
+  })
+})
+
+describe('dev-superadmin capabilities (hidden highest role)', () => {
+  it('dev-superadmin is allowed every capability like super_admin', () => {
+    const allowed = CAPABILITIES.filter((c) => can('dev-superadmin', c))
+    expect(allowed).toEqual([...CAPABILITIES])
+  })
+
+  it('dev-superadmin never gains a capability super_admin lacks', () => {
+    for (const capability of CAPABILITIES) {
+      expect(can('dev-superadmin', capability)).toBe(can('super_admin', capability))
+    }
   })
 })
 
@@ -110,6 +136,7 @@ describe('getRoleLabel', () => {
 
   it('keeps the other role labels byte-identical', () => {
     expect(getRoleLabel('super_admin')).toBe('Superadmin')
+    expect(getRoleLabel('dev-superadmin')).toBe('Developer Superadmin')
     expect(getRoleLabel('admin')).toBe('Koordinator Wilayah')
     expect(getRoleLabel('security')).toBe('Pengawas')
   })

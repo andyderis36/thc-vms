@@ -226,6 +226,42 @@ func assertForbiddenBranchMessage(t *testing.T, raw string) {
 	}
 }
 
+func TestRBAC_DevSuperadminPassesWhereSuperAdminAllowed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, allowed := range [][]domain.RoleName{
+		{domain.RoleSuperAdmin},
+		{domain.RoleSuperAdmin, domain.RoleAdmin},
+		{domain.RoleSecurity, domain.RoleAdmin, domain.RoleSuperAdmin},
+	} {
+		r := gin.New()
+		r.GET("/backoffice",
+			withTestIdentity(deliveryhttp.Identity{UserID: "dev-1", Role: domain.RoleDevSuperAdmin}),
+			middleware.RequireRoles(allowed...),
+			okHandler,
+		)
+		req := httptest.NewRequest(http.MethodGet, "/backoffice", nil)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("dev-superadmin on super_admin route %v status = %d, want %d", allowed, rec.Code, http.StatusOK)
+		}
+	}
+
+	r := gin.New()
+	r.GET("/security-only",
+		withTestIdentity(deliveryhttp.Identity{UserID: "dev-1", Role: domain.RoleDevSuperAdmin}),
+		middleware.RequireRoles(domain.RoleSecurity),
+		okHandler,
+	)
+	req := httptest.NewRequest(http.MethodGet, "/security-only", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("dev-superadmin on security-only route status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	assertForbiddenBranchMessage(t, rec.Body.String())
+}
+
 func TestBranchScope_AdminCannotReadForeignBranch(t *testing.T) {
 	own := domain.UUID("loc-own")
 	foreign := domain.UUID("loc-foreign")
@@ -241,6 +277,25 @@ func TestBranchScope_AdminCannotReadForeignBranch(t *testing.T) {
 	superID := deliveryhttp.Identity{UserID: "root", Role: domain.RoleSuperAdmin}
 	if err := middleware.CheckBranch(superID, foreign); err != nil {
 		t.Fatalf("super_admin bypass must pass, got %v", err)
+	}
+}
+
+func TestBranchScope_DevSuperadminBypassesLikeSuperAdmin(t *testing.T) {
+	foreign := domain.UUID("loc-foreign")
+	narrowed := domain.UUID("loc-narrow")
+	for _, role := range []domain.RoleName{domain.RoleSuperAdmin, domain.RoleDevSuperAdmin} {
+		id := deliveryhttp.Identity{UserID: "root", Role: role}
+		if err := middleware.CheckBranch(id, foreign); err != nil {
+			t.Fatalf("role %s bypass must pass, got %v", role, err)
+		}
+		scope, err := middleware.EffectiveScope(id, "")
+		if err != nil || scope != nil {
+			t.Fatalf("role %s global scope must be nil,nil, got %v,%v", role, scope, err)
+		}
+		scope, err = middleware.EffectiveScope(id, string(narrowed))
+		if err != nil || scope == nil || *scope != narrowed {
+			t.Fatalf("role %s narrowed scope must pass through, got %v,%v", role, scope, err)
+		}
 	}
 }
 

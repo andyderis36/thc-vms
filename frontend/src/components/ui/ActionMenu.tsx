@@ -44,7 +44,7 @@ export interface ActionMenuProps {
  * urutan varian CSS Tailwind v4 (hover → focus → active → disabled).
  */
 const TRIGGER_CLASS =
-  'inline-flex min-h-touch min-w-touch items-center justify-center rounded-control border border-border-light text-ink-secondary transition hover:bg-neutral-bg active:bg-ink/10 disabled:cursor-not-allowed disabled:opacity-60'
+  'inline-flex min-h-touch min-w-touch items-center justify-center rounded-control border-0 bg-transparent text-ink-secondary shadow-none transition active:bg-ink/10 focus-visible:ring-4 focus-visible:ring-brand/12 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60'
 
 const PANEL_CLASS =
   'fixed z-[60] w-56 rounded-control border border-border-mid bg-surface p-1 shadow-dropdown'

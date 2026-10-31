@@ -431,7 +431,7 @@ $UNKNOWN_UUID = '11111111-2222-3333-4444-555555555555'
 $UNIQ_LOCS = @($meList | Where-Object { $_.LocationId -ne '' } | Select-Object -ExpandProperty LocationId -Unique)
 
 $PURP = (((Invoke-Api -Method GET -Path '/purposes' -Token $script:Tokens['sa']).Json.data |
-          Where-Object { $_.name -like 'Splicing*' } | Select-Object -First 1).id)
+          Where-Object { $_.name -eq 'Survey' } | Select-Object -First 1).id)
 $VDA  = (((Invoke-Api -Method GET -Path '/vendors'  -Token $script:Tokens['sa']).Json.data |
           Where-Object { $_.name -like '*Lintas*' } | Select-Object -First 1).id)
 if (-not $LOC1 -or -not $LOC2 -or -not $PURP -or -not $VDA -or $LOC1 -eq $LOC2) {

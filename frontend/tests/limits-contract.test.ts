@@ -20,6 +20,7 @@ import {
   PASSWORD_MIN_LENGTH,
   PHONE_MAX_LENGTH,
   PHONE_PATTERN,
+  PURPOSE_NAME_MAX_LENGTH,
   PURPOSE_NOTE_MAX_LENGTH,
   REJECT_REASON_MIN_LENGTH,
   SEARCH_QUERY_MAX_LENGTH,
@@ -78,6 +79,11 @@ const numberContracts: ReadonlyArray<{
     constant: 'PHONE_MAX_LENGTH',
     actual: PHONE_MAX_LENGTH,
     key: 'phone_max_length',
+  },
+  {
+    constant: 'PHONE_MIN_LENGTH',
+    actual: 10,
+    key: 'phone_min_length',
   },
   {
     constant: 'PASSWORD_MIN_LENGTH',
@@ -146,6 +152,11 @@ const numberContracts: ReadonlyArray<{
     key: 'jabatan_max_length',
   },
   {
+    constant: 'PURPOSE_NAME_MAX_LENGTH',
+    actual: PURPOSE_NAME_MAX_LENGTH,
+    key: 'purpose_name_max_length',
+  },
+  {
     constant: 'PURPOSE_NOTE_MAX_LENGTH',
     actual: PURPOSE_NOTE_MAX_LENGTH,
     key: 'purpose_note_max_length',
@@ -186,7 +197,7 @@ describe('limits-contract — lib/limits.ts vs docs/4. openapi.yaml', () => {
   })
 
   it('jumlah kunci x-limits sama dengan jumlah kontrak', () => {
-    expect(limits.size).toBe(25)
+    expect(limits.size).toBe(27)
     expect(limits.size).toBe(numberContracts.length + 2)
   })
 

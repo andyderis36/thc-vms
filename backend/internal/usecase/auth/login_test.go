@@ -150,10 +150,11 @@ func loginDeps(users *fakeUsers) Deps {
 	return Deps{
 		Users: users,
 		Roles: fakeRoles{names: map[domain.UUID]domain.RoleName{
-			"role-superadmin": domain.RoleSuperAdmin,
-			"role-admin":      domain.RoleAdmin,
-			"role-security":   domain.RoleSecurity,
-			"role-vendor":     domain.RoleVendor,
+			"role-superadmin":    domain.RoleSuperAdmin,
+			"role-devsuperadmin": domain.RoleDevSuperAdmin,
+			"role-admin":         domain.RoleAdmin,
+			"role-security":      domain.RoleSecurity,
+			"role-vendor":        domain.RoleVendor,
 		}},
 		Locations: fakeLocations{locations: map[domain.UUID]domain.Location{
 			"loc-bandung": {ID: loc, Name: "THC Cabang Bandung"},
@@ -404,10 +405,10 @@ func TestLogin_RejectsInactiveAndBlacklistedAccounts(t *testing.T) {
 
 	_, err := svc.Login(context.Background(), "inactive@thc.local", "Password123!")
 	if err == nil {
-		t.Fatal("inactive login succeeded, want 401")
+		t.Fatal("inactive login succeeded, want 403")
 	}
-	if got := appErrorOf(t, err); got.Code != "INVALID_CREDENTIALS" || got.Message != "Kredensial tidak valid" {
-		t.Fatalf("inactive: got (%s,%s), want the identical 401", got.Code, got.Message)
+	if got := appErrorOf(t, err); got.Status != 403 || got.Code != "ACCOUNT_PENDING" || got.Message != "Akun Anda menunggu persetujuan superadmin." {
+		t.Fatalf("inactive: got (%d,%s,%s), want the pending-approval 403", got.Status, got.Code, got.Message)
 	}
 
 	_, err = svc.Login(context.Background(), "black@thc.local", "Password123!")

@@ -108,13 +108,6 @@ func run(ctx context.Context) error {
 
 	dir := directory.New(pool, master)
 	jwtSvc := infraJWT.NewService(cfg).WithDirectory(dir)
-	authSvc := auth.NewService(auth.Deps{
-		Users: users, Roles: dir.Roles(), Locations: master, Vendors: repository.NewVendorRepository(pool), Issuer: jwtSvc, Clock: clock,
-		Profiles: repository.NewProfileRepository(pool), Audit: audit,
-		// Storage backs the avatar ownership proof on PATCH /auth/me; avatar
-		// reads no longer presign, they stream through GET /avatars/:id.
-		Storage: store,
-	})
 	// File links on visit reads are short-lived presigned URLs of our own
 	// private bucket (never the raw stored address); the TTL comes from
 	// S3_PRESIGN_TTL_MINUTES and is guaranteed positive by config. The object
@@ -155,17 +148,37 @@ func run(ctx context.Context) error {
 	}
 	slog.Info("admin and vendor roles resolved")
 
+	// One managed-account adapter serves both the public vendor
+	// self-registration (POST /auth/register, status inactive) and the
+	// superadmin back office below.
+	managedUsers := repository.NewManagedUserRepository(pool)
+	authSvc := auth.NewService(auth.Deps{
+		Users: users, Roles: dir.Roles(), Locations: master, Vendors: repository.NewVendorRepository(pool), Issuer: jwtSvc, Clock: clock,
+		Profiles: repository.NewProfileRepository(pool), Audit: audit,
+		// Storage backs the avatar ownership proof on PATCH /auth/me; avatar
+		// reads no longer presign, they stream through GET /avatars/:id.
+		Storage: store,
+		// ManagedUserRepository backs POST /auth/register (vendor
+		// self-registration with status inactive).
+		Managed:      managedUsers,
+		VendorRoleID: vendorRoleID,
+	})
+	slog.Info("auth service wired")
+
 	authHandler := handlers.NewAuthHandler(authSvc)
 	visitHandler := handlers.NewVisitHandler(visitSvc)
 	gateHandler := handlers.NewGateHandler(gateSvc)
 	masterHandler := handlers.NewMasterHandler(master)
 	userHandler := handlers.NewUserHandler(users, master, securityRoleID)
 	superAdminHandler := handlers.NewSuperAdminHandler(
-		repository.NewManagedUserRepository(pool),
+		managedUsers,
 		repository.NewLocationAdminRepository(pool),
+		repository.NewPurposeAdminRepository(pool),
 		visits,
 		adminRoleID, vendorRoleID,
-	)
+		// Delete paths collect stored keys before the row goes and purge the
+		// objects best-effort after the commit (row-first, object-second).
+	).WithStorage(store).WithCheckIns(checkins)
 	avatarSvc := avatar.NewService(avatar.Deps{Users: users, Objects: store})
 	avatarHandler := handlers.NewAvatarHandler(avatarSvc)
 	uploadHandler := handlers.NewUploadHandler(store, cfg.Upload.MaxIngestBytes)
@@ -201,7 +214,7 @@ func run(ctx context.Context) error {
 	}
 	deps := deliveryhttp.Deps{
 		Auth: deliveryhttp.AuthRoutes{
-			Login: authHandler.Login, Me: authHandler.Me, PatchMe: authHandler.PatchMe,
+			Login: authHandler.Login, Register: authHandler.Register, Me: authHandler.Me, PatchMe: authHandler.PatchMe,
 			Logout: authHandler.Logout,
 		},
 		Users: deliveryhttp.UserRoutes{
@@ -243,15 +256,14 @@ func run(ctx context.Context) error {
 			LoginLimiter: loginLimiter,
 			Authenticate: middleware.JWT(jwtSvc, authSvc),
 			AdminOnly: middleware.RequireRoles(
-				domain.RoleSuperAdmin, domain.RoleAdmin),
-			SuperAdminOnly: middleware.RequireRoles(
-				domain.RoleSuperAdmin),
+				domain.RoleSuperAdmin, domain.RoleDevSuperAdmin, domain.RoleAdmin),
+			SuperAdminOnly: middleware.RequireSuperAdmin(),
 			ApproveOnly: middleware.RequireRoles(
-				domain.RoleSuperAdmin, domain.RoleAdmin),
+				domain.RoleSuperAdmin, domain.RoleDevSuperAdmin, domain.RoleAdmin),
 			GateOnly: middleware.RequireRoles(
-				domain.RoleSecurity, domain.RoleAdmin, domain.RoleSuperAdmin),
+				domain.RoleSecurity, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleDevSuperAdmin),
 			NotifyOnly: middleware.RequireRoles(
-				domain.RoleSuperAdmin, domain.RoleAdmin, domain.RoleSecurity, domain.RoleVendor),
+				domain.RoleSuperAdmin, domain.RoleDevSuperAdmin, domain.RoleAdmin, domain.RoleSecurity, domain.RoleVendor),
 		},
 	}
 	// A nil route member mounts as a pass-through, so a handler forgotten here
@@ -273,6 +285,30 @@ func run(ctx context.Context) error {
 		runner.Start(ctx)
 	}()
 	slog.Info("starting background auto-rule worker", "interval", interval.String())
+
+	// Reaper Wave-2: nightly sweep of orphaned objects under the four
+	// <dir>/pending/ prefixes. REAPER_DRY_RUN defaults ON, so a fresh
+	// deploy only logs what it WOULD delete; REAPER_GRACE_HOURS defaults
+	// to 24h. The repository's pg_try_advisory_lock slot keeps replicas
+	// from racing on the same objects.
+	reaperConfig := worker.ReaperConfigFromEnv()
+	reaper := worker.NewReaper(worker.ReaperDeps{
+		Store:    store,
+		Repo:     repository.NewReaperRepository(pool),
+		Config:   reaperConfig,
+		Interval: worker.ReaperIntervalFromEnv(),
+		Clock:    clock,
+		Logger:   logger,
+	})
+	reaperDone := make(chan struct{})
+	go func() {
+		defer close(reaperDone)
+		reaper.Start(ctx)
+	}()
+	slog.Info("starting background pending-orphan reaper",
+		"interval", reaper.Interval().String(),
+		"grace", reaperConfig.Grace.String(),
+		"dry_run", reaperConfig.DryRun)
 
 	addr := ":" + strconv.Itoa(cfg.App.Port)
 	server := &http.Server{
@@ -311,6 +347,8 @@ func run(ctx context.Context) error {
 	slog.Info("http server stopped")
 	<-workerDone
 	slog.Info("background worker stopped")
+	<-reaperDone
+	slog.Info("background reaper stopped")
 	slog.Info("database pool closed")
 	slog.Info("shutdown complete")
 	return nil
@@ -324,6 +362,9 @@ func superAdminRoutes(h *handlers.SuperAdminHandler) deliveryhttp.SuperAdminRout
 		CreateLocation:   h.CreateLocation,
 		UpdateLocation:   h.UpdateLocation,
 		DeleteLocation:   h.DeleteLocation,
+		CreatePurpose:    h.CreatePurpose,
+		UpdatePurpose:    h.UpdatePurpose,
+		DeletePurpose:    h.DeletePurpose,
 		ListUsers:        h.ListUsers,
 		CreateUser:       h.CreateUser,
 		UpdateUser:       h.UpdateUser,

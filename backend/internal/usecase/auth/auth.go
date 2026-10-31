@@ -71,8 +71,9 @@ type LoginResult struct {
 // constructor keeps a single parameter. Every field is required except
 // Vendors (nil catalogue means vendor names stay nil), Clock (nil falls back
 // to the wall clock), Audit (nil disables the login trail: hermetic tests
-// and unwired callers log in exactly as before) and Storage (nil only
-// disables the avatar ownership proof on PATCH /auth/me).
+// and unwired callers log in exactly as before), Storage (nil only
+// disables the avatar ownership proof on PATCH /auth/me), Managed and
+// VendorRoleID (nil/empty only disables POST /auth/register).
 type Deps struct {
 	Users     domain.UserRepository
 	Roles     RoleDirectory
@@ -85,6 +86,12 @@ type Deps struct {
 	// separate port from Users so the narrow login fakes keep compiling; a nil
 	// value only disables UpdateSelf (500), never login/logout/me.
 	Profiles domain.ProfileRepository
+	// Managed is the managed-account write port behind POST /auth/register.
+	// A nil value disables self-registration (500), never login/logout/me.
+	Managed domain.ManagedUserRepository
+	// VendorRoleID is the role row id stamped onto self-registered accounts.
+	// Empty disables POST /auth/register (500 wiring bug, never a user error).
+	VendorRoleID domain.UUID
 	// Storage reverses a submitted avatar URL to its object key so the
 	// self-service write can prove the photo belongs to the caller's own
 	// upload namespace. It never mints read URLs: avatar reads stream through
@@ -104,6 +111,9 @@ type Service struct {
 	profiles  domain.ProfileRepository
 	// storage backs the avatar ownership proof on the self-service write path.
 	storage domain.IStorageService
+	managed domain.ManagedUserRepository
+	// vendorRoleID is stamped onto self-registered accounts (POST /auth/register).
+	vendorRoleID domain.UUID
 }
 
 // NewService wires the collaborators. A nil Clock defaults to SystemClock;
@@ -122,6 +132,8 @@ func NewService(d Deps) *Service {
 		audit:     d.Audit,
 		profiles:  d.Profiles,
 		storage:   d.Storage,
+		managed:   d.Managed,
+		vendorRoleID: d.VendorRoleID,
 	}
 }
 

@@ -56,6 +56,10 @@ func (fakeAuthService) UpdateSelf(_ context.Context, _ auth.SelfIdentity, _ auth
 
 func (fakeAuthService) Logout(_ context.Context) error { return nil }
 
+func (fakeAuthService) RegisterVendor(_ context.Context, _ auth.RegisterVendorInput) (auth.Profile, error) {
+	return auth.Profile{}, domain.ErrUnauthorized
+}
+
 // fakeVisitService answers every visit call with 404.
 type fakeVisitService struct{}
 
@@ -157,6 +161,8 @@ func (fakeStorage) PresignedURL(_ context.Context, _ string, _ time.Duration) (s
 	return "", domain.ErrNotFound
 }
 
+func (fakeStorage) DeleteObject(_ context.Context, _ string) error { return nil }
+
 func (fakeStorage) ObjectKeyFromStoredURL(_ string) (string, error) {
 	return "", domain.ErrValidation
 }
@@ -175,7 +181,7 @@ func testEngine() *gin.Engine {
 	limiter := middleware.NewRateLimiter(1000, time.Minute)
 	return deliveryhttp.New(deliveryhttp.Deps{
 		Auth: deliveryhttp.AuthRoutes{
-			Login: auth.Login, Me: auth.Me, PatchMe: auth.PatchMe, Logout: auth.Logout,
+			Login: auth.Login, Register: auth.Register, Me: auth.Me, PatchMe: auth.PatchMe, Logout: auth.Logout,
 		},
 		Users: deliveryhttp.UserRoutes{
 			List: users.ListSecurity, Create: users.CreateSecurity, UpdateStatus: users.UpdateSecurityStatus,
@@ -221,7 +227,7 @@ func serve(engine *gin.Engine, method, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 38 wired
+// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 42 wired
 // operations resolves to a registered route: a registered route may answer
 // 401/403/400/500 without credentials, but never 404. The two Phase-2
 // feedback and incident endpoints must 404.
@@ -229,6 +235,7 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 	engine := testEngine()
 	wired := []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/auth/login"},
+		{http.MethodPost, "/api/v1/auth/register"},
 		{http.MethodGet, "/api/v1/health"},
 		{http.MethodGet, "/api/v1/ready"},
 		{http.MethodGet, "/api/v1/auth/me"},
@@ -243,6 +250,9 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodPost, "/api/v1/locations"},
 		{http.MethodPatch, "/api/v1/locations/some-id"},
 		{http.MethodDelete, "/api/v1/locations/some-id"},
+		{http.MethodPost, "/api/v1/purposes"},
+		{http.MethodPatch, "/api/v1/purposes/some-id"},
+		{http.MethodDelete, "/api/v1/purposes/some-id"},
 		{http.MethodGet, "/api/v1/users"},
 		{http.MethodPost, "/api/v1/users"},
 		{http.MethodPatch, "/api/v1/users/some-id/status"},
@@ -267,8 +277,8 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/notifications"},
 		{http.MethodPost, "/api/v1/uploads"},
 	}
-	if len(wired) != 38 {
-		t.Fatalf("contract drift: wired routes = %d, want 38", len(wired))
+	if len(wired) != 42 {
+		t.Fatalf("contract drift: wired routes = %d, want 42", len(wired))
 	}
 	for _, route := range wired {
 		rec := serve(engine, route.method, route.path)

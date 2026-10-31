@@ -20,8 +20,13 @@ type VisitRequest struct {
 	// VendorUserName/VendorUserEmail adalah display name + email dari join users
 	// (sudah diseleksi query list/detail, tanpa query tambahan).
 	// Kosong berarti "vendor user tak dikenal" dan dirender nil/omit di wire.
-	VendorUserName      string
-	VendorUserEmail     string
+	VendorUserName string
+	VendorUserEmail string
+	// VendorUserVendorName adalah perusahaan milik akun vendor yang mengajukan
+	// (COALESCE(users.vendor_name_override, vendor.name) dari join users +
+	// vendor akun). Kosong berarti akun pengaju tidak membawa perusahaan dan
+	// dirender nil/omit di wire.
+	VendorUserVendorName string
 	StartDate           time.Time
 	EndDate             time.Time
 	IsMultiDay          bool
@@ -38,8 +43,14 @@ type VisitRequest struct {
 	UpdatedAt   time.Time
 	// VendorName is the display name of VendorID resolved from the vendor
 	// catalogue join. Empty means "no vendor or unknown" and renders as ""
-	// in the openapi VisitDetail vendor_name member.
+	// in the openapi VisitDetail vendor_name member, unless VendorNameOverride
+	// below carries the manual visit-level company (which then wins on the wire).
 	VendorName string
+	// VendorNameOverride is the manually typed visit-level company
+	// (migration 000017, admin/superadmin-created visits): a *string so a
+	// stored NULL maps one-to-one onto nil, mirroring PurposeNote. The wire
+	// vendor_name renders this trimmed value when present, otherwise VendorName.
+	VendorNameOverride *string
 	// Visitors is the technician roster travelling under this request. It is
 	// populated on single-visit reads and on paged lists (one batched query
 	// per page); the create path echoes the request input instead because the

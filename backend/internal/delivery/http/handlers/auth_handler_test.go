@@ -34,6 +34,9 @@ type stubAuthService struct {
 	updateSelfCalls int
 	lastSelfActor   auth.SelfIdentity
 	lastSelfUpdate  auth.SelfUpdate
+
+	registerErr       error
+	lastRegisterInput *auth.RegisterVendorInput
 }
 
 func (s *stubAuthService) Login(_ context.Context, email, password string) (auth.LoginResult, error) {
@@ -65,6 +68,14 @@ func (s *stubAuthService) UpdateSelf(_ context.Context, actor auth.SelfIdentity,
 func (s *stubAuthService) Logout(_ context.Context) error {
 	s.logoutCalls++
 	return nil
+}
+
+func (s *stubAuthService) RegisterVendor(_ context.Context, in auth.RegisterVendorInput) (auth.Profile, error) {
+	s.lastRegisterInput = &in
+	if s.registerErr != nil {
+		return auth.Profile{}, s.registerErr
+	}
+	return s.profile, nil
 }
 
 func cannedAuthProfile() auth.Profile {

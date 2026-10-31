@@ -31,7 +31,7 @@ import { VisitCards } from '@/features/visits/components/VisitCards'
 import { VisitTable } from '@/features/visits/components/VisitTable'
 import { useLocationsQuery, usePendingApprovalCount, useVisitsQuery } from '@/lib/api/hooks'
 import type { VisitDetail, VisitListParams, VisitOrder, VisitSortField, VisitStatus } from '@/lib/api/types'
-import { can } from '@/lib/auth/capabilities'
+import { can, isSuperAdminRole } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
 import { SEARCH_QUERY_MAX_LENGTH } from '@/lib/limits'
@@ -150,7 +150,7 @@ function DashboardScreen() {
   // menyimpang satu sama lain. (RequireAuth hanya me-mount layar ini saat sesi
   // sudah ter-autentikasi, jadi `user` sudah terisi pada render pertama.)
   const defaultFacilityFilter =
-    user !== null && user.role !== 'super_admin' && user.role !== 'vendor'
+    user !== null && !isSuperAdminRole(user.role) && user.role !== 'vendor'
       ? (user.location_id ?? 'all')
       : 'all'
   const [facilityFilter, setFacilityFilter] = useState<string>(defaultFacilityFilter)
@@ -341,7 +341,7 @@ function DashboardScreen() {
   ]
 
   const facilityOptions: SelectOption[] =
-    role === 'super_admin'
+    isSuperAdminRole(role)
       ? [
           { value: 'all', label: 'Semua Cabang / POP' },
           ...(locationsQuery.data ?? []).map((location) => ({
@@ -459,7 +459,7 @@ function DashboardScreen() {
               label="Fasilitas"
               options={facilityOptions}
               value={facilityFilter}
-              disabled={role !== 'super_admin'}
+              disabled={!isSuperAdminRole(role)}
               onChange={(event) => setFacilityFilter(event.target.value)}
             />
           </div>
@@ -627,7 +627,7 @@ function DashboardScreen() {
     return <VendorMobileShell activeHref="/dashboard">{content}</VendorMobileShell>
   }
 
-  if (role === 'super_admin') {
+  if (isSuperAdminRole(role)) {
     return (
       <SuperadminShell
         pendingCount={pendingCount}

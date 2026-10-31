@@ -25,6 +25,7 @@ import type {
   NotificationListResult,
   Purpose,
   QrPayload,
+  RegisterVendorRequest,
   RejectRequest,
   RescheduleRequest,
   UpdateLocationRequest,
@@ -70,6 +71,18 @@ export async function logout(): Promise<void> {
   } finally {
     clearToken();
   }
+}
+
+/**
+ * `POST /auth/register` — pendaftaran Vendor/Mitra mandiri (publik).
+ * SENGAJA tanpa `storeToken`: akun baru berstatus inactive dan tidak
+ * langsung masuk — layar sukses bersifat netral ("menunggu persetujuan").
+ */
+export function registerVendor(body: RegisterVendorRequest): Promise<User> {
+  return apiFetch<User>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 // ---------------------------------------------------------------------------

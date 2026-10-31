@@ -6,7 +6,14 @@ import { formatTanggalWaktu } from '@/features/visits/detail/Timeline'
 import { Copy } from 'lucide-react'
 import type { AuditLog } from '@/lib/api/types'
 import { toast } from 'sonner'
-import { auditActionLabel, auditActorLabel, auditEntityLabel } from './page'
+import {
+  auditActionLabel,
+  auditActorLabelHonest,
+  auditEntityLabel,
+  auditImpactSentence,
+  auditMetadataDisplayRows,
+  auditMetadataSummaryTranslated,
+} from './page'
 
 // ---------------------------------------------------------------------------
 // Helper murni (diekspor agar dapat diuji unit — lihat tests/audit-logs.test.ts)
@@ -97,7 +104,7 @@ export function auditDetail(
     {
       title: 'Aktor',
       rows: [
-        { label: 'Pelaku', value: auditActorLabel(log.user_id, usersById) },
+        { label: 'Pelaku', value: auditActorLabelHonest(log, usersById) },
         { label: 'ID Pelaku', value: log.user_id ?? '—', wrap: true, copyable: true },
         { label: 'Email Pelaku', value: auditActorEmail(log.user_id, usersById), wrap: true },
       ],
@@ -106,7 +113,7 @@ export function auditDetail(
       title: 'Entitas',
       rows: [
         { label: 'Entitas', value: auditEntityLabel(log.entity) },
-        { label: 'ID Entitas', value: log.entity_id ?? '—', wrap: true },
+        { label: 'ID Entitas', value: log.entity_id ?? '—', wrap: true, copyable: true },
       ],
     },
     {
@@ -147,10 +154,10 @@ export interface AuditDetailModalProps {
 }
 
 /**
- * Hanya baris ID (ID Pelaku, ID Jejak) yang copyable — itu penanda unik yang
- * dicocokkan operator dengan basis data saat menelusuri insiden. Field teks
- * bebas (kode aksi, user-agent, metadata) tidak diberi tombol salin karena
- * isinya sudah terbaca langsung dan bisa sangat panjang.
+ * Hanya ketiga baris ID (ID Pelaku, ID Entitas, ID Jejak) yang copyable — itu
+ * penanda unik yang dicocokkan operator dengan basis data saat menelusuri
+ * insiden. Field teks bebas (kode aksi, user-agent, metadata) tidak diberi
+ * tombol salin karena isinya sudah terbaca langsung dan bisa sangat panjang.
  */
 async function copyToClipboard(value: string): Promise<void> {
   try {
@@ -199,8 +206,85 @@ function DetailRow({ row }: { row: AuditDetailRow }) {
   )
 }
 
+/**
+ * Satu baris detail: user-agent yang panjang dilipat ke dalam `<details>`
+ * dengan pratinjau 80 karakter agar konteks tidak mendominasi layar —
+ * operator membuka lipatan hanya saat menelusuri insiden.
+ */
+function DetailSectionRow({ row }: { row: AuditDetailRow }) {
+  if (row.label === 'User Agent' && row.value !== '—') {
+    const preview = row.value.length > 80 ? `${row.value.slice(0, 80)}…` : row.value
+    return (
+      <div className="flex flex-col gap-1 py-3 sm:flex-row sm:items-baseline sm:gap-4">
+        <dt className="shrink-0 text-label font-semibold text-ink-secondary sm:w-44">
+          {row.label}
+        </dt>
+        <dd className="min-w-0 flex-1 text-sm text-ink">
+          <details>
+            <summary className="min-h-touch cursor-pointer break-words wrap-anywhere">
+              {preview}
+            </summary>
+            <p className="mt-1 break-words text-sm text-ink-secondary wrap-anywhere">
+              {row.value}
+            </p>
+          </details>
+        </dd>
+      </div>
+    )
+  }
+  return <DetailRow row={row} />
+}
+
+/**
+ * Satu kelompok detail: baris "Kode aksi" (kode mentah untuk teknisi)
+ * dilipat ke dalam `<details>` teknis agar bagian Aksi tetap ringkas.
+ */
+function DetailSection({ section }: { section: AuditDetailSection }) {
+  if (section.title === 'Aksi') {
+    const visible = section.rows.filter((row) => row.label !== 'Kode aksi')
+    const technical = section.rows.filter((row) => row.label === 'Kode aksi')
+    return (
+      <section className="overflow-hidden rounded-control border border-border-light">
+        <h3 className="bg-brand/5 px-3 py-2 text-xs font-semibold text-ink-secondary">
+          {section.title}
+        </h3>
+        <dl className="divide-y divide-border-light px-3">
+          {visible.map((row) => (
+            <DetailRow key={row.label} row={row} />
+          ))}
+        </dl>
+        {technical.length > 0 ? (
+          <details className="border-t border-border-light px-3 py-2">
+            <summary className="min-h-touch cursor-pointer content-center text-label font-semibold text-ink-secondary">
+              Detail teknis
+            </summary>
+            <dl>
+              {technical.map((row) => (
+                <DetailRow key={row.label} row={row} />
+              ))}
+            </dl>
+          </details>
+        ) : null}
+      </section>
+    )
+  }
+  return (
+    <section className="overflow-hidden rounded-control border border-border-light">
+      <h3 className="bg-brand/5 px-3 py-2 text-xs font-semibold text-ink-secondary">
+        {section.title}
+      </h3>
+      <dl className="divide-y divide-border-light px-3">
+        {section.rows.map((row) => (
+          <DetailSectionRow key={row.label} row={row} />
+        ))}
+      </dl>
+    </section>
+  )
+}
+
 export function AuditDetailModal({ log, usersById, onClose }: AuditDetailModalProps) {
   const detail = log !== null ? auditDetail(log, usersById) : null
+  const metadataRows = log !== null ? auditMetadataDisplayRows(log.metadata) : []
   const title =
     log !== null ? `Detail Jejak Audit — ${auditActionLabel(log.action)}` : 'Detail Jejak Audit'
 
@@ -216,45 +300,51 @@ export function AuditDetailModal({ log, usersById, onClose }: AuditDetailModalPr
         </Button>
       }
     >
-      {detail !== null ? (
+      {detail !== null && log !== null ? (
         <div className="flex flex-col gap-4">
-          {detail.sections.map((section) => (
-            <section
-              key={section.title}
-              className="overflow-hidden rounded-control border border-border-light"
+          <section className="rounded-control border border-brand/25 bg-brand/5 px-4 py-3">
+            <h3 className="text-xs font-semibold text-ink-secondary">Ringkasan</h3>
+            <p
+              className="mt-1 text-sm font-semibold text-ink"
+              title={auditMetadataSummaryTranslated(log.metadata)}
             >
-              <h3 className="bg-brand/5 px-3 py-2 text-xs font-semibold text-ink-secondary">
-                {section.title}
-              </h3>
-              <dl className="divide-y divide-border-light px-3">
-                {section.rows.map((row) => (
-                  <DetailRow key={row.label} row={row} />
-                ))}
-              </dl>
-            </section>
+              {auditImpactSentence(log, auditActorLabelHonest(log, usersById))}
+            </p>
+          </section>
+          {detail.sections.map((section) => (
+            <DetailSection key={section.title} section={section} />
           ))}
 
           {/*
-            Metadata dirender per entri (bukan ringkasan `auditMetadataSummary`)
-            agar tiap kunci→nilai terbaca utuh. Wadah TIDAK pernah kosong:
-            entri nol = strip sebagai isi satu-satunya baris.
+            Metadata dirender per baris sadar-pasangan: kunci `from`/`to`
+            menjadi satu baris "Dari X Ke Y", kunci `before.<kolom>`/
+            `after.<kolom>` dikelompokkan per kolom ("Kolom Nama: A → B",
+            nilai panjang terpotong + tooltip), sisanya terjemahan kamus.
+            Wadah TIDAK pernah kosong: nol baris = strip satu-satunya isi.
           */}
           <section className="overflow-hidden rounded-control border border-border-light">
             <h3 className="bg-brand/5 px-3 py-2 text-xs font-semibold text-ink-secondary">
               Metadata
             </h3>
-            {detail.metadata.length > 0 ? (
+            {metadataRows.length > 0 ? (
               <dl className="divide-y divide-border-light">
-                {detail.metadata.map((entry) => (
+                {metadataRows.map((row) => (
                   <div
-                    key={entry.key}
+                    key={row.key}
                     className="flex flex-col gap-1 px-3 py-3 sm:flex-row sm:items-baseline sm:gap-4"
                   >
                     <dt className="shrink-0 text-label font-semibold text-ink-secondary wrap-anywhere sm:w-44">
-                      {entry.key}
+                      {row.label}
                     </dt>
-                    <dd className="min-w-0 flex-1 break-words text-sm text-ink wrap-anywhere">
-                      {entry.value}
+                    <dd
+                      className={
+                        row.truncate
+                          ? 'min-w-0 flex-1 truncate text-sm text-ink'
+                          : 'min-w-0 flex-1 break-words text-sm text-ink wrap-anywhere'
+                      }
+                      title={row.truncate ? row.title : undefined}
+                    >
+                      {row.value}
                     </dd>
                   </div>
                 ))}

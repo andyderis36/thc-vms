@@ -1,11 +1,13 @@
-// Package superadmin holds the pure validation and guard rules behind the
+// Package superadmin holds the validation and guard rules behind the
 // super_admin back-office endpoints (PRD §4: kelola lokasi + kelola
-// admin/vendor). Every function here is dependency-free: it takes plain
-// values, returns plain results, and never touches a database or a clock, so
-// the rules stay unit-testable without fakes. Failures are *domain.AppError
-// carrying the exact HTTP status and envelope code the handler renders via
-// response.Fail, with Bahasa Indonesia messages matching the tone of
-// domain/errors.go.
+// admin/vendor). The guard functions are dependency-free: they take plain
+// values, return plain results, and never touch a database or a clock, so
+// the rules stay unit-testable without fakes. The delete-path storage
+// cleanup (delete_objects.go) takes its ports as explicit parameters, so it
+// stays equally unit-testable with recording fakes. Guard failures are
+// *domain.AppError carrying the exact HTTP status and envelope code the
+// handler renders via response.Fail, with Bahasa Indonesia messages matching
+// the tone of domain/errors.go.
 package superadmin
 
 import (
@@ -199,7 +201,14 @@ func validateAccountEmail(raw string) error {
 }
 
 func validateAccountPhone(raw string) error {
-	if trimmed := strings.TrimSpace(raw); trimmed != "" && !validation.ValidPhone(trimmed) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	if validation.PhoneLengthViolation(trimmed) {
+		return badRequest("Nomor telepon harus 10–16 digit angka.")
+	}
+	if !validation.ValidPhone(trimmed) {
 		return badRequest("Nomor telepon tidak valid.")
 	}
 	return nil
@@ -281,6 +290,8 @@ func ValidateManagedUserCreate(in ManagedUserInput) (domain.UserType, error) {
 		return domain.UserTypeExternal, nil
 	case domain.RoleSuperAdmin:
 		return "", badRequest("Akun super_admin tidak dapat dibuat melalui endpoint ini.")
+	case domain.RoleDevSuperAdmin:
+		return "", badRequest("Akun dev-superadmin tidak dapat dibuat melalui endpoint ini.")
 	case domain.RoleSecurity:
 		return "", badRequest("Akun security dibuat melalui POST /users/security.")
 	default:
@@ -382,7 +393,7 @@ func ValidateManagedUserUpdate(in ManagedUserPatchInput) error {
 			return badRequest("vendor_name hanya untuk role vendor.")
 		}
 		return nil
-	case domain.RoleSuperAdmin:
+	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:
 		if in.LocationID != nil {
 			return badRequest("Role super_admin tidak memakai location_id.")
 		}
@@ -405,7 +416,7 @@ func ValidateManagedUserUpdate(in ManagedUserPatchInput) error {
 // persist into a password takeover. Non-superadmin targets need no proof:
 // the super_admin caller is already fully authenticated for them.
 func CheckManagedPasswordReset(actorID domain.UUID, target domain.ManagedUser, currentPassword *string) error {
-	if target.Role == domain.RoleSuperAdmin && target.User.ID != actorID {
+	if domain.IsSuperAdminRole(target.Role) && target.User.ID != actorID {
 		return forbidden("Tidak dapat me-reset password super_admin lain.")
 	}
 	if target.User.ID == actorID {
@@ -450,7 +461,7 @@ func CheckUserStatusChange(actorID domain.UUID, found bool, target domain.Manage
 	if target.User.ID == actorID {
 		return forbidden("Tidak dapat mengubah status akun sendiri.")
 	}
-	if target.Role == domain.RoleSuperAdmin {
+	if domain.IsSuperAdminRole(target.Role) {
 		return forbidden("Tidak dapat mengubah status akun super_admin lain.")
 	}
 	return nil

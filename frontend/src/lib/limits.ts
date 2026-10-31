@@ -22,11 +22,21 @@ export const ID_NUMBER_PATTERN = /^[A-Za-z0-9]{8,20}$/
 /** Panjang maksimum identitas (implisit dari pola, dipakai untuk `maxLength`). */
 export const ID_NUMBER_MAX_LENGTH = 20
 
-/** Nomor HP Indonesia: diawali `62` atau `0`, 8–13 digit setelahnya. */
-export const PHONE_PATTERN = /^(?:62|0)[0-9]{8,13}$/
+/** Nomor HP Indonesia: diawali `62` atau `0`, 9–15 digit setelahnya (total 0-prefix 10–16 digit). */
+export const PHONE_PATTERN = /^(?:62|0)[0-9]{9,15}$/
+
+/** Panjang minimum nomor HP setelah normalisasi (digit saja). */
+export const PHONE_MIN_LENGTH = 10
 
 /** Panjang maksimum nomor HP setelah normalisasi (digit saja). */
-export const PHONE_MAX_LENGTH = 15
+export const PHONE_MAX_LENGTH = 16
+
+/** Pesan validasi digit nomor HP. */
+export const PHONE_DIGIT_MESSAGE = 'Nomor telepon harus 10–16 digit angka.'
+export const PHONE_DIGITS_MESSAGE = PHONE_DIGIT_MESSAGE
+export const PHONE_MESSAGE = PHONE_DIGIT_MESSAGE
+export const PHONE_VALIDATION_MESSAGE = PHONE_DIGIT_MESSAGE
+export const PHONE_ERROR_MESSAGE = PHONE_DIGIT_MESSAGE
 
 /** Panjang minimum kata sandi dalam jumlah karakter (rune). */
 export const PASSWORD_MIN_LENGTH = 8
@@ -52,7 +62,7 @@ export const FACILITY_NAME_MAX_LENGTH = 100
 export const FACILITY_ADDRESS_MAX_LENGTH = 255
 
 /** Panjang maksimum kota fasilitas. */
-export const FACILITY_CITY_MAX_LENGTH = 255
+export const FACILITY_CITY_MAX_LENGTH = 100
 
 // --- Gerbang & kunjungan ----------------------------------------------------
 
@@ -67,6 +77,9 @@ export const CHECKIN_NOTES_MAX_LENGTH = 500
 
 /** Panjang maksimum kata kunci pencarian. */
 export const SEARCH_QUERY_MAX_LENGTH = 100
+
+/** Panjang maksimum nama tujuan kunjungan (katalog). */
+export const PURPOSE_NAME_MAX_LENGTH = 100
 
 /** Panjang maksimum teks bebas "Tujuan lain" (kontrak CreateVisitRequest). */
 export const PURPOSE_NOTE_MAX_LENGTH = 200
@@ -126,9 +139,15 @@ export function sanitizePhoneInput(raw: string): string {
 
 /** `true` bila nomor HP (setelah normalisasi) sesuai pola dan batas panjang. */
 export function isValidPhone(raw: string): boolean {
+  const digits = raw.replace(/[^0-9]/g, '')
+  if (digits.length > PHONE_MAX_LENGTH) {
+    return false
+  }
   const normalized = normalizePhone(raw)
   return (
-    normalized.length <= PHONE_MAX_LENGTH && PHONE_PATTERN.test(normalized)
+    normalized.length >= PHONE_MIN_LENGTH &&
+    normalized.length <= PHONE_MAX_LENGTH &&
+    PHONE_PATTERN.test(normalized)
   )
 }
 

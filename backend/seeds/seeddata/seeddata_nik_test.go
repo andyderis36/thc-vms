@@ -9,14 +9,15 @@ import (
 // 3578{branch:02d}{role:02d}{seq:08d} (admin = 01, vendor = 02).
 var demoNIKShape = regexp.MustCompile(`^3578[0-9]{12}$`)
 
-// TestPlanNIKsFollowTheDemoShape pins the 26-account identity contract: the
+// TestPlanNIKsFollowTheDemoShape pins the 27-account identity contract: the
 // superadmin plus five admins carry the documented population (admins with a
-// NIK), the ten security (Pengawas) accounts carry none, and the ten vendors
-// carry one each — every populated value 16 digits and unique across the plan.
+// NIK), the hidden dev-superadmin and the ten security (Pengawas) accounts
+// carry none, and the ten vendors carry one each — every populated value 16
+// digits and unique across the plan.
 func TestPlanNIKsFollowTheDemoShape(t *testing.T) {
 	p := Plan()
-	if len(p.Users) != 26 {
-		t.Fatalf("users = %d, want 26", len(p.Users))
+	if len(p.Users) != 27 {
+		t.Fatalf("users = %d, want 27", len(p.Users))
 	}
 	seen := map[string]string{}
 	populated := 0
@@ -49,9 +50,10 @@ func TestPlanNIKsFollowTheDemoShape(t *testing.T) {
 	}
 }
 
-// TestPlanRoleCensus locks the 26-account composition docs/5. LOCAL_DEV.md
-// 6.1 publishes: one superadmin, one admin plus two security (Pengawas)
-// accounts per facility, and two vendors per facility index.
+// TestPlanRoleCensus locks the 27-account composition docs/5. LOCAL_DEV.md
+// 6.1 publishes: one superadmin, one hidden dev-superadmin, one admin plus
+// two security (Pengawas) accounts per facility, and two vendors per
+// facility index.
 func TestPlanRoleCensus(t *testing.T) {
 	counts := map[string]int{}
 	branchAdmins := map[string]int{}
@@ -78,8 +80,8 @@ func TestPlanRoleCensus(t *testing.T) {
 			}
 		}
 	}
-	if counts[RoleSuperAdmin] != 1 || counts[RoleAdmin] != 5 || counts[RoleSecurity] != 10 || counts[RoleVendor] != 10 {
-		t.Fatalf("role census = %v, want 1 super_admin + 5 admin + 10 security + 10 vendor", counts)
+	if counts[RoleSuperAdmin] != 1 || counts[RoleDevSuperAdmin] != 1 || counts[RoleAdmin] != 5 || counts[RoleSecurity] != 10 || counts[RoleVendor] != 10 {
+		t.Fatalf("role census = %v, want 1 super_admin + 1 dev-superadmin + 5 admin + 10 security + 10 vendor", counts)
 	}
 	for _, l := range Plan().Locations {
 		if branchAdmins[l.Code] != 1 {

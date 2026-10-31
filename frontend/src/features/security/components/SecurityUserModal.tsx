@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Pagination } from '@/components/ui/Pagination'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
@@ -28,13 +29,15 @@ import {
 import { DEFAULT_PAGE_SIZE, paginate } from '@/lib/pagination'
 import { TABLE_CLASS, TABLE_WRAPPER_CLASS } from '@/lib/table-styles'
 import { useSession } from '@/lib/auth/session'
-import { can, getRoleLabel } from '@/lib/auth/capabilities'
+import { can, getRoleLabel, isSuperAdminRole } from '@/lib/auth/capabilities'
 import type { Role, UpdateUserStatusRequest, User } from '@/lib/api/types'
 import {
   EMAIL_MAX_LENGTH,
   NAME_MAX_LENGTH,
   PASSWORD_MAX_BYTES,
+  PHONE_DIGIT_MESSAGE,
   PHONE_MAX_LENGTH,
+  PHONE_MIN_LENGTH,
   SEARCH_QUERY_MAX_LENGTH,
   isValidEmail,
   isValidPassword,
@@ -66,7 +69,7 @@ export function canShowDeleteSecurityUser(
   ownLocationId: string | null,
 ): boolean {
   if (!can(role, 'deleteSecurity')) return false
-  if (role === 'super_admin') return true
+  if (isSuperAdminRole(role)) return true
   return ownLocationId !== null && target.location_id === ownLocationId
 }
 
@@ -170,7 +173,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
   const updateSecurity = useUpdateSecurityUserMutation()
 
   // Lokasi cabang penugasan: super_admin memilih; admin terkunci ke cabangnya.
-  const effectiveLocationId = role === 'super_admin' ? '' : (ownLocationId ?? '')
+  const effectiveLocationId = role !== null && isSuperAdminRole(role) ? '' : (ownLocationId ?? '')
   const usersQuery = useSecurityUsersQuery(effectiveLocationId !== '' ? effectiveLocationId : undefined, enabled)
 
   // Filter daftar di sisi klien: kontrak GET /users/security hanya punya
@@ -219,7 +222,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
     value: location.id,
     label: location.name,
   }))
-  const canPickLocation = role === 'super_admin'
+  const canPickLocation = role !== null && isSuperAdminRole(role)
 
   // Reset SEMUA filter bar ke default: pencarian (state mentah + state debounced)
   // dan status. Pagination di sini SERBA KLIEN: panel memuat seluruh anggota
@@ -719,8 +722,20 @@ function CreateSecurityModal({
     setEmailError(nextEmailError)
     if (nextEmailError !== undefined) return
 
+    const trimmedPhone = phone.trim()
+    const normalizedPhone = trimmedPhone.startsWith('62')
+      ? `0${trimmedPhone.slice(2)}`
+      : trimmedPhone
     const nextPhoneError =
-      phone.trim() === '' || isValidPhone(phone) ? undefined : 'Format nomor telepon tidak valid.'
+      trimmedPhone === ''
+        ? undefined
+        : normalizedPhone.startsWith('0') &&
+            (normalizedPhone.length < PHONE_MIN_LENGTH ||
+              normalizedPhone.length > PHONE_MAX_LENGTH)
+          ? PHONE_DIGIT_MESSAGE
+          : isValidPhone(trimmedPhone)
+            ? undefined
+            : 'Format nomor telepon tidak valid.'
     setPhoneError(nextPhoneError)
     if (nextPhoneError !== undefined) return
 
@@ -813,9 +828,8 @@ function CreateSecurityModal({
             maxLength={PHONE_MAX_LENGTH}
             error={phoneError}
           />
-          <Input
+          <PasswordInput
             label="Kata Sandi"
-            type="password"
             placeholder="Kata sandi awal"
             value={password}
             onChange={(event) => {

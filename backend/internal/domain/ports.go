@@ -64,6 +64,8 @@ type IStorageService interface {
 	// on the adapter (SRP): only the storage owner knows the bucket name and
 	// the key layout; usecases never split URLs themselves.
 	ObjectKeyFromStoredURL(rawURL string) (string, error)
+	// DeleteObject removes one stored object by its bucket key.
+	DeleteObject(ctx context.Context, key string) error
 }
 
 // ObjectContent is the streamed payload of one stored object: the open body
@@ -75,6 +77,16 @@ type ObjectContent struct {
 	Size        int64
 	ContentType string
 	ModTime     time.Time
+}
+
+// ObjectInfo is one object as a storage driver lists it: its full key and
+// the last-modified instant a consumer measures age against (the reaper's
+// grace window). It is the shared element shape for prefix listing; the
+// ports that consume it live with their consumer (the worker names its own
+// narrow seam), so domain carries only the data, never the listing policy.
+type ObjectInfo struct {
+	Key     string
+	ModTime time.Time
 }
 
 // ObjectReader is the read half of object storage behind the scoped
@@ -97,11 +109,14 @@ type ObjectReader interface {
 // ProfileUpdate is the fully resolved body of a self-service profile write.
 // The usecase resolves the final values first (an empty phone/avatar is sent as
 // "" and the adapter stores SQL NULL), so the adapter performs a straight
-// read-modify-write rather than a COALESCE patch.
+// read-modify-write rather than a COALESCE patch. PasswordHash carries a fresh
+// bcrypt hash when the caller rotates its own password ("" keeps the stored
+// hash via COALESCE); the plaintext password never reaches this port.
 type ProfileUpdate struct {
-	Name      string
-	Phone     string
-	AvatarURL string
+	Name         string
+	Phone        string
+	AvatarURL    string
+	PasswordHash string
 }
 
 // UserRepository is the port the PostgreSQL adapter implements for accounts.

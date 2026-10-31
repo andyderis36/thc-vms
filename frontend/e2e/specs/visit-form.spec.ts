@@ -29,7 +29,7 @@ import { collectFileUrls, deleteUploadedFiles } from '../helpers/storage'
 import { gotoApp } from '../helpers/nav'
 
 const HQ_LABEL = 'Kantor Pusat THC (Pontianak)'
-const PURPOSE_CATALOG = 'Splicing & Maintenance Kabel Fiber Optik'
+const PURPOSE_CATALOG = 'Survey'
 const SUBMIT_LABEL = 'Kirim Permohonan Kunjungan'
 
 /** Kunjungan yang dibuat lewat UI dan harus dihapus (diisi setelah redirect). */

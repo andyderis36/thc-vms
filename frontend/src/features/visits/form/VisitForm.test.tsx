@@ -57,7 +57,7 @@ vi.mock('@/lib/api/hooks', () => ({
     isError: false,
   }),
   usePurposesQuery: () => ({
-    data: [{ id: 'pur-1', name: 'Splicing FO' }],
+    data: [{ id: 'pur-1', name: 'Survey' }],
     isPending: false,
     isError: false,
   }),
@@ -77,6 +77,9 @@ vi.mock('@/lib/api/hooks', () => ({
 
 /** id <datalist> yang dipakai input Jabatan (satu untuk seluruh baris). */
 const JABATAN_DATALIST_ID = 'visit-jabatan-datalist'
+
+/** id <datalist> yang dipakai input Fasilitas Tujuan. */
+const FACILITY_DATALIST_ID = 'visit-facility-datalist'
 
 beforeEach(() => {
   createVisitMock.mockReset()
@@ -121,7 +124,7 @@ async function fillVisitForm(options: {
     target: { value: 'loc-1' },
   })
   fireEvent.click(screen.getByRole('button', { name: /Tujuan Kunjungan/ }))
-  fireEvent.click(await screen.findByRole('checkbox', { name: 'Splicing FO' }))
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'Survey' }))
 
   fireEvent.change(screen.getByLabelText(/Waktu Mulai/), {
     target: { value: '2026-09-01T09:00' },
@@ -213,6 +216,19 @@ describe('VisitForm - roster anggota/pengunjung', () => {
     expect(options).toEqual(['Mandor', 'Teknisi'])
   })
 
+  it('menampilkan input Fasilitas Tujuan dengan saran fasilitas dari cache', () => {
+    const { container } = render(<VisitForm />)
+
+    const facility = screen.getByLabelText<HTMLInputElement>(/Fasilitas Tujuan/)
+    expect(facility).toBeInTheDocument()
+    expect(facility.getAttribute('list')).toBe(FACILITY_DATALIST_ID)
+
+    const options = Array.from(
+      container.querySelectorAll(`#${FACILITY_DATALIST_ID} option`),
+    ).map((option) => option.getAttribute('value'))
+    expect(options).toEqual(['POP Bandung'])
+  })
+
   it('mengirim jabatan yang diketik pada payload visitors[]', async () => {
     await fillVisitForm({ ktp: true, jabatan: 'Mandor' })
     submitForm()
@@ -229,6 +245,15 @@ describe('VisitForm - roster anggota/pengunjung', () => {
     await waitFor(() => expect(createVisitMock).toHaveBeenCalledTimes(1))
     const body = createVisitMock.mock.calls[0]?.[0]?.body
     expect(body?.visitors[0]).not.toHaveProperty('jabatan')
+  })
+
+  it('jabatan bebas-teks baru (novel) tetap terkirim apa adanya', async () => {
+    await fillVisitForm({ ktp: true, jabatan: 'Teknisi FO Baru XYZ' })
+    submitForm()
+
+    await waitFor(() => expect(createVisitMock).toHaveBeenCalledTimes(1))
+    const body = createVisitMock.mock.calls[0]?.[0]?.body
+    expect(body?.visitors[0]?.jabatan).toBe('Teknisi FO Baru XYZ')
   })
 })
 
@@ -251,6 +276,14 @@ describe('VisitForm - foto KTP wajib diunggah', () => {
       'https://cdn.example/ktp.jpg',
     )
     expect(screen.queryByText('Foto KTP wajib diunggah.')).not.toBeInTheDocument()
+  })
+})
+
+describe('VisitForm - Vendor/Mitra per kunjungan khusus admin', () => {
+  it('peran vendor TIDAK melihat input Vendor/Mitra kunjungan', () => {
+    render(<VisitForm />)
+
+    expect(screen.queryByLabelText(/Vendor Pengaju/)).not.toBeInTheDocument()
   })
 })
 

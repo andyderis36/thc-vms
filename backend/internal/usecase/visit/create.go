@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"thc-vms/backend/internal/domain"
+	"thc-vms/backend/internal/validation"
 )
 
 // VisitorInput is one technician travelling under a visit request.
@@ -73,6 +74,12 @@ type CreateVisitInput struct {
 	// assignment_letter category. Mandatory for new requests; data filed
 	// before this rule is grandfathered (no check on read/update paths).
 	AssignmentLetterURL *string
+	// VendorName is the manually typed visit-level company (migration 000017,
+	// admin/superadmin-created visits): trimmed and capped like the visitor
+	// VendorName above; empty stays absent (NULL). It never enters the vendor
+	// catalogue and never shadows a per-technician company: the roster keeps
+	// its own vendor names.
+	VendorName *string
 }
 
 // CreateVisit files a new visit request in status requested. Field validation
@@ -86,6 +93,9 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 	}
 	if len([]rune(strings.TrimSpace(in.PurposeNote))) > maxPurposeNoteLen {
 		return domain.VisitRequest{}, domain.ValidationFailure("Tujuan lain kunjungan maksimal 200 karakter.")
+	}
+	if len([]rune(strings.TrimSpace(textOrEmpty(in.VendorName)))) > maxManualVendorNameLen {
+		return domain.VisitRequest{}, domain.ValidationFailure("Nama perusahaan vendor/mitra maksimal 120 karakter.")
 	}
 	if len(in.Visitors) < 1 {
 		return domain.VisitRequest{}, domain.ValidationFailure("Minimal satu pengunjung wajib didaftarkan.")
@@ -173,6 +183,9 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 	if note := strings.TrimSpace(in.PurposeNote); note != "" {
 		visit.PurposeNote = &note
 	}
+	if name := strings.TrimSpace(textOrEmpty(in.VendorName)); name != "" {
+		visit.VendorNameOverride = &name
+	}
 	visitors := make([]domain.Visitor, 0, len(in.Visitors))
 	for _, v := range in.Visitors {
 		visitor := domain.Visitor{
@@ -240,6 +253,12 @@ func validateVisitor(v VisitorInput, n int, allow FileOriginAllowlist) error {
 	}
 	if strings.TrimSpace(v.Phone) == "" {
 		return domain.ValidationFailure("Nomor telepon pengunjung ke-" + itoa(n) + " wajib diisi.")
+	}
+	if validation.PhoneLengthViolation(strings.TrimSpace(v.Phone)) {
+		return domain.ValidationFailure("Nomor telepon pengunjung ke-" + itoa(n) + " harus 10–16 digit angka.")
+	}
+	if !validation.ValidPhone(strings.TrimSpace(v.Phone)) {
+		return domain.ValidationFailure("Nomor telepon pengunjung ke-" + itoa(n) + " tidak valid.")
 	}
 	if err := validatePhotoURL(textOrEmpty(v.IDCardPhotoURL), allow); err != nil {
 		return err
