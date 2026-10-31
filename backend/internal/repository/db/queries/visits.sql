@@ -32,9 +32,10 @@
 INSERT INTO visit_request (
     visit_id, vendor_user_id, vendor_id, location_id,
     start_date, end_date, is_multi_day, status,
-    assignment_letter_url, is_nda_accepted, notes, purpose_note
+    assignment_letter_url, is_nda_accepted, notes, purpose_note,
+    vendor_name_override
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10, $11)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10, $11, $12)
 RETURNING *;
 
 -- Detail read for GET /visits/{id} (openapi L309-327) and for every
@@ -47,11 +48,13 @@ SELECT
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.id = $1;
 
 -- name: GetVisitByVisitCode :one
@@ -64,11 +67,13 @@ SELECT
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.visit_id = $1;
 
 -- name: GetVisitByIDForUpdate :one
@@ -79,11 +84,13 @@ SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name
+    pu.name AS vendor_user_name,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.id = $1
 FOR UPDATE OF vr;
 
@@ -93,11 +100,13 @@ SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name
+    pu.name AS vendor_user_name,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.visit_id = $1
 FOR UPDATE OF vr;
 
@@ -114,11 +123,13 @@ SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE (sqlc.narg('location_id')::uuid IS NULL OR vr.location_id = sqlc.narg('location_id')::uuid)
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
@@ -174,11 +185,13 @@ SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.location_id = sqlc.arg('location_id')::uuid
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
@@ -231,11 +244,13 @@ SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
-    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone
+    pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
+LEFT JOIN vendor vu ON vu.id = pu.vendor_id
 WHERE vr.vendor_user_id = sqlc.arg('vendor_user_id')::uuid
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)

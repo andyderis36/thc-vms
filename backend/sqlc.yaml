@@ -35,6 +35,9 @@ sql:
       - "migrations/000012_visitor_jabatan.up.sql"
       - "migrations/000013_visit_list_perf.up.sql"
       - "migrations/000014_user_profile.up.sql"
+      - "migrations/000015_audit_log_user_on_delete_set_null.up.sql"
+      - "migrations/000016_dev_superadmin_role.up.sql"
+      - "migrations/000017_visit_request_vendor_override.up.sql"
     queries: "internal/repository/db/queries"
 
     gen:

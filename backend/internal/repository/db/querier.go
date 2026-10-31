@@ -31,6 +31,9 @@ type Querier interface {
 	// DELETE /locations/:id pre-check 2: visits hosted at the facility
 	// (visit_request.location_id, no cascade, so a remaining row blocks it).
 	CountVisitsByLocation(ctx context.Context, arg CountVisitsByLocationParams) (int64, error)
+	// DELETE /purposes/:id pre-check: visit_purpose links still pointing at the
+	// catalogue row (no cascade, so a remaining row blocks the delete).
+	CountVisitsByPurpose(ctx context.Context, arg CountVisitsByPurposeParams) (int64, error)
 	// =============================================================================
 	// SUPER_ADMIN HARD DELETE (DELETE /users/:id, super_admin only). The Go layer
 	// runs the Count* pre-checks below FIRST and refuses with 409 while a visit,
@@ -79,6 +82,10 @@ type Querier interface {
 	// pgx.ErrNoRows (-> 404 via MapError); a raced reference surfaces 23503
 	// (-> 409).
 	DeleteLocation(ctx context.Context, arg DeleteLocationParams) (uuid.UUID, error)
+	// DELETE /purposes/:id (super_admin only). A missing id surfaces
+	// pgx.ErrNoRows (-> 404 via MapError); a raced reference surfaces 23503
+	// (-> 409).
+	DeletePurpose(ctx context.Context, arg DeletePurposeParams) (uuid.UUID, error)
 	// DELETE /users/:id (super_admin only). A missing id surfaces pgx.ErrNoRows
 	// (-> 404 via MapError); a raced reference surfaces 23503 (-> 409).
 	DeleteUser(ctx context.Context, arg DeleteUserParams) (uuid.UUID, error)
@@ -106,6 +113,7 @@ type Querier interface {
 	// projection as GetUserByID plus the resolved role NAME, which the status
 	// guard needs to refuse touches on other super_admin accounts.
 	GetManagedUserByID(ctx context.Context, arg GetManagedUserByIDParams) (GetManagedUserByIDRow, error)
+	GetPurposeByID(ctx context.Context, arg GetPurposeByIDParams) (Purpose, error)
 	// =============================================================================
 	// users.sql - Authentication, profile projection and branch security accounts.
 	//
@@ -212,6 +220,9 @@ type Querier interface {
 	// pairing the Go validation missed (check_violation -> 400 via MapError) and
 	// users_email_key rejects a duplicate email (23505 -> 409 via MapError).
 	InsertManagedUser(ctx context.Context, arg InsertManagedUserParams) (InsertManagedUserRow, error)
+	// POST /purposes (super_admin only). New rows start active; a blank name is
+	// rejected in Go before this runs so no CHECK is needed.
+	InsertPurpose(ctx context.Context, arg InsertPurposeParams) (Purpose, error)
 	// POST /users/security (openapi L140-159). A branch security officer is always
 	// `type = 'internal'` and starts `active`; the role id is passed in so the caller
 	// resolves the 'security' role, and the trigger rejects a NULL location_id for it
@@ -244,7 +255,8 @@ type Querier interface {
 	//   narrows a super_admin's national feed by branch; it never widens a scoped
 	//   caller because the user_id predicate is always present.
 	// =============================================================================
-	// Fan-out to the visit's staff audience: every active super_admin (national)
+	// Fan-out to the visit's staff audience: every active super_admin (national,
+	// including the hidden dev-superadmin which passes every super_admin gate)
 	// plus the active admin/security at the visit's location. ON CONFLICT keeps the
 	// write idempotent per (recipient, type, visit).
 	InsertStaffNotifications(ctx context.Context, arg InsertStaffNotificationsParams) error
@@ -298,6 +310,19 @@ type Querier interface {
 	// visible and can be reactivated via PATCH /locations/:id. Same column
 	// shape plus the is_active flag the console renders.
 	ListAllLocations(ctx context.Context) ([]Location, error)
+	// =============================================================================
+	// SUPER_ADMIN PURPOSE WRITES (PRD §4: kelola tujuan kunjungan). New purposes
+	// start active; the soft removal stays deactivation via is_active, while the
+	// hard removal is DELETE /purposes/:id (super_admin only, with the Count*
+	// pre-check below refusing with 409 while visit_purpose rows still reference
+	// the row; the DELETE itself is the second line of defence, 23503 -> 409).
+	// The SCR-03 picker keeps reading the active-only catalogue via
+	// ListActivePurposes; the super_admin console reads every row via
+	// ListAllPurposes so a switched-off purpose stays visible and reactivatable.
+	// =============================================================================
+	// GET /purposes?active_only=false (super_admin console only): every purpose
+	// row including deactivated ones, with the is_active flag the console renders.
+	ListAllPurposes(ctx context.Context) ([]Purpose, error)
 	// Filtered trail read. date_from is inclusive, date_to is exclusive (half-open
 	// [from, to) window, same convention as the visits.sql list queries).
 	// `q` is a NULLable free-text needle: a case-insensitive substring match across
@@ -461,9 +486,20 @@ type Querier interface {
 	// (check_violation -> 400) and users_email_key guards email (23505 -> 409).
 	// =============================================================================
 	UpdateManagedUser(ctx context.Context, arg UpdateManagedUserParams) (UpdateManagedUserRow, error)
+	// PATCH /purposes/:id (super_admin only). Every column is a NULLable bound
+	// value: a NULL keeps the stored column via COALESCE, so the body may carry
+	// any subset of fields. is_active flips here are the deactivation path that
+	// replaces DELETE.
+	UpdatePurpose(ctx context.Context, arg UpdatePurposeParams) (Purpose, error)
 	// Successful login bookkeeping. Also refreshes updated_at (see the migration
 	// header: the repository layer owns this column).
 	UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error
+	// Self-service password rotation (PATCH /auth/me). A plain UPDATE on purpose:
+	// the named-parameter form is proven by UpdateManagedUser, while the CTE
+	// projection above only accepts positional parameters. The caller passes the
+	// fresh bcrypt hash the usecase minted, never a plaintext password; the row
+	// must exist (a missing id surfaces no rows, mapped to ErrNotFound upstream).
+	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
 	// Self-service profile write. The usecase resolves the final name, phone and
 	// avatar (empty -> NULL) and this statement stores them verbatim, then re-reads
 	// the SAME projection as GetUserByID so the caller gets the complete profile

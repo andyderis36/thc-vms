@@ -747,6 +747,31 @@ func (q *Queries) UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLog
 	return err
 }
 
+const updateUserPasswordHash = `-- name: UpdateUserPasswordHash :execrows
+UPDATE users
+SET password_hash = $1,
+    updated_at    = now()
+WHERE id = $2
+`
+
+type UpdateUserPasswordHashParams struct {
+	PasswordHash string    `json:"password_hash"`
+	ID           uuid.UUID `json:"id"`
+}
+
+// Self-service password rotation (PATCH /auth/me). A plain UPDATE on purpose:
+// the named-parameter form is proven by UpdateManagedUser, while the CTE
+// projection above only accepts positional parameters. The caller passes the
+// fresh bcrypt hash the usecase minted, never a plaintext password; the row
+// must exist (a missing id surfaces no rows, mapped to ErrNotFound upstream).
+func (q *Queries) UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateUserPasswordHash, arg.PasswordHash, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateUserProfile = `-- name: UpdateUserProfile :one
 WITH updated AS (
     UPDATE users

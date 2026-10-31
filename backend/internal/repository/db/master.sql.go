@@ -50,6 +50,25 @@ func (q *Queries) CountVisitsByLocation(ctx context.Context, arg CountVisitsByLo
 	return count, err
 }
 
+const countVisitsByPurpose = `-- name: CountVisitsByPurpose :one
+SELECT count(*)
+FROM visit_purpose
+WHERE purpose_id = $1
+`
+
+type CountVisitsByPurposeParams struct {
+	PurposeID uuid.UUID `json:"purpose_id"`
+}
+
+// DELETE /purposes/:id pre-check: visit_purpose links still pointing at the
+// catalogue row (no cascade, so a remaining row blocks the delete).
+func (q *Queries) CountVisitsByPurpose(ctx context.Context, arg CountVisitsByPurposeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countVisitsByPurpose, arg.PurposeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteLocation = `-- name: DeleteLocation :one
 DELETE FROM location
 WHERE id = $1
@@ -65,6 +84,26 @@ type DeleteLocationParams struct {
 // (-> 409).
 func (q *Queries) DeleteLocation(ctx context.Context, arg DeleteLocationParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, deleteLocation, arg.ID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deletePurpose = `-- name: DeletePurpose :one
+DELETE FROM purpose
+WHERE id = $1
+RETURNING id
+`
+
+type DeletePurposeParams struct {
+	ID uuid.UUID `json:"id"`
+}
+
+// DELETE /purposes/:id (super_admin only). A missing id surfaces
+// pgx.ErrNoRows (-> 404 via MapError); a raced reference surfaces 23503
+// (-> 409).
+func (q *Queries) DeletePurpose(ctx context.Context, arg DeletePurposeParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, deletePurpose, arg.ID)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
@@ -135,6 +174,23 @@ func (q *Queries) GetLocationByID(ctx context.Context, arg GetLocationByIDParams
 	return i, err
 }
 
+const getPurposeByID = `-- name: GetPurposeByID :one
+SELECT id, name, is_active
+FROM purpose
+WHERE id = $1
+`
+
+type GetPurposeByIDParams struct {
+	ID uuid.UUID `json:"id"`
+}
+
+func (q *Queries) GetPurposeByID(ctx context.Context, arg GetPurposeByIDParams) (Purpose, error) {
+	row := q.db.QueryRow(ctx, getPurposeByID, arg.ID)
+	var i Purpose
+	err := row.Scan(&i.ID, &i.Name, &i.IsActive)
+	return i, err
+}
+
 const getVendorName = `-- name: GetVendorName :one
 SELECT name
 FROM vendor
@@ -198,6 +254,25 @@ func (q *Queries) InsertLocation(ctx context.Context, arg InsertLocationParams) 
 		&i.Timezone,
 		&i.IsActive,
 	)
+	return i, err
+}
+
+const insertPurpose = `-- name: InsertPurpose :one
+INSERT INTO purpose (name, is_active)
+VALUES ($1, true)
+RETURNING id, name, is_active
+`
+
+type InsertPurposeParams struct {
+	Name string `json:"name"`
+}
+
+// POST /purposes (super_admin only). New rows start active; a blank name is
+// rejected in Go before this runs so no CHECK is needed.
+func (q *Queries) InsertPurpose(ctx context.Context, arg InsertPurposeParams) (Purpose, error) {
+	row := q.db.QueryRow(ctx, insertPurpose, arg.Name)
+	var i Purpose
+	err := row.Scan(&i.ID, &i.Name, &i.IsActive)
 	return i, err
 }
 
@@ -370,6 +445,45 @@ func (q *Queries) ListAllLocations(ctx context.Context) ([]Location, error) {
 	return items, nil
 }
 
+const listAllPurposes = `-- name: ListAllPurposes :many
+
+SELECT id, name, is_active
+FROM purpose
+ORDER BY name ASC
+`
+
+// =============================================================================
+// SUPER_ADMIN PURPOSE WRITES (PRD §4: kelola tujuan kunjungan). New purposes
+// start active; the soft removal stays deactivation via is_active, while the
+// hard removal is DELETE /purposes/:id (super_admin only, with the Count*
+// pre-check below refusing with 409 while visit_purpose rows still reference
+// the row; the DELETE itself is the second line of defence, 23503 -> 409).
+// The SCR-03 picker keeps reading the active-only catalogue via
+// ListActivePurposes; the super_admin console reads every row via
+// ListAllPurposes so a switched-off purpose stays visible and reactivatable.
+// =============================================================================
+// GET /purposes?active_only=false (super_admin console only): every purpose
+// row including deactivated ones, with the is_active flag the console renders.
+func (q *Queries) ListAllPurposes(ctx context.Context) ([]Purpose, error) {
+	rows, err := q.db.Query(ctx, listAllPurposes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Purpose{}
+	for rows.Next() {
+		var i Purpose
+		if err := rows.Scan(&i.ID, &i.Name, &i.IsActive); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateLocation = `-- name: UpdateLocation :one
 UPDATE location
 SET name      = COALESCE($2, name),
@@ -416,5 +530,30 @@ func (q *Queries) UpdateLocation(ctx context.Context, arg UpdateLocationParams) 
 		&i.Timezone,
 		&i.IsActive,
 	)
+	return i, err
+}
+
+const updatePurpose = `-- name: UpdatePurpose :one
+UPDATE purpose
+SET name      = COALESCE($2, name),
+    is_active = COALESCE($3::boolean, is_active)
+WHERE id = $1
+RETURNING id, name, is_active
+`
+
+type UpdatePurposeParams struct {
+	ID       uuid.UUID   `json:"id"`
+	Name     pgtype.Text `json:"name"`
+	IsActive pgtype.Bool `json:"is_active"`
+}
+
+// PATCH /purposes/:id (super_admin only). Every column is a NULLable bound
+// value: a NULL keeps the stored column via COALESCE, so the body may carry
+// any subset of fields. is_active flips here are the deactivation path that
+// replaces DELETE.
+func (q *Queries) UpdatePurpose(ctx context.Context, arg UpdatePurposeParams) (Purpose, error) {
+	row := q.db.QueryRow(ctx, updatePurpose, arg.ID, arg.Name, arg.IsActive)
+	var i Purpose
+	err := row.Scan(&i.ID, &i.Name, &i.IsActive)
 	return i, err
 }
