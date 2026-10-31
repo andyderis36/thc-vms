@@ -80,7 +80,7 @@ if (-not $Password) {
     }
     if (-not $Password) {
       foreach ($ln in $docLines) {
-        $m = [regex]::Match($ln, 'superadmin@thc\.net\.id`\s*\|\s*`([^`]{6,})`')
+        $m = [regex]::Match($ln, 'superadmin@transhybrid\.net\.id`\s*\|\s*`([^`]{6,})`')
         if ($m.Success) { $Password = $m.Groups[1].Value; break }
       }
     }
@@ -326,7 +326,7 @@ trap {
   $tok = ''
   if ($script:Tokens.ContainsKey('SA')) { $tok = [string]$script:Tokens['SA'] }
   if (-not $tok) {
-    $lr = Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = 'superadmin@thc.net.id'; password = $Password })
+    $lr = Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = 'superadmin@transhybrid.net.id'; password = $Password })
     if ($lr.Status -eq 200 -and $lr.Json -and $lr.Json.data -and $lr.Json.data.token) { $tok = [string]$lr.Json.data.token }
   }
   if ($tok) {
@@ -401,15 +401,15 @@ Write-Host ("  health uptime=" + $h.Json.data.uptime)
 
 # Kredensial: hanya email seed yang nyata. Login satu kali per akun, token dipakai ulang.
 $ACCOUNTS = [ordered]@{
-  sa   = 'superadmin@thc.net.id'
-  adm1 = 'admin1@thc.com'
-  adm2 = 'admin2@thc.com'
-  adm3 = 'admin3@thc.com'
-  adm4 = 'admin4@thc.com'
-  adm5 = 'admin5@thc.com'
-  sec1 = 'security1a@thc.com'
-  sec2 = 'security2a@thc.com'
-  vendor1 = 'vendor1a@thc.com'
+  sa   = 'superadmin@transhybrid.net.id'
+  adm1 = 'admin1@transhybrid.net.id'
+  adm2 = 'admin2@transhybrid.net.id'
+  adm3 = 'admin3@transhybrid.net.id'
+  adm4 = 'admin4@transhybrid.net.id'
+  adm5 = 'admin5@transhybrid.net.id'
+  sec1 = 'security1a@transhybrid.net.id'
+  sec2 = 'security2a@transhybrid.net.id'
+  vendor1 = 'vendor1a@transhybrid.net.id'
 }
 foreach ($k in $ACCOUNTS.Keys) { [void](Login $k $ACCOUNTS[$k]) }
 Write-Host "  login OK untuk $($ACCOUNTS.Count) akun seed"
@@ -480,10 +480,10 @@ Add-R 'A-01' 'P0' 'Login 4 role (super_admin/admin/security/vendor) -> 200, toke
   ($roles -eq 'super_admin/admin/security/vendor') 'super_admin/admin/security/vendor' $roles `
   '9 akun seed login 200 (superadmin, admin1-5, security1a/2a, vendor1a)'
 [void](Check 'A-02' 'P0' 'Login password salah -> 401 INVALID_CREDENTIALS (pesan ID)' 401 `
-  (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = 'admin1@thc.com'; password = 'Password123!X' })) `
+  (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = 'admin1@transhybrid.net.id'; password = 'Password123!X' })) `
   'Kredensial tidak valid' -ExpectEnvelopeFail -Code 'INVALID_CREDENTIALS')
 [void](Check 'A-03' 'P0' 'Login email tak dikenal -> 401 (tidak bocor keberadaan akun)' 401 `
-  (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = 'tidak-ada@thc.com'; password = 'Password123!' })) `
+  (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = 'tidak-ada@transhybrid.net.id'; password = 'Password123!' })) `
   'Kredensial tidak valid' -ExpectEnvelopeFail -Code 'INVALID_CREDENTIALS')
 [void](Check 'A-04' 'P0' 'Login field kosong -> 400 VALIDATION_ERROR' 400 `
   (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = ''; password = '' })) `

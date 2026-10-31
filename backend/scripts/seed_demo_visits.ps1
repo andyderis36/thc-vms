@@ -38,7 +38,7 @@ param(
     [string]$BaseUrl = "http://localhost:8080/api/v1",
     # Uniform demo password for every seeded account (docs/5. LOCAL_DEV.md 6.1).
     [string]$Password = "Password123!",
-    [string]$SuperadminEmail = "superadmin@thc.net.id"
+    [string]$SuperadminEmail = "superadmin@transhybrid.net.id"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -179,9 +179,9 @@ foreach ($l in $locations) { Write-Log ("  branch: {0} [{1}]" -f $l.name, $l.typ
 
 # ------------------------------------------- logins: admins/security/vendors
 # Login ONCE per account, reuse tokens; ~3s between logins (strict limiter).
-$vendorEmails = @("vendor1a@thc.com", "vendor1b@thc.com", "vendor2a@thc.com", "vendor2b@thc.com",
-    "vendor3a@thc.com", "vendor3b@thc.com", "vendor4a@thc.com", "vendor4b@thc.com",
-    "vendor5a@thc.com", "vendor5b@thc.com")
+$vendorEmails = @("vendor1a@transhybrid.net.id", "vendor1b@transhybrid.net.id", "vendor2a@transhybrid.net.id", "vendor2b@transhybrid.net.id",
+    "vendor3a@transhybrid.net.id", "vendor3b@transhybrid.net.id", "vendor4a@transhybrid.net.id", "vendor4b@transhybrid.net.id",
+    "vendor5a@transhybrid.net.id", "vendor5b@transhybrid.net.id")
 $adminTokens = @{}   # location_id -> token (branch koordinator)
 $adminEmails = @{}   # location_id -> email (for the report)
 $secTokens = @{}     # location_id -> token (branch pengawas)
@@ -189,7 +189,7 @@ $secEmails = @{}     # location_id -> email (for the report)
 $vendorTokens = @{}   # email -> token
 
 for ($i = 1; $i -le 5; $i++) {
-    $email = "admin$($i)@thc.com"
+    $email = "admin$($i)@transhybrid.net.id"
     $tok = Login $email
     if (-not $tok) { Write-Log "FATAL: cannot login $email."; exit 1 }
     $me = Get-Me $tok
@@ -200,7 +200,7 @@ for ($i = 1; $i -le 5; $i++) {
     Start-Sleep -Seconds 3
 }
 for ($i = 1; $i -le 5; $i++) {
-    $email = "security$($i)a@thc.com"
+    $email = "security$($i)a@transhybrid.net.id"
     $tok = Login $email
     if (-not $tok) { Write-Log "FATAL: cannot login $email."; exit 1 }
     $me = Get-Me $tok
