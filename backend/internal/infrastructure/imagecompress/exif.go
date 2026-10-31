@@ -2,28 +2,58 @@ package imagecompress
 
 import "encoding/binary"
 
+// exifState distinguishes the three outcomes of walking a JPEG for an EXIF
+// orientation tag. Callers need the difference: a file with no EXIF block can
+// be trusted as-is, while a file carrying a broken EXIF block must be
+// re-encoded rather than passed through.
+type exifState int
+
+const (
+	// exifAbsent means the JPEG has no APP1 EXIF segment at all.
+	exifAbsent exifState = iota
+	// exifValid means an EXIF block was found and carries a usable 1..8 tag.
+	exifValid
+	// exifMalformed means an EXIF block exists but its orientation tag is
+	// missing, truncated, or otherwise unreadable.
+	exifMalformed
+)
+
 // jpegOrientation reports the EXIF orientation tag of a JPEG. Go's image/jpeg
 // decoder ignores EXIF, so re-encoding a rotated photo would bake the rotation
 // into a sideways raster; Prepare must leave those files untouched instead.
 //
-// The parser is deliberately self-contained: pulling an EXIF library in for a
-// single SHORT tag would add a dependency to every upload path. It only walks
-// JPEG markers up to the image data and then the first TIFF IFD, returning
-// ok=false for anything it cannot read confidently.
+// ok is true only for a valid 1..8 value. Callers that need to tell "no EXIF"
+// apart from "broken EXIF" use jpegEXIFOrientation directly.
 func jpegOrientation(src []byte) (orientation int, ok bool) {
-	if len(src) < 2 || src[0] != 0xFF || src[1] != 0xD8 {
+	orientation, state := jpegEXIFOrientation(src)
+	if state != exifValid {
 		return 0, false
+	}
+	return orientation, true
+}
+
+// jpegEXIFOrientation walks JPEG markers up to the image data and then the
+// first TIFF IFD, returning the orientation together with how trustworthy the
+// result is. The parser is deliberately self-contained: pulling an EXIF library
+// in for a single SHORT tag would add a dependency to every upload path.
+//
+// A segment that claims more bytes than the file holds, a TIFF block with a bad
+// header, or an orientation tag with an out-of-range value is malformed — never
+// silently treated as absent.
+func jpegEXIFOrientation(src []byte) (orientation int, state exifState) {
+	if len(src) < 2 || src[0] != 0xFF || src[1] != 0xD8 {
+		return 0, exifAbsent
 	}
 
 	for i := 2; i+1 < len(src); {
 		if src[i] != 0xFF {
-			return 0, false
+			return 0, exifMalformed
 		}
 		for i < len(src) && src[i] == 0xFF {
 			i++
 		}
 		if i >= len(src) {
-			return 0, false
+			return 0, exifMalformed
 		}
 
 		marker := src[i]
@@ -35,35 +65,39 @@ func jpegOrientation(src []byte) (orientation int, ok bool) {
 		}
 		// Start of scan / end of image: EXIF APP1, when present, came earlier.
 		if marker == 0xDA || marker == 0xD9 {
-			return 0, false
+			return 0, exifAbsent
 		}
 		if i+2 > len(src) {
-			return 0, false
+			return 0, exifMalformed
 		}
 
 		segmentLen := int(binary.BigEndian.Uint16(src[i : i+2]))
 		if segmentLen < 2 {
-			return 0, false
+			return 0, exifMalformed
 		}
 		segmentEnd := i + segmentLen
 		if segmentEnd > len(src) {
-			return 0, false
+			return 0, exifMalformed
 		}
 
 		if marker == 0xE1 && segmentLen >= 2+6 && string(src[i+2:i+8]) == "Exif\x00\x00" {
 			if o, ok := tiffOrientation(src[i+8 : segmentEnd]); ok {
-				return o, true
+				return o, exifValid
 			}
+			// An EXIF block we cannot read is still an EXIF block: report it
+			// as malformed so callers re-encode instead of trusting the bytes.
+			return 0, exifMalformed
 		}
 
 		i = segmentEnd
 	}
 
-	return 0, false
+	return 0, exifAbsent
 }
 
 // tiffOrientation reads tag 0x0112 from IFD0 of an EXIF TIFF block. Values
-// outside 1..8 are treated as absent so a corrupt tag cannot block compression.
+// outside 1..8 are treated as unusable so a corrupt tag cannot block
+// compression.
 func tiffOrientation(tiff []byte) (int, bool) {
 	if len(tiff) < 8 {
 		return 0, false

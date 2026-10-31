@@ -98,6 +98,7 @@ func TestSuperAdminListUsers_AvatarURLIsAPIPathOrNull(t *testing.T) {
 			h := handlers.NewSuperAdminHandler(
 				newStubManagedUsers(account),
 				newStubLocationAdmin(),
+				newStubLocationAdmin(),
 				newStubVisitRepos(),
 				"role-admin", "role-vendor",
 			)
