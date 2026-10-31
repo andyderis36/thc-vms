@@ -26,9 +26,14 @@ import (
 // reaching an INSERT.
 const (
 	RoleSuperAdmin = "super_admin"
-	RoleAdmin      = "admin"
-	RoleSecurity   = "security"
-	RoleVendor     = "vendor"
+	// RoleDevSuperAdmin is the hidden highest role (hyphen, not underscore):
+	// one internal, global, always-active platform-operator account. It is
+	// seeded like any other role row but never surfaces in user-facing
+	// lists and is never offered as a selectable role.
+	RoleDevSuperAdmin = "dev-superadmin"
+	RoleAdmin         = "admin"
+	RoleSecurity      = "security"
+	RoleVendor        = "vendor"
 
 	LocationPusat   = "pusat"
 	LocationCabang  = "cabang"
@@ -214,9 +219,18 @@ func ResolveVendorID(name string) *uuid.UUID {
 // reject, and it is what a dry run exercises.
 func CheckInvariant(role string, locationID *uuid.UUID, userType string) error {
 	switch role {
-	case RoleSuperAdmin, RoleAdmin, RoleSecurity, RoleVendor:
+	case RoleSuperAdmin, RoleDevSuperAdmin, RoleAdmin, RoleSecurity, RoleVendor:
 	default:
 		return fmt.Errorf("role %q is not in chk_role_name; add its invariant to the trigger before seeding it", role)
+	}
+	if role == RoleDevSuperAdmin {
+		if locationID != nil {
+			return fmt.Errorf("role %s must have location_id = NULL, got %s", role, locationID)
+		}
+		if userType != UserTypeInternal {
+			return fmt.Errorf("role %s must be typed %s, got %q", role, UserTypeInternal, userType)
+		}
+		return nil
 	}
 	if role == RoleSuperAdmin || role == RoleVendor {
 		if locationID != nil {
@@ -242,7 +256,7 @@ func Validate(p SeedPlan) error {
 	}
 	for _, r := range p.Roles {
 		switch r.Name {
-		case RoleSuperAdmin, RoleAdmin, RoleSecurity, RoleVendor:
+		case RoleSuperAdmin, RoleDevSuperAdmin, RoleAdmin, RoleSecurity, RoleVendor:
 		default:
 			return fmt.Errorf("role %q is not in chk_role_name", r.Name)
 		}
@@ -298,6 +312,7 @@ func Plan() SeedPlan {
 	return SeedPlan{
 		Roles: []SeedRole{
 			{Name: RoleSuperAdmin, Permissions: `{}`},
+			{Name: RoleDevSuperAdmin, Permissions: `{}`},
 			{Name: RoleAdmin, Permissions: `{}`},
 			{Name: RoleSecurity, Permissions: `{}`},
 			{Name: RoleVendor, Permissions: `{}`},
@@ -331,16 +346,15 @@ func Plan() SeedPlan {
 			},
 		},
 
-		// Purpose names are verbatim from docs/5. LOCAL_DEV.md section 6.3. The
-		// codes are the stable keys; the names are operator-facing labels and are
-		// not free text to be shortened.
+		// Purpose names are the product decision: Survey, Operation &
+		// Maintenance, Project, Other. The codes are the stable keys; the
+		// names are operator-facing labels and are not free text to be
+		// shortened.
 		Purposes: []SeedPurpose{
-			{Code: "SPLICING_FO", Name: "Splicing & Maintenance Kabel Fiber Optik"},
-			{Code: "GENSET_UPS", Name: "Maintenance Genset & Sistem Catu Daya UPS"},
-			{Code: "SERVER_NET", Name: "Troubleshooting Perangkat Server & Router ISP"},
-			{Code: "PREVENTIVE", Name: "Preventive Maintenance & Kebersihan Shelter"},
-			{Code: "LOGISTICS", Name: "Pengantaran / Penarikan Perangkat & Sparepart"},
-			{Code: "AUDIT_SURVEY", Name: "Survey Jalur / Audit Infrastruktur"},
+			{Code: "SURVEY", Name: "Survey"},
+			{Code: "OPERATION_MAINTENANCE", Name: "Operation & Maintenance"},
+			{Code: "PROJECT", Name: "Project"},
+			{Code: "OTHER", Name: "Other"},
 		},
 
 		Vendors: []SeedVendor{
@@ -359,6 +373,10 @@ func Plan() SeedPlan {
 		Users: []SeedUser{
 			{
 				Name: "Hendra Wijaya (Super Admin)", Email: "superadmin@thc.net.id", Role: RoleSuperAdmin,
+				LocationCode: "", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
+			},
+			{
+				Name: "Developer Superadmin", Email: "dev-superadmin@transhybrid.net.id", Role: RoleDevSuperAdmin,
 				LocationCode: "", Type: UserTypeInternal, Status: UserStatusActive, VendorName: "",
 			},
 			{

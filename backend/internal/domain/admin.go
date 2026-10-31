@@ -110,3 +110,30 @@ type LocationAdminRepository interface {
 	// a raced reference is ErrConflict via MapError's 23503 mapping.
 	DeleteLocation(ctx context.Context, id UUID) error
 }
+
+// PurposePatch is the partial body of PATCH /purposes/:id. A nil member
+// means "leave the column unchanged"; the adapter renders nil as SQL NULL so
+// COALESCE keeps the stored value.
+type PurposePatch struct {
+	Name     *string
+	IsActive *bool
+}
+
+// PurposeAdminRepository is the super_admin purpose port: it embeds the
+// read-only MasterDataRepository catalogue and adds the purpose writes plus
+// the hard delete with its reference pre-check (DELETE /purposes/:id,
+// super_admin only). The soft removal stays deactivation via is_active; the
+// hard delete is refused with 409 while visit_purpose rows still reference
+// the row, so operational history is never orphaned by accident.
+type PurposeAdminRepository interface {
+	MasterDataRepository
+	FindPurposeByID(ctx context.Context, id UUID) (Purpose, error)
+	CreatePurpose(ctx context.Context, purpose Purpose) (Purpose, error)
+	UpdatePurpose(ctx context.Context, id UUID, patch PurposePatch) (Purpose, error)
+	// CountVisitsByPurpose reports visit_purpose links still pointing at the
+	// catalogue row (no cascade): non-zero blocks the delete with 409.
+	CountVisitsByPurpose(ctx context.Context, purposeID UUID) (int64, error)
+	// DeletePurpose removes the catalogue row. Missing is ErrNotFound;
+	// a raced reference is ErrConflict via MapError's 23503 mapping.
+	DeletePurpose(ctx context.Context, id UUID) error
+}

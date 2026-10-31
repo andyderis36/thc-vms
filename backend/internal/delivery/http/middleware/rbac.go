@@ -12,8 +12,16 @@ import (
 // roles pass. Anonymous callers get the 401 envelope; the wrong role gets
 // 403 with the sentinel's exact message, read from domain.ErrForbiddenBranch
 // and never retyped. vendor is refused on every administrative route by simply
-// never listing it among the allowed roles.
+// never listing it among the allowed roles. The hidden dev-superadmin passes
+// wherever super_admin is allowed, without being named at any call site.
 func RequireRoles(allowed ...domain.RoleName) gin.HandlerFunc {
+	allowsSuperAdmin := false
+	for _, role := range allowed {
+		if domain.IsSuperAdminRole(role) {
+			allowsSuperAdmin = true
+			break
+		}
+	}
 	return func(c *gin.Context) {
 		id, ok := deliveryhttp.IdentityFrom(c)
 		if !ok {
@@ -27,9 +35,20 @@ func RequireRoles(allowed ...domain.RoleName) gin.HandlerFunc {
 				return
 			}
 		}
+		if allowsSuperAdmin && id.Role == domain.RoleDevSuperAdmin {
+			c.Next()
+			return
+		}
 		response.Fail(c, domain.ErrForbiddenBranch)
 		c.Abort()
 	}
+}
+
+// RequireSuperAdmin is the chain helper for super-admin routes: it admits
+// super_admin and the hidden dev-superadmin, and refuses every other role
+// (vendor included). Route groups mount this instead of naming both roles.
+func RequireSuperAdmin() gin.HandlerFunc {
+	return RequireRoles(domain.RoleSuperAdmin, domain.RoleDevSuperAdmin)
 }
 
 // CheckBranch enforces multi-branch isolation for one target branch:
@@ -39,7 +58,7 @@ func RequireRoles(allowed ...domain.RoleName) gin.HandlerFunc {
 // ErrForbiddenBranch sentinel itself, so domain.FromError renders the
 // mandated 403 with the exact message.
 func CheckBranch(id deliveryhttp.Identity, target domain.UUID) error {
-	if id.Role == domain.RoleSuperAdmin {
+	if domain.IsSuperAdminRole(id.Role) {
 		return nil
 	}
 	if id.LocationID == nil || *id.LocationID != target {
@@ -53,7 +72,7 @@ func CheckBranch(id deliveryhttp.Identity, target domain.UUID) error {
 // admin and security are locked to their own branch and vendor is refused.
 // An unparseable filter can never widen the scope, so it fails closed.
 func EffectiveScope(id deliveryhttp.Identity, queryLocation string) (*domain.UUID, error) {
-	if id.Role == domain.RoleSuperAdmin {
+	if domain.IsSuperAdminRole(id.Role) {
 		if queryLocation == "" {
 			return nil, nil
 		}
