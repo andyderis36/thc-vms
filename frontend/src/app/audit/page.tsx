@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { AlertTriangle, Fingerprint, Inbox, Info, Server, Tag, UserRound } from 'lucide-react'
+import { AlertTriangle, Inbox, Info, Server, Tag, UserRound } from 'lucide-react'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -55,6 +55,9 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'location.create': 'Buat fasilitas',
   'location.update': 'Ubah fasilitas',
   'location.delete': 'Hapus fasilitas',
+  'purpose.create': 'Buat tujuan',
+  'purpose.update': 'Ubah tujuan',
+  'purpose.delete': 'Hapus tujuan',
   'visit.delete': 'Hapus kunjungan',
 }
 
@@ -63,6 +66,7 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   auth: 'Autentikasi',
   user: 'Pengguna',
   location: 'Fasilitas',
+  purpose: 'Tujuan',
   visit: 'Kunjungan',
 }
 
@@ -81,6 +85,23 @@ export function auditActionTone(action: string): StatusTone {
   return 'info'
 }
 
+/**
+ * Baris jejak yang boleh dirender: backend sudah membuang baris pelaku
+ * `dev-superadmin` yang tersembunyi (beserta totalnya), dan lapisan ini
+ * membuang baris yang pelakunya tak bisa dipecahkan lewat `GET /users` —
+ * yang tak pernah memuat akun tersembunyi — agar cache basi pun tak bisa
+ * merendernya. Baris sistem (`null`) selalu lolos. Diterapkan hanya setelah
+ * daftar user termuat (`usersLoaded`); sebelumnya apa adanya.
+ */
+export function filterVisibleAuditItems(
+  items: AuditLog[],
+  usersById: ReadonlyMap<string, AuditActorInfo>,
+  usersLoaded: boolean,
+): AuditLog[] {
+  if (!usersLoaded) return items
+  return items.filter((log) => log.user_id === null || usersById.has(log.user_id))
+}
+
 /** Nama pelaku dari peta user; baris sistem (`null`) = "Sistem"; user terhapus = UUID pendek. */
 export function auditActorLabel(
   userId: string | null,
@@ -92,11 +113,523 @@ export function auditActorLabel(
   return userId.slice(0, 8)
 }
 
+/**
+ * Label pelaku yang jujur untuk tampilan baris: aksi autentikasi tanpa sesi
+ * (`auth.*` + `null`, mis. login gagal) = "Upaya masuk (tanpa sesi)", bukan
+ * "Sistem"; `null` non-autentikasi = "Sistem"; pelaku yang tak ada di peta
+ * user (akun terhapus, cache basi) = "Akun terhapus", bukan potongan UUID
+ * yang menyesatkan. Murni; tanpa jaringan/state.
+ */
+export function auditActorLabelHonest(
+  log: Pick<AuditLog, 'user_id' | 'action'>,
+  usersById: ReadonlyMap<string, AuditActorInfo>,
+): string {
+  if (log.user_id === null) {
+    return log.action.startsWith('auth.') ? 'Upaya masuk (tanpa sesi)' : 'Sistem'
+  }
+  const name = usersById.get(log.user_id)?.name
+  if (name !== undefined && name !== '') return name
+  return 'Akun terhapus'
+}
+
 /** Ringkas metadata kunci→nilai untuk satu baris; kosong/null = strip. */
 export function auditMetadataSummary(metadata: Record<string, string> | null | undefined): string {
   const entries = Object.entries(metadata ?? {})
   if (entries.length === 0) return '—'
   return entries.map(([key, value]) => `${key}: ${value}`).join(' · ')
+}
+
+export const AUDIT_METADATA_KEY_LABEL: Record<string, string> = {
+  email: 'Surel',
+  reason: 'Alasan',
+  role: 'Peran',
+  source: 'Sumber',
+  from: 'Dari',
+  to: 'Ke',
+  fields: 'Kolom diubah',
+  name: 'Nama',
+  visit_code: 'Kode kunjungan',
+  type: 'Jenis',
+  phone: 'Telepon',
+  status: 'Status',
+  location: 'Fasilitas',
+  location_id: 'Fasilitas',
+  facility: 'Fasilitas',
+  address: 'Alamat',
+  old_name: 'Nama lama',
+  new_name: 'Nama baru',
+  city: 'Kota',
+  timezone: 'Zona waktu',
+  is_active: 'Status',
+  nik: 'NIK',
+  vendor_id: 'ID vendor',
+  vendor_name: 'Nama vendor',
+  password: 'Kata sandi',
+  avatar_url: 'Foto profil',
+  old_phone: 'Telepon lama',
+  new_phone: 'Telepon baru',
+  old_avatar: 'Foto lama',
+  new_avatar: 'Foto baru',
+}
+
+export const AUDIT_METADATA_VALUE_LABEL: Record<string, string> = {
+  invalid_credentials: 'kredensial salah',
+  active: 'Aktif',
+  inactive: 'Nonaktif',
+  vendor: 'Vendor',
+  admin: 'Admin',
+  super_admin: 'Superadmin',
+  security: 'Petugas jaga',
+  'self-registration': 'Pendaftaran mandiri',
+  name: 'Nama',
+  email: 'Surel',
+  phone: 'Telepon',
+  nik: 'NIK',
+  location_id: 'Fasilitas',
+  vendor_id: 'ID vendor',
+  vendor_name: 'Nama vendor',
+  password: 'Kata sandi',
+  avatar_url: 'Foto profil',
+  is_active: 'Status',
+  type: 'Jenis',
+  address: 'Alamat',
+  city: 'Kota',
+  timezone: 'Zona waktu',
+  status: 'Status',
+  role: 'Peran',
+  source: 'Sumber',
+  old_name: 'Nama lama',
+  new_name: 'Nama baru',
+  old_phone: 'Telepon lama',
+  new_phone: 'Telepon baru',
+}
+
+export function auditMetadataKeyLabel(key: string): string {
+  return AUDIT_METADATA_KEY_LABEL[key] ?? key
+}
+
+export function auditMetadataKeyTranslated(key: string): string {
+  return auditMetadataKeyLabel(key)
+}
+
+export function auditMetadataValueLabel(value: string): string {
+  return AUDIT_METADATA_VALUE_LABEL[value] ?? value
+}
+
+export function auditMetadataValueTranslated(value: string): string
+export function auditMetadataValueTranslated(key: string, value: string): string
+export function auditMetadataValueTranslated(a: string, b?: string): string {
+  if (b === undefined) {
+    return AUDIT_METADATA_VALUE_LABEL[a] ?? a
+  }
+  if (a === 'fields') {
+    return String(b)
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part !== '')
+      .map((part) => AUDIT_METADATA_VALUE_LABEL[part] ?? part)
+      .join(', ')
+  }
+  return AUDIT_METADATA_VALUE_LABEL[b] ?? b
+}
+
+export interface AuditMetadataEntryTranslated {
+  key: string
+  value: string
+}
+
+export function auditMetadataEntriesTranslated(
+  metadata: Record<string, string> | null | undefined,
+): AuditMetadataEntryTranslated[] {
+  const entries = Object.entries(metadata ?? {})
+  return entries.map(([key, value]) => {
+    const translatedKey = auditMetadataKeyLabel(key)
+    const translatedValue =
+      key === 'fields'
+        ? String(value)
+            .split(',')
+            .map((part) => part.trim())
+            .filter((part) => part !== '')
+            .map((part) => AUDIT_METADATA_VALUE_LABEL[part] ?? part)
+            .join(', ')
+        : auditMetadataValueLabel(String(value))
+    return { key: translatedKey, value: translatedValue }
+  })
+}
+
+export function auditMetadataSummaryTranslated(
+  metadata: Record<string, string> | null | undefined,
+): string {
+  const entries = auditMetadataEntriesTranslated(metadata)
+  if (entries.length === 0) return '—'
+  return entries.map((entry) => `${entry.key}: ${entry.value}`).join(' · ')
+}
+
+/** Satu kolom yang berubah, dikelompokkan dari kunci `before.<kolom>`/`after.<kolom>`. */
+export interface AuditBeforeAfterPair {
+  /** Nama kolom mentah di balik kunci, mis. `is_active`. */
+  field: string
+  /** Label kolom Bahasa Indonesia; kunci tak dikenal = mentah. */
+  label: string
+  /** Nilai sebelum; `null` = sisi tak ada/kosong → render "—". */
+  before: string | null
+  /** Nilai sesudah; `null` = sisi tak ada/kosong → render "—". */
+  after: string | null
+}
+
+/**
+ * Label kolom untuk pasangan before/after: kamus nilai memuat nama kolom
+ * (`name` → "Nama", `is_active` → "Status"); kunci tak dikenal jatuh mentah
+ * (jangan mengarang label — hanya render yang ditulis backend).
+ */
+export function auditBeforeAfterFieldLabel(field: string): string {
+  return AUDIT_METADATA_VALUE_LABEL[field] ?? AUDIT_METADATA_KEY_LABEL[field] ?? field
+}
+
+/** Sisi pasangan yang hilang/kosong (backend mengirim string kosong untuk NULL). */
+function auditPairSide(
+  entries: Record<string, string>,
+  key: string,
+): string | null {
+  if (!(key in entries)) return null
+  const raw: unknown = entries[key]
+  const text = typeof raw === 'string' ? raw : String(raw ?? '')
+  return text !== '' ? text : null
+}
+
+/**
+ * Mengelompokkan kunci aditif `before.<kolom>`/`after.<kolom>` per kolom.
+ * Urutan deterministik: ikuti CSV `fields` bila ada (urutan penulis backend),
+ * lalu kolom lain sesuai kemunculan pertama. Kolom dari `fields` yang tak
+ * punya pasangan dilewati — ia tetap dirender baris "Kolom diubah" warisan.
+ */
+export function groupBeforeAfter(
+  metadata: Record<string, string> | null | undefined,
+): AuditBeforeAfterPair[] {
+  const entries = metadata ?? {}
+  const order: string[] = []
+  const seen = new Set<string>()
+  const pushField = (field: string): void => {
+    if (field !== '' && !seen.has(field)) {
+      seen.add(field)
+      order.push(field)
+    }
+  }
+  const rawFields: unknown = entries['fields']
+  if (typeof rawFields === 'string') {
+    for (const part of rawFields.split(',')) pushField(part.trim())
+  }
+  for (const key of Object.keys(entries)) {
+    if (key.startsWith('before.')) pushField(key.slice('before.'.length))
+    else if (key.startsWith('after.')) pushField(key.slice('after.'.length))
+  }
+  const pairs: AuditBeforeAfterPair[] = []
+  for (const field of order) {
+    const beforeKey = `before.${field}`
+    const afterKey = `after.${field}`
+    if (!(beforeKey in entries) && !(afterKey in entries)) continue
+    pairs.push({
+      field,
+      label: auditBeforeAfterFieldLabel(field),
+      before: auditPairSide(entries, beforeKey),
+      after: auditPairSide(entries, afterKey),
+    })
+  }
+  return pairs
+}
+
+/** Pasangan status gaya `from`/`to` (penulis `user.status`), nilai terjemahan. */
+export interface AuditStatusPair {
+  /** Nilai `from` terjemahan; sisi hilang = "—". */
+  from: string
+  /** Nilai `to` terjemahan; sisi hilang = "—". */
+  to: string
+}
+
+/**
+ * Pasangan status `from`/`to`; `null` bila kedua kunci tak ada — pemanggil
+ * jatuh kembali ke ringkasan lama. Sisi yang hilang dirender "—".
+ */
+export function auditStatusPair(
+  metadata: Record<string, string> | null | undefined,
+): AuditStatusPair | null {
+  const entries = metadata ?? {}
+  if (!('from' in entries) && !('to' in entries)) return null
+  const readSide = (key: string): string => {
+    const side = auditPairSide(entries, key)
+    return side !== null ? auditMetadataValueLabel(side) : '—'
+  }
+  return { from: readSide('from'), to: readSide('to') }
+}
+
+/** Nilai pasangan untuk tampil: terjemahan kamus, sisi hilang = "—". */
+function auditPairDisplayValue(side: string | null): string {
+  return side !== null ? auditMetadataValueLabel(side) : '—'
+}
+
+/**
+ * Ringkasan satu baris sadar-pasangan untuk tooltip tabel/kartu. Tanpa kunci
+ * baru (`from`/`to`/`before.*`/`after.*`) mengembalikan PERSIS keluaran
+ * `auditMetadataSummaryTranslated` — baris warisan tak berubah sedikit pun.
+ */
+export function auditMetadataPairSummary(
+  metadata: Record<string, string> | null | undefined,
+): string {
+  const entries = metadata ?? {}
+  const status = auditStatusPair(entries)
+  const pairs = groupBeforeAfter(entries)
+  if (status === null && pairs.length === 0) {
+    return auditMetadataSummaryTranslated(entries)
+  }
+  const parts: string[] = []
+  if (status !== null) {
+    parts.push(`Dari ${status.from} Ke ${status.to}`)
+  }
+  const pairedFields = new Set(pairs.map((pair) => pair.field))
+  for (const pair of pairs) {
+    const before = auditPairDisplayValue(pair.before)
+    const after = auditPairDisplayValue(pair.after)
+    parts.push(`Kolom ${pair.label}: ${before} → ${after}`)
+  }
+  // `fields` yang tak tercakup pasangan (mis. kata sandi — penulis sengaja
+  // tak pernah mengirim nilainya) tetap dilaporkan agar tak ada info hilang.
+  const rawFields: unknown = entries['fields']
+  if (typeof rawFields === 'string') {
+    const uncovered = rawFields
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part !== '' && !pairedFields.has(part))
+    if (uncovered.length > 0) {
+      const value = uncovered.map((field) => auditMetadataValueLabel(field)).join(', ')
+      parts.push(`Kolom diubah: ${value}`)
+    }
+  }
+  // Sisa kunci lain: terjemahan Phase-1 apa adanya, tanpa kunci terkonsumsi.
+  const consumed = new Set<string>(['from', 'to', 'fields'])
+  for (const pair of pairs) {
+    consumed.add(`before.${pair.field}`)
+    consumed.add(`after.${pair.field}`)
+  }
+  for (const [key, value] of Object.entries(entries)) {
+    if (consumed.has(key)) continue
+    const raw: unknown = value
+    const text = typeof raw === 'string' ? raw : String(raw ?? '')
+    const translated =
+      key === 'fields'
+        ? auditMetadataValueTranslated('fields', text)
+        : auditMetadataValueLabel(text)
+    parts.push(`${auditMetadataKeyLabel(key)}: ${translated}`)
+  }
+  return parts.length > 0 ? parts.join(' · ') : '—'
+}
+
+/** Satu baris Metadata modal: label, nilai tampil, tooltip, dan mode potong. */
+export interface AuditMetadataDisplayRow {
+  /** Kunci React stabil (kunci mentah / `from/to` / `fields`). */
+  key: string
+  label: string
+  value: string
+  /** Teks utuh untuk tooltip `title` (hanya dipakai baris pasangan). */
+  title: string
+  /** `true` = baris pasangan → nilai `truncate` + tooltip; warisan = `false`. */
+  truncate: boolean
+}
+
+/**
+ * Baris Metadata modal sadar-pasangan. Tanpa kunci baru hasilnya setara
+ * `auditMetadataEntriesTranslated` (label/nilai terjemahan, `truncate: false`)
+ * — baris warisan mempertahankan struktur dan gaya Phase-1.
+ */
+export function auditMetadataDisplayRows(
+  metadata: Record<string, string> | null | undefined,
+): AuditMetadataDisplayRow[] {
+  const entries = metadata ?? {}
+  const rows: AuditMetadataDisplayRow[] = []
+  const status = auditStatusPair(entries)
+  if (status !== null) {
+    const value = `Dari ${status.from} Ke ${status.to}`
+    rows.push({ key: 'from/to', label: 'Perubahan status', value, title: value, truncate: true })
+  }
+  const pairs = groupBeforeAfter(entries)
+  const pairedFields = new Set(pairs.map((pair) => pair.field))
+  for (const pair of pairs) {
+    const before = auditPairDisplayValue(pair.before)
+    const after = auditPairDisplayValue(pair.after)
+    const label = `Kolom ${pair.label}`
+    const value = `${before} → ${after}`
+    rows.push({
+      key: `before.${pair.field}`,
+      label,
+      value,
+      title: `${label}: ${value}`,
+      truncate: true,
+    })
+  }
+  const rawFields: unknown = entries['fields']
+  if (typeof rawFields === 'string') {
+    const uncovered = rawFields
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part !== '' && !pairedFields.has(part))
+    if (uncovered.length > 0) {
+      const value = uncovered.map((field) => auditMetadataValueLabel(field)).join(', ')
+      rows.push({
+        key: 'fields',
+        label: 'Kolom diubah',
+        value,
+        title: `Kolom diubah: ${value}`,
+        truncate: false,
+      })
+    }
+  }
+  const consumed = new Set<string>(['from', 'to', 'fields'])
+  for (const pair of pairs) {
+    consumed.add(`before.${pair.field}`)
+    consumed.add(`after.${pair.field}`)
+  }
+  for (const [key, value] of Object.entries(entries)) {
+    if (consumed.has(key)) continue
+    const translated = auditMetadataEntriesTranslated({ [key]: value })
+    const entry = translated[0]
+    if (entry === undefined) continue
+    rows.push({
+      key,
+      label: entry.key,
+      value: entry.value,
+      title: `${entry.key}: ${entry.value}`,
+      truncate: false,
+    })
+  }
+  return rows
+}
+
+/**
+ * Subjek yang tersentuh aksi: utamakan nama/email yang dibawa metadata,
+ * baru `entity_id` (UUID/penanda) sebagai fallback terakhir. Tidak pernah
+ * mencetak "Sistem" — pelaku sudah diwakili `actorLabel`.
+ */
+function auditImpactSubject(
+  log: AuditLog,
+  metadata: Record<string, string>,
+): string {
+  if (metadata.name !== undefined && metadata.name !== '') return metadata.name
+  if (metadata.email !== undefined && metadata.email !== '') return metadata.email
+  if (log.entity_id !== null && log.entity_id !== '') return log.entity_id
+  return '—'
+}
+
+/**
+ * Kalimat dampak Bahasa Indonesia per aksi audit (13 aksi MVP). Murni: tidak
+ * menyentuh jaringan/state; `actorLabel` disuntik pemanggil (null-auth →
+ * "Upaya masuk (tanpa sesi)", akun terhapus → "Akun terhapus"). Label kunci
+ * dan nilai diambil dari kamus yang sama (tanpa literal duplikat).
+ */
+export function auditImpactSentence(log: AuditLog, actorLabel: string): string {
+  const A = actorLabel
+  const metadata = (log.metadata ?? {}) as Record<string, string>
+
+  if (log.action === 'user.create') {
+    const B = auditImpactSubject(log, metadata)
+    const R = metadata.role ? auditMetadataValueLabel(metadata.role) : '—'
+    return `${A} membuat akun ${B} sebagai Peran ${R}`
+  }
+  if (log.action === 'location.create') {
+    const B = auditImpactSubject(log, metadata)
+    return `${A} membuat fasilitas bernama ${B}`
+  }
+  if (log.action === 'purpose.create') {
+    const B = auditImpactSubject(log, metadata)
+    return `${A} membuat tujuan kunjungan bernama ${B}`
+  }
+  if (log.action === 'user.status') {
+    const B = auditImpactSubject(log, metadata)
+    const X = metadata.from ? auditMetadataValueLabel(metadata.from) : '—'
+    const Y = metadata.to ? auditMetadataValueLabel(metadata.to) : '—'
+    return `${A} mengubah status ${B} dari ${X} menjadi ${Y}`
+  }
+  if (log.action === 'visit.delete') {
+    const V = metadata.visit_code && metadata.visit_code !== '' ? metadata.visit_code : '—'
+    return `${A} menghapus kunjungan Kode ${V}`
+  }
+  if (log.action === 'auth.login.failed') {
+    const E = metadata.email && metadata.email !== '' ? metadata.email : '—'
+    const reason = metadata.reason ? auditMetadataValueLabel(metadata.reason) : 'kredensial salah'
+    return `Upaya masuk gagal untuk surel ${E} (${reason})`
+  }
+  if (log.action === 'auth.login.success') {
+    const E = metadata.email && metadata.email !== '' ? metadata.email : '—'
+    return `${A} masuk berhasil (surel ${E})`
+  }
+  if (
+    log.action === 'user.update' ||
+    log.action === 'location.update' ||
+    log.action === 'purpose.update'
+  ) {
+    const noun =
+      log.action === 'user.update'
+        ? 'akun'
+        : log.action === 'location.update'
+          ? 'fasilitas'
+          : 'tujuan kunjungan'
+    const B = auditImpactSubject(log, metadata)
+    const columns = metadata.fields
+      ? auditMetadataValueTranslated('fields', metadata.fields)
+      : '—'
+    let sentence = `${A} mengubah ${noun} ${B}: ${columns}`
+
+    const hasFromTo = 'from' in metadata || 'to' in metadata
+    const hasBeforeAfter =
+      Object.keys(metadata).some((key) => key.startsWith('before.')) ||
+      Object.keys(metadata).some((key) => key.startsWith('after.'))
+    if (hasFromTo || hasBeforeAfter) {
+      let X = '—'
+      let Y = '—'
+      if (hasFromTo) {
+        X = metadata.from ? auditMetadataValueLabel(metadata.from) : '—'
+        Y = metadata.to ? auditMetadataValueLabel(metadata.to) : '—'
+      } else {
+        const fieldsOrder = metadata.fields
+          ? metadata.fields
+              .split(',')
+              .map((part) => part.trim())
+              .filter((part) => part !== '')
+          : []
+        const beforeAfterFields = Object.keys(metadata)
+          .filter((key) => key.startsWith('before.') || key.startsWith('after.'))
+          .map((key) => key.replace(/^(before|after)\./, ''))
+          .filter((value, index, array) => array.indexOf(value) === index)
+        const candidates = fieldsOrder.length > 0 ? fieldsOrder : beforeAfterFields
+        const field = candidates.find(
+          (candidate) =>
+            `before.${candidate}` in metadata || `after.${candidate}` in metadata,
+        )
+        if (field) {
+          const beforeValue = metadata[`before.${field}`]
+          const afterValue = metadata[`after.${field}`]
+          X = beforeValue ? auditMetadataValueLabel(beforeValue) : '—'
+          Y = afterValue ? auditMetadataValueLabel(afterValue) : '—'
+        }
+      }
+      sentence += ` (Dari ${X}→${Y})`
+    }
+    return sentence
+  }
+  if (log.action === 'user.delete') {
+    const B = auditImpactSubject(log, metadata)
+    return `${A} menghapus akun ${B}`
+  }
+  if (log.action === 'location.delete') {
+    const B = auditImpactSubject(log, metadata)
+    return `${A} menghapus fasilitas ${B}`
+  }
+  if (log.action === 'purpose.delete') {
+    const B = auditImpactSubject(log, metadata)
+    return `${A} menghapus tujuan kunjungan ${B}`
+  }
+
+  const label = auditActionLabel(log.action)
+  const summary = auditMetadataSummaryTranslated(metadata)
+  return `${label} — ${summary}`
 }
 
 export type AuditOrder = 'asc' | 'desc'
@@ -475,7 +1008,17 @@ function AuditScreen() {
     setSelectedLog((prev) => (prev?.id === log.id ? null : log))
   }
 
-  const items = auditQuery.data?.items ?? []
+  // Baris tersembunyi (pelaku `dev-superadmin` / tak terpecahkan) tak pernah
+  // dirender: backend membuangnya, lapisan ini membuang sisanya (cache basi).
+  const items = useMemo(
+    () =>
+      filterVisibleAuditItems(
+        auditQuery.data?.items ?? [],
+        usersById,
+        usersQuery.isSuccess,
+      ),
+    [auditQuery.data, usersById, usersQuery.isSuccess],
+  )
   const total = auditQuery.data?.total ?? 0
   const pageLimit = filter.limit ?? AUDIT_PAGE_LIMIT
   const totalPages = Math.max(1, Math.ceil(total / pageLimit))
@@ -814,7 +1357,7 @@ function AuditTable({ items, usersById, onSelect }: AuditListProps) {
                   className="truncate text-xs sm:text-sm font-semibold text-ink"
                   title={log.user_id ?? undefined}
                 >
-                  {auditActorLabel(log.user_id, usersById)}
+                  {auditActorLabelHonest(log, usersById)}
                 </p>
               </td>
               <td className={TABLE_TD_CLASS}>
@@ -824,11 +1367,6 @@ function AuditTable({ items, usersById, onSelect }: AuditListProps) {
               </td>
               <td className={TABLE_TD_CLASS}>
                 <Badge tone="neutral">{auditEntityLabel(log.entity)}</Badge>
-                {log.entity_id !== null ? (
-                  <p className="mt-1 truncate text-xs text-ink-muted" title={log.entity_id}>
-                    {log.entity_id}
-                  </p>
-                ) : null}
               </td>
               <td className={TABLE_TD_CLASS}>
                 <p className="truncate text-xs sm:text-sm tabular-nums text-ink-secondary" title={log.ip}>
@@ -838,9 +1376,9 @@ function AuditTable({ items, usersById, onSelect }: AuditListProps) {
               <td className={TABLE_TD_CLASS}>
                 <p
                   className="truncate text-xs sm:text-sm text-ink-secondary"
-                  title={auditMetadataSummary(log.metadata)}
+                  title={auditMetadataPairSummary(log.metadata)}
                 >
-                  {auditMetadataSummary(log.metadata)}
+                  {auditImpactSentence(log, auditActorLabelHonest(log, usersById))}
                 </p>
               </td>
             </tr>
@@ -877,15 +1415,12 @@ function AuditCards({ items, usersById, onSelect }: AuditListProps) {
                 aria-hidden="true"
               />
               <span className="min-w-0 wrap-anywhere text-ink">
-                {auditActorLabel(log.user_id, usersById)}
+                {auditActorLabelHonest(log, usersById)}
               </span>
             </p>
             <p className="flex items-start gap-2">
               <Tag className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-              <span className="min-w-0 wrap-anywhere">
-                {auditEntityLabel(log.entity)}
-                {log.entity_id !== null ? ` · ${log.entity_id}` : ''}
-              </span>
+              <span className="min-w-0 wrap-anywhere">{auditEntityLabel(log.entity)}</span>
             </p>
             <p className="flex items-start gap-2">
               <Server className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
@@ -894,18 +1429,12 @@ function AuditCards({ items, usersById, onSelect }: AuditListProps) {
               </span>
             </p>
             <p className="flex items-start gap-2">
-              <Fingerprint
-                className="mt-0.5 size-4 shrink-0 text-ink-muted"
-                aria-hidden="true"
-              />
-              <span className="min-w-0 truncate wrap-anywhere" title={log.user_agent}>
-                {log.user_agent !== '' ? log.user_agent : '—'}
-              </span>
-            </p>
-            <p className="flex items-start gap-2">
               <Info className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-              <span className="min-w-0 wrap-anywhere">
-                {auditMetadataSummary(log.metadata)}
+              <span
+                className="min-w-0 wrap-anywhere"
+                title={auditMetadataPairSummary(log.metadata)}
+              >
+                {auditImpactSentence(log, auditActorLabelHonest(log, usersById))}
               </span>
             </p>
           </div>
