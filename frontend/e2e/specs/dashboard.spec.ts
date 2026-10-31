@@ -132,7 +132,7 @@ test('@DASH-04 dashboard vendor hanya memuat kunjungan sendiri tanpa kontrol app
   h,
 }) => {
   const ownVisit = await h.createVisit('dash04-own', { withFiles: false })
-  const purposeId = PURPOSES['Splicing & Maintenance Kabel Fiber Optik']
+  const purposeId = PURPOSES.Survey
   if (purposeId === undefined) {
     throw new Error('[DASH-04] purpose seed untuk vendor pembanding tidak ditemukan.')
   }

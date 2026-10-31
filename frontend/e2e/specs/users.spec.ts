@@ -154,7 +154,7 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
 
     await dialog.getByLabel('Nama Lengkap').fill(name)
     await dialog.getByLabel('Email').fill(email)
-    await dialog.getByLabel('Kata Sandi').fill(PASSWORD)
+    await dialog.getByRole('textbox', { name: 'Kata Sandi' }).fill(PASSWORD)
     await dialog.getByLabel('NIK').fill(uniqueNik())
     await dialog.getByLabel('Cabang Penugasan').selectOption(LOCATIONS.hq)
     await dialog

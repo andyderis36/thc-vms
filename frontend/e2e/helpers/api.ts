@@ -80,12 +80,10 @@ export const LOCATIONS = {
 
 /** Peta nama purpose katalog -> UUID (seed). */
 export const PURPOSES: Record<string, string> = {
-  'Splicing & Maintenance Kabel Fiber Optik': 'f97105bd-08d4-56c1-9a49-494bfe5f5482',
-  'Maintenance Genset & Sistem Catu Daya UPS': '66e53f2d-8e3b-54dd-b444-6be64be802c8',
-  'Troubleshooting Perangkat Server & Router ISP': '0c3a0afa-c7bb-525a-b4f7-e205e1f1b240',
-  'Preventive Maintenance & Kebersihan Shelter': 'c1e5e97b-a8d2-5d8f-ab7d-6974e9791ee8',
-  'Pengantaran / Penarikan Perangkat & Sparepart': '7774470a-b79f-5446-bbad-d2e00635a98f',
-  'Survey Jalur / Audit Infrastruktur': '883b74bc-38b5-5bb7-96b2-e45287b55255',
+  Survey: '1aeaf239-bc11-5ab8-b4c9-66dd20dc9027',
+  'Operation & Maintenance': 'ddd413b2-30f4-5e20-874b-ed18b4c8d153',
+  Project: '893bdd49-de22-5516-aea4-2636f17820bb',
+  Other: '0ea74b0d-fe47-5a97-80da-d84f5f36c9f8',
 }
 
 export interface User {
