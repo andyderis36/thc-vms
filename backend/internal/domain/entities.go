@@ -68,6 +68,20 @@ func IsSuperAdminRole(role RoleName) bool {
 	return role == RoleSuperAdmin || role == RoleDevSuperAdmin
 }
 
+// DevSuperadminEmail is the fixed address of the one hidden platform-operator
+// account seeded by the backend seeder. It is the single home of that string:
+// repository post-filters call IsHiddenDevAccount instead of comparing it.
+const DevSuperadminEmail = "dev-superadmin@transhybrid.net.id"
+
+// IsHiddenDevAccount reports whether a user row belongs to the hidden
+// dev-superadmin account and must be dropped from every user-facing listing.
+// The role name is the primary signal; the email fallback covers pre-000016
+// and data-drift rows whose role no longer reads dev-superadmin but whose
+// account is still the seeded platform operator.
+func IsHiddenDevAccount(role RoleName, email string) bool {
+	return role == RoleDevSuperAdmin || email == DevSuperadminEmail
+}
+
 // Role mirrors the ROLE table.
 type Role struct {
 	ID          UUID
