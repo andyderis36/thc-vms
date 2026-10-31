@@ -50,10 +50,14 @@ type purposeDTO struct {
 // userDTO mirrors User. Id is always present; name/email ride along from the
 // visit join (kartu Informasi Kunjungan FE). Empty renders nil/omitted, same
 // partial rule as locationDTO (User has no required members in openapi).
+// VendorName carries the requesting vendor account's own company
+// (COALESCE(users.vendor_name_override, vendor.name)); nil when the account
+// carries no company.
 type userDTO struct {
-	ID    string  `json:"id"`
-	Name  *string `json:"name,omitempty"`
-	Email *string `json:"email,omitempty"`
+	ID         string  `json:"id"`
+	Name       *string `json:"name,omitempty"`
+	Email      *string `json:"email,omitempty"`
+	VendorName *string `json:"vendor_name,omitempty"`
 }
 
 // visitDetailDTO mirrors VisitDetail. Field notes: vendor_name carries the
@@ -124,6 +128,10 @@ type uploadDTO struct {
 // upload category.
 type createVisitBody struct {
 	LocationID string   `json:"location_id"`
+	// VendorName is the manually typed visit-level company (migration 000017),
+	// honoured for admin/superadmin-created visits; it never enters the
+	// vendor catalogue.
+	VendorName *string  `json:"vendor_name"`
 	PurposeIDs []string `json:"purpose_ids"`
 	// PurposeNote is the free-typed "tujuan lain" (migration 000005): either
 	// a non-empty purpose_ids or a non-empty purpose_note is required.
@@ -170,6 +178,13 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 		typ := string(v.LocationType)
 		loc.Type = &typ
 	}
+	// The wire vendor_name prefers the manual visit-level company (migration
+	// 000017) when the trimmed text is present, otherwise the catalogue
+	// display name resolved by the repository.
+	vendorName := v.VendorName
+	if v.VendorNameOverride != nil && strings.TrimSpace(*v.VendorNameOverride) != "" {
+		vendorName = strings.TrimSpace(*v.VendorNameOverride)
+	}
 	detail := visitDetailDTO{
 		ID:         string(v.ID),
 		VisitID:    v.VisitID,
@@ -177,7 +192,7 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 		Location:   loc,
 		Purposes:   []purposeDTO{},
 		VendorUser: userDTO{ID: string(v.VendorUserID)},
-		VendorName: v.VendorName,
+		VendorName: vendorName,
 		StartDate:  v.StartDate.Format(time.RFC3339),
 		EndDate:    v.EndDate.Format(time.RFC3339),
 		Visitors:   []visitorDTO{},
@@ -190,6 +205,10 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 	if v.VendorUserEmail != "" {
 		email := v.VendorUserEmail
 		detail.VendorUser.Email = &email
+	}
+	if strings.TrimSpace(v.VendorUserVendorName) != "" {
+		company := strings.TrimSpace(v.VendorUserVendorName)
+		detail.VendorUser.VendorName = &company
 	}
 	// The deprecated pic_user alias always mirrors vendor_user byte for byte so
 	// a stale frontend bundle keeps rendering the visitor card unchanged.
@@ -262,6 +281,7 @@ func toCreateInput(body createVisitBody, start, end time.Time) visit.CreateVisit
 		EndDate:       end,
 		Notes:         body.Notes,
 		PurposeNote:   body.PurposeNote,
+		VendorName:    body.VendorName,
 		IsNDAAccepted: body.IsNDAAccepted != nil && *body.IsNDAAccepted,
 	}
 	if body.AssignmentLetterURL != nil {

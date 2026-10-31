@@ -22,6 +22,7 @@ type AuthService interface {
 	Me(ctx context.Context, userID domain.UUID) (auth.Profile, error)
 	UpdateSelf(ctx context.Context, actor auth.SelfIdentity, in auth.SelfUpdate) (auth.Profile, error)
 	Logout(ctx context.Context) error
+	RegisterVendor(ctx context.Context, in auth.RegisterVendorInput) (auth.Profile, error)
 }
 
 // AuthHandler serves POST /auth/login, GET /auth/me and POST /auth/logout.
@@ -147,14 +148,18 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	response.OK(c, profileToAccount(profile))
 }
 
-// patchMeBody is the strict PATCH /auth/me payload: only the three
-// self-service fields are keys. avatar_url stays raw because the openapi
+// patchMeBody is the strict PATCH /auth/me payload: only the self-service
+// fields are keys (name, phone, avatar_url, plus the new_password /
+// current_password rotation pair). avatar_url stays raw because the openapi
 // tri-state ("absent keeps", null removes, string replaces) cannot be
 // expressed by a plain *string, where absent and null both decode to nil.
+// The legacy "password" key stays rejected: a rotation speaks new_password.
 type patchMeBody struct {
-	Name      *string         `json:"name"`
-	Phone     *string         `json:"phone"`
-	AvatarURL json.RawMessage `json:"avatar_url"`
+	Name            *string         `json:"name"`
+	Phone           *string         `json:"phone"`
+	AvatarURL       json.RawMessage `json:"avatar_url"`
+	NewPassword     *string         `json:"new_password"`
+	CurrentPassword *string         `json:"current_password"`
 }
 
 // decodeStrictBody binds one JSON body into dst and refuses unknown members,
@@ -213,10 +218,12 @@ func (h *AuthHandler) PatchMe(c *gin.Context) {
 	}
 	ctx := deliveryhttp.ContextWithRequestMeta(c.Request.Context(), c)
 	profile, err := h.auth.UpdateSelf(ctx, auth.SelfIdentity{UserID: id.UserID, Role: id.Role}, auth.SelfUpdate{
-		Name:        body.Name,
-		Phone:       body.Phone,
-		AvatarURL:   avatarURL,
-		ClearAvatar: clearAvatar,
+		Name:            body.Name,
+		Phone:           body.Phone,
+		AvatarURL:       avatarURL,
+		ClearAvatar:     clearAvatar,
+		NewPassword:     body.NewPassword,
+		CurrentPassword: body.CurrentPassword,
 	})
 	if err != nil {
 		response.Fail(c, err)
@@ -236,4 +243,53 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 	response.OK[map[string]string](c, nil)
+}
+
+// registerVendorBody mirrors the POST /auth/register body: the vendor account
+// fields with no role and no location members (both are derived server-side:
+// role is always vendor, location is always nil).
+type registerVendorBody struct {
+	Name       string `json:"name"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	Phone      string `json:"phone"`
+	NIK        string `json:"nik"`
+	VendorID   string `json:"vendor_id"`
+	VendorName string `json:"vendor_name"`
+}
+
+// Register serves POST /auth/register with 201 and the openapi User object.
+// The account starts inactive and cannot sign in until a superadmin activates
+// it; a duplicate email is 409 via the same 23505 mapping the managed create
+// relies on.
+func (h *AuthHandler) Register(c *gin.Context) {
+	var body registerVendorBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Format isi permintaan tidak valid.")
+		return
+	}
+	var vendorID *domain.UUID
+	if raw := strings.TrimSpace(body.VendorID); raw != "" {
+		parsed, err := domain.ParseUUID(raw)
+		if err != nil {
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "vendor_id tidak valid.")
+			return
+		}
+		vendorID = &parsed
+	}
+	ctx := deliveryhttp.ContextWithRequestMeta(c.Request.Context(), c)
+	profile, err := h.auth.RegisterVendor(ctx, auth.RegisterVendorInput{
+		Name:       body.Name,
+		Email:      body.Email,
+		Password:   body.Password,
+		Phone:      body.Phone,
+		NIK:        body.NIK,
+		VendorID:   vendorID,
+		VendorName: body.VendorName,
+	})
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.Created(c, profileToAccount(profile))
 }
