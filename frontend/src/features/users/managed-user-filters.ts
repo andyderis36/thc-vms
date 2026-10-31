@@ -16,6 +16,22 @@ import { can, getRoleLabel, type Role } from '@/lib/auth/capabilities'
  */
 
 // ---------------------------------------------------------------------------
+// Dev-account hiding (single source of truth)
+// ---------------------------------------------------------------------------
+
+/** Surel akun dev-superadmin yang tersembunyi (drifted prod account). */
+export const DEV_SUPERADMIN_EMAIL = 'dev-superadmin@transhybrid.net.id'
+
+/**
+ * Akun dev yang disembunyikan dari semua layar user terkelola: peran
+ * `dev-superadmin` ATAU surel yang cocok (case-insensitive) dengan
+ * `DEV_SUPERADMIN_EMAIL`. Satu sumber kebenaran — dipakai di kedua drop
+ * (`filterManagedUsersByRoles` dan `applyManagedUserFilters`).
+ */
+export function isHiddenDevUser(user: Pick<User, 'role' | 'email'>): boolean {
+  return user.role === 'dev-superadmin' || user.email.toLowerCase() === DEV_SUPERADMIN_EMAIL
+}
+// ---------------------------------------------------------------------------
 // Peran
 // ---------------------------------------------------------------------------
 
@@ -127,7 +143,7 @@ export function filterManagedUsersByRoles(
   return users.filter((user) => {
     const role = user.role
     if (role === 'security') return false
-    if (role === 'dev-superadmin') return false
+    if (isHiddenDevUser(user)) return false
     return roles.includes(role as ManagedPageRole)
   })
 }
@@ -239,7 +255,7 @@ export function applyManagedUserFilters(
 ): User[] {
   return users.filter((user) => {
     if (user.role === 'security') return false
-    if (user.role === 'dev-superadmin') return false
+    if (isHiddenDevUser(user)) return false
     if (filter.status !== 'all' && user.status !== filter.status) return false
     if (filter.vendor !== VENDOR_FILTER_ALL && (user.vendor_name ?? '') !== filter.vendor) return false
     return true
