@@ -12,6 +12,10 @@ import (
 var (
 	// ErrInvalidCredentials backs the 401 login failure: "Kredensial tidak valid".
 	ErrInvalidCredentials = errors.New("Kredensial tidak valid")
+	// ErrAccountPending backs the 403 login refusal for inactive accounts
+	// (self-registered vendors waiting for superadmin approval): the account
+	// exists and the password was right, but it may not sign in yet.
+	ErrAccountPending = errors.New("Akun Anda menunggu persetujuan superadmin.")
 	// ErrForbiddenBranch backs the 403 cross-branch refusal.
 	ErrForbiddenBranch = errors.New("Tidak berhak mengelola kunjungan cabang lain")
 	// ErrCheckInWindow backs the 400 check-in refusal, PRD L123 verbatim, used
@@ -91,6 +95,16 @@ func InvalidCredentials() *AppError {
 	}
 }
 
+// AccountPending builds the 403 login refusal for inactive accounts.
+func AccountPending() *AppError {
+	return &AppError{
+		Status:  http.StatusForbidden,
+		Code:    "ACCOUNT_PENDING",
+		Message: ErrAccountPending.Error(),
+		Err:     ErrAccountPending,
+	}
+}
+
 // ForbiddenBranch builds the 403 cross-branch refusal.
 func ForbiddenBranch() *AppError {
 	return &AppError{
@@ -164,6 +178,8 @@ func FromError(err error) *AppError {
 	switch {
 	case errors.Is(err, ErrInvalidCredentials):
 		return InvalidCredentials()
+	case errors.Is(err, ErrAccountPending):
+		return AccountPending()
 	case errors.Is(err, ErrForbiddenBranch):
 		return ForbiddenBranch()
 	case errors.Is(err, ErrCheckInWindow):

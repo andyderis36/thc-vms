@@ -69,7 +69,7 @@ func NewService(deps Dependencies) *Service {
 // external account that must never execute a gate operation.
 func authorizeGateRole(role domain.RoleName) error {
 	switch role {
-	case domain.RoleSecurity, domain.RoleAdmin, domain.RoleSuperAdmin:
+	case domain.RoleSecurity, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:
 		return nil
 	default:
 		return domain.ForbiddenBranch()
@@ -80,7 +80,7 @@ func authorizeGateRole(role domain.RoleName) error {
 // bypasses the filter (approval matrix "Ya (Bypass)"); a branch-locked actor
 // without a location is refused rather than treated as global.
 func authorizeBranch(actor Actor, visit domain.VisitRequest) error {
-	if actor.Role == domain.RoleSuperAdmin {
+	if domain.IsSuperAdminRole(actor.Role) {
 		return nil
 	}
 	if actor.LocationID == nil || *actor.LocationID != visit.LocationID {

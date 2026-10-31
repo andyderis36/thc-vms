@@ -53,7 +53,7 @@ func TestApplySendsNIKPerRole(t *testing.T) {
 			}
 		}
 	}
-	if users != 26 {
-		t.Fatalf("recorded %d user inserts, want 26", users)
+	if users != 27 {
+		t.Fatalf("recorded %d user inserts, want 27", users)
 	}
 }

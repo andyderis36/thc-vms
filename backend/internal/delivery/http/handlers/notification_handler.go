@@ -192,7 +192,7 @@ func requireNotificationRole(c *gin.Context) (deliveryhttp.Identity, bool) {
 		return deliveryhttp.Identity{}, false
 	}
 	switch id.Role {
-	case domain.RoleSuperAdmin, domain.RoleAdmin, domain.RoleSecurity, domain.RoleVendor:
+	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin, domain.RoleAdmin, domain.RoleSecurity, domain.RoleVendor:
 		return id, true
 	default:
 		response.Fail(c, domain.ErrForbiddenBranch)
