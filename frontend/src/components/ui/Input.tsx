@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, type InputHTMLAttributes } from 'react'
+import { useId, type InputHTMLAttributes, type ReactNode } from 'react'
 
 /**
  * `default` 40px · `gate` 40px (mobile/desktop) → 48px (tablet 768–1023px).
@@ -35,6 +35,7 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   error?: string
   hint?: string
   fieldSize?: FieldSize
+  trailing?: ReactNode
 }
 
 /**
@@ -49,6 +50,7 @@ export function Input({
   id,
   className = '',
   required,
+  trailing,
   ...rest
 }: InputProps) {
   const generatedId = useId()
@@ -66,14 +68,21 @@ export function Input({
         </label>
       ) : null}
 
-      <input
-        {...rest}
-        id={inputId}
-        required={required}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy}
-        className={`${FIELD_BASE_CLASS} ${FIELD_HEIGHT[fieldSize]} ${error ? 'border-brand' : ''} ${className}`.trim()}
-      />
+      <div className="relative">
+        <input
+          {...rest}
+          id={inputId}
+          required={required}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
+          className={`${FIELD_BASE_CLASS} ${FIELD_HEIGHT[fieldSize]} ${error ? 'border-brand' : ''} ${trailing ? 'pr-12' : ''} ${className}`.trim()}
+        />
+        {trailing ? (
+          <div className="absolute right-1 top-1/2 -translate-y-1/2">
+            {trailing}
+          </div>
+        ) : null}
+      </div>
 
       {error ? (
         <p id={errorId} role="alert" className="text-xs text-danger-text">
