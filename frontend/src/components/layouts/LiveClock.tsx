@@ -6,11 +6,14 @@ import { useEffect, useState } from 'react'
  * Formatter jam WIB. `timeZone: 'Asia/Jakarta'` WAJIB eksplisit: kios pos
  * jaga dapat berjalan di perangkat dengan zona waktu sistem berbeda, sedangkan
  * seluruh fasilitas THC beroperasi di WIB (lihat `Location.timezone` pada
- * `lib/api/types.ts`). `hour12: false` menjaga format 24 jam.
+ * `lib/api/types.ts`). `hour12: false` + `hourCycle: 'h23'` menjaga format
+ * 24 jam mutlak — `h23` menutup celah Chrome yang kadang menampilkan
+ * `24:xx` untuk tengah malam saat hanya `hour12: false` yang disetel.
  */
 const WIB_TIME_FORMATTER = new Intl.DateTimeFormat('id-ID', {
   timeZone: 'Asia/Jakarta',
   hour12: false,
+  hourCycle: 'h23',
   hour: '2-digit',
   minute: '2-digit',
   second: '2-digit',
