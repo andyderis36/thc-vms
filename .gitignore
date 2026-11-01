@@ -18,6 +18,8 @@ frontend/.env.local
 # Production secrets (docker-compose.prod.yml reads repo-root .env).
 /.env
 .env.prod.local
+# E2E live local secrets (auto-loaded by e2e.ps1, never commit).
+.e2e-live.local.env
 
 # Playwright MCP scratch artifacts (console logs + traces)
 .playwright-mcp/

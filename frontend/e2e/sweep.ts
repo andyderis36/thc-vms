@@ -51,7 +51,27 @@ const APPLY = process.argv.includes('--apply')
 const API_MODULE_URL = new URL('./helpers/api.ts', import.meta.url).href
 const MAX_VISIT_PAGES = 200
 const VISIT_MARKER = /(?:^|\|\s*)E2E-[A-Za-z0-9]/
-const USER_MARKER = /^(?:[a-z0-9]+\.)?e2e-[a-z0-9][a-z0-9-]*@transhybrid\.net\.id$/i
+// Domain akun seed bisa di-override (prod memakai @thc.net.id/@thc.com); regex
+// dibangun dari env yang sama dengan ACCOUNTS, default transhybrid.net.id, dan
+// tetap menerima domain default agar sapuan lokal tidak regresi.
+const SWEEP_USER_DOMAINS = new Set<string>(['transhybrid.net.id'])
+for (const candidate of [
+  process.env.E2E_EMAIL_SUPERADMIN,
+  process.env.E2E_EMAIL_ADMIN,
+  process.env.E2E_EMAIL_ADMIN2,
+  process.env.E2E_EMAIL_SECURITY,
+  process.env.E2E_EMAIL_SECURITY2,
+  process.env.E2E_EMAIL_VENDOR,
+]) {
+  const domain = candidate?.includes('@') ? candidate.split('@')[1] : ''
+  if (domain) SWEEP_USER_DOMAINS.add(domain)
+}
+const USER_MARKER = new RegExp(
+  `^(?:[a-z0-9]+\\.)?e2e-[a-z0-9][a-z0-9-]*@(?:${[...SWEEP_USER_DOMAINS]
+    .map((d) => d.replace(/\./g, '\\.'))
+    .join('|')})$`,
+  'i',
+)
 const FACILITY_MARKER = /^E2E-FAC/i
 
 function log(message: string): void {

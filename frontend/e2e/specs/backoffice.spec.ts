@@ -24,6 +24,8 @@ import type { Locator, Page } from '@playwright/test'
 import { expect, test, type Harness } from '../fixtures'
 import {
   LOCATIONS,
+  ACCOUNTS,
+  DEFAULT_PASSWORD,
   apiFetch,
   apiFetchRaw,
   loginViaApi,
@@ -31,7 +33,7 @@ import {
 } from '../helpers/api'
 import { gotoApp } from '../helpers/nav'
 
-const PASSWORD = 'Password123!'
+const PASSWORD = DEFAULT_PASSWORD
 const NEW_PASSWORD = 'RahasiaBaru456!'
 
 /** Bentuk minimal `User` dari openapi yang dipakai spec ini. */
@@ -664,10 +666,10 @@ test('@EDT-03 admin ubah pengawas se-cabang; lintas cabang ditolak (UI & API)', 
 test('@SEED akun seed tetap bisa login dengan peran & lokasi yang benar', async () => {
   // Guard terakhir: memastikan tidak ada test back-office yang menyentuh seed.
   const seeds = [
-    { role: 'super', email: 'superadmin@transhybrid.net.id', apiRole: 'super_admin', location: null },
-    { role: 'admin', email: 'admin1@transhybrid.net.id', apiRole: 'admin', location: LOCATIONS.hq },
-    { role: 'security', email: 'security1a@transhybrid.net.id', apiRole: 'security', location: LOCATIONS.hq },
-    { role: 'vendor', email: 'vendor1a@transhybrid.net.id', apiRole: 'vendor', location: null },
+    { role: 'super', email: ACCOUNTS.super.email, apiRole: 'super_admin', location: null },
+    { role: 'admin', email: ACCOUNTS.admin.email, apiRole: 'admin', location: LOCATIONS.hq },
+    { role: 'security', email: ACCOUNTS.security.email, apiRole: 'security', location: LOCATIONS.hq },
+    { role: 'vendor', email: ACCOUNTS.vendor.email, apiRole: 'vendor', location: null },
   ] as const
 
   for (const seed of seeds) {

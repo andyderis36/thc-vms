@@ -26,6 +26,16 @@
 param(
   [string]$BaseUrl    = 'http://127.0.0.1:8080/api/v1',   # 127.0.0.1, bukan localhost (hindari ::1)
   [string]$Password   = '',   # TIDAK di-hardcode: diisi runtime dari docs / env / argumen
+  # Email seed per akun (default = literal seed saat ini; override via env THCVMS_E2E_*_EMAIL).
+  [string]$SaEmail     = 'superadmin@transhybrid.net.id',
+  [string]$Adm1Email   = 'admin1@transhybrid.net.id',
+  [string]$Adm2Email   = 'admin2@transhybrid.net.id',
+  [string]$Adm3Email   = 'admin3@transhybrid.net.id',
+  [string]$Adm4Email   = 'admin4@transhybrid.net.id',
+  [string]$Adm5Email   = 'admin5@transhybrid.net.id',
+  [string]$Sec1Email   = 'security1a@transhybrid.net.id',
+  [string]$Sec2Email   = 'security2a@transhybrid.net.id',
+  [string]$Vendor1Email = 'vendor1a@transhybrid.net.id',
   [string]$FixtureDir = "$env:TEMP\e2e-bb",
   # Prefix URL objek storage yang dikembalikan API. Lokal memakai MinIO langsung;
   # produksi memakai URL publik Caddy (mis. https://vms.thckalbar.com/s3/thc-vms-bucket).
@@ -90,6 +100,17 @@ if (-not $Password) {
   throw 'Password seed tidak ditemukan. Beri -Password <nilai>, set env THCVMS_E2E_PASSWORD, atau pastikan docs\5. LOCAL_DEV.md tersedia.'
 }
 Write-Host ("  kredensial runtime: password diambil dari " + $(if ($env:THCVMS_E2E_PASSWORD) { 'env THCVMS_E2E_PASSWORD' } else { 'docs\5. LOCAL_DEV.md' }))
+
+# Email seed: env THCVMS_E2E_*_EMAIL menang atas param/default literal.
+if ($env:THCVMS_E2E_SA_EMAIL)      { $SaEmail      = [string]$env:THCVMS_E2E_SA_EMAIL }
+if ($env:THCVMS_E2E_ADM1_EMAIL)    { $Adm1Email    = [string]$env:THCVMS_E2E_ADM1_EMAIL }
+if ($env:THCVMS_E2E_ADM2_EMAIL)    { $Adm2Email    = [string]$env:THCVMS_E2E_ADM2_EMAIL }
+if ($env:THCVMS_E2E_ADM3_EMAIL)    { $Adm3Email    = [string]$env:THCVMS_E2E_ADM3_EMAIL }
+if ($env:THCVMS_E2E_ADM4_EMAIL)    { $Adm4Email    = [string]$env:THCVMS_E2E_ADM4_EMAIL }
+if ($env:THCVMS_E2E_ADM5_EMAIL)    { $Adm5Email    = [string]$env:THCVMS_E2E_ADM5_EMAIL }
+if ($env:THCVMS_E2E_SEC1_EMAIL)    { $Sec1Email    = [string]$env:THCVMS_E2E_SEC1_EMAIL }
+if ($env:THCVMS_E2E_SEC2_EMAIL)    { $Sec2Email    = [string]$env:THCVMS_E2E_SEC2_EMAIL }
+if ($env:THCVMS_E2E_VENDOR1_EMAIL) { $Vendor1Email = [string]$env:THCVMS_E2E_VENDOR1_EMAIL }
 
 # ───────────────────────── transport ─────────────────────────
 function New-Resp {
@@ -326,7 +347,7 @@ trap {
   $tok = ''
   if ($script:Tokens.ContainsKey('SA')) { $tok = [string]$script:Tokens['SA'] }
   if (-not $tok) {
-    $lr = Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = 'superadmin@transhybrid.net.id'; password = $Password })
+    $lr = Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = $SaEmail; password = $Password })
     if ($lr.Status -eq 200 -and $lr.Json -and $lr.Json.data -and $lr.Json.data.token) { $tok = [string]$lr.Json.data.token }
   }
   if ($tok) {
@@ -401,15 +422,15 @@ Write-Host ("  health uptime=" + $h.Json.data.uptime)
 
 # Kredensial: hanya email seed yang nyata. Login satu kali per akun, token dipakai ulang.
 $ACCOUNTS = [ordered]@{
-  sa   = 'superadmin@transhybrid.net.id'
-  adm1 = 'admin1@transhybrid.net.id'
-  adm2 = 'admin2@transhybrid.net.id'
-  adm3 = 'admin3@transhybrid.net.id'
-  adm4 = 'admin4@transhybrid.net.id'
-  adm5 = 'admin5@transhybrid.net.id'
-  sec1 = 'security1a@transhybrid.net.id'
-  sec2 = 'security2a@transhybrid.net.id'
-  vendor1 = 'vendor1a@transhybrid.net.id'
+  sa      = $SaEmail
+  adm1    = $Adm1Email
+  adm2    = $Adm2Email
+  adm3    = $Adm3Email
+  adm4    = $Adm4Email
+  adm5    = $Adm5Email
+  sec1    = $Sec1Email
+  sec2    = $Sec2Email
+  vendor1 = $Vendor1Email
 }
 foreach ($k in $ACCOUNTS.Keys) { [void](Login $k $ACCOUNTS[$k]) }
 Write-Host "  login OK untuk $($ACCOUNTS.Count) akun seed"

@@ -300,7 +300,7 @@ test('@FILE-06 admin lintas cabang 403, vendor lain 404', async ({ h }) => {
   expect(crossBody.error.message).toBe('Tidak berhak mengelola kunjungan cabang lain')
 
   // vendor1b adalah akun seed lain (bukan pemilik kunjungan ini).
-  const otherVendor = await loginViaApi('vendor1b@transhybrid.net.id', DEFAULT_PASSWORD)
+  const otherVendor = await loginViaApi(process.env.E2E_EMAIL_VENDOR2 ?? 'vendor1b@transhybrid.net.id', DEFAULT_PASSWORD)
   const foreignVendor = await apiFetchRaw<ApiEnvelope<unknown>>(otherVendor.token, 'GET', path)
   const foreignBody = expectFailure(foreignVendor, 404, '@FILE-06 vendor lain')
   expect(foreignBody.error.code).toBe('NOT_FOUND')

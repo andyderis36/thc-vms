@@ -190,7 +190,7 @@ test('@AUTH-06 vendor hanya melihat kunjungan miliknya sendiri', async ({ h }) =
     'daftar vendor1a hanya boleh memuat kunjungan miliknya',
   ).toEqual([])
 
-  const vendorB = await loginViaApi('vendor1b@transhybrid.net.id', DEFAULT_PASSWORD)
+  const vendorB = await loginViaApi(process.env.E2E_EMAIL_VENDOR2 ?? 'vendor1b@transhybrid.net.id', DEFAULT_PASSWORD)
   const other = await listVisits(vendorB.token)
   console.log(
     `[@AUTH-06] vendor1b melihat ${other.items.length} kunjungan; ` +
