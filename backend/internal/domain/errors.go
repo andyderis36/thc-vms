@@ -12,7 +12,7 @@ import (
 var (
 	// ErrInvalidCredentials backs the 401 login failure: "Kredensial tidak valid".
 	ErrInvalidCredentials = errors.New("Kredensial tidak valid")
-	// ErrAccountPending backs the 403 login refusal for inactive accounts
+	// ErrAccountPending backs the 403 login refusal for pending or inactive accounts
 	// (self-registered vendors waiting for superadmin approval): the account
 	// exists and the password was right, but it may not sign in yet.
 	ErrAccountPending = errors.New("Akun Anda menunggu persetujuan superadmin.")
@@ -95,7 +95,7 @@ func InvalidCredentials() *AppError {
 	}
 }
 
-// AccountPending builds the 403 login refusal for inactive accounts.
+	// AccountPending builds the 403 login refusal for pending or inactive accounts.
 func AccountPending() *AppError {
 	return &AppError{
 		Status:  http.StatusForbidden,

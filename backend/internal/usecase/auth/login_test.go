@@ -401,6 +401,11 @@ func TestLogin_RejectsInactiveAndBlacklistedAccounts(t *testing.T) {
 	blacklisted.Status = domain.UserStatusBlacklisted
 	users.byEmail[inactive.Email] = inactive
 	users.byEmail[blacklisted.Email] = blacklisted
+	pending := activeAdmin(hashPassword(t, "Password123!"))
+	pending.ID = "user-pending-1"
+	pending.Email = "pending@vendor.example"
+	pending.Status = domain.UserStatusPending
+	users.byEmail[pending.Email] = pending
 	svc := NewService(loginDeps(users))
 
 	_, err := svc.Login(context.Background(), "inactive@thc.local", "Password123!")
@@ -409,6 +414,14 @@ func TestLogin_RejectsInactiveAndBlacklistedAccounts(t *testing.T) {
 	}
 	if got := appErrorOf(t, err); got.Status != 403 || got.Code != "ACCOUNT_PENDING" || got.Message != "Akun Anda menunggu persetujuan superadmin." {
 		t.Fatalf("inactive: got (%d,%s,%s), want the pending-approval 403", got.Status, got.Code, got.Message)
+	}
+
+	_, err = svc.Login(context.Background(), "pending@vendor.example", "Password123!")
+	if err == nil {
+		t.Fatal("pending login succeeded, want 403")
+	}
+	if got := appErrorOf(t, err); got.Status != 403 || got.Code != "ACCOUNT_PENDING" || got.Message != "Akun Anda menunggu persetujuan superadmin." {
+		t.Fatalf("pending: got (%d,%s,%s), want the pending-approval 403", got.Status, got.Code, got.Message)
 	}
 
 	_, err = svc.Login(context.Background(), "black@thc.local", "Password123!")

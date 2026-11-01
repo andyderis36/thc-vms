@@ -155,8 +155,10 @@ WHERE r.name = 'security'
 ORDER BY u.created_at DESC, u.id DESC;
 
 -- PATCH /users/security/{id}/status (openapi L161-188). Accepts only
--- 'active'/'inactive' at the request boundary; the CHECK constraint on
--- users.status additionally rejects 'blacklisted' writes from this path.
+-- 'active'/'inactive' at the request boundary; the superadmin path
+-- PATCH /users/:id/status additionally admits 'pending' through this same
+-- statement. The CHECK constraint on users.status rejects every other value
+-- ('blacklisted' included) from both paths.
 -- name: UpdateUserStatus :one
 UPDATE users
 SET status     = $2,

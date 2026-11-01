@@ -148,6 +148,17 @@ func TestCheckUserStatusChange(t *testing.T) {
 		t.Fatalf("admin flip must be allowed: %v", err)
 	}
 
+	pendingTarget := domain.ManagedUser{
+		User: domain.User{ID: "target-2", Status: domain.UserStatusPending},
+		Role: domain.RoleVendor,
+	}
+	if err := superadmin.CheckUserStatusChange(actor, true, pendingTarget, domain.UserStatusActive); err != nil {
+		t.Fatalf("pending approval must be allowed: %v", err)
+	}
+	if err := superadmin.CheckUserStatusChange(actor, true, adminTarget, domain.UserStatusPending); err != nil {
+		t.Fatalf("pending vocabulary must be accepted: %v", err)
+	}
+
 	mustAppError(t,
 		superadmin.CheckUserStatusChange(actor, false, domain.ManagedUser{}, domain.UserStatusInactive),
 		404, "NOT_FOUND")

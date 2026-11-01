@@ -17,10 +17,10 @@ func newRegisterEngine(svc *stubAuthService) *gin.Engine {
 	return engine
 }
 
-func TestRegister_Returns201WithInactiveUser(t *testing.T) {
+func TestRegister_Returns201WithPendingUser(t *testing.T) {
 	profile := cannedAuthProfile()
 	profile.Role = domain.RoleVendor
-	profile.Status = domain.UserStatusInactive
+	profile.Status = domain.UserStatusPending
 	profile.Type = domain.UserTypeExternal
 	profile.LocationID = nil
 	profile.LocationName = nil
@@ -34,8 +34,8 @@ func TestRegister_Returns201WithInactiveUser(t *testing.T) {
 	if user["role"] != "vendor" {
 		t.Fatalf("role = %v, want vendor (server-derived, never from the body)", user["role"])
 	}
-	if user["status"] != "inactive" {
-		t.Fatalf("status = %v, want inactive (never immediately usable)", user["status"])
+	if user["status"] != "pending" {
+		t.Fatalf("status = %v, want pending (never immediately usable)", user["status"])
 	}
 	if user["location_id"] != nil {
 		t.Fatalf("location_id = %v, want JSON null for vendor", user["location_id"])
@@ -57,7 +57,7 @@ func TestRegister_Returns201WithInactiveUser(t *testing.T) {
 func TestRegister_ForwardsCatalogueVendorID(t *testing.T) {
 	profile := cannedAuthProfile()
 	profile.Role = domain.RoleVendor
-	profile.Status = domain.UserStatusInactive
+	profile.Status = domain.UserStatusPending
 	svc := &stubAuthService{profile: profile}
 	engine := newRegisterEngine(svc)
 

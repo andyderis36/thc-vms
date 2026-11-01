@@ -693,6 +693,20 @@ func TestSuperAdmin_UpdateUserStatus(t *testing.T) {
 		}
 	})
 
+	t.Run("200 approves a pending self-registration", func(t *testing.T) {
+		target := managedAccount("target-2", "vendor@vendor.example", domain.RoleVendor, nil)
+		target.User.Status = domain.UserStatusPending
+		users := newStubManagedUsers(target)
+		engine := newSuperAdminEngine(users, newStubLocationAdmin(), domain.RoleSuperAdmin)
+
+		rec := serveJSON(engine, "PATCH", "/users/target-2/status", `{"status":"active"}`)
+		mustStatus(t, rec, http.StatusOK)
+		data := decodeData[map[string]any](t, mustSuccess(t, rec))
+		if data["status"] != "active" {
+			t.Fatalf("pending approval must flip to active, got %v", data)
+		}
+	})
+
 	t.Run("403 self, 403 other super_admin, 404 ghost, 400 vocabulary", func(t *testing.T) {
 		users := newStubManagedUsers(
 			managedAccount("actor-1", "saya@thc.local", domain.RoleSuperAdmin, nil),

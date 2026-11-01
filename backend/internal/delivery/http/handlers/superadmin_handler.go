@@ -719,14 +719,14 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 }
 
 // updateManagedStatusBody mirrors the PATCH /users/:id/status body: the
-// contract enum is ONLY active|inactive.
+// contract enum is ONLY active|pending|inactive.
 type updateManagedStatusBody struct {
 	Status string `json:"status"`
 }
 
 // UpdateUserStatus serves PATCH /users/:id/status with 200. Unknown ids are
 // 404, flipping the caller's own account is 403, touching another
-// super_admin row is 403, and any status outside active|inactive is 400.
+// super_admin row is 403, and any status outside active|pending|inactive is 400.
 func (h *SuperAdminHandler) UpdateUserStatus(c *gin.Context) {
 	id, ok := requireSuperAdmin(c)
 	if !ok {

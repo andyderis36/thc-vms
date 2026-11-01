@@ -25,7 +25,7 @@ type RegisterVendorInput struct {
 	VendorName string
 }
 
-// RegisterVendor creates one vendor account with status inactive: the account
+// RegisterVendor creates one vendor account with status pending: the account
 // exists but cannot sign in until a superadmin flips it to active. Validation
 // is exactly the managed-user create rule with role=vendor (name/email/
 // password mandatory, NIK 16 digits, vendor catalogue-wins, no location), so
@@ -70,7 +70,7 @@ func (s *Service) RegisterVendor(ctx context.Context, in RegisterVendorInput) (P
 		RoleID:             s.vendorRoleID,
 		LocationID:         nil,
 		Type:               accountType,
-		Status:             domain.UserStatusInactive,
+		Status:             domain.UserStatusPending,
 		VendorID:           in.VendorID,
 		VendorNameOverride: vendorOverride,
 	})

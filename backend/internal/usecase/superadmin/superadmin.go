@@ -448,15 +448,17 @@ func ValidateUserListRole(raw string) (*domain.RoleName, error) {
 
 // CheckUserStatusChange guards PATCH /users/:id/status: the target must
 // exist (found=false renders 404 upstream), the status must be in the
-// active|inactive vocabulary, the caller must not flip its own account, and
-// no super_admin row may be touched by anyone but itself (which the self
+// active|pending|inactive vocabulary (pending admits the approval of a
+// never-approved self-registration, active reactivates a deactivated
+// account, inactive deactivates), the caller must not flip its own account,
+// and no super_admin row may be touched by anyone but itself (which the self
 // rule already refuses, so every other super_admin row is untouchable).
 func CheckUserStatusChange(actorID domain.UUID, found bool, target domain.ManagedUser, status domain.UserStatus) error {
 	if !found {
 		return domain.NotFoundEntity("Akun")
 	}
-	if status != domain.UserStatusActive && status != domain.UserStatusInactive {
-		return badRequest("Status harus active atau inactive.")
+	if status != domain.UserStatusActive && status != domain.UserStatusPending && status != domain.UserStatusInactive {
+		return badRequest("Status harus active, pending, atau inactive.")
 	}
 	if target.User.ID == actorID {
 		return forbidden("Tidak dapat mengubah status akun sendiri.")
