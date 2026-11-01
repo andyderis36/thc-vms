@@ -269,6 +269,10 @@ describe('KioskStatusStrip — pita identitas kios ponsel', () => {
     expect(name.className).toContain('min-w-0')
     expect(name.className).toContain('truncate')
     expect(name.className).toContain('font-bold')
+    // Nama = pengisi baris (flex-1) yang menyusut sendiri, dan membawa
+    // tooltip nama PENUH di elemennya (bukan gabungan di baris).
+    expect(name.className).toContain('flex-1')
+    expect(name).toHaveAttribute('title', 'Joko Susilo')
 
     const shiftClasses = shift.className.split(/\s+/)
     expect(shiftClasses).toContain('ml-auto')
@@ -281,6 +285,36 @@ describe('KioskStatusStrip — pita identitas kios ponsel', () => {
     // Pill shift polos: teks saja, TANPA ikon SVG.
     expect(shift.querySelector('svg')).toBeNull()
     expect(shift).toHaveTextContent('Shift Malam')
+  })
+
+  it('nama panjang di 360px: ketiga elemen tetap tampil, nama truncate + tooltip penuh', () => {
+    render(
+      <KioskStatusStrip
+        guardName="Muhammad Abdurrahman Wahyudi Pratama"
+        locationName="Kantor Pusat THC (Pontianak)"
+        shiftLabel="Shift Malam"
+      />,
+    )
+
+    const name = screen.getByTestId('kiosk-guard-name')
+    const shift = screen.getByTestId('kiosk-shift')
+    const location = screen.getByTestId('kiosk-location')
+
+    // Ketiga elemen identitas tampil serentak — tak satu pun disembunyikan
+    // atau digantikan saat nama panjang memaksa baris 1 menyempit.
+    expect(name).toHaveTextContent('Muhammad Abdurrahman Wahyudi Pratama')
+    expect(shift).toHaveTextContent('Shift Malam')
+    expect(location).toHaveTextContent('Kantor Pusat THC (Pontianak)')
+
+    // Nama memecah dirinya sendiri (flex-1 + min-w-0 truncate) dan
+    // menyimpan nama PENUH di title; pill shift dijaga utuh.
+    expect(name.className).toContain('flex-1')
+    expect(name.className).toContain('min-w-0')
+    expect(name.className).toContain('truncate')
+    expect(name).toHaveAttribute('title', 'Muhammad Abdurrahman Wahyudi Pratama')
+    expect(shift.className).toContain('ml-auto')
+    expect(shift.className).toContain('shrink-0')
+    expect(shift.className).toContain('whitespace-nowrap')
   })
 
   it('chip lokasi datang SETELAH baris 1 dalam urutan DOM', () => {
