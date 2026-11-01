@@ -1545,7 +1545,7 @@ components:
           description: Nama fasilitas cabang/POP penugasan
         status:
           type: string
-          enum: [active, inactive, blacklisted]
+          enum: [active, inactive, pending, blacklisted]
           example: active
         type:
           type: string
@@ -1626,7 +1626,9 @@ components:
       properties:
         status:
           type: string
-          enum: [active, inactive]
+          enum: [active, inactive, pending]
+
+
 
     UpdateSecurityUserRequest:
       type: object

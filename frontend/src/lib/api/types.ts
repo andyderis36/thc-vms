@@ -51,7 +51,7 @@ export interface User {
   role: Role;
   location_id: string | null;
   location_name: string | null;
-  status: 'active' | 'inactive' | 'blacklisted';
+  status: 'active' | 'inactive' | 'pending' | 'blacklisted';
   type: 'internal' | 'external';
   vendor_name: string | null;
   /**
@@ -340,7 +340,7 @@ export interface CreateSecurityUserRequest {
 }
 
 export interface UpdateUserStatusRequest {
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'pending';
 }
 
 /**
