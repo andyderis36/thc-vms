@@ -123,7 +123,7 @@ test('@AUD-02 hapus kunjungan lewat API menghasilkan baris visit.delete di tabel
 
     await page.getByLabel('Aksi').selectOption({ value: 'visit.delete' })
 
-    const row = page.locator('tbody tr').filter({ hasText: visit.id })
+    const row = page.locator('tbody tr').filter({ hasText: visit.code })
     await expect(row).toHaveCount(1)
     await expect(row).toContainText('Hapus kunjungan')
 
