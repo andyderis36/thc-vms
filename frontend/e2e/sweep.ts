@@ -62,6 +62,7 @@ for (const candidate of [
   process.env.E2E_EMAIL_SECURITY,
   process.env.E2E_EMAIL_SECURITY2,
   process.env.E2E_EMAIL_VENDOR,
+  process.env.E2E_EMAIL_VENDOR2,
 ]) {
   const domain = candidate?.includes('@') ? candidate.split('@')[1] : ''
   if (domain) SWEEP_USER_DOMAINS.add(domain)

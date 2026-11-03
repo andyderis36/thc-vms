@@ -200,11 +200,25 @@ test('@FILE-02 admin se-cabang mengunduh SPK: 200, application/pdf, body tidak k
 // @FILE-03 - super_admin lintas cabang: SPK kunjungan Sambas tetap 200
 // ---------------------------------------------------------------------------
 test('@FILE-03 super_admin mengakses SPK kunjungan cabang Sambas: 200', async ({ h }) => {
+  const sambasToken = await h.tokenAs('admin-sambas')
+  const sambasMe = await apiFetchRaw<ApiEnvelope<{ location_id: string | null }>>(
+    sambasToken,
+    'GET',
+    '/auth/me',
+  )
+  expect(sambasMe.status, 'GET /auth/me admin-sambas harus 200').toBe(200)
+  if (!sambasMe.body.success) {
+    throw new Error(`GET /auth/me admin-sambas gagal: ${sambasMe.body.error.code}`)
+  }
+  const sambasLocationId = sambasMe.body.data.location_id
+  expect(sambasLocationId, 'lokasi runtime cabang Sambas wajib ada').not.toBeNull()
   const created = await h.createVisit('file03', {
     withFiles: true,
-    locationId: LOCATIONS.sambas,
+    locationId: sambasLocationId ?? undefined,
   })
-  expect(created.locationId, '@FILE-03: fixture harus di cabang Sambas').toBe(LOCATIONS.sambas)
+  expect(created.locationId, '@FILE-03: fixture harus di cabang runtime Sambas').toBe(
+    sambasLocationId,
+  )
 
   const superToken = await h.tokenAs('super')
   const path = visitFilePath(created.id, 'assignment_letter')

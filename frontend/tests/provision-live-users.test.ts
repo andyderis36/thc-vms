@@ -34,6 +34,7 @@ import {
   parseTeardownArgs,
   readLedgerFile,
   resolveProvisionLocationId,
+  resolveSecondLocationId,
   sanitizeRunId,
   writeLedger,
 } from '../e2e/provision-live-users'
@@ -48,6 +49,7 @@ function sweepUserMarker(env: Record<string, string | undefined>): RegExp {
     'E2E_EMAIL_SECURITY',
     'E2E_EMAIL_SECURITY2',
     'E2E_EMAIL_VENDOR',
+    'E2E_EMAIL_VENDOR2',
   ] as const) {
     const candidate = env[key]
     const domain = candidate?.includes('@') ? candidate.split('@')[1] : ''
@@ -119,13 +121,16 @@ describe('provision-live-users email-gen', () => {
     expect(emailDomain({ E2E_EMAIL_SUPERADMIN: 'ops@thc.net.id' })).toBe('thc.net.id')
   })
 
-  it('tiga peran berbeda dan unik', () => {
+  it('enam peran berbeda dan unik', () => {
     const emails = buildEmails('abc123', domain)
-    const values = [emails.admin, emails.security, emails.vendor]
-    expect(new Set(values).size).toBe(3)
+    const values = [emails.admin, emails.security, emails.vendor, emails.admin2, emails.security2, emails.vendor2]
+    expect(new Set(values).size).toBe(6)
     expect(emails.admin).toBe('e2e-abc123-admin@transhybrid.net.id')
     expect(emails.security).toBe('e2e-abc123-security@transhybrid.net.id')
     expect(emails.vendor).toBe('e2e-abc123-vendor@transhybrid.net.id')
+    expect(emails.admin2).toBe('e2e-abc123-admin2@transhybrid.net.id')
+    expect(emails.security2).toBe('e2e-abc123-security2@transhybrid.net.id')
+    expect(emails.vendor2).toBe('e2e-abc123-vendor2@transhybrid.net.id')
   })
 
   it('run-id berbeda -> email berbeda', () => {
@@ -136,7 +141,7 @@ describe('provision-live-users email-gen', () => {
 
   it('local-part huruf kecil alfanumerik-strip', () => {
     const emails = buildEmails('ABC Def__99', domain)
-    for (const email of [emails.admin, emails.security, emails.vendor]) {
+    for (const email of [emails.admin, emails.security, emails.vendor, emails.admin2, emails.security2, emails.vendor2]) {
       const local = email.split('@')[0] ?? ''
       expect(local).toMatch(/^e2e-[a-z0-9][a-z0-9-]*$/)
     }
@@ -152,6 +157,9 @@ describe('provision-live-users email-gen', () => {
       expect(marker.test(emails.admin)).toBe(true)
       expect(marker.test(emails.security)).toBe(true)
       expect(marker.test(emails.vendor)).toBe(true)
+      expect(marker.test(emails.admin2)).toBe(true)
+      expect(marker.test(emails.security2)).toBe(true)
+      expect(marker.test(emails.vendor2)).toBe(true)
     }
   })
 
@@ -174,17 +182,20 @@ describe('provision-live-users export', () => {
 
   it('baris KEY=VALUE tanpa spasi untuk injeksi e2e.ps1', () => {
     for (const line of lines) {
-      expect(line).toMatch(/^E2E_[A-Z_]+=\S+$/)
+      expect(line).toMatch(/^E2E_[A-Z0-9_]+=\S+$/)
     }
   })
 
-  it('memuat kunci wajib admin/security/vendor + password + run-id', () => {
+  it('memuat kunci wajib admin/security/vendor + admin2/security2/vendor2 + password + run-id', () => {
     const keys = lines.map((line) => line.split('=')[0])
     expect(keys).toEqual([
       'E2E_RUN_ID',
       'E2E_EMAIL_ADMIN',
       'E2E_EMAIL_SECURITY',
       'E2E_EMAIL_VENDOR',
+      'E2E_EMAIL_ADMIN2',
+      'E2E_EMAIL_SECURITY2',
+      'E2E_EMAIL_VENDOR2',
       'E2E_PASSWORD',
     ])
   })
@@ -216,6 +227,9 @@ describe('provision-live-users secret-scan', () => {
     }
     expect(masked).toContain('E2E_PASSWORD=***')
     expect(masked).toContain(`E2E_EMAIL_VENDOR=${emails.vendor}`)
+    expect(masked).toContain(`E2E_EMAIL_ADMIN2=${emails.admin2}`)
+    expect(masked).toContain(`E2E_EMAIL_SECURITY2=${emails.security2}`)
+    expect(masked).toContain(`E2E_EMAIL_VENDOR2=${emails.vendor2}`)
   })
 })
 
@@ -285,9 +299,16 @@ describe('provision-live-users teardown', () => {
     const emails = buildEmails('roundtrip1', 'transhybrid.net.id')
     const path = writeLedger('roundtrip1', emails, env)
     expect(path).toBe(ledgerPathFor('roundtrip1', env))
-    expect(readLedgerFile(path).emails).toEqual([emails.admin, emails.security, emails.vendor])
+    expect(readLedgerFile(path).emails).toEqual([
+      emails.admin,
+      emails.security,
+      emails.vendor,
+      emails.admin2,
+      emails.security2,
+      emails.vendor2,
+    ])
     const targets = collectTeardownTargets({ ...env, E2E_RUN_ID: 'roundtrip1' }, [])
-    for (const email of [emails.admin, emails.security, emails.vendor]) {
+    for (const email of [emails.admin, emails.security, emails.vendor, emails.admin2, emails.security2, emails.vendor2]) {
       expect(targets.emails).toContain(email)
     }
   })
@@ -297,13 +318,16 @@ describe('provision-live-users teardown', () => {
     const env = {
       E2E_RUN_ID: 'recon9',
       E2E_EMAIL_ADMIN: 'E2E-RECON9-ADMIN@transhybrid.net.id',
+      E2E_EMAIL_ADMIN2: 'E2E-RECON9-ADMIN2@transhybrid.net.id',
+      E2E_EMAIL_SECURITY2: 'e2e-recon9-security2@transhybrid.net.id',
+      E2E_EMAIL_VENDOR2: 'e2e-recon9-vendor2@transhybrid.net.id',
       E2E_EMAIL_SUPERADMIN: 'superadmin@transhybrid.net.id',
       E2E_PROVISION_LEDGER_DIR: dir,
     } as Record<string, string | undefined>
     const targets = collectTeardownTargets(env, ['--email', 'e2e-recon9-admin@transhybrid.net.id'])
     expect(targets.runId).toBe('recon9')
     const rebuilt = buildEmails('recon9', 'transhybrid.net.id')
-    for (const email of [rebuilt.admin, rebuilt.security, rebuilt.vendor]) {
+    for (const email of [rebuilt.admin, rebuilt.security, rebuilt.vendor, rebuilt.admin2, rebuilt.security2, rebuilt.vendor2]) {
       expect(targets.emails).toContain(email)
     }
     expect(targets.emails.filter((e) => e === rebuilt.admin)).toHaveLength(1)
@@ -343,5 +367,38 @@ describe('resolveProvisionLocationId', () => {
   it('kosong bila tidak ada lokasi', () => {
     expect(resolveProvisionLocationId([])).toBe('')
     expect(resolveProvisionLocationId([{ id: '', name: 'X' }])).toBe('')
+  })
+})
+
+describe('resolveSecondLocationId', () => {
+  it('prefer nama mengandung sambas di antara non-primer', () => {
+    expect(
+      resolveSecondLocationId(
+        [
+          { id: 'a', name: 'Kantor Pusat THC' },
+          { id: 'b', name: 'ARK-01' },
+          { id: 'c', name: 'SBS-01-SAMBAS' },
+        ],
+        'a',
+      ),
+    ).toBe('c')
+  })
+
+  it('fallback abjad pertama non-primer bila tanpa sambas', () => {
+    expect(
+      resolveSecondLocationId(
+        [
+          { id: 'a', name: 'Kantor Pusat THC' },
+          { id: 'c', name: 'SKS-01' },
+          { id: 'b', name: 'ARK-01' },
+        ],
+        'a',
+      ),
+    ).toBe('b')
+  })
+
+  it('fallback id primer bila hanya satu lokasi', () => {
+    expect(resolveSecondLocationId([{ id: 'a', name: 'Kantor Pusat THC' }], 'a')).toBe('a')
+    expect(resolveSecondLocationId([], 'a')).toBe('a')
   })
 })

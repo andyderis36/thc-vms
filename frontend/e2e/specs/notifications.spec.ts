@@ -178,7 +178,7 @@ test('@NOTIF-02 badge belum-dibaca cocok dengan unread_count API dan baris kunju
   const item = notificationFor(feed, visit.id, 'visit_requested')
   expect(item.is_read, 'notifikasi yang baru dibuat wajib belum dibaca').toBe(false)
   expect(item.visit_id).toBe(visit.code)
-  expect(item.location_id).toBe(LOCATIONS.hq)
+  expect(item.location_id).toBe(visit.locationId)
   expect(feed.unread_count, 'harus ada minimal satu unread baru').toBeGreaterThan(0)
 
   const page = await h.openAs('admin')
@@ -249,7 +249,7 @@ test('@NOTIF-04 tandai semua dibaca menurunkan unread_count akun itu ke nol', as
 
   const before = await listNotifications(token)
   const item = notificationFor(before, visit.id, 'visit_requested')
-  expect(item.location_id).toBe(LOCATIONS.sambas)
+  expect(item.location_id).toBe(visit.locationId)
   expect(item.is_read).toBe(false)
   expect(before.unread_count).toBeGreaterThan(0)
 
@@ -319,10 +319,10 @@ test('@NOTIF-05 isolasi: notifikasi pengguna lain tidak bisa ditandai (404) dan 
   const superAll = await listNotifications(superToken)
   const superHq = notificationFor(superAll, hqVisit.id, 'visit_requested')
   const superSambas = notificationFor(superAll, sambasVisit.id, 'visit_requested')
-  expect(superHq.location_id).toBe(LOCATIONS.hq)
-  expect(superSambas.location_id).toBe(LOCATIONS.sambas)
+  expect(superHq.location_id).toBe(hqVisit.locationId)
+  expect(superSambas.location_id).toBe(sambasVisit.locationId)
 
-  const superSambasOnly = await listNotifications(superToken, { locationId: LOCATIONS.sambas })
+  const superSambasOnly = await listNotifications(superToken, { locationId: sambasVisit.locationId })
   expect(
     superSambasOnly.items.some((candidate) => candidate.id === superHq.id),
     'filter Sambas tidak boleh memuat notifikasi cabang HQ',
@@ -336,7 +336,7 @@ test('@NOTIF-05 isolasi: notifikasi pengguna lain tidak bisa ditandai (404) dan 
     'unread_count global tidak terpengaruh filter location_id',
   ).toBe(superAll.unread_count)
 
-  const superHqOnly = await listNotifications(superToken, { locationId: LOCATIONS.hq })
+  const superHqOnly = await listNotifications(superToken, { locationId: hqVisit.locationId })
   expect(
     superHqOnly.items.some((candidate) => candidate.id === superSambas.id),
     'filter HQ tidak boleh memuat notifikasi cabang Sambas',

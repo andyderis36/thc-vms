@@ -2,8 +2,9 @@
  * Provisi akun E2E sekali pakai untuk target LIVE maupun lokal.
  *
  * Dipanggil oleh `e2e.ps1` SEBELUM suite berjalan supaya run yang menembak
- * backend tanpa akun seed (produksi) tetap punya tiga akun harness
- * (admin, security, vendor) yang terisolasi per run-id.
+ * backend tanpa akun seed (produksi) tetap punya enam akun harness
+ * (admin, security, vendor, admin2, security2, vendor2) yang terisolasi
+ * per run-id.
  *
  * Pemakaian:
  *   E2E_API_BASE_URL=http://localhost:8080/api/v1 E2E_LOCAL_PROVISION=1 node e2e/provision-live-users.ts
@@ -32,6 +33,7 @@
  *
  * Ekspor: blok `BEGIN_EXPORT`/`END_EXPORT` berisi baris `KEY=VALUE`
  * (`E2E_RUN_ID`, `E2E_EMAIL_ADMIN`, `E2E_EMAIL_SECURITY`, `E2E_EMAIL_VENDOR`,
+ * `E2E_EMAIL_ADMIN2`, `E2E_EMAIL_SECURITY2`, `E2E_EMAIL_VENDOR2`,
  * `E2E_PASSWORD`) untuk diinjeksi `e2e.ps1` ke environment run.
  *
  * Teardown mandiri (ledger-based self-delete):
@@ -39,6 +41,7 @@
  *     [--email <addr> ...] [--ledger <path>]
  * Membaca email target dari argv (`--email`/`--run-id`), env (`E2E_RUN_ID`,
  * `E2E_EMAIL_ADMIN`/`E2E_EMAIL_SECURITY`/`E2E_EMAIL_VENDOR`,
+ * `E2E_EMAIL_ADMIN2`/`E2E_EMAIL_SECURITY2`/`E2E_EMAIL_VENDOR2`,
  * `E2E_PROVISION_LEDGER`), dan ledger temp
  * (`$TEMP/e2e-provision-<runid>.json`, ditulis otomatis tiap provisi sukses;
  * bila `--run-id` tak dikenal, seluruh ledger temp dipindai). Lookup
@@ -77,6 +80,9 @@ export interface ProvisionEmails {
   admin: string
   security: string
   vendor: string
+  admin2: string
+  security2: string
+  vendor2: string
 }
 
 interface GateDecision {
@@ -194,6 +200,9 @@ export function buildEmails(runId: string, domain: string): ProvisionEmails {
     admin: `${local}-admin@${domain.toLowerCase()}`,
     security: `${local}-security@${domain.toLowerCase()}`,
     vendor: `${local}-vendor@${domain.toLowerCase()}`,
+    admin2: `${local}-admin2@${domain.toLowerCase()}`,
+    security2: `${local}-security2@${domain.toLowerCase()}`,
+    vendor2: `${local}-vendor2@${domain.toLowerCase()}`,
   }
 }
 
@@ -211,6 +220,23 @@ export function resolveProvisionLocationId(locations: ProvisionLocation[]): stri
   const hq = sorted.find((l) => l.name.toLowerCase().includes('pusat'))
   const picked = hq ?? sorted[0]
   return picked === undefined ? '' : picked.id
+}
+
+/**
+ * Pilih lokasi KEDUA untuk admin2/security2: non-primer pertama abjad,
+ * prefer nama mengandung "sambas" (case-insensitive); fallback id primer
+ * (HQ) bila tidak ada kandidat lain.
+ */
+export function resolveSecondLocationId(locations: ProvisionLocation[], primaryId: string): string {
+  const candidates = [...locations]
+    .filter((l) => l.id !== '' && l.id !== primaryId)
+    .sort((a, b) => a.name.localeCompare(b.name))
+  if (candidates.length === 0) {
+    return primaryId
+  }
+  const sambas = candidates.find((l) => l.name.toLowerCase().includes('sambas'))
+  const picked = sambas ?? candidates[0]
+  return picked === undefined ? primaryId : picked.id
 }
 
 /** Satu kata sandi acak bersama (16 karakter alfanumerik, hanya di memori). */
@@ -242,6 +268,9 @@ export function buildExportLines(
     `E2E_EMAIL_ADMIN=${emails.admin}`,
     `E2E_EMAIL_SECURITY=${emails.security}`,
     `E2E_EMAIL_VENDOR=${emails.vendor}`,
+    `E2E_EMAIL_ADMIN2=${emails.admin2}`,
+    `E2E_EMAIL_SECURITY2=${emails.security2}`,
+    `E2E_EMAIL_VENDOR2=${emails.vendor2}`,
     `E2E_PASSWORD=${password}`,
   ]
 }
@@ -317,7 +346,10 @@ export function writeLedger(
   try {
     writeFileSync(
       path,
-      JSON.stringify({ runId, emails: [emails.admin, emails.security, emails.vendor] }),
+      JSON.stringify({
+        runId,
+        emails: [emails.admin, emails.security, emails.vendor, emails.admin2, emails.security2, emails.vendor2],
+      }),
       'utf8',
     )
     return path
@@ -417,7 +449,7 @@ export function collectTeardownTargets(
   for (const email of args.emails) {
     add(email)
   }
-  for (const key of ['E2E_EMAIL_ADMIN', 'E2E_EMAIL_SECURITY', 'E2E_EMAIL_VENDOR'] as const) {
+  for (const key of ['E2E_EMAIL_ADMIN', 'E2E_EMAIL_SECURITY', 'E2E_EMAIL_VENDOR', 'E2E_EMAIL_ADMIN2', 'E2E_EMAIL_SECURITY2', 'E2E_EMAIL_VENDOR2'] as const) {
     const value = env[key]
     if (value !== undefined) {
       add(value)
@@ -437,6 +469,9 @@ export function collectTeardownTargets(
     add(rebuilt.admin)
     add(rebuilt.security)
     add(rebuilt.vendor)
+    add(rebuilt.admin2)
+    add(rebuilt.security2)
+    add(rebuilt.vendor2)
   }
   return { runId, emails: [...found.values()] }
 }
@@ -602,6 +637,9 @@ async function preDeleteRunAccounts(
     [emails.admin, 'admin'],
     [emails.security, 'security'],
     [emails.vendor, 'vendor'],
+    [emails.admin2, 'admin'],
+    [emails.security2, 'security'],
+    [emails.vendor2, 'vendor'],
   ])
   const managed = expectArray(await api.apiFetchRaw(token, 'GET', '/users'), 'GET /users')
   const securities = expectArray(
@@ -674,7 +712,8 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   if (hq === '') {
     fail('GET /locations kosong: tidak ada lokasi untuk akun admin/security')
   }
-  log(`run-id ${runId} domain ${emailDomain()} (3 akun: admin/security/vendor)`)
+  const second = resolveSecondLocationId(locList, hq)
+  log(`run-id ${runId} domain ${emailDomain()} (6 akun: admin/security/vendor + admin2/security2/vendor2; lokasi kedua ${second})`)
 
   const pace = async (label: string): Promise<void> => {
     const ms = pacingMs()
@@ -768,6 +807,90 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   }
   log(`login security ${emails.security} -> 200`)
 
+  // ---- 4. vendor2: register publik -> active, lalu verifikasi login ----
+  await pace('register vendor2')
+  const vendor2Id = expectId(
+    await api.apiFetchRaw('', 'POST', '/auth/register', {
+      name: `E2E Provision Vendor2 ${runId}`,
+      email: emails.vendor2,
+      password,
+      nik: makeNik(),
+    }),
+    201,
+    'POST /auth/register (vendor2)',
+  )
+  log(`register vendor2 ${emails.vendor2} -> 201 id=${vendor2Id}`)
+
+  await pace('aktivasi vendor2')
+  expectId(
+    await api.apiFetchRaw(superToken, 'PATCH', `/users/${encodeURIComponent(vendor2Id)}/status`, {
+      status: 'active',
+    }),
+    200,
+    'PATCH /users/{vendor2Id}/status active',
+  )
+  log(`aktivasi vendor2 ${emails.vendor2} -> 200 active`)
+
+  await pace('verifikasi login vendor2')
+  const vendor2Login = await api.apiFetchRaw('', 'POST', '/auth/login', {
+    email: emails.vendor2,
+    password,
+  })
+  if (vendor2Login.status !== 200) {
+    fail(`login vendor2 ${emails.vendor2} -> HTTP ${vendor2Login.status} (harus 200): ${describe(vendor2Login.body)}`)
+  }
+  log(`login vendor2 ${emails.vendor2} -> 200`)
+
+  // ---- 5. admin2 lokasi kedua via POST /users (superadmin-only) ----
+  await pace('create admin2')
+  const admin2Id = expectId(
+    await api.apiFetchRaw(superToken, 'POST', '/users', {
+      name: `E2E Provision Admin2 ${runId}`,
+      email: emails.admin2,
+      password,
+      nik: makeNik(),
+      role: 'admin',
+      location_id: second,
+    }),
+    201,
+    'POST /users (admin2)',
+  )
+  log(`create admin2 ${emails.admin2} -> 201 id=${admin2Id}`)
+
+  await pace('verifikasi login admin2')
+  const admin2Login = await api.apiFetchRaw('', 'POST', '/auth/login', {
+    email: emails.admin2,
+    password,
+  })
+  if (admin2Login.status !== 200) {
+    fail(`login admin2 ${emails.admin2} -> HTTP ${admin2Login.status} (harus 200): ${describe(admin2Login.body)}`)
+  }
+  log(`login admin2 ${emails.admin2} -> 200`)
+
+  // ---- 6. security2 lokasi kedua via POST /users/security ----
+  await pace('create security2')
+  const security2Id = expectId(
+    await api.apiFetchRaw(superToken, 'POST', '/users/security', {
+      name: `E2E Provision Security2 ${runId}`,
+      email: emails.security2,
+      password,
+      location_id: second,
+    }),
+    201,
+    'POST /users/security (security2)',
+  )
+  log(`create security2 ${emails.security2} -> 201 id=${security2Id}`)
+
+  await pace('verifikasi login security2')
+  const security2Login = await api.apiFetchRaw('', 'POST', '/auth/login', {
+    email: emails.security2,
+    password,
+  })
+  if (security2Login.status !== 200) {
+    fail(`login security2 ${emails.security2} -> HTTP ${security2Login.status} (harus 200): ${describe(security2Login.body)}`)
+  }
+  log(`login security2 ${emails.security2} -> 200`)
+
   for (const masked of maskSecrets(buildExportLines(runId, emails, password))) {
     log(masked)
   }
@@ -780,7 +903,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
     console.log(line)
   }
   console.log(`[e2e-provision] ${EXPORT_END}`)
-  log('provisi 3 akun selesai (admin+security+vendor login 200)')
+  log('provisi 6 akun selesai (admin+security+vendor+admin2+security2+vendor2 login 200)')
 }
 
 const invokedAsScript = (process.argv[1] ?? '').replace(/\\/g, '/').endsWith('e2e/provision-live-users.ts')

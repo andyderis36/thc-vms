@@ -25,7 +25,7 @@
 
 import type { Page } from '@playwright/test'
 import { expect, test, type Harness } from '../fixtures'
-import { LOCATIONS, apiFetch, apiFetchRaw, type ApiEnvelope } from '../helpers/api'
+import { LOCATIONS, apiFetch, apiFetchRaw, isLiveRun, type ApiEnvelope } from '../helpers/api'
 import { gotoApp } from '../helpers/nav'
 
 const PASSWORD = 'Password123!'
@@ -48,6 +48,25 @@ function uniqueNik(): string {
 
 function tableRowWith(page: Page, text: string) {
   return page.locator('tbody tr').filter({ hasText: text })
+}
+
+async function runtimeBranchId(h: Harness): Promise<string> {
+  const token = await h.tokenAs('super')
+  const rows = expectData(
+    (await apiFetch<ApiEnvelope<Array<{ id: string; name: string }>>>(
+      token,
+      'GET',
+      '/locations',
+    )).body,
+    'GET /locations',
+  )
+  const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name))
+  const picked =
+    sorted.find((row) => row.name.toLowerCase().includes('pusat')) ?? sorted[0]
+  if (picked === undefined) {
+    throw new Error('[users] katalog lokasi runtime kosong.')
+  }
+  return picked.id
 }
 
 function expectData<T>(body: ApiEnvelope<T>, context: string): T {
@@ -109,6 +128,10 @@ async function expectToast(page: Page, text: string): Promise<void> {
 test('@USR-01 pencarian email di /coordinators menyaring baris dan Reset Filter memulihkan', async ({
   h,
 }) => {
+  test.skip(
+    isLiveRun(),
+    'live: email seed admin1/admin2 tidak ada di prod (dataset seed-only).',
+  )
   const page = await h.openAs('super')
   await gotoApp(page, '/coordinators')
 
@@ -138,6 +161,7 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
   const email = uniqueEmail(h, 'usr02')
   const name = `${h.unique('Koordinator')} Uji`
   try {
+    const branchId = await runtimeBranchId(h)
     const page = await h.openAs('super')
     await gotoApp(page, '/coordinators')
     await expect(
@@ -156,7 +180,7 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
     await dialog.getByLabel('Email').fill(email)
     await dialog.getByRole('textbox', { name: 'Kata Sandi' }).fill(PASSWORD)
     await dialog.getByLabel('NIK').fill(uniqueNik())
-    await dialog.getByLabel('Cabang Penugasan').selectOption(LOCATIONS.hq)
+    await dialog.getByLabel('Cabang Penugasan').selectOption(branchId)
     await dialog
       .getByRole('button', { name: 'Tambah Koordinator Wilayah', exact: true })
       .click()
@@ -176,7 +200,7 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
       throw new Error(`[USR-02] user ${email} tidak ditemukan lewat API setelah dibuat via UI.`)
     }
     expect(created.role).toBe('admin')
-    expect(created.location_id).toBe(LOCATIONS.hq)
+    expect(created.location_id).toBe(branchId)
 
     const firstDelete = await apiFetchRaw(token, 'DELETE', `/users/${created.id}`)
     expect(firstDelete.status).toBe(204)
@@ -190,6 +214,10 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
 })
 
 test('@USR-03 filter Cabang hanya menampilkan koordinator cabang terpilih', async ({ h }) => {
+  test.skip(
+    isLiveRun(),
+    'live: baris seed admin1/admin2/superadmin tidak ada di prod (dataset seed-only).',
+  )
   const page = await h.openAs('super')
   await gotoApp(page, '/coordinators')
   await expect(tableRowWith(page, 'admin1@transhybrid.net.id')).toHaveCount(1)
@@ -208,6 +236,10 @@ test('@USR-03 filter Cabang hanya menampilkan koordinator cabang terpilih', asyn
 test('@USR-04 filter peran Koordinator Wilayah menyembunyikan Superadmin dan mempertahankan tombol tambah', async ({
   h,
 }) => {
+  test.skip(
+    isLiveRun(),
+    'live: baris seed admin1/admin2/superadmin tidak ada di prod (dataset seed-only).',
+  )
   const page = await h.openAs('super')
   await gotoApp(page, '/coordinators')
   await expect(tableRowWith(page, 'superadmin@transhybrid.net.id')).toHaveCount(1)

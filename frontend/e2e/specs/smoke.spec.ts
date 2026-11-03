@@ -6,7 +6,7 @@
  */
 
 import { expect, test } from '../fixtures'
-import { getVisitViaApi, LOCATIONS, type Role } from '../helpers/api'
+import { apiFetchRaw, getVisitViaApi, type ApiEnvelope, type Role } from '../helpers/api'
 import { gotoApp } from '../helpers/nav'
 
 const ROLES: readonly Role[] = [
@@ -44,11 +44,23 @@ test('@SMOKE createVisit menghasilkan kunjungan approved yang bisa dibaca ulang'
 
   expect(created.status).toBe('approved')
   expect(created.code).toMatch(/^VST-/)
-  expect(created.locationId).toBe(LOCATIONS.hq)
+  const catalog = await apiFetchRaw<ApiEnvelope<Array<{ id: string }>>>(
+    await h.tokenAs('super'),
+    'GET',
+    '/locations',
+  )
+  expect(catalog.status, 'GET /locations harus 200').toBe(200)
+  if (!catalog.body.success) {
+    throw new Error(`GET /locations gagal: ${catalog.body.error.code}`)
+  }
+  expect(
+    catalog.body.data.map((row) => row.id),
+    'lokasi kunjungan harus terdaftar di katalog runtime',
+  ).toContain(created.locationId)
 
   const fetched = await getVisitViaApi(await h.tokenAs('super'), created.id)
   expect(fetched.id).toBe(created.id)
   expect(fetched.visit_id).toBe(created.code)
   expect(fetched.status).toBe('approved')
-  expect(fetched.location_id).toBe(LOCATIONS.hq)
+  expect(fetched.location_id).toBe(created.locationId)
 })
