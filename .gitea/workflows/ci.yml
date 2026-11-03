@@ -116,7 +116,7 @@ jobs:
       - name: Unit tests
         working-directory: frontend
         # Vitest's default parallelism over-spawns workers on this runner; the
-        # single-worker run is the stable baseline (60 files / 758 tests).
+        # single-worker run is the stable baseline (82 files / 1112 tests).
         run: timeout 600 npm test -- --maxWorkers=1
 
       - name: Build

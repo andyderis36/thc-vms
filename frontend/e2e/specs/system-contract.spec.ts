@@ -367,14 +367,14 @@ test('@SYS-06 status akun security nonaktif memblokir login, aktif kembali lalu 
     )
     expect(readSuccess(deactivated, '@SYS-06 nonaktifkan akun').status).toBe('inactive')
 
-    // 2) Login ditolak dengan 403 pending (bukan 401 generik): akun nonaktif
-    //    menunggu persetujuan, sesuai kontrak POST /auth/register.
+    // 2) Login ditolak dengan 403 inactive (bukan 401 generik): akun nonaktif
+    //    dinonaktifkan, sesuai kontrak POST /auth/login.
     const refused = await apiFetchRaw<ApiEnvelope<unknown>>('', 'POST', '/auth/login', {
       email,
       password: PASSWORD,
     })
     expect(refused.status, 'login akun nonaktif wajib 403').toBe(403)
-    expect(failureCode(refused, '@SYS-06 login akun nonaktif')).toBe('ACCOUNT_PENDING')
+    expect(failureCode(refused, '@SYS-06 login akun nonaktif')).toBe('ACCOUNT_INACTIVE')
 
     // 3) Aktifkan kembali.
     const restored = await apiFetch<ApiEnvelope<AccountRow>>(
@@ -475,9 +475,9 @@ test('@SYS-08 superadmin menonaktifkan akun non-security lewat PATCH /users/{id}
     )
     expect(failureCode(wrongSurface, '@SYS-08 permukaan security atas vendor')).toBe('NOT_FOUND')
 
-    // Permukaan superadmin: nonaktif -> login ditolak 403 pending (bukan 401
-    // generik): akun nonaktif menunggu persetujuan, sesuai kontrak POST
-    // /auth/register.
+    // Permukaan superadmin: nonaktif -> login ditolak 403 inactive (bukan 401
+    // generik): akun nonaktif dinonaktifkan, sesuai kontrak POST
+    // /auth/login.
     const deactivated = await apiFetch<ApiEnvelope<AccountRow>>(
       token,
       'PATCH',
@@ -491,7 +491,7 @@ test('@SYS-08 superadmin menonaktifkan akun non-security lewat PATCH /users/{id}
       password: PASSWORD,
     })
     expect(refused.status, 'login akun non-security nonaktif wajib 403').toBe(403)
-    expect(failureCode(refused, '@SYS-08 login vendor nonaktif')).toBe('ACCOUNT_PENDING')
+    expect(failureCode(refused, '@SYS-08 login vendor nonaktif')).toBe('ACCOUNT_INACTIVE')
 
     // Aktif kembali.
     const restored = await apiFetch<ApiEnvelope<AccountRow>>(

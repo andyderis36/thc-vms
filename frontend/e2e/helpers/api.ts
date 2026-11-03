@@ -18,7 +18,7 @@
 export const API_BASE = process.env.E2E_API_BASE_URL ?? 'http://localhost:8080/api/v1'
 export const FRONTEND_BASE = process.env.E2E_FRONTEND_BASE_URL ?? 'http://localhost:3210'
 export const TOKEN_STORAGE_KEY = 'thc_vms_token'
-export const DEFAULT_PASSWORD = 'Password123!'
+export const DEFAULT_PASSWORD = process.env.E2E_PASSWORD ?? 'Password123!'
 
 export type Role = 'super' | 'admin' | 'admin-sambas' | 'security' | 'security-sambas' | 'vendor'
 
@@ -30,39 +30,48 @@ export interface Account {
   locationId: string | null
 }
 
+// Env override per peran (storage helpers memakai pola E2E_S3_* yang sama):
+//   E2E_EMAIL_SUPERADMIN  -> super (default superadmin@transhybrid.net.id)
+//   E2E_EMAIL_ADMIN       -> admin (default admin1@transhybrid.net.id)
+//   E2E_EMAIL_ADMIN2      -> admin-sambas (default admin2@transhybrid.net.id)
+//   E2E_EMAIL_SECURITY    -> security (default security1a@transhybrid.net.id)
+//   E2E_EMAIL_SECURITY2   -> security-sambas (default security2a@transhybrid.net.id)
+//   E2E_EMAIL_VENDOR      -> vendor (default vendor1a@transhybrid.net.id)
+//   E2E_PASSWORD          -> DEFAULT_PASSWORD (default Password123!)
+// Fallback literal = perilaku seed lokal saat ini; set env untuk menembak prod.
 export const ACCOUNTS: Record<Role, Account> = {
   super: {
-    email: 'superadmin@transhybrid.net.id',
+    email: process.env.E2E_EMAIL_SUPERADMIN ?? 'superadmin@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'super_admin',
     locationId: null,
   },
   admin: {
-    email: 'admin1@transhybrid.net.id',
+    email: process.env.E2E_EMAIL_ADMIN ?? 'admin1@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'admin',
     locationId: '868430ab-ed33-552b-8619-0b7376537262',
   },
   'admin-sambas': {
-    email: 'admin2@transhybrid.net.id',
+    email: process.env.E2E_EMAIL_ADMIN2 ?? 'admin2@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'admin',
     locationId: '7a6ce73e-2759-572d-bfe9-c5c4c7faee67',
   },
   security: {
-    email: 'security1a@transhybrid.net.id',
+    email: process.env.E2E_EMAIL_SECURITY ?? 'security1a@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'security',
     locationId: '868430ab-ed33-552b-8619-0b7376537262',
   },
   'security-sambas': {
-    email: 'security2a@transhybrid.net.id',
+    email: process.env.E2E_EMAIL_SECURITY2 ?? 'security2a@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'security',
     locationId: '7a6ce73e-2759-572d-bfe9-c5c4c7faee67',
   },
   vendor: {
-    email: 'vendor1a@transhybrid.net.id',
+    email: process.env.E2E_EMAIL_VENDOR ?? 'vendor1a@transhybrid.net.id',
     password: DEFAULT_PASSWORD,
     role: 'vendor',
     locationId: null,

@@ -507,8 +507,10 @@ type Querier interface {
 	// CTE carries the updated row into the joined projection unchanged.
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error)
 	// PATCH /users/security/{id}/status (openapi L161-188). Accepts only
-	// 'active'/'inactive' at the request boundary; the CHECK constraint on
-	// users.status additionally rejects 'blacklisted' writes from this path.
+	// 'active'/'inactive' at the request boundary; the superadmin path
+	// PATCH /users/:id/status additionally admits 'pending' through this same
+	// statement. The CHECK constraint on users.status rejects every other value
+	// ('blacklisted' included) from both paths.
 	UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (UpdateUserStatusRow, error)
 	// POST /visits/{id}/reschedule (openapi L376-404). The new window must still
 	// satisfy chk_visit_request_date_order, so a reversed reschedule is rejected by

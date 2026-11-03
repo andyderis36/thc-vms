@@ -29,8 +29,10 @@ var dummyPasswordHash = sync.OnceValue(func() []byte {
 // stamp last login, project the profile. Unknown emails, wrong passwords and
 // blacklisted accounts return the byte-identical 401 so the response never
 // reveals whether an account exists; a repository ErrNotFound becomes that
-// 401, never a 404. Inactive accounts (self-registered vendors waiting for
-// superadmin approval) fail closed with a 403 naming the wait instead.
+// 401, never a 404. Pending accounts (never-approved self-registered vendors
+// waiting for superadmin approval) fail closed with a 403 naming the wait,
+// while inactive accounts (deactivated veterans) fail closed with a distinct
+// 403 naming the deactivation.
 //
 // Every outcome feeds the audit trail best-effort (auth.login.success /
 // auth.login.failed): the metadata carries ONLY the normalised email, never
@@ -55,9 +57,13 @@ func (s *Service) Login(ctx context.Context, email, password string) (LoginResul
 		s.recordLoginFailed(ctx, normalised)
 		return LoginResult{}, domain.InvalidCredentials()
 	}
-	if user.Status == domain.UserStatusInactive {
+	if user.Status == domain.UserStatusPending {
 		s.recordLoginFailed(ctx, normalised)
 		return LoginResult{}, domain.AccountPending()
+	}
+	if user.Status == domain.UserStatusInactive {
+		s.recordLoginFailed(ctx, normalised)
+		return LoginResult{}, domain.AccountInactive()
 	}
 	if user.Status != domain.UserStatusActive {
 		s.recordLoginFailed(ctx, normalised)

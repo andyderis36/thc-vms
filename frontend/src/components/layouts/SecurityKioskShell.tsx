@@ -10,6 +10,7 @@ import { NotificationsMenu } from '@/components/ui/NotificationsMenu'
 import { Tabs, type TabItem } from '@/components/ui/Tabs'
 import { UserAvatar } from '@/components/ui/UserAvatar'
 import { useSession } from '@/lib/auth/session'
+import { getGuardShiftLabel } from '@/lib/guard-shift'
 import type { NotificationItem } from '@/lib/api/types'
 import { LiveClock } from './LiveClock'
 import { SkipToContentLink } from './SkipToContentLink'
@@ -37,7 +38,7 @@ export interface SecurityKioskShellProps {
   children: ReactNode
   /** Jumlah teknisi yang sedang berada di lokasi (dihitung layar pemilik data). */
   onSiteCount?: number
-  /** Label shift petugas. Default `Shift Pagi`. */
+  /** Label shift petugas. Default dinamis dari jam dinding WIB (lihat `getGuardShiftLabel`). */
   shiftLabel?: string
   /**
    * Tab aktif. Bila diisi, shell murni terkontrol dari layar pemilik data
@@ -78,7 +79,7 @@ export interface SecurityKioskShellProps {
 export function SecurityKioskShell({
   children,
   onSiteCount = 0,
-  shiftLabel = 'Shift Pagi',
+  shiftLabel = getGuardShiftLabel(),
   activeTab,
   onTabChange,
   tabCounts,

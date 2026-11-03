@@ -170,8 +170,8 @@ func (r *userRepository) Create(ctx context.Context, user domain.User) (domain.U
 	}, nil
 }
 
-// UpdateStatus flips an account between active and inactive. The database
-// CHECK additionally refuses values outside the account vocabulary.
+// UpdateStatus flips an account between active, pending and inactive. The
+// database CHECK additionally refuses values outside the account vocabulary.
 func (r *userRepository) UpdateStatus(ctx context.Context, id domain.UUID, status domain.UserStatus) error {
 	parsed, err := fromDomainUUID(id)
 	if err != nil {

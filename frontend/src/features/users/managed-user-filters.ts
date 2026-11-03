@@ -220,7 +220,7 @@ export function toManagedUserListParams(filter: ManagedListFilter): ManagedUserL
 }
 
 /** Filter status pada layar user terkelola; 'all' = semua status. */
-export type ManagedStatusFilter = 'all' | 'active' | 'inactive' | 'blacklisted'
+export type ManagedStatusFilter = 'all' | 'active' | 'pending' | 'inactive' | 'blacklisted'
 
 /** Sentinel "semua" untuk filter Vendor (selaras dengan filter Cabang). */
 export const VENDOR_FILTER_ALL = 'all'

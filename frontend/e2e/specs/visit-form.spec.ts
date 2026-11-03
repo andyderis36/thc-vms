@@ -117,13 +117,13 @@ async function openForm(page: Page): Promise<void> {
   ).toBeVisible()
   // Katalog fasilitas & tujuan dimuat async; tunggu sampai kontrol siap.
   await expect(
-    page.locator('#visit-location option').filter({ hasText: HQ_LABEL }),
+    page.locator(`#visit-facility-datalist option[value="${HQ_LABEL}"]`),
   ).toHaveCount(1)
   await expect(page.locator('#visit-purpose')).toBeEnabled()
 }
 
 async function pickLocation(page: Page): Promise<void> {
-  await page.getByLabel('Fasilitas Tujuan').selectOption({ label: HQ_LABEL })
+  await page.getByLabel('Fasilitas Tujuan').fill(HQ_LABEL)
 }
 
 async function pickCatalogPurpose(page: Page): Promise<void> {

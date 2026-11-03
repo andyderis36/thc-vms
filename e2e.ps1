@@ -15,6 +15,12 @@
       e2e.cmd sweep -Apply        # HAPUS artefak E2E sisa di production (204/404 saja; lainnya batal)
       e2e.cmd local -DryRun       # cetak command line + env yang akan dipakai, tanpa menjalankan test
 
+  Akun harness terisolasi (opt-in): $env:E2E_LOCAL_PROVISION=1 (local) atau
+  $env:E2E_LIVE_PROVISION=1 (live) memprovisi 3 akun e2e-<runid>-* pre-suite
+  dan SELALU menghapusnya post-suite (finally: sweep --apply visits-first +
+  provision --teardown-only), bahkan saat suite gagal/Ctrl+C. Objek MinIO
+  yang diunggah TIDAK ikut terhapus (orphan di bucket).
+
   Local mode memakai backend :8080 + frontend :3210 yang sudah berjalan. Bila
   salah satu mati, script menyalakannya lewat vms.ps1 (docker -> be -> fe).
   Live mode TIDAK menyalakan stack lokal; ia menembak https://vms.thckalbar.com.
@@ -64,12 +70,15 @@ $RepoRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $Frontend = Join-Path $RepoRoot 'frontend'
 $PlaywrightCli = Join-Path $Frontend 'node_modules\.bin\playwright.cmd'
 $SweepScript = Join-Path $Frontend 'e2e\sweep.ts'
+$ProvisionScript = Join-Path $Frontend 'e2e\provision-live-users.ts'
 $Vms = Join-Path $RepoRoot 'vms.ps1'
 $LiveUrl = 'https://vms.thckalbar.com'
 $LivePacingMs = if ($env:E2E_LIVE_PACING_MS) { $env:E2E_LIVE_PACING_MS } else { '13000' }
 
 # Cache script-scope: probe `playwright --list` (2-4 detik) hanya sekali per invocation.
 $script:E2EInventoryCache = $null
+# Email akun harness terprovisi run ini (untuk ringkasan post-suite; tanpa password).
+$script:E2EProvisionedEmails = @()
 
 # -SlowMo eksplisit menang atas env; kalau tidak diisi, hormati $env:E2E_SLOWMO.
 if (-not $PSBoundParameters.ContainsKey('SlowMo')) {
@@ -259,6 +268,8 @@ function Ensure-DockerEngine {
 # Jangan pernah mewarisi target dari shell sebelumnya: tanpa ini, `e2e.cmd`
 # setelah `e2e.cmd live` di terminal yang sama bisa menembak production.
 function Clear-E2EOverrides {
+    # E2E_EMAIL_* dan E2E_PASSWORD sengaja TIDAK di-clear (pass-through) agar
+    # operator bisa menyuplai kredensial prod via env tanpa terhapus.
     foreach ($name in @(
             'E2E_BASE_URL',
             'E2E_API_BASE_URL',
@@ -276,16 +287,78 @@ function Set-LocalE2EEnv {
     $env:E2E_API_BASE_URL = 'http://localhost:8080/api/v1'
     $env:E2E_FRONTEND_BASE_URL = 'http://localhost:3210'
     $env:E2E_SLOWMO = "$SlowMo"
+    # Kredensial default = seed lokal (transhybrid). Override via env sebelum run
+    # bila perlu; nilai operator yang sudah ada di-clear oleh Clear-E2EOverrides? Tidak:
+    # E2E_EMAIL_* / E2E_PASSWORD sengaja TIDAK di-clear (pass-through), tetapi di
+    # mode lokal kita set default seed agar perilaku lokal tetap deterministik.
+    $env:E2E_EMAIL_SUPERADMIN = 'superadmin@transhybrid.net.id'
+    $env:E2E_EMAIL_ADMIN = 'admin1@transhybrid.net.id'
+    $env:E2E_EMAIL_ADMIN2 = 'admin2@transhybrid.net.id'
+    $env:E2E_EMAIL_SECURITY = 'security1a@transhybrid.net.id'
+    $env:E2E_EMAIL_SECURITY2 = 'security2a@transhybrid.net.id'
+    $env:E2E_EMAIL_VENDOR = 'vendor1a@transhybrid.net.id'
+    $env:E2E_EMAIL_VENDOR2 = 'vendor1b@transhybrid.net.id'
+    $env:E2E_PASSWORD = 'Password123!'
+}
+
+# Muat kredensial live lokal dari .e2e-live.local.env (repo root, gitignored)
+# bila ada. Format KEY=VALUE per baris; baris kosong/# dilewati. Tidak pernah
+# melempar bila file absen (operator bisa suplai via env manual).
+function Import-E2ELiveEnvFile {
+    $f = Join-Path $RepoRoot '.e2e-live.local.env'
+    if (-not (Test-Path -LiteralPath $f)) { return }
+    foreach ($line in (Get-Content -LiteralPath $f)) {
+        $t = $line.Trim()
+        if (($t -eq '') -or $t.StartsWith('#')) { continue }
+        $i = $t.IndexOf('=')
+        if ($i -le 0) { continue }
+        $k = $t.Substring(0, $i).Trim()
+        $v = $t.Substring($i + 1).Trim()
+        if ($k -ne '') { Set-Item -Path "env:$k" -Value $v }
+    }
 }
 
 function Set-LiveE2EEnv {
     Clear-E2EOverrides
+    Import-E2ELiveEnvFile
+    if (-not $env:E2E_LIVE_PROVISION) { $env:E2E_LIVE_PROVISION = '1' }
     $env:E2E_BASE_URL = $LiveUrl
     $env:E2E_API_BASE_URL = "$LiveUrl/api/v1"
     $env:E2E_FRONTEND_BASE_URL = $LiveUrl
     $env:E2E_LOGIN_PACING_MS = $LivePacingMs
     $env:E2E_SKIP_STORAGE_CLEANUP = '1'
     $env:E2E_SLOWMO = "$SlowMo"
+    # Kredensial TIDAK diset default di mode live: operator wajib menyuplai
+    # E2E_EMAIL_* dan E2E_PASSWORD (akun prod lama @thc.net.id/@thc.com) via env
+    # sebelum menjalankan. E2E_EMAIL_* / E2E_PASSWORD sengaja pass-through (tidak
+    # di-clear) agar nilai operator mengalir ke Playwright. Contoh:
+    #   $env:E2E_EMAIL_SUPERADMIN='admin@thc.net.id'
+    #   $env:E2E_EMAIL_ADMIN='admin1@thc.net.id'
+    #   $env:E2E_EMAIL_ADMIN2='admin2@thc.net.id'
+    #   $env:E2E_EMAIL_SECURITY='security1@thc.net.id'
+    #   $env:E2E_EMAIL_SECURITY2='security2@thc.net.id'
+    #   $env:E2E_EMAIL_VENDOR='vendor1@thc.net.id'
+    #   $env:E2E_EMAIL_VENDOR2='vendor2@thc.net.id'
+    #   $env:E2E_PASSWORD='PasswordProd!'
+    #   .\e2e-live.cmd
+    # Bila dijalankan interaktif (klik 2x) dan kredensial kosong, tanya langsung
+    # di sini agar alur klik-jalan. Non-interaktif: biarkan kosong (gagal cepat
+    # dengan pesan jelas, bukan diam-diam pakai default seed yang salah sasaran).
+    if ([Environment]::UserInteractive -and (-not $DryRun) -and ((-not $env:E2E_EMAIL_SUPERADMIN) -or (-not $env:E2E_PASSWORD))) {
+        Write-Host '    kredensial prod untuk E2E live (disarankan: dev-superadmin + E2E_LIVE_PROVISION=1):' -ForegroundColor Yellow
+        $typedEmail = Read-Host '    email superadmin prod'
+        if ($typedEmail) { $env:E2E_EMAIL_SUPERADMIN = $typedEmail.Trim() }
+        $typedPass = Read-Host '    password superadmin prod' -AsSecureString
+        if ($typedPass) {
+            $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($typedPass))
+            $env:E2E_PASSWORD = $plain
+            Remove-Variable plain -ErrorAction SilentlyContinue
+        }
+        if (-not $env:E2E_LIVE_PROVISION) {
+            $prov = Read-Host '    provisi akun uji otomatis + hapus setelahnya? (Y/n)'
+            if (($prov -eq '') -or ($prov -eq 'Y') -or ($prov -eq 'y')) { $env:E2E_LIVE_PROVISION = '1' }
+        }
+    }
 }
 
 function Assert-LiveTarget {
@@ -294,6 +367,104 @@ function Assert-LiveTarget {
         throw "production tidak sehat di $LiveUrl/api/v1/health. Periksa deploy sebelum menembak live."
     }
     Write-Ok "production sehat: $LiveUrl"
+}
+
+# Provisi akun harness E2E (pre-suite, opt-in): E2E_LIVE_PROVISION=1 (live)
+# atau E2E_LOCAL_PROVISION=1 (local). Tanpa flag yang cocok = no-op ($false)
+# agar perilaku seed lokal tetap deterministik. Berhasil ($true) = blok
+# BEGIN_EXPORT/END_EXPORT diparse lalu diinjeksikan ke env proses Playwright
+# (E2E_RUN_ID + E2E_EMAIL_ADMIN/SECURITY/VENDOR + E2E_PASSWORD). Kata sandi
+# TIDAK PERNAH ditulis ke log (hanya ***); gagal provisi = throw (suite batal
+# karena tanpa akun run-id test tak bermakna).
+function Invoke-E2EProvision([string]$Scope) {
+    if ($Scope -eq 'live') { $want = $env:E2E_LIVE_PROVISION; $flag = 'E2E_LIVE_PROVISION' } else { $want = $env:E2E_LOCAL_PROVISION; $flag = 'E2E_LOCAL_PROVISION' }
+    if ($want -ne '1') {
+        Write-Host "    provision: dilewati ($flag bukan 1)" -ForegroundColor Gray
+        return $false
+    }
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        throw 'node tidak ditemukan di PATH; provisi membutuhkan Node 24+ (type stripping)'
+    }
+    if (-not (Test-Path -LiteralPath $ProvisionScript)) {
+        throw "script provisi tidak ada: $ProvisionScript"
+    }
+    Write-Step "provisi akun E2E $Scope (run-id terisolasi)"
+    $out = $null
+    Push-Location $Frontend
+    try {
+        $out = (& node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON $ProvisionScript 2>&1 | Out-String)
+        $code = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    foreach ($line in ($out -split "`r?`n")) {
+        if ($line -match 'E2E_PASSWORD=') { Write-Host ($line -replace 'E2E_PASSWORD=.*', 'E2E_PASSWORD=***') }
+        elseif ($line.Trim() -ne '') { Write-Host "    [provision] $line" }
+    }
+    if ($code -ne 0) { throw "provisi akun E2E gagal (exit $code); suite dibatalkan" }
+    if ($out -notmatch 'BEGIN_EXPORT') {
+        Write-Host '    provision: skipped oleh script (tanpa akun baru); lanjut dengan kredensial seed' -ForegroundColor Gray
+        return $false
+    }
+    $inExport = $false
+    foreach ($line in ($out -split "`r?`n")) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match 'BEGIN_EXPORT') { $inExport = $true; continue }
+        if ($trimmed -match 'END_EXPORT') { $inExport = $false; continue }
+        if ($inExport -and $trimmed -match '^(E2E_[A-Z_]+)=(.*)$') {
+            [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
+        }
+    }
+    if (-not $env:E2E_RUN_ID) { throw 'provisi selesai tetapi E2E_RUN_ID kosong; suite dibatalkan' }
+    $script:E2EProvisionedEmails = @($env:E2E_EMAIL_ADMIN, $env:E2E_EMAIL_SECURITY, $env:E2E_EMAIL_VENDOR | Where-Object { $_ })
+    Write-Ok "provisi run $($env:E2E_RUN_ID): $($script:E2EProvisionedEmails -join ', ')"
+    return $true
+}
+
+# Teardown akun harness (post-suite, best-effort): ledger-temp + env + run-id
+# dibaca oleh `provision-live-users.ts --teardown-only` (exact-email DELETE,
+# 204/404 toleran; kunjungan TIDAK disentuh di sini). TIDAK PERNAH melempar:
+# kegagalan teardown = WARN tanpa menutupi exit code suite.
+function Invoke-E2EProvisionTeardown {
+    if (-not $env:E2E_RUN_ID -and -not $env:E2E_EMAIL_ADMIN -and -not (Test-Path -LiteralPath $ProvisionScript)) { return }
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Warn2 'teardown akun dilewati (node tidak ada di PATH)'
+        return
+    }
+    Write-Step 'teardown akun E2E terprovisi (ledger-based self-delete)'
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        Push-Location $Frontend
+        try {
+            $out = (& node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON $ProvisionScript --teardown-only 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+        foreach ($line in ($out -split "`r?`n")) {
+            if ($line -match 'E2E_PASSWORD=') { Write-Host ($line -replace 'E2E_PASSWORD=.*', 'E2E_PASSWORD=***') }
+            elseif ($line.Trim() -ne '') { Write-Host "    [teardown] $line" }
+        }
+        if ($code -ne 0) {
+            Write-Warn2 "teardown akun exit $code (cek manual via sweep; exit code suite tetap dipertahankan)"
+        } else {
+            Write-Ok 'teardown akun selesai'
+        }
+    } catch {
+        Write-Warn2 "teardown akun gagal: $($_.Exception.Message) (exit code suite tetap dipertahankan)"
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
+# Ringkasan email terprovisi + disclaimer yatim MinIO (objek upload TIDAK
+# ikut terhapus — penghapusan via presigned/backend saja, bukan publik).
+function Write-E2EProvisionSummary {
+    if ($script:E2EProvisionedEmails -and @($script:E2EProvisionedEmails).Count -gt 0) {
+        Write-Host "    akun terprovisi: $($script:E2EProvisionedEmails -join ', ')" -ForegroundColor Gray
+    }
+    Write-Host '    catatan: objek file MinIO/S3 yang diunggah suite TIDAK ikut terhapus (orphan di bucket); akun + kunjungan dibersihkan di atas' -ForegroundColor Gray
 }
 
 # Sapuan artefak E2E sisa (kunjungan/akun/fasilitas) SEBELUM suite live.
@@ -413,10 +584,18 @@ function Show-DryRun([string[]]$CliArgs, [string]$Target) {
     Write-Host "    cwd        : $Frontend"
     Write-Host "    cmd        : $(Format-Command $PlaywrightCli $CliArgs)"
     Write-Host '    env        :'
-    foreach ($name in @('E2E_BASE_URL', 'E2E_API_BASE_URL', 'E2E_FRONTEND_BASE_URL', 'E2E_LOGIN_PACING_MS', 'E2E_SKIP_STORAGE_CLEANUP', 'E2E_SLOWMO')) {
+    foreach ($name in @('E2E_BASE_URL', 'E2E_API_BASE_URL', 'E2E_FRONTEND_BASE_URL', 'E2E_LOGIN_PACING_MS', 'E2E_SKIP_STORAGE_CLEANUP', 'E2E_SLOWMO', 'E2E_PASSWORD', 'E2E_EMAIL_SUPERADMIN', 'E2E_EMAIL_ADMIN', 'E2E_EMAIL_ADMIN2', 'E2E_EMAIL_SECURITY', 'E2E_EMAIL_SECURITY2', 'E2E_EMAIL_VENDOR', 'E2E_EMAIL_VENDOR2')) {
         $value = [Environment]::GetEnvironmentVariable($name)
-        if ($value) { Write-Host "                 $name=$value" }
+        if ($value) {
+            if ($name -eq 'E2E_PASSWORD') { $value = '***' }
+            Write-Host "                 $name=$value"
+        }
     }
+    $provFlag = if ($mode -in @('live', 'prod', 'production')) { 'E2E_LIVE_PROVISION' } else { 'E2E_LOCAL_PROVISION' }
+    $provOn = ([Environment]::GetEnvironmentVariable($provFlag) -eq '1')
+    Write-Host "    provision  : $(if ($provOn) { "YA ($provFlag=1) -> node e2e/provision-live-users.ts, injeksi E2E_RUN_ID/E2E_EMAIL_*/E2E_PASSWORD ke Playwright" } else { "TIDAK ($provFlag bukan 1; kredensial seed)" })"
+    Write-Host '    teardown   : SELALU (finally, tanpa menutupi exit code): node e2e/provision-live-users.ts --teardown-only + sweep --apply (visits-first), ringkasan email + disclaimer orphan MinIO'
+    Write-Host '    sweep      : pre-suite (live saja, --apply) + post-suite (live & local, --apply; 204/404 toleran)'
     Write-Host "    inventaris : $($stats.Tests) test dalam $($stats.Files) file (sumber: $($stats.Source))"
     Write-Host ''
     Write-Ok 'DRY RUN selesai; tidak ada test yang dijalankan'
@@ -532,7 +711,10 @@ if ($isLive) {
     $specStats = Get-E2ESpecStats 'e2e'
     Write-Host "    - $($specStats.Tests) test dalam $($specStats.Files) spec (project e2e saja; setup dilewati, login dipacing $LivePacingMs ms)" -ForegroundColor Yellow
     Write-Host ''
-    $answer = Read-Host 'Ketik LIVE untuk melanjutkan'
+    $answer = 'LIVE'
+    if ($env:E2E_LIVE_AUTO_CONFIRM -ne '1') {
+        $answer = Read-Host 'Ketik LIVE untuk melanjutkan'
+    }
     if ($answer -cne 'LIVE') {
         Write-Host 'Dibatalkan. Tidak ada request test ke production.' -ForegroundColor Gray
         exit 1
@@ -546,11 +728,39 @@ if ($isLive) {
         Write-Err2 $_.Exception.Message
         exit 1
     }
+    $LiveLockFile = Join-Path $env:TEMP 'thc-e2e-live.lock'
+    if (Test-Path -LiteralPath $LiveLockFile) {
+        $oldPid = ''
+        try { $oldPid = (Get-Content -LiteralPath $LiveLockFile | Select-Object -First 1).Trim() } catch { $oldPid = '' }
+        $alive = $false
+        if ($oldPid -match '^\d+$') {
+            try { $null = Get-Process -Id ([int]$oldPid) -ErrorAction Stop; $alive = $true } catch { $alive = $false }
+        }
+        if ($alive) {
+            Write-Err2 "live run lain sedang berjalan (PID $oldPid). Tunggu selesai atau pastikan tidak ada duplikat."
+            exit 1
+        }
+        Remove-Item -LiteralPath $LiveLockFile -Force -ErrorAction SilentlyContinue
+    }
+    Set-Content -LiteralPath $LiveLockFile -Value "$PID" -NoNewline
+    try {
+        Invoke-E2EProvision 'live' | Out-Null
+    } catch {
+        Write-Err2 $_.Exception.Message
+        Remove-Item -LiteralPath $LiveLockFile -Force -ErrorAction SilentlyContinue
+        exit 1
+    }
     Write-Step "menjalankan E2E headed ke $LiveUrl (slowMo $SlowMo ms)"
 } else {
     Ensure-LocalStack
     Set-LocalE2EEnv
 
+    try {
+        Invoke-E2EProvision 'local' | Out-Null
+    } catch {
+        Write-Err2 $_.Exception.Message
+        exit 1
+    }
     $specStats = Get-E2ESpecStats
     Write-Step "menjalankan E2E headed ke localhost:3210 ($($specStats.Tests) test dalam $($specStats.Files) spec; slowMo $SlowMo ms)"
 }
@@ -565,6 +775,20 @@ try {
     Write-Err2 "E2E FAILED: $($_.Exception.Message)"
     if ($_.ScriptStackTrace) { Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray }
     $code = 1
+} finally {
+    # Teardown DIJAMIN jalan (sukses/gagal/Ctrl+C): visits-first via sweep
+    # (melepas FK kunjungan->akun), lalu self-delete exact-ledger untuk sisa
+    # akun pola e2e-. Kegagalan di sini = WARN saja; $code suite dipertahankan.
+    Write-Host ''
+    Write-Step 'post-suite cleanup (tidak menutupi exit code suite)'
+    try {
+        Invoke-E2ESweep -Apply
+    } catch {
+        Write-Warn2 "sweep post-suite gagal: $($_.Exception.Message)"
+    }
+    Invoke-E2EProvisionTeardown
+    Write-E2EProvisionSummary
+    Remove-Item -LiteralPath (Join-Path $env:TEMP 'thc-e2e-live.lock') -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host ''

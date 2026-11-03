@@ -80,7 +80,12 @@ export function visitSchedule(
     month: 'short',
     year: 'numeric',
   })
-  const time = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' })
+  const time = new Intl.DateTimeFormat('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  })
   return {
     dateLabel: sameDay ? fullDate.format(start) : `${dayMonth.format(start)} - ${fullDate.format(end)}`,
     timeLabel: `${time.format(start)} - ${time.format(end)}`,

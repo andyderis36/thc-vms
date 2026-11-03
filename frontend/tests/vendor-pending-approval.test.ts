@@ -54,7 +54,7 @@ const { pendingFixture, statusMutateMock, deleteMutateMock } = vi.hoisted(() => 
       role: 'vendor',
       location_id: null,
       location_name: null,
-      status: 'inactive',
+      status: 'pending',
       type: 'external',
       vendor_name: 'PT Lintas Fiber',
       avatar_url: null,

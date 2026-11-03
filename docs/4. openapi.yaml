@@ -129,7 +129,7 @@ paths:
         '401':
           description: Kredensial tidak valid
         '403':
-          description: 'Akun belum aktif — pendaftaran vendor menunggu persetujuan superadmin (ACCOUNT_PENDING). Amplop galat: { success: false, error: { code, message } }.'
+          description: 'Akun belum aktif — pendaftaran vendor menunggu persetujuan superadmin: status pending → 403 ACCOUNT_PENDING "Akun Anda menunggu persetujuan superadmin.", status inactive → 403 ACCOUNT_INACTIVE "Akun Anda dinonaktifkan.". Amplop galat: { success: false, error: { code, message } }.'
 
   /auth/register:
     post:
@@ -138,7 +138,7 @@ paths:
       description: |
         Formulir publik dari halaman masuk ("Daftar sebagai Vendor/Mitra").
         Tanpa autentikasi, dibatasi rate limiter yang sama dengan login.
-        Akun BARU SELALU berstatus `inactive` dan tidak dapat masuk sampai
+        Akun BARU SELALU berstatus `pending` dan tidak dapat masuk sampai
         superadmin mengaktifkannya (`PATCH /users/{id}/status`). Aktivasi dan
         penolakan (hapus) hanya boleh dilakukan superadmin/dev-superadmin lewat
         endpoint manajemen yang sudah ada; peran `role` dan `location_id`
@@ -152,7 +152,7 @@ paths:
               $ref: '#/components/schemas/RegisterVendorRequest'
       responses:
         '201':
-          description: Pendaftaran diterima — akun menunggu persetujuan (status inactive)
+          description: Pendaftaran diterima — akun menunggu persetujuan (status pending)
           content:
             application/json:
               schema:
@@ -584,7 +584,7 @@ paths:
   /users/{id}/status:
     patch:
       tags: [UserManagement]
-      summary: 'Ubah status aktif/nonaktif akun pengguna (Superadmin; larangan: akun sendiri & super_admin)'
+      summary: 'Ubah status aktif/nonaktif akun pengguna, termasuk persetujuan pending→aktif (Superadmin; larangan: akun sendiri & super_admin)'
       parameters:
         - name: id
           in: path
@@ -1545,7 +1545,7 @@ components:
           description: Nama fasilitas cabang/POP penugasan
         status:
           type: string
-          enum: [active, inactive, blacklisted]
+          enum: [active, inactive, pending, blacklisted]
           example: active
         type:
           type: string
@@ -1626,7 +1626,9 @@ components:
       properties:
         status:
           type: string
-          enum: [active, inactive]
+          enum: [active, inactive, pending]
+
+
 
     UpdateSecurityUserRequest:
       type: object

@@ -26,8 +26,20 @@ export function VendorIdentityCard({ user }: VendorIdentityCardProps) {
           {user.nik !== null ? `NIK ${user.nik}` : 'NIK —'}
         </p>
       </div>
-      <Badge tone={user.status === 'active' ? 'success' : 'neutral'}>
-        {user.status === 'active' ? 'Aktif' : 'Nonaktif'}
+      <Badge
+        tone={
+          user.status === 'active'
+            ? 'success'
+            : user.status === 'pending'
+              ? 'warning'
+              : 'neutral'
+        }
+      >
+        {user.status === 'active'
+          ? 'Aktif'
+          : user.status === 'pending'
+            ? 'Menunggu'
+            : 'Nonaktif'}
       </Badge>
     </section>
   )

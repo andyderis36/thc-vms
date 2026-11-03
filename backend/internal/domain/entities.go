@@ -98,11 +98,14 @@ const (
 	UserTypeExternal UserType = "external"
 )
 
-// UserStatus is the account lifecycle: active, inactive or blacklisted.
+// UserStatus is the account lifecycle: pending (a never-approved
+// self-registration waiting for superadmin approval), active, inactive (a
+// deactivated veteran, never a pending queue) or blacklisted.
 type UserStatus string
 
 const (
 	UserStatusActive      UserStatus = "active"
+	UserStatusPending     UserStatus = "pending"
 	UserStatusInactive    UserStatus = "inactive"
 	UserStatusBlacklisted UserStatus = "blacklisted"
 )

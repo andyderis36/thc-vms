@@ -413,12 +413,14 @@ export const handlers: RequestHandler[] = [
     const user = db.users.find(
       (candidate) => candidate.email.toLowerCase() === email,
     );
-    if (
-      user === undefined ||
-      password !== DEMO_PASSWORD ||
-      user.status === 'inactive'
-    ) {
+    if (user === undefined || password !== DEMO_PASSWORD) {
       return fail('UNAUTHORIZED', 'Kredensial tidak valid', 401);
+    }
+    if (user.status === 'inactive') {
+      return fail('ACCOUNT_INACTIVE', 'Akun Anda dinonaktifkan.', 403);
+    }
+    if (user.status === 'pending') {
+      return fail('ACCOUNT_PENDING', 'Akun Anda menunggu persetujuan superadmin.', 403);
     }
     const result: LoginResult = { token: createMockToken(user), user };
     return ok(result);
@@ -1276,14 +1278,14 @@ export const handlers: RequestHandler[] = [
         return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
       }
       const body = await readJsonBody(request);
-      const status = stringField(body, 'status');
-      if (status !== 'active' && status !== 'inactive') {
-        return fail(
-          'BAD_REQUEST',
-          'Status harus "active" atau "inactive".',
-          400,
-        );
-      }
+       const status = stringField(body, 'status');
+       if (status !== 'active' && status !== 'inactive' && status !== 'pending') {
+         return fail(
+           'BAD_REQUEST',
+           'Status harus "active", "inactive", atau "pending".',
+           400,
+         );
+       }
       target.status = status;
       return ok(target);
     },
@@ -1612,10 +1614,10 @@ export const handlers: RequestHandler[] = [
     }
     const body = await readJsonBody(request);
     const status = stringField(body, 'status');
-    if (status !== 'active' && status !== 'inactive') {
+    if (status !== 'active' && status !== 'inactive' && status !== 'pending') {
       return fail(
         'BAD_REQUEST',
-        'Status harus "active" atau "inactive".',
+        'Status harus "active", "inactive", atau "pending".',
         400,
       );
     }

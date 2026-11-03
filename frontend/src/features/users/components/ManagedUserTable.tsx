@@ -151,6 +151,7 @@ export function ManagedUserStatusCell({
   className?: string
 }) {
   if (status === 'active') return <Badge tone="success" className={className}>Aktif</Badge>
+  if (status === 'pending') return <Badge tone="warning" className={className}>Menunggu</Badge>
   if (status === 'blacklisted') return <Badge tone="danger" className={className}>Diblokir</Badge>
   return <Badge tone="neutral" className={className}>Nonaktif</Badge>
 }

@@ -83,6 +83,7 @@ export interface ManagedUsersScreenProps {
 const STATUS_FILTER_OPTIONS: SelectOption[] = [
   { value: 'all', label: 'Semua Status' },
   { value: 'active', label: 'Aktif' },
+  { value: 'pending', label: 'Menunggu' },
   { value: 'inactive', label: 'Nonaktif' },
   { value: 'blacklisted', label: 'Diblokir' },
 ]
@@ -190,7 +191,7 @@ export function ManagedUsersScreen({
   const pendingRows: User[] = useMemo(
     () =>
       filterManagedUsersByRoles(usersQuery.data ?? [], effectiveRoles).filter(
-        (user) => user.status === 'inactive',
+        (user) => user.status === 'pending',
       ),
     [usersQuery.data, effectiveRoles],
   )

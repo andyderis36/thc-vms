@@ -5,6 +5,7 @@ import { MapPin } from 'lucide-react'
 
 import { Badge } from '@/components/ui/Badge'
 import { UserAvatar } from '@/components/ui/UserAvatar'
+import { getGuardShiftLabel } from '@/lib/guard-shift'
 
 export interface KioskStatusStripProps {
   /** Nama petugas dari sesi (pemanggil sudah memberi fallback). */
@@ -13,7 +14,7 @@ export interface KioskStatusStripProps {
   locationName: string
   /** Foto profil petugas dari sesi; kosong → inisial. */
   avatarUrl?: string | null
-  /** Label shift. Default `Shift Pagi`, sama dengan SHELL-03. */
+  /** Label shift. Default dinamis dari jam dinding WIB, sama dengan SHELL-03. */
   shiftLabel?: string
   /** Kelas tambahan pada pembungkus (mis. `mb-3`). */
   className?: string
@@ -34,7 +35,8 @@ export interface KioskStatusStripProps {
  * di kanan.
  *
  * Isinya HANYA identitas petugas + pos jaga dalam dua baris:
- * - Baris 1 = nama pengawas (truncate) + PILL SHIFT bersaudara di kanan
+ * - Baris 1 = nama pengawas (`flex-1 min-w-0 truncate` + tooltip nama
+ *   PENUH di elemen nama) + PILL SHIFT bersaudara di kanan
  *   (`ml-auto shrink-0 whitespace-nowrap`). Nama panjang hanya menyusut
  *   dirinya sendiri, sehingga label shift TIDAK PERNAH terpotong
  *   truncation nama.
@@ -59,7 +61,7 @@ export function KioskStatusStrip({
   guardName,
   locationName,
   avatarUrl,
-  shiftLabel = 'Shift Pagi',
+  shiftLabel = getGuardShiftLabel(),
   className,
   href,
 }: KioskStatusStripProps) {
@@ -79,17 +81,16 @@ export function KioskStatusStrip({
   const content = (
     <>
       <UserAvatar name={guardName} avatarUrl={avatarUrl} size="lg" />
-      {/* Kolom identitas: baris 1 = nama (truncate) + pill shift `ml-auto`
-          yang tak ikut menyusut; baris 2 = chip lokasi `self-end` (rata
-          kanan) di bawahnya. */}
+      {/* Kolom identitas: baris 1 = nama (`flex-1` truncate, membawa
+          tooltip nama penuh) + pill shift `ml-auto` yang tak ikut
+          menyusut; baris 2 = chip lokasi `self-end` (rata kanan) di
+          bawahnya. */}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p
-          className="flex min-w-0 items-center gap-2 text-label leading-tight"
-          title={`${guardName} · ${shiftLabel}`}
-        >
+        <p className="flex min-w-0 items-center gap-2 text-label leading-tight">
           <span
             data-testid="kiosk-guard-name"
-            className="min-w-0 truncate font-bold text-ink"
+            className="min-w-0 flex-1 truncate font-bold text-ink"
+            title={guardName}
           >
             {guardName}
           </span>

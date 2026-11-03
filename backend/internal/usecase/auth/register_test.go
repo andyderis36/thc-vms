@@ -72,7 +72,7 @@ func validRegisterInput() RegisterVendorInput {
 	}
 }
 
-func TestRegisterVendor_CreatesInactiveExternalVendor(t *testing.T) {
+func TestRegisterVendor_CreatesPendingExternalVendor(t *testing.T) {
 	managed := &fakeManagedUsers{}
 	audit := &fakeAudit{}
 	svc := NewService(registerDeps(managed, audit))
@@ -85,8 +85,8 @@ func TestRegisterVendor_CreatesInactiveExternalVendor(t *testing.T) {
 		t.Fatalf("created rows = %d, want 1", len(managed.created))
 	}
 	stored := managed.created[0]
-	if stored.Status != domain.UserStatusInactive {
-		t.Fatalf("status = %q, want inactive (never immediately usable)", stored.Status)
+	if stored.Status != domain.UserStatusPending {
+		t.Fatalf("status = %q, want pending (never immediately usable)", stored.Status)
 	}
 	if stored.Type != domain.UserTypeExternal {
 		t.Fatalf("type = %q, want external", stored.Type)
@@ -100,8 +100,8 @@ func TestRegisterVendor_CreatesInactiveExternalVendor(t *testing.T) {
 	if stored.VendorNameOverride != nil {
 		t.Fatalf("vendor override = %v, want nil without a manual name", stored.VendorNameOverride)
 	}
-	if got.ID != "user-vendor-new" || got.Status != domain.UserStatusInactive {
-		t.Fatalf("profile = %+v, want the inactive account", got)
+	if got.ID != "user-vendor-new" || got.Status != domain.UserStatusPending {
+		t.Fatalf("profile = %+v, want the pending account", got)
 	}
 	if len(audit.entries) != 1 {
 		t.Fatalf("audit entries = %d, want exactly 1", len(audit.entries))

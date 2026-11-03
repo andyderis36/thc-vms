@@ -10,12 +10,12 @@
 
 import type { Browser, Page } from '@playwright/test'
 import { expect, test } from '../fixtures'
-import { FRONTEND_BASE, TOKEN_STORAGE_KEY, awaitLoginSlot } from '../helpers/api'
+import { FRONTEND_BASE, TOKEN_STORAGE_KEY, awaitLoginSlot, ACCOUNTS, DEFAULT_PASSWORD } from '../helpers/api'
 import { gotoApp } from '../helpers/nav'
 
-const DEMO_PASSWORD = 'Password123!'
-const SECURITY_EMAIL = 'security1a@transhybrid.net.id'
-const ADMIN_EMAIL = 'admin1@transhybrid.net.id'
+const DEMO_PASSWORD = DEFAULT_PASSWORD
+const SECURITY_EMAIL = ACCOUNTS.security.email
+const ADMIN_EMAIL = ACCOUNTS.admin.email
 
 /** Semua rute yang diproteksi guard client-side pada skenario NAV-03. */
 const PROTECTED_PATHS = [

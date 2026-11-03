@@ -175,7 +175,7 @@ Gunakan dua cabang berbeda, mis. Pontianak HQ dan Sambas. Ulangi tiap baris untu
 ## 6. OUT OF SCOPE (jangan file bug untuk ini)
 
 1. `/{id}/feedback` dan `/{id}/incident`: placeholder Fase 2. BE 404 itu disengaja.
-2. Pendaftaran vendor mandiri publik: tidak ada di MVP. Akun vendor dibuat manual oleh admin atau superadmin.
+2. Pendaftaran vendor mandiri publik tersedia lewat `POST /auth/register`: akun baru berstatus `pending` dan tidak dapat masuk sampai superadmin menyetujuinya via `PATCH /users/{id}/status`.
 3. Layar Emergency Evacuation List terpisah: sudah diganti tab Sedang di Lokasi.
 4. Tombol Approve, Reject, atau Check-in di tampilan vendor: memang tidak boleh ada.
 5. Kasus API otomatis yang sudah ada di `docs/6. QA_CHECKLIST.md`: tidak perlu diulang di sini kecuali alur browsernya gagal.
