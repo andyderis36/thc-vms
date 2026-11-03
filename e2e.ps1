@@ -16,7 +16,7 @@
       e2e.cmd local -DryRun       # cetak command line + env yang akan dipakai, tanpa menjalankan test
 
   Akun harness terisolasi (opt-in): $env:E2E_LOCAL_PROVISION=1 (local) atau
-  $env:E2E_LIVE_PROVISION=1 (live) memprovisi 3 akun e2e-<runid>-* pre-suite
+  $env:E2E_LIVE_PROVISION=1 (live) memprovisi 6 akun e2e-<runid>-* pre-suite
   dan SELALU menghapusnya post-suite (finally: sweep --apply visits-first +
   provision --teardown-only), bahkan saat suite gagal/Ctrl+C. Objek MinIO
   yang diunggah TIDAK ikut terhapus (orphan di bucket).
