@@ -1,7 +1,11 @@
 'use client'
 
+import { useState } from 'react'
+import { Plus } from 'lucide-react'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { SecurityUserPanel } from '@/features/security/components/SecurityUserModal'
 import { usePendingApprovalCount } from '@/lib/api/hooks'
@@ -46,6 +50,8 @@ function SecurityScreen() {
   // Badge antrean shell: total requested + rescheduled (server-total,
   // limit 1 — hanya total yang dipakai); lihat usePendingApprovalCount.
   const { pendingCount } = usePendingApprovalCount()
+  const [guardCount, setGuardCount] = useState(0)
+  const [createOpen, setCreateOpen] = useState(false)
 
   if (role === null) {
     return (
@@ -64,13 +70,20 @@ function SecurityScreen() {
       */}
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight text-ink">
-            {`Kelola ${getRoleLabel('security')}`}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight text-ink">
+              {`Kelola ${getRoleLabel('security')}`}
+            </h1>
+            <Badge tone="warning">{guardCount} pengawas</Badge>
+          </div>
           <p className="mt-1.5 text-sm text-ink-secondary">
             {`Daftarkan akun ${getRoleLabel('security').toLowerCase()} baru dan kelola status aktif/nonaktif.`}
           </p>
         </div>
+        <Button className="min-h-touch" onClick={() => setCreateOpen(true)}>
+          <Plus className="size-4 shrink-0" aria-hidden="true" />
+          Tambah {getRoleLabel('security')}
+        </Button>
       </div>
 
       {/*
@@ -81,7 +94,7 @@ function SecurityScreen() {
         kotak berbordered. Pola yang sama dipakai dashboard/approvals —
         kartu hasil berada langsung di atas latar halaman.
       */}
-      <SecurityUserPanel enabled variant="page" onCreated={() => undefined} />
+      <SecurityUserPanel enabled variant="page" onCreated={() => undefined} onCountChange={setGuardCount} createOpen={createOpen} onCreateOpenChange={setCreateOpen} />
     </RoleShell>
   )
 }

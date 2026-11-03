@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Inbox, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { SuperadminShell } from '@/components/layouts/SuperadminShell'
+import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { DetailModal } from '@/components/ui/DetailModal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
-import { Input, FIELD_HEIGHT } from '@/components/ui/Input'
+import { FIELD_HEIGHT } from '@/components/ui/Input'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { Pagination } from '@/components/ui/Pagination'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
@@ -71,6 +73,8 @@ export interface ManagedUsersScreenProps {
   title: string
   /** Subjudul layar. */
   subtitle: string
+  /** Satuan hitung badge total di samping judul (mis. "akun", "vendor"). */
+  countNoun?: string
   /**
    * Tampilkan antrean "Menunggu persetujuan" (akun inactive) di atas daftar.
    * Dipakai layar `/vendor-registrations`: akun pendaftar mandiri harus
@@ -107,6 +111,7 @@ export function ManagedUsersScreen({
   activeHref,
   title,
   subtitle,
+  countNoun = 'akun',
   showPendingSection = false,
 }: ManagedUsersScreenProps) {
   const [locationId, setLocationId] = useState('all')
@@ -281,7 +286,12 @@ export function ManagedUsersScreen({
     >
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-ink">{title}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-xl font-bold text-ink">{title}</h1>
+            <Badge tone="warning">
+              {rows.length} {countNoun}
+            </Badge>
+          </div>
           <p className="mt-1 text-sm text-ink-secondary">{subtitle}</p>
         </div>
         {createRole !== null ? (
@@ -396,7 +406,10 @@ export function ManagedUsersScreen({
         </div>
         {/* Searchbox nama/email tampil di SEMUA mode peran. */}
         <div className="relative min-w-48 flex-1">
-          <Input
+          <span aria-hidden="true" className="mb-2 block text-label font-semibold text-ink">
+            Pencarian
+          </span>
+          <SearchInput
             aria-label="Cari user"
             placeholder="Cari nama atau email…"
             value={searchInput}
@@ -405,7 +418,9 @@ export function ManagedUsersScreen({
           />
         </div>
         {/* Selalu anak TERAKHIR: satu-satunya reset untuk semua kontrol di atas. */}
-        <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        <div className="flex items-end gap-3">
+          <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        </div>
       </div>
 
       <div className="mt-4">
@@ -448,6 +463,8 @@ export function ManagedUsersScreen({
               onDelete={setDeleting}
               onEdit={setEditing}
               onView={setDetail}
+              page={safePage}
+              pageSize={pageSize}
               roleFilter={
                 showRoleFilter
                   ? {

@@ -419,29 +419,36 @@ function GateContent() {
           ) : null}
         </div>
         <div className="card mb-4 flex flex-wrap items-end gap-3 border-brand/20 bg-brand-soft/40 p-4">
-          <div className="relative min-w-48 flex-1 sm:w-64 sm:flex-none">
-            <SearchInput
-              id={GATE_SEARCH_ID}
-              aria-label="Cari kunjungan"
-              placeholder="Cari Visit ID atau Vendor/Mitra…"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              maxLength={SEARCH_QUERY_MAX_LENGTH}
-              fieldSize="gate"
-              className={searchInput !== '' ? 'pr-12' : ''}
-            />
-            {searchInput !== '' ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="absolute right-2 top-1/2 -translate-y-1/2"
-                onClick={handleClearSearch}
-                aria-label="Hapus pencarian"
-              >
-                <X className="size-4 shrink-0" aria-hidden="true" />
-              </Button>
-            ) : null}
+          <div className="min-w-48 flex-1 sm:w-64 sm:flex-none">
+            <span aria-hidden="true" className="mb-2 block text-label font-semibold text-ink">
+              Pencarian
+            </span>
+            {/* `relative` dipindah ke pembungkus dalam agar tombol clear tetap
+                dipusatkan terhadap FIELD (bukan field + label visual). */}
+            <div className="relative">
+              <SearchInput
+                id={GATE_SEARCH_ID}
+                aria-label="Cari kunjungan"
+                placeholder="Cari Visit ID atau Vendor/Mitra…"
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                maxLength={SEARCH_QUERY_MAX_LENGTH}
+                fieldSize="gate"
+                className={searchInput !== '' ? 'pr-12' : ''}
+              />
+              {searchInput !== '' ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-2 top-1/2 -translate-y-1/2"
+                  onClick={handleClearSearch}
+                  aria-label="Hapus pencarian"
+                >
+                  <X className="size-4 shrink-0" aria-hidden="true" />
+                </Button>
+              ) : null}
+            </div>
           </div>
           <div className="min-w-36 flex-1 sm:w-44 sm:flex-none">
             <Input
@@ -476,7 +483,9 @@ function GateContent() {
               }}
             />
           </div>
-          <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+          <div className="flex items-end gap-3">
+            <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+          </div>
         </div>
         {/* Konteks pengganti prop-drilling: GateQueue tidak diubah, tetapi
             GuestCard tetap menerima handler klik kartu untuk popup detail. */}

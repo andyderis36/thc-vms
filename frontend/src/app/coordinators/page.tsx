@@ -31,6 +31,7 @@ export default function CoordinatorsPage() {
         activeHref="/coordinators"
         title="Koordinator Wilayah & Superadmin"
         subtitle="Kelola akun Koordinator Wilayah di seluruh kantor cabang dan POP THC, berikut akun tingkat atas (Superadmin) di Kantor Pusat."
+        countNoun="akun"
       />
     </RequireRole>
   )

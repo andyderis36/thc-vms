@@ -12,6 +12,7 @@ import { EditUserModal } from '@/features/users/components/EditUserModal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { Modal } from '@/components/ui/Modal'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Pagination } from '@/components/ui/Pagination'
@@ -120,6 +121,19 @@ export interface SecurityUserPanelProps {
    * Default `'modal'` supaya pemakaian lama tetap aman.
    */
   variant?: 'page' | 'modal'
+  /**
+   * Dilaporkan setiap jumlah daftar tersaring berubah — dipakai halaman
+   * `/security` untuk badge total di samping h1 (panel yang memegang data).
+   */
+  onCountChange?: (count: number) => void
+  /**
+   * Modal tambah terkontrol: halaman `/security` memegang tombolnya sendiri
+   * di baris judul (sejajar h1) sehingga panel hanya merender daftar +
+   * filter. Bila diisi, tombol internal disembunyikan dan modal dikendalikan
+   * dari luar; bila kosong (varian modal), perilaku internal tak berubah.
+   */
+  createOpen?: boolean
+  onCreateOpenChange?: (open: boolean) => void
 }
 
 /**
@@ -137,12 +151,14 @@ export interface SecurityUserPanelProps {
  * Tanpa field NIK (BE menolak NIK untuk security — cermin `rejectSecurityNik`
  * di mock/BE).
  */
-export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: SecurityUserPanelProps) {
+export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCountChange, createOpen: controlledOpen, onCreateOpenChange }: SecurityUserPanelProps) {
   const { user } = useSession()
   const role: Role | null = user !== null ? user.role : null
   const ownLocationId = user !== null ? user.location_id : null
 
-  const [createOpen, setCreateOpen] = useState(false)
+  const [createOpenInternal, setCreateOpenInternal] = useState(false)
+  const createOpen = controlledOpen ?? createOpenInternal
+  const setCreateOpen = onCreateOpenChange ?? setCreateOpenInternal
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | User['status']>('all')
@@ -199,6 +215,10 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
   // setelah data ter-refetch menyusut, halaman basi tak pernah menampilkan slice kosong.
   const { items: pageUsers, page: currentPage, totalPages } = paginate(filteredUsers, page, pageSize)
 
+  useEffect(() => {
+    onCountChange?.(filteredUsers.length)
+  }, [onCountChange, filteredUsers.length])
+
   if (role === null || !can(role, 'manageSecurity')) return null
 
   const handleToggle = (userId: string, userName: string, next: UpdateUserStatusRequest['status']): void => {
@@ -244,13 +264,14 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-label font-semibold text-ink">Daftar {getRoleLabel('security')}</p>
-        <Button className="min-h-touch" onClick={() => setCreateOpen(true)}>
-          <Plus className="size-4 shrink-0" aria-hidden="true" />
-          Tambah {getRoleLabel('security')}
-        </Button>
-      </div>
+      {onCreateOpenChange === undefined ? (
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <Button className="min-h-touch" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4 shrink-0" aria-hidden="true" />
+            Tambah {getRoleLabel('security')}
+          </Button>
+        </div>
+      ) : null}
 
       {/* Toolbar filter irisan SCR-02 — pola users benchmark: select berlabel
           + search ber-aria-label, wrap rapi di 375/768/1280 tanpa scroll. */}
@@ -264,7 +285,10 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
           />
         </div>
         <div className="relative min-w-48 flex-1">
-          <Input
+          <span aria-hidden="true" className="mb-2 block text-label font-semibold text-ink">
+            Pencarian
+          </span>
+          <SearchInput
             aria-label={`Cari ${getRoleLabel('security').toLowerCase()}`}
             placeholder="Cari nama, email, atau cabang…"
             value={searchInput}
@@ -272,7 +296,9 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
             maxLength={SEARCH_QUERY_MAX_LENGTH}
           />
         </div>
-        <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        <div className="flex items-end gap-3">
+          <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        </div>
       </div>
 
       <CreateSecurityModal
@@ -341,6 +367,8 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal' }: Sec
                 onDelete={setDeleting}
                 onToggle={handleToggleFor}
                 onView={setDetail}
+                page={currentPage}
+                pageSize={pageSize}
               />
             ) : null}
             {/* Kartu: di mode page dibatasi `lg:hidden` (tabel mengambil alih);
@@ -452,6 +480,8 @@ interface SecurityListProps {
   onDelete: (member: User) => void
   onToggle: (member: User) => void
   onView: (member: User) => void
+  page?: number
+  pageSize?: number
 }
 
 /**
@@ -550,7 +580,8 @@ function SecurityUserActionMenu({
   )
 }
 
-function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUserId, onEdit, onDelete, onToggle, onView }: SecurityListProps) {
+function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUserId, onEdit, onDelete, onToggle, onView, page = 1, pageSize }: SecurityListProps) {
+  const effectivePageSize = pageSize ?? users.length
   return (
     <div className={TABLE_WRAPPER_CLASS}>
       <table className={TABLE_CLASS}>
@@ -558,8 +589,9 @@ function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUs
           <tr>
             {[
               // Aksi 7% seragam dengan /users (ActionMenu ikon tunggal); 9 poin dibagikan proporsional ke kolom data ⇒ total tepat 100%.
+              { label: 'No', width: 'w-[4%]' },
               { label: 'Nama', width: 'w-[27%]' },
-              { label: 'Email', width: 'w-[30%]' },
+              { label: 'Email', width: 'w-[26%]' },
               { label: 'Cabang', width: 'w-[23%]' },
               { label: 'Status', width: 'w-[13%]' },
               { label: 'Aksi', width: 'w-[7%]' },
@@ -575,8 +607,11 @@ function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUs
           </tr>
         </thead>
         <tbody className="divide-y divide-border-light">
-          {users.map((member) => (
+          {users.map((member, index) => (
             <tr key={member.id} className="transition-colors hover:bg-brand/5">
+              <td className="px-3 py-3 text-right tabular-nums text-sm text-ink-secondary lg:px-6">
+                {(page - 1) * effectivePageSize + index + 1}
+              </td>
               <td className="px-3 py-3 lg:px-6">
                 <p className="truncate text-sm font-semibold text-ink" title={member.name}>
                   {member.name}

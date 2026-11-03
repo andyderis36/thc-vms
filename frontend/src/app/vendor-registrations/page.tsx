@@ -27,6 +27,7 @@ export default function VendorRegistrationsPage() {
         activeHref="/vendor-registrations"
         title="Pendaftaran Vendor/Mitra"
         subtitle="Kelola akun Vendor/Mitra (teknisi mitra eksternal) yang terdaftar di THC."
+        countNoun="vendor"
         showPendingSection
       />
     </RequireRole>

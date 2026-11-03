@@ -12,6 +12,7 @@ import { DetailModal, type DetailField } from '@/components/ui/DetailModal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { Modal } from '@/components/ui/Modal'
 import { Pagination } from '@/components/ui/Pagination'
 import { Select, type SelectOption } from '@/components/ui/Select'
@@ -269,7 +270,10 @@ function FacilitiesScreen() {
     >
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-ink">Fasilitas & Cabang</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-xl font-bold text-ink">Fasilitas & Cabang</h1>
+            <Badge tone="warning">{rows.length} fasilitas</Badge>
+          </div>
           <p className="mt-1 text-sm text-ink-secondary">
             Kelola kantor cabang, POP, dan miniPOP THC di seluruh nasional.
           </p>
@@ -308,7 +312,10 @@ function FacilitiesScreen() {
           />
         </div>
         <div className="relative min-w-48 flex-1">
-          <Input
+          <span aria-hidden="true" className="mb-2 block text-label font-semibold text-ink">
+            Pencarian
+          </span>
+          <SearchInput
             aria-label="Cari fasilitas"
             placeholder="Cari nama fasilitas atau kota…"
             value={searchInput}
@@ -317,7 +324,9 @@ function FacilitiesScreen() {
           />
         </div>
         {/* Anak TERAKHIR toolbar: reset semua filter (termasuk filter Cabang). */}
-        <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        <div className="flex items-end gap-3">
+          <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        </div>
       </div>
 
       <div className="mt-4">
@@ -354,6 +363,8 @@ function FacilitiesScreen() {
               onEdit={setEditing}
               onDelete={showDelete ? setDeleting : undefined}
               onView={setDetail}
+              page={safePage}
+              pageSize={pageSize}
             />
             <FacilityCards
               locations={pageRows}
@@ -440,6 +451,8 @@ interface FacilityListProps {
   onEdit: (location: Location) => void
   onDelete?: (location: Location) => void
   onView: (location: Location) => void
+  page?: number
+  pageSize?: number
 }
 
 /**
@@ -484,8 +497,9 @@ function useToggleLocation() {
   return { toggle, isPending: update.isPending, activeId: update.variables?.locationId }
 }
 
-function FacilityTable({ locations, onEdit, onDelete, onView }: FacilityListProps) {
+function FacilityTable({ locations, onEdit, onDelete, onView, page = 1, pageSize }: FacilityListProps) {
   const { toggle, isPending, activeId } = useToggleLocation()
+  const effectivePageSize = pageSize ?? locations.length
 
   return (
     <div className={TABLE_WRAPPER_CLASS}>
@@ -494,7 +508,8 @@ function FacilityTable({ locations, onEdit, onDelete, onView }: FacilityListProp
           <tr>
             {[
               // Lebar kolom mengikuti jumlah kontrol: satu trigger ikon → 7%.
-              { label: 'Nama Fasilitas', width: 'w-[28%]' },
+              { label: 'No', width: 'w-[4%]' },
+              { label: 'Nama Fasilitas', width: 'w-[24%]' },
               { label: 'Tipe', width: 'w-[16%]' },
               { label: 'Kota', width: 'w-[18%]' },
               { label: 'Zona', width: 'w-[12%]' },
@@ -512,7 +527,8 @@ function FacilityTable({ locations, onEdit, onDelete, onView }: FacilityListProp
           </tr>
         </thead>
         <tbody className="divide-y divide-border-light">
-          {locations.map((location) => {
+          {locations.map((location, index) => {
+            const rowNumber = (page - 1) * effectivePageSize + index + 1
             const active = isLocationActive(location)
             const actions: ActionMenuItem[] = [
               {
@@ -561,6 +577,9 @@ function FacilityTable({ locations, onEdit, onDelete, onView }: FacilityListProp
                 key={location.id}
                 className="transition-colors hover:bg-brand/5"
               >
+                <td className={`${TABLE_TD_CLASS} text-right tabular-nums text-xs sm:text-sm text-ink-secondary`}>
+                  {rowNumber}
+                </td>
                 <td className={TABLE_TD_CLASS}>
                   <p className="truncate text-xs sm:text-sm font-semibold text-ink" title={location.name}>
                     {location.name}

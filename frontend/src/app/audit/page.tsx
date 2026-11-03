@@ -1048,7 +1048,10 @@ function AuditScreen() {
   return (
     <SuperadminShell pendingCount={pendingCount} activeHref="/audit">
       <div className="mb-5">
-        <h1 className="text-xl font-bold text-ink">Jejak Audit</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-bold text-ink">Jejak Audit</h1>
+          <Badge tone="warning">{total} jejak</Badge>
+        </div>
         <p className="mt-1 text-sm text-ink-secondary">
           Lacak aktivitas sistem lintas cabang: siapa, apa, dan kapan.
         </p>
@@ -1057,6 +1060,9 @@ function AuditScreen() {
       <div className="card flex flex-col gap-3 p-4">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-56 flex-1">
+            <span aria-hidden="true" className="mb-2 block text-label font-semibold text-ink">
+              Pencarian
+            </span>
             <SearchInput
               type="search"
               aria-label="Cari jejak audit"
@@ -1089,7 +1095,7 @@ function AuditScreen() {
               }
             />
           </div>
-          <div data-testid="audit-filter-reset">
+          <div data-testid="audit-filter-reset" className="flex items-end gap-3">
             <FilterResetButton onReset={handleResetFilters} disabled={!hasActiveFilter} />
           </div>
         </div>
@@ -1259,7 +1265,7 @@ function AuditScreen() {
               </div>
             ) : (
               <>
-                <AuditTable items={items} usersById={usersById} onSelect={handleSelectLog} />
+                <AuditTable items={items} usersById={usersById} onSelect={handleSelectLog} page={safePage} pageSize={pageLimit} />
                 <AuditCards items={items} usersById={usersById} onSelect={handleSelectLog} />
               </>
             )}
@@ -1296,6 +1302,8 @@ interface AuditListProps {
   usersById: ReadonlyMap<string, AuditActorInfo>
   /** Membuka (atau menutup lewat toggle) modal detail untuk baris ini. */
   onSelect: (log: AuditLog) => void
+  page?: number
+  pageSize?: number
 }
 
 /**
@@ -1314,17 +1322,19 @@ function activateRowOnKeyDown(
   }
 }
 
-function AuditTable({ items, usersById, onSelect }: AuditListProps) {
+function AuditTable({ items, usersById, onSelect, page = 1, pageSize }: AuditListProps) {
+  const effectivePageSize = pageSize ?? items.length
   return (
     <div className={TABLE_WRAPPER_CLASS}>
       <table className={TABLE_CLASS}>
         <thead>
           <tr>
             {[
+              { label: 'No', width: 'w-[4%]' },
               { label: 'Waktu', width: 'w-[18%]' },
               { label: 'Pelaku', width: 'w-[18%]' },
               { label: 'Aksi', width: 'w-[14%]' },
-              { label: 'Entitas', width: 'w-[20%]' },
+              { label: 'Entitas', width: 'w-[16%]' },
               { label: 'IP', width: 'w-[12%]' },
               { label: 'Keterangan', width: 'w-[18%]' },
             ].map((header) => (
@@ -1339,7 +1349,7 @@ function AuditTable({ items, usersById, onSelect }: AuditListProps) {
           </tr>
         </thead>
         <tbody className="divide-y divide-border-light">
-          {items.map((log) => (
+          {items.map((log, index) => (
             <tr
               key={log.id}
               tabIndex={0}
@@ -1347,6 +1357,9 @@ function AuditTable({ items, usersById, onSelect }: AuditListProps) {
               onClick={() => onSelect(log)}
               onKeyDown={(event) => activateRowOnKeyDown(event, () => onSelect(log))}
             >
+              <td className={`${TABLE_TD_CLASS} text-right tabular-nums text-xs sm:text-sm text-ink-secondary`}>
+                {(page - 1) * effectivePageSize + index + 1}
+              </td>
               <td className={TABLE_TD_CLASS}>
                 <p className="whitespace-nowrap text-xs sm:text-sm text-ink">
                   {formatTanggalWaktu(log.timestamp)}

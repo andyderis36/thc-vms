@@ -239,6 +239,9 @@ function ApprovalsScreen() {
           </div>
         ) : null}
         <div className="min-w-48 flex-1">
+          <span aria-hidden="true" className="mb-2 block text-label font-semibold text-ink">
+            Pencarian
+          </span>
           <SearchInput
             aria-label="Cari permohonan"
             placeholder="Cari nama Vendor/Mitra atau Visit ID…"
@@ -279,7 +282,9 @@ function ApprovalsScreen() {
         </div>
         {/* Tombol reset selalu tampil (independen dari select Cabang superadmin);
             nonaktif saat tidak ada filter aktif — pola halaman users. */}
-        <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        <div className="flex items-end gap-3">
+          <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        </div>
       </div>
 
       {/* Galat HANYA dari query utama — kegagalan query rescheduled tidak
@@ -343,6 +348,8 @@ function ApprovalsScreen() {
                 setSortBy(field)
                 setSortOrder(nextOrder)
               }}
+              page={page}
+              pageSize={pageSize}
             />
             <VisitCards
               visits={rows}
