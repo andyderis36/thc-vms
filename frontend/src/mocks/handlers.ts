@@ -417,10 +417,10 @@ export const handlers: RequestHandler[] = [
       return fail('UNAUTHORIZED', 'Kredensial tidak valid', 401);
     }
     if (user.status === 'inactive') {
-      return fail('UNAUTHORIZED', 'Kredensial tidak valid', 401);
+      return fail('ACCOUNT_INACTIVE', 'Akun Anda dinonaktifkan.', 403);
     }
     if (user.status === 'pending') {
-      return fail('FORBIDDEN', 'Akun menunggu persetujuan.', 403);
+      return fail('ACCOUNT_PENDING', 'Akun Anda menunggu persetujuan superadmin.', 403);
     }
     const result: LoginResult = { token: createMockToken(user), user };
     return ok(result);
