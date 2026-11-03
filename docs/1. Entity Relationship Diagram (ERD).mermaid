@@ -45,7 +45,7 @@ erDiagram
         uuid role_id FK
         uuid location_id FK "Nullable: required for admin & security, null for super_admin & vendor"
         string type "internal | external"
-        string status "active | inactive | blacklisted"
+        string status "active | inactive | pending | blacklisted"
         string avatar_url "Nullable: absolute object URL, bukan presigned URL; foto profil (000014)"
         uuid vendor_id FK "Nullable for internal staff"
         text vendor_name_override "Nullable: manual vendor company, TIDAK terdaftar di katalog vendor (000005)"
