@@ -15,10 +15,8 @@
  */
 
 import type { Page } from '@playwright/test'
-import { expect, test } from '../fixtures'
+import { expect, test, type Harness } from '../fixtures'
 import {
-  LOCATIONS,
-  PURPOSES,
   apiFetchRaw,
   deleteVisitViaApi,
   getVisitViaApi,
@@ -28,9 +26,62 @@ import { exeBuffer, jpegBuffer, pdfBuffer, writeAsset } from '../helpers/assets'
 import { collectFileUrls, deleteUploadedFiles } from '../helpers/storage'
 import { gotoApp } from '../helpers/nav'
 
-const HQ_LABEL = 'Kantor Pusat THC (Pontianak)'
-const PURPOSE_CATALOG = 'Survey'
 const SUBMIT_LABEL = 'Kirim Permohonan Kunjungan'
+
+interface RuntimeCatalog {
+  facilityId: string
+  facilityName: string
+  purposeId?: string
+  purposeName?: string
+}
+
+let cachedCatalog: RuntimeCatalog | null = null
+
+async function runtimeCatalog(h: Harness): Promise<RuntimeCatalog> {
+  if (cachedCatalog !== null) {
+    return cachedCatalog
+  }
+  const token = await h.tokenAs('super')
+  const locResult = await apiFetchRaw<ApiEnvelope<Array<{ id: string; name: string }>>>(
+    token,
+    'GET',
+    '/locations',
+  )
+  if (locResult.status !== 200 || !locResult.body.success) {
+    throw new Error(
+      `[visit-form] GET /locations -> HTTP ${locResult.status}: ${JSON.stringify(locResult.body)}`,
+    )
+  }
+  const facilities = locResult.body.data
+  if (facilities.length === 0) {
+    throw new Error('[visit-form] katalog lokasi runtime kosong.')
+  }
+  const sorted = [...facilities].sort((a, b) => a.name.localeCompare(b.name))
+  const picked =
+    sorted.find((facility) => facility.name.toLowerCase().includes('pusat')) ?? sorted[0]
+  if (picked === undefined) {
+    throw new Error('[visit-form] katalog lokasi runtime kosong.')
+  }
+  const purResult = await apiFetchRaw<ApiEnvelope<Array<{ id: string; name: string }>>>(
+    token,
+    'GET',
+    '/purposes',
+  )
+  if (purResult.status !== 200 || !purResult.body.success) {
+    throw new Error(
+      `[visit-form] GET /purposes -> HTTP ${purResult.status}: ${JSON.stringify(purResult.body)}`,
+    )
+  }
+  const firstPurpose = purResult.body.data[0]
+  cachedCatalog = {
+    facilityId: picked.id,
+    facilityName: picked.name,
+    ...(firstPurpose !== undefined
+      ? { purposeId: firstPurpose.id, purposeName: firstPurpose.name }
+      : {}),
+  }
+  return cachedCatalog
+}
 
 /** Kunjungan yang dibuat lewat UI dan harus dihapus (diisi setelah redirect). */
 const createdVisitIds: string[] = []
@@ -70,6 +121,7 @@ interface MemberInput {
 }
 
 interface FillVisitOptions {
+  catalog: RuntimeCatalog
   start: string
   end: string
   members: MemberInput[]
@@ -110,27 +162,27 @@ async function fetchVisitRaw(token: string, id: string): Promise<RawVisit> {
   return result.body.data
 }
 
-async function openForm(page: Page): Promise<void> {
+async function openForm(page: Page, facilityName: string): Promise<void> {
   await gotoApp(page, '/visits/new')
   await expect(
     page.getByRole('heading', { name: 'Pengajuan Akses Fasilitas Jaringan THC' }),
   ).toBeVisible()
   // Katalog fasilitas & tujuan dimuat async; tunggu sampai kontrol siap.
   await expect(
-    page.locator(`#visit-facility-datalist option[value="${HQ_LABEL}"]`),
+    page.locator(`#visit-facility-datalist option[value="${facilityName}"]`),
   ).toHaveCount(1)
   await expect(page.locator('#visit-purpose')).toBeEnabled()
 }
 
-async function pickLocation(page: Page): Promise<void> {
-  await page.getByLabel('Fasilitas Tujuan').fill(HQ_LABEL)
+async function pickLocation(page: Page, facilityName: string): Promise<void> {
+  await page.getByLabel('Fasilitas Tujuan').fill(facilityName)
 }
 
-async function pickCatalogPurpose(page: Page): Promise<void> {
+async function pickCatalogPurpose(page: Page, purposeName: string): Promise<void> {
   await page.locator('#visit-purpose').click()
   const panel = page.getByRole('listbox')
   await expect(panel).toBeVisible()
-  await panel.getByRole('checkbox', { name: PURPOSE_CATALOG }).check()
+  await panel.getByRole('checkbox', { name: purposeName }).check()
   await expect(page.locator('#visit-purpose')).toContainText('1 tujuan dipilih')
   // Escape menutup panel (listener document) tanpa bergantung pada klik luar.
   await page.keyboard.press('Escape')
@@ -175,14 +227,21 @@ async function uploadInto(
 }
 
 async function fillVisitForm(page: Page, options: FillVisitOptions): Promise<void> {
-  await openForm(page)
-  await pickLocation(page)
+  const catalog = options.catalog
+  await openForm(page, catalog.facilityName)
+  await pickLocation(page, catalog.facilityName)
 
-  if (options.pickCatalogPurpose !== false) {
-    await pickCatalogPurpose(page)
+  // Katalog tujuan bisa kosong di prod: tanpa purpose runtime, pakai jalur
+  // "Tujuan lain" (purpose_note) agar submit tetap valid.
+  const catalogAvailable =
+    options.pickCatalogPurpose !== false && catalog.purposeName !== undefined
+  if (catalogAvailable) {
+    await pickCatalogPurpose(page, catalog.purposeName ?? '')
   }
-  if (options.purposeNote !== undefined) {
-    await page.locator('#visit-purpose-note').fill(options.purposeNote)
+  if (options.purposeNote !== undefined || !catalogAvailable) {
+    await page
+      .locator('#visit-purpose-note')
+      .fill(options.purposeNote ?? options.notes ?? 'E2E tujuan kunjungan')
   }
 
   await page.locator('#visit-start-date').fill(options.start)
@@ -341,12 +400,14 @@ test('@VISIT-01 happy path lengkap: 1 anggota KTP+selfie, SPK 1,5 MB, tujuan kat
   const page = await h.openAs('vendor')
   const marker = h.unique('visit01')
   markers.push(marker)
+  const catalog = await runtimeCatalog(h)
 
   const spk = await writeAsset(test.info(), 'spk-visit01.pdf', pdfBuffer(1500))
   const ktp = await writeAsset(test.info(), 'ktp.jpg', jpegBuffer())
   const selfie = await writeAsset(test.info(), 'selfie.jpg', jpegBuffer())
 
   await fillVisitForm(page, {
+    catalog,
     start: toLocalInput(offset(-30)),
     end: toLocalInput(offset(180)),
     members: [
@@ -382,7 +443,7 @@ test('@VISIT-02 klien meneruskan SPK 6,2 MB dan menolak 21 MB dengan pesan batas
 }) => {
   test.setTimeout(120_000)
   const page = await h.openAs('vendor')
-  await openForm(page)
+  await openForm(page, (await runtimeCatalog(h)).facilityName)
 
   const uploadPosts: string[] = []
   page.on('request', (request) => {
@@ -430,7 +491,7 @@ test('@VISIT-02 klien meneruskan SPK 6,2 MB dan menolak 21 MB dengan pesan batas
 
 test('@VISIT-03 berkas .exe pada slot SPK ditolak sebagai tipe tidak didukung', async ({ h }) => {
   const page = await h.openAs('vendor')
-  await openForm(page)
+  await openForm(page, (await runtimeCatalog(h)).facilityName)
 
   const exe = await writeAsset(test.info(), 'malware.exe', exeBuffer())
   await page.locator('#visit-assignment-letter input[type=file]').setInputFiles(exe)
@@ -463,6 +524,7 @@ test('@VISIT-04 tanggal terbalik ditolak tanpa request create', async ({ h }) =>
   const spk = await writeAsset(test.info(), 'spk.pdf', pdfBuffer(8))
 
   await fillVisitForm(page, {
+    catalog: await runtimeCatalog(h),
     start: toLocalInput(offset(180)),
     end: toLocalInput(offset(-60)),
     members: [
@@ -492,12 +554,14 @@ test('@VISIT-05 tiga anggota sekaligus tersimpan lengkap', async ({ h }) => {
   const page = await h.openAs('vendor')
   const marker = h.unique('visit05')
   markers.push(marker)
+  const catalog05 = await runtimeCatalog(h)
 
   const ktp = await writeAsset(test.info(), 'ktp.jpg', jpegBuffer())
   const selfie = await writeAsset(test.info(), 'selfie.jpg', jpegBuffer())
   const spk = await writeAsset(test.info(), 'spk-visit05.pdf', pdfBuffer(8))
 
   await fillVisitForm(page, {
+    catalog: catalog05,
     start: toLocalInput(offset(-15)),
     end: toLocalInput(offset(120)),
     members: [1, 2, 3].map((index) => ({
@@ -538,6 +602,7 @@ test('@VISIT-08 jalur di luar katalog: Tujuan lain + vendor manual tersimpan', a
   const spk = await writeAsset(test.info(), 'spk-visit08.pdf', pdfBuffer(8))
 
   await fillVisitForm(page, {
+    catalog: await runtimeCatalog(h),
     start: toLocalInput(offset(-10)),
     end: toLocalInput(offset(90)),
     pickCatalogPurpose: false,
@@ -572,6 +637,7 @@ test('@VISIT-11 submit tanpa Foto KTP ditolak di baris anggota', async ({ h }) =
   const spk = await writeAsset(test.info(), 'spk-visit11.pdf', pdfBuffer(8))
 
   await fillVisitForm(page, {
+    catalog: await runtimeCatalog(h),
     start: toLocalInput(offset(-5)),
     end: toLocalInput(offset(60)),
     members: [
@@ -602,12 +668,14 @@ test('@VISIT-12 Jabatan teks bebas tersimpan apa adanya', async ({ h }) => {
   const marker = h.unique('visit12')
   markers.push(marker)
   const jabatan = 'Teknisi Senior E2E'
+  const catalog = await runtimeCatalog(h)
 
   const ktp = await writeAsset(test.info(), 'ktp.jpg', jpegBuffer())
   const selfie = await writeAsset(test.info(), 'selfie.jpg', jpegBuffer())
   const spk = await writeAsset(test.info(), 'spk-visit12.pdf', pdfBuffer(8))
 
   await fillVisitForm(page, {
+    catalog,
     start: toLocalInput(offset(-20)),
     end: toLocalInput(offset(150)),
     members: [
@@ -629,7 +697,12 @@ test('@VISIT-12 Jabatan teks bebas tersimpan apa adanya', async ({ h }) => {
   const raw = await fetchVisitRaw(await h.tokenAs('vendor'), id)
 
   expect(raw.visitors?.[0]?.jabatan).toBe(jabatan)
-  // Fasilitas & tujuan katalog tetap sesuai pilihan form — payload terkirim utuh.
-  expect(raw.location?.id).toBe(LOCATIONS.hq)
-  expect(raw.purposes?.[0]?.id).toBe(PURPOSES[PURPOSE_CATALOG])
+  // Fasilitas & tujuan tetap sesuai pilihan form runtime — payload terkirim utuh.
+  expect(raw.location?.id).toBe(catalog.facilityId)
+  if (catalog.purposeId !== undefined) {
+    expect(raw.purposes?.[0]?.id).toBe(catalog.purposeId)
+  } else {
+    expect(raw.purposes ?? []).toHaveLength(0)
+    expect(raw.purpose_note).toBe(marker)
+  }
 })

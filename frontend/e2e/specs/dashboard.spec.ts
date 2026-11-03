@@ -22,14 +22,13 @@ import type { Page } from '@playwright/test'
 import { expect, test } from '../fixtures'
 import {
   DEFAULT_PASSWORD,
-  LOCATIONS,
-  PURPOSES,
   apiFetchRaw,
   checkInViaApi,
   createVisitViaApi,
   deleteVisitViaApi,
   getVisitViaApi,
   loginViaApi,
+  type ApiEnvelope,
 } from '../helpers/api'
 import { gotoApp } from '../helpers/nav'
 
@@ -95,7 +94,20 @@ test('@DASH-02 dashboard admin menampilkan KPI/tab dengan Fasilitas terkunci ke 
   await expectDashboardChrome(page)
   const facility = page.getByLabel('Fasilitas')
   await expect(facility).toBeDisabled()
-  await expect(facility).toHaveValue(LOCATIONS.hq)
+  const me = await apiFetchRaw<ApiEnvelope<{ location_id: string | null }>>(
+    await h.tokenAs('admin'),
+    'GET',
+    '/auth/me',
+  )
+  expect(me.status, 'GET /auth/me admin harus 200').toBe(200)
+  if (!me.body.success) {
+    throw new Error(`GET /auth/me admin gagal: ${me.body.error.code}`)
+  }
+  expect(
+    me.body.data.location_id,
+    'fasilitas terkunci = lokasi runtime akun admin sendiri',
+  ).not.toBeNull()
+  await expect(facility).toHaveValue(me.body.data.location_id ?? '')
 })
 
 test('@DASH-03 tab Sedang di Lokasi memuat kunjungan check-in dan baris membuka detail', async ({
@@ -132,18 +144,24 @@ test('@DASH-04 dashboard vendor hanya memuat kunjungan sendiri tanpa kontrol app
   h,
 }) => {
   const ownVisit = await h.createVisit('dash04-own', { withFiles: false })
-  const purposeId = PURPOSES.Survey
-  if (purposeId === undefined) {
-    throw new Error('[DASH-04] purpose seed untuk vendor pembanding tidak ditemukan.')
+  const superToken = await h.tokenAs('super')
+  const purposeList = await apiFetchRaw<ApiEnvelope<Array<{ id: string }>>>(
+    superToken,
+    'GET',
+    '/purposes',
+  )
+  expect(purposeList.status, 'GET /purposes harus 200').toBe(200)
+  if (!purposeList.body.success) {
+    throw new Error(`GET /purposes gagal: ${purposeList.body.error.code}`)
   }
+  const runtimePurposeId = purposeList.body.data[0]?.id
 
   const vendorB = await loginViaApi(process.env.E2E_EMAIL_VENDOR2 ?? 'vendor1b@transhybrid.net.id', DEFAULT_PASSWORD)
   let foreignVisitId: string | null = null
 
   try {
-    const foreignVisit = await createVisitViaApi(vendorB.token, {
-      location_id: LOCATIONS.hq,
-      purpose_ids: [purposeId],
+    const foreignPayload: Record<string, unknown> = {
+      location_id: ownVisit.locationId,
       start_date: new Date(Date.now() - 30 * 60_000).toISOString(),
       end_date: new Date(Date.now() + 180 * 60_000).toISOString(),
       is_nda_accepted: true,
@@ -157,7 +175,13 @@ test('@DASH-04 dashboard vendor hanya memuat kunjungan sendiri tanpa kontrol app
           vendor_name: 'PT Daya Power Mandiri',
         },
       ],
-    })
+    }
+    if (runtimePurposeId !== undefined) {
+      foreignPayload.purpose_ids = [runtimePurposeId]
+    } else {
+      foreignPayload.purpose_note = `${h.unique('dash04-foreign')} audit feeder`
+    }
+    const foreignVisit = await createVisitViaApi(vendorB.token, foreignPayload)
     foreignVisitId = foreignVisit.id
     expect(foreignVisit.status).toBe('requested')
     if (foreignVisit.visit_id === undefined) {

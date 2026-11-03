@@ -28,6 +28,7 @@ import {
   DEFAULT_PASSWORD,
   apiFetch,
   apiFetchRaw,
+  isLiveRun,
   loginViaApi,
   type ApiEnvelope,
 } from '../helpers/api'
@@ -83,6 +84,29 @@ function expectData<T>(body: ApiEnvelope<T>, context: string): T {
     throw new Error(`[e2e-t8] ${context} gagal: ${body.error.code} - ${body.error.message}`)
   }
   return body.data
+}
+
+/**
+ * Lokasi cabang akun admin saat runtime (`GET /auth/me`): dipakai sebagai
+ * pembanding runtime pengganti literal seed `LOCATIONS.hq/sambas`.
+ */
+async function runtimeLocationFor(h: Harness, role: 'admin' | 'admin-sambas'): Promise<string> {
+  const token = await h.tokenAs(role)
+  const result = await apiFetchRaw<ApiEnvelope<{ location_id: string | null }>>(
+    token,
+    'GET',
+    '/auth/me',
+  )
+  if (result.status !== 200 || result.body.success !== true) {
+    throw new Error(
+      `[e2e-t8] GET /auth/me (${role}) -> HTTP ${result.status}: ${JSON.stringify(result.body)}`,
+    )
+  }
+  const locationId = result.body.data.location_id
+  if (locationId === null || locationId === '') {
+    throw new Error(`[e2e-t8] akun ${role} tidak punya location_id saat runtime.`)
+  }
+  return locationId
 }
 
 /**
@@ -287,6 +311,10 @@ async function fillSearch(page: Page, label: string, term: string): Promise<void
 test('@NAV-02 admin membuka /security: form tambah + daftar pengawas cabangnya saja', async ({
   h,
 }) => {
+  test.skip(
+    isLiveRun(),
+    'live: daftar seed security1a@transhybrid.net.id tidak ada di prod (dataset seed-only).',
+  )
   const page = await h.openAs('admin')
   await gotoApp(page, '/security')
 
@@ -348,7 +376,7 @@ test('@AUTH-07 admin menambah pengawas baru via UI dan lokasinya = cabang admin'
     await fillSearch(page, 'Cari pengawas', email)
     await expect(tableRowWith(page, email)).toHaveCount(1)
 
-    // Verifikasi API: user baru berada di cabang admin (HQ).
+    // Verifikasi API: user baru berada di cabang admin (lokasi runtime akun admin).
     const users = await listSecurityUsers(adminToken)
     const created = users.find((user) => user.email === email)
     expect(created, `user ${email} harus ada di daftar API admin`).toBeDefined()
@@ -356,7 +384,7 @@ test('@AUTH-07 admin menambah pengawas baru via UI dan lokasinya = cabang admin'
       throw new Error(`[e2e-t8] user ${email} tidak ditemukan lewat API admin.`)
     }
     expect(created.role).toBe('security')
-    expect(created.location_id).toBe(LOCATIONS.hq)
+    expect(created.location_id).toBe(await runtimeLocationFor(h, 'admin'))
   } finally {
     await tracker.cleanup(h)
   }
@@ -372,7 +400,7 @@ test('@DEL-01 super_admin menghapus pengawas baru via UI lalu API 404', async ({
     const superToken = await h.tokenAs('super')
     const adminToken = await h.tokenAs('admin')
     const created = await createSecurityUser(adminToken, { name, email })
-    expect(created.location_id).toBe(LOCATIONS.hq)
+    expect(created.location_id).toBe(await runtimeLocationFor(h, 'admin'))
 
     const page = await h.openAs('super')
     await gotoApp(page, '/security')
@@ -406,6 +434,10 @@ test('@DEL-01 super_admin menghapus pengawas baru via UI lalu API 404', async ({
 test('@NAV-04 /coordinators memuat admin + super_admin dan filter peran bekerja', async ({
   h,
 }) => {
+  test.skip(
+    isLiveRun(),
+    'live: baris seed admin1/superadmin + hitungan filter peran adalah dataset seed-only.',
+  )
   const page = await h.openAs('super')
   await gotoApp(page, '/coordinators')
 
@@ -439,6 +471,10 @@ test('@NAV-04 /coordinators memuat admin + super_admin dan filter peran bekerja'
 test('@NAV-05 /vendor-registrations hanya akun vendor dan filter vendor bekerja', async ({
   h,
 }) => {
+  test.skip(
+    isLiveRun(),
+    'live: hitungan seed "PT Lintas Fiber" = 5 tidak ada di prod (katalog vendor kosong).',
+  )
   const page = await h.openAs('super')
   await gotoApp(page, '/vendor-registrations')
 
@@ -505,7 +541,7 @@ test('@EDT-01 super_admin mengubah nama koordinator baru lewat modal Ubah', asyn
       email,
       role: 'admin',
       nik: uniqueNik(),
-      locationId: LOCATIONS.hq,
+      locationId: await runtimeLocationFor(h, 'admin'),
     })
 
     const page = await h.openAs('super')
@@ -554,7 +590,7 @@ test('@EDT-02 reset kata sandi lewat modal Ubah lalu login dengan sandi baru', a
       password: PASSWORD,
       role: 'admin',
       nik: uniqueNik(),
-      locationId: LOCATIONS.hq,
+      locationId: await runtimeLocationFor(h, 'admin'),
     })
 
     const page = await h.openAs('super')
@@ -607,15 +643,18 @@ test('@EDT-03 admin ubah pengawas se-cabang; lintas cabang ditolak (UI & API)', 
     const adminToken = await h.tokenAs('admin')
     const superToken = await h.tokenAs('super')
 
-    // Pengawas cabang sendiri (HQ) dibuat oleh admin; cabang lain oleh super.
+    // Pengawas cabang sendiri (lokasi runtime akun admin); cabang lain (lokasi
+    // runtime akun admin-sambas) dibuat oleh super.
+    const adminLocationId = await runtimeLocationFor(h, 'admin')
+    const sambasLocationId = await runtimeLocationFor(h, 'admin-sambas')
     const hqUser = await createSecurityUser(adminToken, { name: hqName, email: hqEmail })
-    expect(hqUser.location_id).toBe(LOCATIONS.hq)
+    expect(hqUser.location_id).toBe(adminLocationId)
     const sambasUser = await createSecurityUser(superToken, {
       name: sambasName,
       email: sambasEmail,
-      locationId: LOCATIONS.sambas,
+      locationId: sambasLocationId,
     })
-    expect(sambasUser.location_id).toBe(LOCATIONS.sambas)
+    expect(sambasUser.location_id).toBe(sambasLocationId)
 
     const page = await h.openAs('admin')
     await gotoApp(page, '/security')
@@ -664,6 +703,10 @@ test('@EDT-03 admin ubah pengawas se-cabang; lintas cabang ditolak (UI & API)', 
 })
 
 test('@SEED akun seed tetap bisa login dengan peran & lokasi yang benar', async () => {
+  test.skip(
+    isLiveRun(),
+    'live: akun seed admin1/admin2/security*/vendor* tidak ada di prod; hanya akun provisi e2e-* yang login.',
+  )
   // Guard terakhir: memastikan tidak ada test back-office yang menyentuh seed.
   const seeds = [
     { role: 'super', email: ACCOUNTS.super.email, apiRole: 'super_admin', location: null },
@@ -677,7 +720,17 @@ test('@SEED akun seed tetap bisa login dengan peran & lokasi yang benar', async 
     expect(login.user.email).toBe(seed.email)
     expect(login.user.role, `peran API untuk seed ${seed.role}`).toBe(seed.apiRole)
     expect(login.user.location_id).toBe(seed.location)
-    const me = await apiFetchRaw(login.token, 'GET', '/auth/me')
+    const me = await apiFetchRaw<ApiEnvelope<{ location_id: string | null }>>(
+      login.token,
+      'GET',
+      '/auth/me',
+    )
     expect(me.status, `GET /auth/me untuk seed ${seed.email}`).toBe(200)
+    if (me.status === 200 && me.body.success === true) {
+      expect(
+        (me.body.data as { location_id: string | null }).location_id,
+        `lokasi runtime /auth/me untuk seed ${seed.role} harus cocok dengan login`,
+      ).toBe(login.user.location_id)
+    }
   }
 })

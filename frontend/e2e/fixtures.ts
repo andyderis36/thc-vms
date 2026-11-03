@@ -26,7 +26,11 @@ import {
   createVisitViaApi,
   deleteVisitViaApi,
   getVisitViaApi,
+  isLiveRun,
   loginViaApiCached,
+  peekLiveCatalog,
+  resolveLiveCatalog,
+  translateSeedLocationId,
   uploadFileViaApi,
   type Role,
 } from './helpers/api'
@@ -78,6 +82,14 @@ export interface Harness {
 
 /** Pilih admin yang cabangnya cocok; super_admin untuk selain HQ/Sambas. */
 function approverFor(locationId: string): Role {
+  if (isLiveRun()) {
+    const catalog = peekLiveCatalog()
+    if (catalog !== null) {
+      if (locationId === catalog.hqId) return 'admin'
+      if (locationId === catalog.secondId) return 'admin-sambas'
+      return 'super'
+    }
+  }
   if (locationId === LOCATIONS.hq) return 'admin'
   if (locationId === LOCATIONS.sambas) return 'admin-sambas'
   return 'super'
@@ -156,15 +168,24 @@ export const test = base.extend<{ h: Harness }>({
         }
 
         const role = opts.role ?? 'vendor'
-        const locationId = opts.locationId ?? LOCATIONS.hq
+        const marker = harness.unique(label)
+        const token = await tokenAs(role)
+        const catalog = await resolveLiveCatalog(token)
+        const locationId = translateSeedLocationId(opts.locationId ?? LOCATIONS.hq)
         const startOffsetMinutes = opts.startOffsetMinutes ?? -30
         const endOffsetMinutes = opts.endOffsetMinutes ?? 180
         const memberCount = Math.min(10, Math.max(1, Math.trunc(opts.memberCount ?? 1)))
-        const purposeIds = opts.purposeIds ?? [DEFAULT_PURPOSE_ID]
+        let purposeIds: string[] | undefined
+        let purposeNote: string | undefined
+        if (opts.purposeIds !== undefined) {
+          purposeIds = opts.purposeIds
+        } else if (catalog.purposeId !== null) {
+          purposeIds = [catalog.purposeId]
+        } else {
+          purposeNote = `E2E ${marker} purpose`.slice(0, 200)
+        }
         const withFiles = opts.withFiles !== false
         const approve = opts.approve !== false
-        const marker = harness.unique(label)
-        const token = await tokenAs(role)
 
         let assignmentLetterUrl = PLACEHOLDER_SPK_URL
         let idCardPhotoUrl: string | undefined
@@ -213,16 +234,22 @@ export const test = base.extend<{ h: Harness }>({
 
         const notes = [opts.notes, marker].filter((part): part is string => !!part).join(' | ')
 
-        const created = await createVisitViaApi(token, {
+        const payload: Record<string, unknown> = {
           location_id: locationId,
-          purpose_ids: purposeIds,
           start_date: new Date(now + startOffsetMinutes * 60_000).toISOString(),
           end_date: new Date(now + endOffsetMinutes * 60_000).toISOString(),
           is_nda_accepted: true,
           assignment_letter_url: assignmentLetterUrl,
           notes,
           visitors,
-        })
+        }
+        if (purposeIds !== undefined) {
+          payload.purpose_ids = purposeIds
+        }
+        if (purposeNote !== undefined) {
+          payload.purpose_note = purposeNote
+        }
+        const created = await createVisitViaApi(token, payload)
         createdVisitIds.push(created.id)
 
         if (created.visit_id === undefined) {

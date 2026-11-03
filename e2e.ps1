@@ -274,6 +274,7 @@ function Clear-E2EOverrides {
             'E2E_BASE_URL',
             'E2E_API_BASE_URL',
             'E2E_FRONTEND_BASE_URL',
+            'E2E_LIVE',
             'E2E_LOGIN_PACING_MS',
             'E2E_SKIP_STORAGE_CLEANUP'
         )) {
@@ -326,6 +327,7 @@ function Set-LiveE2EEnv {
     $env:E2E_API_BASE_URL = "$LiveUrl/api/v1"
     $env:E2E_FRONTEND_BASE_URL = $LiveUrl
     $env:E2E_LOGIN_PACING_MS = $LivePacingMs
+    $env:E2E_LIVE = '1'
     $env:E2E_SKIP_STORAGE_CLEANUP = '1'
     $env:E2E_SLOWMO = "$SlowMo"
     # Kredensial TIDAK diset default di mode live: operator wajib menyuplai
@@ -411,12 +413,12 @@ function Invoke-E2EProvision([string]$Scope) {
         $trimmed = $line.Trim()
         if ($trimmed -match 'BEGIN_EXPORT') { $inExport = $true; continue }
         if ($trimmed -match 'END_EXPORT') { $inExport = $false; continue }
-        if ($inExport -and $trimmed -match '^(E2E_[A-Z_]+)=(.*)$') {
+        if ($inExport -and $trimmed -match '^(E2E_[A-Z0-9_]+)=(.*)$') {
             [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
         }
     }
     if (-not $env:E2E_RUN_ID) { throw 'provisi selesai tetapi E2E_RUN_ID kosong; suite dibatalkan' }
-    $script:E2EProvisionedEmails = @($env:E2E_EMAIL_ADMIN, $env:E2E_EMAIL_SECURITY, $env:E2E_EMAIL_VENDOR | Where-Object { $_ })
+    $script:E2EProvisionedEmails = @(($env:E2E_EMAIL_ADMIN, $env:E2E_EMAIL_SECURITY, $env:E2E_EMAIL_VENDOR, $env:E2E_EMAIL_ADMIN2, $env:E2E_EMAIL_SECURITY2, $env:E2E_EMAIL_VENDOR2) | Where-Object { $_ })
     Write-Ok "provisi run $($env:E2E_RUN_ID): $($script:E2EProvisionedEmails -join ', ')"
     return $true
 }
@@ -704,6 +706,7 @@ if ($isLive) {
     }
 
     Write-Host ''
+    Set-LiveE2EEnv
     Write-Warn2 'MODE LIVE: suite menulis ke PRODUCTION https://vms.thckalbar.com'
     Write-Host '    - preflight di atas hanya GET /health; belum ada data yang ditulis' -ForegroundColor Yellow
     Write-Host '    - membuat lalu menghapus kunjungan nyata + akun sementara' -ForegroundColor Yellow
@@ -720,7 +723,6 @@ if ($isLive) {
         exit 1
     }
 
-    Set-LiveE2EEnv
     Write-Step 'sweep artefak E2E sisa sebelum test (live)'
     try {
         Invoke-E2ESweep -Apply

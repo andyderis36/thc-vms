@@ -35,10 +35,10 @@
 import { expect, test } from '../fixtures'
 import {
   ACCOUNTS,
-  LOCATIONS,
   apiFetch,
   apiFetchRaw,
   loginViaApiCached,
+  resolveLiveCatalog,
   type ApiEnvelope,
   type ApiResult,
   type Role,
@@ -117,6 +117,20 @@ async function fetchList<T>(token: string, path: string): Promise<T[]> {
 async function superToken(): Promise<string> {
   const login = await loginViaApiCached(ACCOUNTS.super.email, ACCOUNTS.super.password)
   return login.token
+}
+
+async function myLocationId(role: Role): Promise<string | null> {
+  const login = await loginViaApiCached(ACCOUNTS[role].email, ACCOUNTS[role].password)
+  const result = await apiFetchRaw<ApiEnvelope<{ location_id: string | null }>>(
+    login.token,
+    'GET',
+    '/auth/me',
+  )
+  expect(result.status, `GET /auth/me (${role}) harus 200`).toBe(200)
+  if (!result.body.success) {
+    throw new Error(`[e2e-sys] GET /auth/me (${role}) gagal: ${result.body.error.code}`)
+  }
+  return result.body.data.location_id
 }
 
 async function createSecurityAccount(
@@ -243,6 +257,13 @@ test('@SYS-04 katalog /locations, /purposes, /vendors, /jabatan terbaca untuk ke
   // Pastikan /jabatan punya minimal satu nilai: fixture menulis `jabatan: Teknisi`.
   await h.createVisit('sys04-jabatan', { withFiles: false, approve: false })
 
+  // Cabang pembanding runtime (bukan literal seed): lokasi akun admin &
+  // admin-sambas sendiri; katalog wajib memuat keduanya di semua peran.
+  const expectedBranches = [await myLocationId('admin'), await myLocationId('admin-sambas')].filter(
+    (id): id is string => id !== null && id !== '',
+  )
+  expect(expectedBranches.length, 'akun admin cabang wajib punya lokasi runtime').toBeGreaterThan(0)
+
   const locationCounts = new Map<Role, number>()
 
   for (const role of CATALOGUE_ROLES) {
@@ -265,8 +286,8 @@ test('@SYS-04 katalog /locations, /purposes, /vendors, /jabatan terbaca untuk ke
       expect(typeof row.is_active, `${role}: location.is_active wajib boolean`).toBe('boolean')
     }
     const ids = locations.map((row) => row.id)
-    expect(ids, `${role}: katalog wajib memuat HQ dan Sambas`).toEqual(
-      expect.arrayContaining([LOCATIONS.hq, LOCATIONS.sambas]),
+    expect(ids, `${role}: katalog wajib memuat cabang runtime`).toEqual(
+      expect.arrayContaining(expectedBranches),
     )
     locationCounts.set(role, locations.length)
 
@@ -344,17 +365,18 @@ test('@SYS-06 status akun security nonaktif memblokir login, aktif kembali lalu 
   const token = await superToken()
   const email = `${h.unique('sys06').toLowerCase()}@transhybrid.net.id`
   const created: CreatedAccount[] = []
+  const hqId = (await resolveLiveCatalog(token)).hqId
 
   try {
     const account = await createSecurityAccount(token, {
       name: `${h.unique('SYS06')} Pengawas`,
       email,
-      locationId: LOCATIONS.hq,
+      locationId: hqId,
     })
     created.push({ kind: 'security', id: account.id, email })
     expect(account.role).toBe('security')
     expect(account.status).toBe('active')
-    expect(account.location_id).toBe(LOCATIONS.hq)
+    expect(account.location_id).toBe(hqId)
     expect(account.email).toBe(email)
 
     // 1) Nonaktifkan lebih dulu: login sukses menulis audit_log.user_id, dan FK
@@ -402,16 +424,17 @@ test('@SYS-07 admin HQ tidak boleh mengubah status akun security cabang Sambas',
   const token = await superToken()
   const email = `${h.unique('sys07').toLowerCase()}@transhybrid.net.id`
   const created: CreatedAccount[] = []
+  const secondId = (await resolveLiveCatalog(token)).secondId
 
   try {
-    // Akun sekali-pakai di Sambas; akun seed tidak pernah disentuh.
+    // Akun sekali-pakai di cabang kedua; akun seed tidak pernah disentuh.
     const account = await createSecurityAccount(token, {
       name: `${h.unique('SYS07')} Pengawas Sambas`,
       email,
-      locationId: LOCATIONS.sambas,
+      locationId: secondId,
     })
     created.push({ kind: 'security', id: account.id, email })
-    expect(account.location_id).toBe(LOCATIONS.sambas)
+    expect(account.location_id).toBe(secondId)
     expect(account.status).toBe('active')
 
     const adminToken = await h.tokenAs('admin')
@@ -429,7 +452,7 @@ test('@SYS-07 admin HQ tidak boleh mengubah status akun security cabang Sambas',
     // Status target tidak berubah.
     const sambasRows = await fetchList<AccountRow>(
       token,
-      `/users/security?location_id=${encodeURIComponent(LOCATIONS.sambas)}`,
+      `/users/security?location_id=${encodeURIComponent(secondId)}`,
     )
     const target = sambasRows.find((row) => row.id === account.id)
     expect(target, 'akun uji Sambas harus tetap terdaftar').toBeDefined()

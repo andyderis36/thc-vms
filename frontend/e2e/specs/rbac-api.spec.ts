@@ -20,6 +20,7 @@ import {
   LOCATIONS,
   apiFetchRaw,
   getVisitViaApi,
+  isLiveRun,
   loginViaApi,
   type ApiEnvelope,
   type ApiFailure,
@@ -69,15 +70,15 @@ function readSuccess<T>(result: ApiResult<ApiEnvelope<T>>, label: string): T {
 }
 
 /**
- * Uji negatif: catat status + body nyata ke output, pastikan status termasuk
+ * Uji negatif: catat status + body nyata, pastikan status termasuk
  * yang diizinkan dan amplop gagal membawa `error.code` yang terisi.
  */
+
 function expectFailure(
   result: ApiResult<ApiEnvelope<unknown>>,
   allowed: readonly number[],
   label: string,
-): ApiFailure {
-  console.log(`[${label}] HTTP ${result.status} body=${JSON.stringify(result.body)}`)
+): ApiFailure {  console.log(`[${label}] HTTP ${result.status} body=${JSON.stringify(result.body)}`)
   expect(
     allowed.includes(result.status),
     `${label}: HTTP ${result.status} tidak termasuk [${allowed.join(', ')}]`,
@@ -112,6 +113,10 @@ async function listManagedUsers(token: string, query: string): Promise<User[]> {
 // @AUTH-03 — isolasi daftar kunjungan admin cabang
 // ---------------------------------------------------------------------------
 test('@AUTH-03 isolasi admin: GET /visits hanya memuat kunjungan cabang HQ', async ({ h }) => {
+  test.skip(
+    isLiveRun(),
+    'live: asumsi "minimal satu kunjungan seed" tidak ada di prod (riwayat seed-only).',
+  )
   const data = await listVisits(await h.tokenAs('admin'))
 
   expect(data.items.length, 'admin HQ harus melihat minimal satu kunjungan seed').toBeGreaterThan(0)
@@ -153,7 +158,7 @@ test('@AUTH-04 admin cabang lain ditolak saat approve kunjungan HQ', async ({ h 
   expect(after.status, 'status kunjungan tidak boleh berubah oleh admin cabang lain').toBe(
     'approved',
   )
-  expect(after.location_id).toBe(LOCATIONS.hq)
+  expect(after.location_id).toBe(visit.locationId)
 })
 
 // ---------------------------------------------------------------------------
@@ -162,6 +167,10 @@ test('@AUTH-04 admin cabang lain ditolak saat approve kunjungan HQ', async ({ h 
 test('@AUTH-05 super_admin melihat lintas cabang dan filter location_id bekerja', async ({
   h,
 }) => {
+  test.skip(
+    isLiveRun(),
+    'live: asumsi riwayat seed lintas-cabang (HQ + Sambas) tidak ada di prod.',
+  )
   const token = await h.tokenAs('super')
 
   const all = await listVisits(token)
@@ -232,6 +241,10 @@ test('@APPR-04 vendor tidak boleh approve kunjungannya sendiri', async ({ h }) =
 test('@DEL-02 admin cabang tidak bisa menghapus pengawas security cabang lain', async ({
   h,
 }) => {
+  test.skip(
+    isLiveRun(),
+    'live: akun security seed cabang HQ bukan data uji; penghapusan akun prod dilarang.',
+  )
   const superToken = await h.tokenAs('super')
   const securityUsers = await listSecurityUsers(superToken)
   const hqSecurity = securityUsers.find((user) => user.location_id === LOCATIONS.hq)
@@ -258,6 +271,10 @@ test('@DEL-02 admin cabang tidak bisa menghapus pengawas security cabang lain', 
 test('@DEL-04 super_admin tidak bisa menghapus vendor yang masih punya kunjungan', async ({
   h,
 }) => {
+  test.skip(
+    isLiveRun(),
+    'live: riwayat kunjungan seed vendor1a tidak ada di prod; penghapusan akun prod dilarang.',
+  )
   const superToken = await h.tokenAs('super')
 
   // vendor1a punya kunjungan seed; login untuk memperoleh UUID akunnya.
@@ -303,6 +320,10 @@ test('@DEL-06 super_admin tidak bisa menghapus akun sendiri', async ({ h }) => {
 test('@EDT-04 admin cabang tidak bisa mengubah pengawas security cabang lain', async ({
   h,
 }) => {
+  test.skip(
+    isLiveRun(),
+    'live: PATCH (upaya rename) akun pengawas prod dilarang; riwayat seed Sambas tidak ada di prod.',
+  )
   const superToken = await h.tokenAs('super')
   const securityUsers = await listSecurityUsers(superToken)
   const sambasSecurity = securityUsers.find((user) => user.location_id === LOCATIONS.sambas)

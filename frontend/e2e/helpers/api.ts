@@ -95,6 +95,123 @@ export const PURPOSES: Record<string, string> = {
   Other: '0ea74b0d-fe47-5a97-80da-d84f5f36c9f8',
 }
 
+/** True bila suite menembak katalog live (produksi), bukan seed lokal. */
+export function isLiveRun(): boolean {
+  return process.env.E2E_LIVE === '1'
+}
+
+/** Katalog live yang di-resolve sekali per proses worker Playwright. */
+export interface LiveCatalog {
+  hqId: string
+  secondId: string
+  purposeId: string | null
+}
+
+let liveCatalogCache: LiveCatalog | null = null
+let liveCatalogInflight: Promise<LiveCatalog> | null = null
+
+function catalogEntries(value: unknown): Array<{ id: string; name: string }> {
+  if (!isRecord(value) || !Array.isArray(value.data)) {
+    return []
+  }
+  const entries: Array<{ id: string; name: string }> = []
+  for (const item of value.data) {
+    if (!isRecord(item) || typeof item.id !== 'string' || item.id === '') {
+      continue
+    }
+    entries.push({
+      id: item.id,
+      name: typeof item.name === 'string' ? item.name : '',
+    })
+  }
+  return entries
+}
+
+function pickLiveLocationIds(locations: Array<{ id: string; name: string }>): {
+  hqId: string
+  secondId: string
+} {
+  if (locations.length === 0) {
+    return { hqId: LOCATIONS.hq, secondId: LOCATIONS.sambas }
+  }
+  const sorted = [...locations].sort((a, b) => {
+    if (a.name < b.name) return -1
+    if (a.name > b.name) return 1
+    return 0
+  })
+  const hq = sorted.find((entry) => entry.name.toLowerCase().includes('pusat')) ?? sorted[0]
+  const second =
+    sorted.find((entry) => entry.name.toLowerCase().includes('sambas')) ??
+    sorted[1] ??
+    sorted[0]
+  return {
+    hqId: hq !== undefined ? hq.id : LOCATIONS.hq,
+    secondId: second !== undefined ? second.id : LOCATIONS.sambas,
+  }
+}
+
+/**
+ * Resolve katalog lokasi/tujuan sekali per proses. Lokal: tanpa network,
+ * mengembalikan ID seed sehingga perilaku identik dengan hari ini. Live:
+ * GET /locations + /purposes memakai token pemanggil, lalu pilih hq (nama
+ * mengandung 'pusat', fallback alfabetis pertama), cabang kedua ('sambas',
+ * fallback alfabetis kedua / hq bila hanya 1 lokasi), dan purpose pertama
+ * (null bila katalog kosong).
+ */
+export async function resolveLiveCatalog(token: string): Promise<LiveCatalog> {
+  if (liveCatalogCache !== null) {
+    return liveCatalogCache
+  }
+  if (liveCatalogInflight !== null) {
+    return liveCatalogInflight
+  }
+  liveCatalogInflight = (async (): Promise<LiveCatalog> => {
+    if (!isLiveRun()) {
+      return { hqId: LOCATIONS.hq, secondId: LOCATIONS.sambas, purposeId: PURPOSES.Survey ?? null }
+    }
+    const [locationsResult, purposesResult] = await Promise.all([
+      apiFetch<ApiEnvelope<unknown>>(token, 'GET', '/locations'),
+      apiFetch<ApiEnvelope<unknown>>(token, 'GET', '/purposes'),
+    ])
+    const { hqId, secondId } = pickLiveLocationIds(catalogEntries(locationsResult.body))
+    const purposes = catalogEntries(purposesResult.body)
+    const firstPurpose = purposes[0]
+    return {
+      hqId,
+      secondId,
+      purposeId: firstPurpose !== undefined ? firstPurpose.id : null,
+    }
+  })()
+  try {
+    liveCatalogCache = await liveCatalogInflight
+    return liveCatalogCache
+  } finally {
+    liveCatalogInflight = null
+  }
+}
+
+/** Snapshot katalog yang sudah di-resolve (null bila belum ada). */
+export function peekLiveCatalog(): LiveCatalog | null {
+  return liveCatalogCache
+}
+
+/**
+ * Petakan ID lokasi seed ke ID live yang sudah di-resolve. Lokal / belum
+ * resolve / ID non-seed: passthrough tanpa perubahan.
+ */
+export function translateSeedLocationId(id: string): string {
+  if (!isLiveRun() || liveCatalogCache === null) {
+    return id
+  }
+  if (id === LOCATIONS.hq) {
+    return liveCatalogCache.hqId
+  }
+  if (id === LOCATIONS.sambas) {
+    return liveCatalogCache.secondId
+  }
+  return id
+}
+
 export interface User {
   id: string
   name: string
