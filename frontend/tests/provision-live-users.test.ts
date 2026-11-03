@@ -6,9 +6,8 @@
  *   COCOK dengan USER_MARKER `sweep.ts` (rekonstruksi di bawah menyalin
  *   algoritma `sweep.ts` baris 58-74: domain default + domain dari env
  *   `E2E_EMAIL_*`; bila pola sweep berubah, test ini wajib ikut berubah).
- * - Format ekspor: baris `KEY=VALUE` untuk injeksi `e2e.ps1`.
- * - Secret-scan: kata sandi hanya muncul pada SATU baris ekspor
- *   `E2E_PASSWORD=`; seluruh baris log (hasil `maskSecrets`) bebas rahasia.
+ * - Format ekspor: baris `KEY=VALUE` untuk injeksi `e2e.ps1`, tanpa rahasia
+ *   (tanpa baris `E2E_PASSWORD=` — kata sandi operator dipakai bersama).
  */
 
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -27,9 +26,7 @@ import {
   isTeardownOnly,
   ledgerPathFor,
   makeNik,
-  makePassword,
   makeRunId,
-  maskSecrets,
   pacingMs,
   parseTeardownArgs,
   readLedgerFile,
@@ -178,7 +175,7 @@ describe('provision-live-users email-gen', () => {
 
 describe('provision-live-users export', () => {
   const emails = buildEmails('run7', 'transhybrid.net.id')
-  const lines = buildExportLines('run7', emails, 'RahasiaBersama16')
+  const lines = buildExportLines('run7', emails)
 
   it('baris KEY=VALUE tanpa spasi untuk injeksi e2e.ps1', () => {
     for (const line of lines) {
@@ -186,7 +183,7 @@ describe('provision-live-users export', () => {
     }
   })
 
-  it('memuat kunci wajib admin/security/vendor + admin2/security2/vendor2 + password + run-id', () => {
+  it('memuat kunci wajib admin/security/vendor + admin2/security2/vendor2 + run-id, tanpa rahasia', () => {
     const keys = lines.map((line) => line.split('=')[0])
     expect(keys).toEqual([
       'E2E_RUN_ID',
@@ -196,40 +193,8 @@ describe('provision-live-users export', () => {
       'E2E_EMAIL_ADMIN2',
       'E2E_EMAIL_SECURITY2',
       'E2E_EMAIL_VENDOR2',
-      'E2E_PASSWORD',
     ])
-  })
-})
-
-describe('provision-live-users secret-scan', () => {
-  it('password acak 16 alfanumerik dan tidak berulang', () => {
-    const a = makePassword()
-    const b = makePassword()
-    expect(a).toMatch(/^[A-Za-z0-9]{16}$/)
-    expect(a).not.toBe(b)
-  })
-
-  it('password hanya muncul pada SATU baris ekspor E2E_PASSWORD=', () => {
-    const password = makePassword()
-    const emails = buildEmails('run9', 'transhybrid.net.id')
-    const lines = buildExportLines('run9', emails, password)
-    const hits = lines.filter((line) => line.includes(password))
-    expect(hits).toHaveLength(1)
-    expect(hits[0]).toMatch(/^E2E_PASSWORD=/)
-  })
-
-  it('baris log termasker: bebas password, bertanda ***', () => {
-    const password = makePassword()
-    const emails = buildEmails('run9', 'transhybrid.net.id')
-    const masked = maskSecrets(buildExportLines('run9', emails, password))
-    for (const line of masked) {
-      expect(line.includes(password)).toBe(false)
-    }
-    expect(masked).toContain('E2E_PASSWORD=***')
-    expect(masked).toContain(`E2E_EMAIL_VENDOR=${emails.vendor}`)
-    expect(masked).toContain(`E2E_EMAIL_ADMIN2=${emails.admin2}`)
-    expect(masked).toContain(`E2E_EMAIL_SECURITY2=${emails.security2}`)
-    expect(masked).toContain(`E2E_EMAIL_VENDOR2=${emails.vendor2}`)
+    expect(keys.includes('E2E_PASSWORD')).toBe(false)
   })
 })
 

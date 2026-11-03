@@ -37,6 +37,7 @@ import {
   ACCOUNTS,
   apiFetch,
   apiFetchRaw,
+  isLiveRun,
   loginViaApiCached,
   resolveLiveCatalog,
   type ApiEnvelope,
@@ -291,26 +292,42 @@ test('@SYS-04 katalog /locations, /purposes, /vendors, /jabatan terbaca untuk ke
     )
     locationCounts.set(role, locations.length)
 
+    // Live (prod) sah memiliki katalog kosong: 0 purposes, 0 vendors,
+    // 0 jabatan — hanya /locations yang dijamin terisi. Lokal seed selalu
+    // penuh sehingga cabang else di bawah mempertahankan pin length>0.
     const purposes = await fetchList<Record<string, unknown>>(token, '/purposes')
-    expect(purposes.length, `${role}: katalog purpose tidak boleh kosong`).toBeGreaterThan(0)
-    for (const row of purposes) {
-      expect(typeof row.id, `${role}: purpose.id wajib string`).toBe('string')
-      expect(typeof row.name, `${role}: purpose.name wajib string`).toBe('string')
+    if (isLiveRun() && purposes.length === 0) {
+      expect(Array.isArray(purposes), `${role}: katalog purpose wajib array`).toBe(true)
+    } else {
+      expect(purposes.length, `${role}: katalog purpose tidak boleh kosong`).toBeGreaterThan(0)
+      for (const row of purposes) {
+        expect(typeof row.id, `${role}: purpose.id wajib string`).toBe('string')
+        expect(typeof row.name, `${role}: purpose.name wajib string`).toBe('string')
+      }
     }
 
     const vendors = await fetchList<Record<string, unknown>>(token, '/vendors')
-    expect(vendors.length, `${role}: katalog vendor tidak boleh kosong`).toBeGreaterThan(0)
-    for (const row of vendors) {
-      expect(typeof row.id, `${role}: vendor.id wajib string`).toBe('string')
-      expect(typeof row.name, `${role}: vendor.name wajib string`).toBe('string')
+    if (isLiveRun() && vendors.length === 0) {
+      expect(Array.isArray(vendors), `${role}: katalog vendor wajib array`).toBe(true)
+    } else {
+      expect(vendors.length, `${role}: katalog vendor tidak boleh kosong`).toBeGreaterThan(0)
+      for (const row of vendors) {
+        expect(typeof row.id, `${role}: vendor.id wajib string`).toBe('string')
+        expect(typeof row.name, `${role}: vendor.name wajib string`).toBe('string')
+      }
     }
 
     const jabatan = await fetchList<unknown>(token, '/jabatan')
-    expect(jabatan.length, `${role}: saran jabatan tidak boleh kosong setelah visit dibuat`).toBeGreaterThan(
-      0,
-    )
-    for (const value of jabatan) {
-      expect(typeof value, `${role}: setiap saran jabatan wajib string`).toBe('string')
+    if (isLiveRun() && jabatan.length === 0) {
+      expect(Array.isArray(jabatan), `${role}: saran jabatan wajib array`).toBe(true)
+    } else {
+      expect(
+        jabatan.length,
+        `${role}: saran jabatan tidak boleh kosong setelah visit dibuat`,
+      ).toBeGreaterThan(0)
+      for (const value of jabatan) {
+        expect(typeof value, `${role}: setiap saran jabatan wajib string`).toBe('string')
+      }
     }
   }
 
