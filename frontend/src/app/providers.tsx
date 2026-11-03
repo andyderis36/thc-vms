@@ -141,9 +141,47 @@ function useToastPosition(): ToastPosition {
   return position
 }
 
+/**
+ * Menyegarkan seluruh cache query saat riwayat browser dilintasi
+ * (tombol Back/Forward).
+ *
+ * Seluruh layar memakai `useQuery` dengan `staleTime: Infinity`, dan navigasi
+ * Back/Forward memulihkan DOM dari Router Cache tanpa remount — jadi
+ * refetch-saat-mount tidak pernah menyala dan antrean terlihat basi sampai
+ * reload manual. Dua pemicu dirangkum karena App Router selalu navigasi
+ * same-document (diukur E2E 2026-11-03: klik + Back menambah NOL `pageshow`
+ * dan tepat satu `popstate`):
+ * - `popstate` — traversal Back/Forward antar rute SPA; inilah jalur yang
+ *   benar-benar dipakai aplikasi ini.
+ * - `pageshow` dengan `persisted: true` — HANYA pemulihan bfcache sejati
+ *   (mis. kembali dari halaman muat-penuh eksternal); muat awal
+ *   (`persisted: false`) tidak double-fetch.
+ * Invalidasi tanpa filter kunci: katalog master yang ikut ter-refetch hanya
+ * 4 query mungil, jadi pengecualian tidak sepadan.
+ */
+function useBfcacheRefresh(queryClient: QueryClient): void {
+  useEffect(() => {
+    const refresh = (): void => {
+      void queryClient.invalidateQueries()
+    }
+    const onPageShow = (event: PageTransitionEvent): void => {
+      if (event.persisted) {
+        refresh()
+      }
+    }
+    window.addEventListener('popstate', refresh)
+    window.addEventListener('pageshow', onPageShow)
+    return () => {
+      window.removeEventListener('popstate', refresh)
+      window.removeEventListener('pageshow', onPageShow)
+    }
+  }, [queryClient])
+}
+
 export function Providers({ children }: { children: ReactNode }) {
   const queryClient = getQueryClient()
   const position = useToastPosition()
+  useBfcacheRefresh(queryClient)
 
   return (
     <QueryClientProvider client={queryClient}>

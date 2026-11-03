@@ -76,24 +76,47 @@ function headerWidthPercent(th: HTMLElement): number {
 }
 
 describe('VisitTable (desktop)', () => {
-  it('menampilkan tepat 8 columnheader dan tidak ada "Keperluan"', () => {
+  it('menampilkan tepat 9 columnheader dan tidak ada "Keperluan"', () => {
     renderVisitTable()
 
     const headers = screen.getAllByRole('columnheader')
-    expect(headers).toHaveLength(8)
+    expect(headers).toHaveLength(9)
 
     expect(
       headers.some((h) => (h.textContent ?? '').includes('Keperluan'))
     ).toBe(false)
   })
 
-  it('lebar 8 kolom (w-[n%]) bertambah tepat 100%', () => {
+  it('lebar 9 kolom (w-[n%]) bertambah tepat 100%', () => {
     renderVisitTable()
 
     const headers = screen.getAllByRole('columnheader')
     const total = headers.reduce((sum, th) => sum + headerWidthPercent(th), 0)
 
     expect(total).toBe(100)
+  })
+
+  it('kolom pertama "No" tak tersortir dan baris bernomor urut tampilan', () => {
+    renderVisitTable()
+
+    const headers = screen.getAllByRole('columnheader')
+    expect(headers[0]?.textContent).toBe('No')
+    expect(headers[0]?.querySelector('button')).toBeNull()
+
+    const rows = screen.getAllByRole('row')
+    expect(rows[1]?.textContent).toMatch(/^1/)
+  })
+
+  it('nomor baris mengikuti halaman: (page-1)*pageSize + i + 1', () => {
+    renderVisitTable({
+      visits: [buildVisit(), buildVisit({ id: 'visit-2', visit_id: 'VISIT-2026-0002' })],
+      page: 2,
+      pageSize: 10,
+    })
+
+    const rows = screen.getAllByRole('row')
+    expect(rows[1]?.textContent).toMatch(/^11/)
+    expect(rows[2]?.textContent).toMatch(/^12/)
   })
 
   it('selalu merender ikon + label Setujui, label tak lagi bersyarat lebar layar', () => {

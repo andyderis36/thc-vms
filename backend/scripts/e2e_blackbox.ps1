@@ -501,10 +501,10 @@ Add-R 'A-01' 'P0' 'Login 4 role (super_admin/admin/security/vendor) -> 200, toke
   ($roles -eq 'super_admin/admin/security/vendor') 'super_admin/admin/security/vendor' $roles `
   '9 akun seed login 200 (superadmin, admin1-5, security1a/2a, vendor1a)'
 [void](Check 'A-02' 'P0' 'Login password salah -> 401 INVALID_CREDENTIALS (pesan ID)' 401 `
-  (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = 'admin1@transhybrid.net.id'; password = 'Password123!X' })) `
+  (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = $Adm1Email; password = 'Password123!X' })) `
   'Kredensial tidak valid' -ExpectEnvelopeFail -Code 'INVALID_CREDENTIALS')
 [void](Check 'A-03' 'P0' 'Login email tak dikenal -> 401 (tidak bocor keberadaan akun)' 401 `
-  (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = 'tidak-ada@transhybrid.net.id'; password = 'Password123!' })) `
+  (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = ('tidak-ada.' + $Adm1Email); password = 'Password123!' })) `
   'Kredensial tidak valid' -ExpectEnvelopeFail -Code 'INVALID_CREDENTIALS')
 [void](Check 'A-04' 'P0' 'Login field kosong -> 400 VALIDATION_ERROR' 400 `
   (Invoke-Api -Method POST -Path '/auth/login' -Body (@{ email = ''; password = '' })) `
@@ -531,6 +531,42 @@ Add-R 'A-09' 'P0' 'admin1..admin5 semua role=admin & punya location_id' `
   '5 admin: role=admin & location_id terisi' `
   "adm=$($admRows.Count) badRole=$badRole noLoc=$noLoc" `
   (($admRows | ForEach-Object { "$($_.Key)=$($_.Role)/$($_.LocationId)" }) -join ' ; ')
+# A-10..A-16: registrasi vendor publik -> pending -> aktivasi superadmin -> login -> hapus.
+# Kontrak SSOT: docs/4. openapi.yaml /auth/register (201, status pending) +
+# /auth/login 403 (pending -> ACCOUNT_PENDING, inactive -> ACCOUNT_INACTIVE).
+$regStamp = (Get-Date).ToString('HHmmss')
+$emailReg = "e2ebbreg$regStamp@thc.local"
+Start-Sleep -Seconds $LoginPacingSeconds
+$r = Invoke-Api -Method POST -Path '/auth/register' -Body @{
+  name = "$TAG Vendor Reg Uji"; email = $emailReg; password = 'E2eBb123!'; nik = '3578010200011111'
+}
+$newReg = $null
+if ($r.Status -eq 201 -and $r.Json.data.id) { $newReg = $r.Json.data; Track-User ([string]$newReg.id) }
+$okReg = Check 'A-10' 'P0' 'POST /auth/register vendor valid -> 201 status pending' 201 $r
+if ($okReg) {
+  Write-Host ("  A-10 akun register baru = " + $newReg.id)
+  Add-R 'A-11' 'P0' 'Akun registrasi publik berstatus pending' `
+    ([string]$newReg.status -eq 'pending') 'pending' ([string]$newReg.status) `
+    ($newReg | ConvertTo-Json -Compress)
+}
+Start-Sleep -Seconds $LoginPacingSeconds
+[void](Check 'A-12' 'P0' 'Login akun pending -> 403 ACCOUNT_PENDING' 403 `
+  (Invoke-Api -Method POST -Path '/auth/login' -Body @{ email = $emailReg; password = 'E2eBb123!' }) `
+  'Akun Anda menunggu persetujuan superadmin.' -ExpectEnvelopeFail -Code 'ACCOUNT_PENDING')
+if (Check-Pre 'A-13' 'P0' 'Akun register terbentuk sebelum aktivasi' $newReg) {
+  [void](Check 'A-13' 'P0' 'PATCH /users/{id}/status {active} oleh superadmin -> 200' 200 `
+    (Invoke-Api -Method PATCH -Path "/users/$($newReg.id)/status" -Token $SA -Body @{ status = 'active' }))
+  Start-Sleep -Seconds $LoginPacingSeconds
+  [void](Check 'A-14' 'P0' 'Login akun register setelah aktivasi -> 200' 200 `
+    (Invoke-Api -Method POST -Path '/auth/login' -Body @{ email = $emailReg; password = 'E2eBb123!' }))
+  [void](Check 'A-15' 'P0' 'DELETE /users/{id} akun register -> 204' 204 `
+    (Invoke-Api -Method DELETE -Path "/users/$($newReg.id)" -Token $SA) -ExpectEmptyBody)
+  $ulAfter = Invoke-Api -Method GET -Path '/users?limit=200' -Token $SA
+  $rowGone = @(@($ulAfter.Json.data) | Where-Object { [string]$_.id -eq [string]$newReg.id })
+  Add-R 'A-16' 'P0' 'Akun register hilang dari GET /users setelah DELETE (setara verifikasi 404 per-ID)' `
+    (($ulAfter.Status -eq 200) -and ($rowGone.Count -eq 0)) '0 baris' "$($rowGone.Count) baris" `
+    "status=$($ulAfter.Status)"
+}
 
 # ═════════════════════════ B. CREATE VISIT (P0) ═════════════════════════
 Write-Host "`n=== B. CREATE VISIT ===" -ForegroundColor Cyan
@@ -966,9 +1002,9 @@ if ($okS) {
     ($newSec | ConvertTo-Json -Compress)
   [void](Check 'J-06' 'P0' 'PATCH /users/security/{id}/status oleh admin cabangnya -> 200' 200 `
     (Invoke-Api -Method PATCH -Path "/users/security/$($newSec.id)/status" -Token $ADM1 -Body @{ status = 'inactive' }))
-  [void](Check 'J-07' 'P0' 'Akun security hasil create nonaktif -> login 401' 401 `
+  [void](Check 'J-07' 'P0' 'Akun security hasil create nonaktif -> login 403 inactive' 403 `
     (Invoke-Api -Method POST -Path '/auth/login' -Body @{ email = $emailNew; password = 'E2eBb123!' }) `
-    'Kredensial tidak valid' -ExpectEnvelopeFail -Code 'INVALID_CREDENTIALS')
+    'Akun Anda dinonaktifkan.' -ExpectEnvelopeFail -Code 'ACCOUNT_INACTIVE')
   [void](Check 'J-08' 'P0' 'PATCH /users/security/{id} oleh vendor -> 403' 403 `
     (Invoke-Api -Method PATCH -Path "/users/security/$($newSec.id)" -Token $VENDOR1 -Body @{ name = 'x' }) `
     'Tidak berhak mengelola kunjungan cabang lain' -ExpectEnvelopeFail)

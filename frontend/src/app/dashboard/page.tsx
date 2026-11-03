@@ -477,8 +477,13 @@ function DashboardScreen() {
         </div>
         {/* SearchBox bersama (components/ui/SearchInput): ikon dipusatkan
             otomatis terhadap tinggi field (h-10/h-12) — tanpa offset rem
-            hardcode — dan pl-9 menjaga teks placeholder tidak tertimpa ikon. */}
+            hardcode — dan pl-9 menjaga teks placeholder tidak tertimpa ikon.
+            Label visual disamakan dengan Select/Input di bar ini; `aria-hidden`
+            agar nama aksesibel tetap tunggal dari `aria-label`. */}
         <div className="min-w-48 flex-1">
+          <span aria-hidden="true" className="mb-2 block text-label font-semibold text-ink">
+            Pencarian
+          </span>
           <SearchInput
             aria-label="Cari kunjungan"
             placeholder="Cari Visit ID, Vendor/Mitra, atau lokasi…"
@@ -517,18 +522,22 @@ function DashboardScreen() {
             }}
           />
         </div>
-        {canSubmit && role !== 'vendor' ? (
-          <div className="hidden md:block">
-            <Button className="min-h-touch" onClick={goCreateVisit}>
-              <Plus className="size-4" aria-hidden="true" />
-              Buat Kunjungan Baru
-            </Button>
-          </div>
-        ) : null}
-        {/* Reset Filter — anak TERAKHIR bar (flex-wrap menempelkan ke ujung
-            baris); mengembalikan seluruh kontrol bar termasuk filter
-            "Fasilitas" di atas. */}
-        <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        {/* Aksi bar dikelompokkan dalam satu kontainer agar tombol Buat tak
+            pernah terdampar sendirian saat flex-wrap (Reset selalu di
+            sebelahnya); keduanya sejajar ujung bawah seperti kontrol lain. */}
+        <div className="flex items-end gap-3">
+          {canSubmit && role !== 'vendor' ? (
+            <div className="hidden md:block">
+              <Button className="min-h-touch" onClick={goCreateVisit}>
+                <Plus className="size-4" aria-hidden="true" />
+                Buat Kunjungan Baru
+              </Button>
+            </div>
+          ) : null}
+          {/* Reset Filter — mengembalikan seluruh kontrol bar termasuk filter
+              "Fasilitas" di atas. */}
+          <FilterResetButton onReset={handleResetFilters} disabled={!isFiltered} />
+        </div>
       </div>
 
       <Tabs className="mt-5" tabs={tabs} value={tabValue} onChange={handleTabChange} />
@@ -588,6 +597,8 @@ function DashboardScreen() {
                 setSortBy(field)
                 setSortOrder(nextOrder)
               }}
+              page={page}
+              pageSize={pageSize}
             />
             <VisitCards
               visits={rows}

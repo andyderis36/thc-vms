@@ -168,17 +168,21 @@
     box-shadow: var(--shadow-card);
   }
 
-  /* Status badge: pill, normal-case, soft-tinted (jokoui) */
+  /* Status badge: pill, normal-case, soft-tinted (jokoui). Padding
+   * horizontal lega agar label memanjang tak menyentuh ujung rounded;
+   * teks selalu rata tengah; ukuran ~20% lebih ringkas dari body. */
   .status-badge {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     border-radius: var(--radius-badge);
-    padding: 4px 8px;
-    font-size: 0.875rem;
+    padding: 3px 10px;
+    font-size: 0.75rem;
     font-weight: 500;
     letter-spacing: -0.01em;
     text-transform: none;
-    line-height: 1.4;
+    line-height: 1.35;
+    text-align: center;
   }
 
   /*

@@ -27,6 +27,9 @@ export interface VisitTableProps {
   sortBy?: VisitSortField
   order?: VisitOrder
   onSortChange?: (field: VisitSortField, order: VisitOrder) => void
+  /** Nomor baris tampilan: (page-1)*pageSize + i + 1. Default 1/rows agar 1..n. */
+  page?: number
+  pageSize?: number
 }
 
 export interface VisitSchedule {
@@ -46,14 +49,15 @@ export interface VisitSchedule {
  * (< 768px) memakai tumpukan kartu — keduanya dari `VisitCards`.
  */
 const HEADERS: Array<{ label: string; width: string; sortField?: VisitSortField }> = [
+  { label: 'No', width: 'w-[4%]' },
   { label: 'Visit ID', width: 'w-[11%]' },
-  { label: 'Vendor/Mitra', width: 'w-[13%]' },
+  { label: 'Vendor/Mitra', width: 'w-[12%]' },
   { label: 'Fasilitas', width: 'w-[12%]' },
-  { label: 'Teknisi', width: 'w-[16%]' },
+  { label: 'Teknisi', width: 'w-[15%]' },
   { label: 'SPK', width: 'w-[9%]' },
-  { label: 'Tanggal & Jam', width: 'w-[14%]', sortField: 'start_date' },
+  { label: 'Tanggal & Jam', width: 'w-[13%]', sortField: 'start_date' },
   { label: 'Status', width: 'w-[11%]' },
-  { label: 'Aksi', width: 'w-[14%]' },
+  { label: 'Aksi', width: 'w-[13%]' },
 ]
 
 /** Label tipe fasilitas dalam Bahasa Indonesia (bukan mentah `pusat`, `pop`, dst). */
@@ -138,8 +142,11 @@ export function VisitTable({
   sortBy,
   order,
   onSortChange,
+  page = 1,
+  pageSize,
 }: VisitTableProps) {
   const allowApproval = can(role, 'approveVisit')
+  const effectivePageSize = pageSize ?? visits.length
 
   const toggleSort = (field: VisitSortField): void => {
     if (onSortChange === undefined) return
@@ -192,7 +199,8 @@ export function VisitTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-border-light">
-          {visits.map((visit) => {
+          {visits.map((visit, index) => {
+            const rowNumber = (page - 1) * effectivePageSize + index + 1
             const schedule = visitSchedule(visit)
             const vendorDisplay = primaryVendorDisplay(visit.visitors)
             const vendorUser = visitVendorUser(visit)
@@ -204,6 +212,9 @@ export function VisitTable({
                 key={visit.id}
                 className="transition-colors hover:bg-brand/5"
               >
+                <td className={`${TABLE_TD_CLASS} text-right tabular-nums text-xs sm:text-sm text-ink-secondary`}>
+                  {rowNumber}
+                </td>
                 <td className={`truncate ${TABLE_TD_CLASS} font-mono text-xs sm:text-sm`} title={visit.visit_id}>
                   <Link
                     href={`/visits/${visit.id}`}

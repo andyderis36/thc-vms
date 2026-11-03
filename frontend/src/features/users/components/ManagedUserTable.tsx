@@ -41,6 +41,8 @@ export interface ManagedUserListProps {
   onDelete: (user: User) => void
   onEdit: (user: User) => void
   onView: (user: User) => void
+  page?: number
+  pageSize?: number
 }
 
 /**
@@ -178,8 +180,9 @@ export function managedUserDetailFields(user: User): DetailField[] {
  * peran hidup DI DALAM header kolom itu.
  */
 const MANAGED_USER_TABLE_HEADERS = [
+  { key: 'no', label: 'No', width: 'w-[4%]' },
   { key: 'name', label: 'Nama', width: 'w-[20%]' },
-  { key: 'email', label: 'Email', width: 'w-[22%]' },
+  { key: 'email', label: 'Email', width: 'w-[18%]' },
   { key: 'role', label: 'Peran', width: 'w-[18%]' },
   { key: 'affiliation', label: 'Cabang / Vendor', width: 'w-[20%]' },
   { key: 'status', label: 'Status', width: 'w-[11%]' },
@@ -199,8 +202,11 @@ export function ManagedUserTable({
   onEdit,
   onView,
   roleFilter,
+  page = 1,
+  pageSize,
 }: ManagedUserListProps & { roleFilter?: ManagedUserRoleFilterControl }) {
   const { toggle, isPending, activeId } = useToggleManagedStatus()
+  const effectivePageSize = pageSize ?? users.length
 
   return (
     <div className={TABLE_WRAPPER_CLASS}>
@@ -233,7 +239,8 @@ export function ManagedUserTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-border-light">
-          {users.map((user) => {
+          {users.map((user, index) => {
+            const rowNumber = (page - 1) * effectivePageSize + index + 1
             const actions = buildUserActions({
               user,
               currentUserId,
@@ -248,6 +255,9 @@ export function ManagedUserTable({
                 key={user.id}
                 className="transition-colors hover:bg-brand/5"
               >
+                <td className={`${TABLE_TD_CLASS} text-right tabular-nums text-xs sm:text-sm text-ink-secondary`}>
+                  {rowNumber}
+                </td>
                 <td className={TABLE_TD_CLASS}>
                   <p className="truncate text-xs sm:text-sm font-semibold text-ink" title={user.name}>
                     {user.name}
