@@ -12,10 +12,14 @@ import (
 var (
 	// ErrInvalidCredentials backs the 401 login failure: "Kredensial tidak valid".
 	ErrInvalidCredentials = errors.New("Kredensial tidak valid")
-	// ErrAccountPending backs the 403 login refusal for pending or inactive accounts
+	// ErrAccountPending backs the 403 login refusal for pending accounts
 	// (self-registered vendors waiting for superadmin approval): the account
 	// exists and the password was right, but it may not sign in yet.
 	ErrAccountPending = errors.New("Akun Anda menunggu persetujuan superadmin.")
+	// ErrAccountInactive backs the 403 login refusal for inactive accounts
+	// (deactivated veterans): the account exists and the password was right,
+	// but it has been deactivated.
+	ErrAccountInactive = errors.New("Akun Anda dinonaktifkan.")
 	// ErrForbiddenBranch backs the 403 cross-branch refusal.
 	ErrForbiddenBranch = errors.New("Tidak berhak mengelola kunjungan cabang lain")
 	// ErrCheckInWindow backs the 400 check-in refusal, PRD L123 verbatim, used
@@ -95,13 +99,23 @@ func InvalidCredentials() *AppError {
 	}
 }
 
-	// AccountPending builds the 403 login refusal for pending or inactive accounts.
+ 	// AccountPending builds the 403 login refusal for pending accounts.
 func AccountPending() *AppError {
 	return &AppError{
 		Status:  http.StatusForbidden,
 		Code:    "ACCOUNT_PENDING",
 		Message: ErrAccountPending.Error(),
 		Err:     ErrAccountPending,
+	}
+}
+
+// AccountInactive builds the 403 login refusal for inactive accounts.
+func AccountInactive() *AppError {
+	return &AppError{
+		Status:  http.StatusForbidden,
+		Code:    "ACCOUNT_INACTIVE",
+		Message: ErrAccountInactive.Error(),
+		Err:     ErrAccountInactive,
 	}
 }
 
@@ -180,6 +194,8 @@ func FromError(err error) *AppError {
 		return InvalidCredentials()
 	case errors.Is(err, ErrAccountPending):
 		return AccountPending()
+	case errors.Is(err, ErrAccountInactive):
+		return AccountInactive()
 	case errors.Is(err, ErrForbiddenBranch):
 		return ForbiddenBranch()
 	case errors.Is(err, ErrCheckInWindow):

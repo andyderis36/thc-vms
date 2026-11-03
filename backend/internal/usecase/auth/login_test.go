@@ -412,8 +412,8 @@ func TestLogin_RejectsInactiveAndBlacklistedAccounts(t *testing.T) {
 	if err == nil {
 		t.Fatal("inactive login succeeded, want 403")
 	}
-	if got := appErrorOf(t, err); got.Status != 403 || got.Code != "ACCOUNT_PENDING" || got.Message != "Akun Anda menunggu persetujuan superadmin." {
-		t.Fatalf("inactive: got (%d,%s,%s), want the pending-approval 403", got.Status, got.Code, got.Message)
+	if got := appErrorOf(t, err); got.Status != 403 || got.Code != "ACCOUNT_INACTIVE" || got.Message != "Akun Anda dinonaktifkan." {
+		t.Fatalf("inactive: got (%d,%s,%s), want the inactive 403", got.Status, got.Code, got.Message)
 	}
 
 	_, err = svc.Login(context.Background(), "pending@vendor.example", "Password123!")
