@@ -2,7 +2,6 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { Checkbox } from '@/components/ui/Checkbox'
 import { FIELD_BASE_CLASS, FIELD_HEIGHT } from '@/components/ui/Input'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -151,22 +150,34 @@ export function PurposeDropdown({
             aria-labelledby={buttonId}
             className="absolute inset-x-0 top-full z-40 mt-1 flex max-h-64 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-card border border-border-mid bg-surface p-1.5 shadow-dropdown"
           >
-            {PURPOSE_OPTIONS.map((option) => (
-              <div
-                key={option}
-                role="option"
-                aria-selected={selectedIds.includes(option)}
-                className="rounded-control hover:bg-neutral-bg"
-              >
-                <Checkbox
-                  label={option}
-                  name="purpose_ids"
-                  value={option}
-                  checked={selectedIds.includes(option)}
-                  onChange={() => onToggle(option)}
-                />
-              </div>
-            ))}
+            {PURPOSE_OPTIONS.map((option, index) => {
+              const optionInputId = `${panelId}-option-${index}`
+              const checked = selectedIds.includes(option)
+              return (
+                <div
+                  key={option}
+                  role="option"
+                  aria-selected={checked}
+                  className="flex min-h-touch cursor-pointer items-center gap-3 rounded-control px-2.5 py-1.5 hover:bg-neutral-bg"
+                >
+                  <input
+                    id={optionInputId}
+                    name="purpose_ids"
+                    value={option}
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggle(option)}
+                    className="h-5 w-5 shrink-0 cursor-pointer accent-brand focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+                  />
+                  <label
+                    htmlFor={optionInputId}
+                    className="flex-1 cursor-pointer text-sm leading-snug text-ink"
+                  >
+                    {option}
+                  </label>
+                </div>
+              )
+            })}
           </div>
         ) : null}
       </div>

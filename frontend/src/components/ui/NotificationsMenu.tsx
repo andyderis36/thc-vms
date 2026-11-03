@@ -253,7 +253,7 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
               Tandai semua dibaca
             </Button>
           </div>
-          <div className="max-h-96 overflow-y-auto py-1">
+          <div className="flex max-h-96 flex-col gap-1 overflow-y-auto px-1 py-1">
             {isPending ? (
               <p className="px-3 py-6 text-center text-sm text-ink-muted">Memuat notifikasi…</p>
             ) : isError ? (
