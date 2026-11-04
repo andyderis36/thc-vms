@@ -21,6 +21,7 @@ import {
   apiFetch,
   apiFetchRaw,
   deleteVisitViaApi,
+  isLiveRun,
   type ApiEnvelope,
   type Role,
 } from '../helpers/api'
@@ -92,6 +93,10 @@ test('@AUD-01 super_admin melihat jejak audit; filter tanggal menyaring lalu Res
 test('@AUD-02 hapus kunjungan lewat API menghasilkan baris visit.delete di tabel dan modal detail', async ({
   h,
 }) => {
+  test.skip(
+    isLiveRun(),
+    'live: GET /audit-logs sengaja membuang baris yang diaudit oleh akun hidden dev-superadmin (backend/internal/delivery/http/handlers/audit_handler.go:20-25), dan suite live login sebagai dev-superadmin sehingga baris visit.delete miliknya tidak pernah terlihat.',
+  )
   const superToken = await h.tokenAs('super')
   const visit = await h.createVisit('AUD02', {
     withFiles: false,

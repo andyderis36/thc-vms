@@ -361,8 +361,12 @@ export async function awaitLoginSlot(): Promise<void> {
 /**
  * Kirim request dan kembalikan status + body MENTAH (tanpa melempar).
  * Body JSON hanya dikirim bila `body !== undefined`; respons 204 dibiarkan
- * `undefined`.
+ * `undefined`. Tiap percobaan dibatasi `REQUEST_TIMEOUT_MS`: tanpa ini,
+ * koneksi yang menggantung (blackhole) menunggu selamanya dan suite tampak
+ * macet tanpa output — lebih baik gagal cepat dengan pesan jelas.
  */
+const REQUEST_TIMEOUT_MS = 90_000
+
 export async function apiFetchRaw<T = unknown>(
   token: string,
   method: string,
@@ -373,11 +377,11 @@ export async function apiFetchRaw<T = unknown>(
   const maxAttempts = isLogin ? AUTH_RETRIES_ON_429 + 1 : 1
   const headers: Record<string, string> = {
     accept: 'application/json',
-  }
+  };
   if (token !== '') {
     headers.authorization = `Bearer ${token}`
   }
-  const init: RequestInit = { method, headers }
+  const init: RequestInit = { method, headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }
   if (body !== undefined) {
     headers['content-type'] = 'application/json'
     init.body = JSON.stringify(body)

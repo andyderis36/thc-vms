@@ -22,6 +22,7 @@ import {
   getVisitViaApi,
   isLiveRun,
   loginViaApi,
+  resolveLiveCatalog,
   type ApiEnvelope,
   type ApiFailure,
   type ApiResult,
@@ -347,14 +348,26 @@ test('@EDT-04 admin cabang tidak bisa mengubah pengawas security cabang lain', a
 // @AUTH-01b — login API sukses untuk semua peran
 // ---------------------------------------------------------------------------
 test('@AUTH-01b login API sukses dan mengembalikan token + role yang benar', async () => {
+  // Akun provision memakai location_id RUNTIME, sedangkan ACCOUNTS.*.locationId
+  // memegang UUID seed lokal. resolveLiveCatalog mengembalikan nilai seed
+  // tanpa network saat lokal (identik dengan perilaku lama) dan nilai runtime
+  // saat live, jadi dipakai tanpa cabang isLiveRun.
+  const bootstrap = await loginViaApi(ACCOUNTS.super.email, ACCOUNTS.super.password)
+  const catalog = await resolveLiveCatalog(bootstrap.token)
+  const expectedLocationId = (role: Role): string | null => {
+    if (role === 'admin' || role === 'security') return catalog.hqId
+    if (role === 'admin-sambas' || role === 'security-sambas') return catalog.secondId
+    return null
+  }
   for (const role of ROLES) {
     const account = ACCOUNTS[role]
     const { token, user } = await loginViaApi(account.email, account.password)
     expect(token.length, `${role}: token wajib non-kosong`).toBeGreaterThan(0)
     expect(user.role, `${role}: role harus ${account.role}`).toBe(account.role)
     expect(user.email, `${role}: email harus cocok`).toBe(account.email)
-    if (account.locationId !== null) {
-      expect(user.location_id, `${role}: location_id harus cocok`).toBe(account.locationId)
+    const expected = expectedLocationId(role)
+    if (expected !== null) {
+      expect(user.location_id, `${role}: location_id harus cocok`).toBe(expected)
     }
   }
 })

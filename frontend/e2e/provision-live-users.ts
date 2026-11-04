@@ -25,16 +25,17 @@
  *   `POST /users` role admin; pengawas lewat `POST /users/security`.
  *   Payload mengikuti `backend/internal/delivery/http/handlers/*_handler.go`
  *   dan `docs/4. openapi.yaml` — bukan dari ingatan.
- * - Satu kata sandi acak 16-karakter dipakai bersama, hanya di memori, dan
- *   TIDAK PERNAH ditulis ke log (baris log memakai `***`; nilai asli hanya
- *   muncul pada SATU baris ekspor `E2E_PASSWORD=` untuk injeksi `e2e.ps1`).
+ * - Seluruh akun memakai kata sandi operator yang sama (`E2E_PASSWORD`,
+ *   juga dipakai `ACCOUNTS.*.password`): menimpa `E2E_PASSWORD` dengan nilai
+ *   acak akan MERUSAK login superadmin untuk sisa run, jadi tidak ada kata
+ *   sandi acak dan tidak ada ekspor rahasia apa pun.
  * - Langkah berjalan sekuensial dengan jeda `E2E_LOGIN_PACING_MS`
  *   (default 13000) antar-langkah agar tidak menabrak rate limiter login.
  *
  * Ekspor: blok `BEGIN_EXPORT`/`END_EXPORT` berisi baris `KEY=VALUE`
  * (`E2E_RUN_ID`, `E2E_EMAIL_ADMIN`, `E2E_EMAIL_SECURITY`, `E2E_EMAIL_VENDOR`,
- * `E2E_EMAIL_ADMIN2`, `E2E_EMAIL_SECURITY2`, `E2E_EMAIL_VENDOR2`,
- * `E2E_PASSWORD`) untuk diinjeksi `e2e.ps1` ke environment run.
+ * `E2E_EMAIL_ADMIN2`, `E2E_EMAIL_SECURITY2`, `E2E_EMAIL_VENDOR2`) untuk
+ * diinjeksi `e2e.ps1` ke environment run. Tanpa baris rahasia.
  *
  * Teardown mandiri (ledger-based self-delete):
  *   node e2e/provision-live-users.ts --teardown-only [--run-id <id>]
@@ -239,17 +240,6 @@ export function resolveSecondLocationId(locations: ProvisionLocation[], primaryI
   return picked === undefined ? primaryId : picked.id
 }
 
-/** Satu kata sandi acak bersama (16 karakter alfanumerik, hanya di memori). */
-export function makePassword(): string {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-  const bytes = randomBytes(16)
-  let out = ''
-  for (const byte of bytes) {
-    out += alphabet[byte % alphabet.length]
-  }
-  return out
-}
-
 /** NIK 16-digit unik (`9` + 9 digit waktu + 6 digit acak kripto; kolom NIK UNIQUE). */
 export function makeNik(): string {
   const time = String(Date.now()).slice(-9).padStart(9, '0')
@@ -257,12 +247,8 @@ export function makeNik(): string {
   return `9${time}${rand}`
 }
 
-/** Baris ekspor `KEY=VALUE` untuk injeksi `e2e.ps1` (mentah, berisi rahasia). */
-export function buildExportLines(
-  runId: string,
-  emails: ProvisionEmails,
-  password: string,
-): string[] {
+/** Baris ekspor `KEY=VALUE` untuk injeksi `e2e.ps1` (tanpa rahasia). */
+export function buildExportLines(runId: string, emails: ProvisionEmails): string[] {
   return [
     `E2E_RUN_ID=${runId}`,
     `E2E_EMAIL_ADMIN=${emails.admin}`,
@@ -271,15 +257,7 @@ export function buildExportLines(
     `E2E_EMAIL_ADMIN2=${emails.admin2}`,
     `E2E_EMAIL_SECURITY2=${emails.security2}`,
     `E2E_EMAIL_VENDOR2=${emails.vendor2}`,
-    `E2E_PASSWORD=${password}`,
   ]
-}
-
-/** Samarkan nilai `E2E_PASSWORD=` pada baris log (manusia boleh baca log). */
-export function maskSecrets(lines: string[]): string[] {
-  return lines.map((line) =>
-    line.startsWith('E2E_PASSWORD=') ? 'E2E_PASSWORD=***' : line,
-  )
 }
 
 /** `true` bila argv meminta mode teardown (`--teardown-only`). */
@@ -700,7 +678,9 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
 
   const runId = makeRunId()
   const emails = buildEmails(runId, emailDomain())
-  const password = makePassword()
+  // Kata sandi operator bersama (sama yang dipakai ACCOUNTS): acak/export
+  // ulang E2E_PASSWORD akan merusak login superadmin sisa run.
+  const password = process.env.E2E_PASSWORD ?? 'Password123!'
   const locRes = await api.apiFetchRaw(superToken, 'GET', '/locations')
   if (locRes.status !== 200) {
     fail(`GET /locations -> HTTP ${locRes.status} (harus 200): ${describe(locRes.body)}`)
@@ -891,15 +871,15 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   }
   log(`login security2 ${emails.security2} -> 200`)
 
-  for (const masked of maskSecrets(buildExportLines(runId, emails, password))) {
-    log(masked)
+  for (const line of buildExportLines(runId, emails)) {
+    log(line)
   }
   const ledgerPath = writeLedger(runId, emails)
   if (ledgerPath !== '') {
     log(`ledger teardown: ${ledgerPath}`)
   }
   console.log(`[e2e-provision] ${EXPORT_BEGIN}`)
-  for (const line of buildExportLines(runId, emails, password)) {
+  for (const line of buildExportLines(runId, emails)) {
     console.log(line)
   }
   console.log(`[e2e-provision] ${EXPORT_END}`)

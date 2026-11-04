@@ -522,8 +522,23 @@ test('@NAV-06 /users 404 dan filter Superadmin menyembunyikan tombol tambah', as
 
   // Perilaku nyata: baris tersaring ke Superadmin dan tombol tambah hilang
   // (POST /users hanya menerima admin|vendor).
-  await expect(page.locator('tbody tr')).toHaveCount(1)
-  await expect(page.locator('tbody tr').first()).toContainText('Superadmin')
+  // Live membawa DUA superadmin (superadmin-1, superadmin-2), jadi hitungan
+  // pasti bukan 1 di sana; lokal seed hanya punya satu sehingga pin exact-1
+  // dipertahankan untuk menjaga cakupan.
+  if (isLiveRun()) {
+    const liveRows = page.locator('tbody tr')
+    await expect(liveRows.first()).toBeVisible()
+    const liveCount = await liveRows.count()
+    expect(liveCount, 'live: filter Superadmin wajib menyisakan >= 1 baris').toBeGreaterThanOrEqual(
+      1,
+    )
+    for (let index = 0; index < liveCount; index += 1) {
+      await expect(liveRows.nth(index)).toContainText('Superadmin')
+    }
+  } else {
+    await expect(page.locator('tbody tr')).toHaveCount(1)
+    await expect(page.locator('tbody tr').first()).toContainText('Superadmin')
+  }
   await expect(page.getByRole('button', { name: 'Tambah Koordinator Wilayah' })).toHaveCount(0)
 })
 
