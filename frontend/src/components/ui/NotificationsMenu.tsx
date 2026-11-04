@@ -285,7 +285,7 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
                       <span className="block truncate text-sm font-semibold text-ink">
                         {item.title}
                       </span>
-                      <span className="block truncate text-xs text-ink-secondary">
+                      <span className="block break-words text-xs text-ink-secondary">
                         {item.message}
                       </span>
                       <span className="mt-0.5 flex items-center gap-2 text-badge text-ink-muted">
