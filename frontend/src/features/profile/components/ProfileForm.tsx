@@ -333,8 +333,8 @@ export function ProfileForm() {
     return (
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
         {heading}
-        {passwordSection}
         <EmailChangeSection />
+        {passwordSection}
         <section className="card p-4 sm:p-6" aria-label="Informasi akun">
           <h2 className="text-base font-semibold text-ink">Informasi Akun</h2>
           <p className="mt-1 text-sm text-ink-secondary">
@@ -467,23 +467,23 @@ export function ProfileForm() {
               error={phoneError}
             />
           ) : null}
-        </section>
 
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button
-            type="submit"
-            className="min-h-touch-lg focus-visible:outline-brand-contrast"
-            disabled={!dirty || busy}
-            loading={updateProfile.isPending}
-          >
-            Simpan Perubahan
-          </Button>
-        </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="submit"
+              className="min-h-touch-lg focus-visible:outline-brand-contrast"
+              disabled={!dirty || busy}
+              loading={updateProfile.isPending}
+            >
+              Simpan Perubahan
+            </Button>
+          </div>
+        </section>
       </form>
 
-      {passwordSection}
-
       <EmailChangeSection />
+
+      {passwordSection}
 
       <AvatarCropDialog
         open={cropFile !== null}
