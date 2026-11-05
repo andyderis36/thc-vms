@@ -71,7 +71,11 @@ WHERE u.status = 'active'
         r.name IN ('super_admin', 'dev-superadmin')
         OR (r.name IN ('admin', 'security') AND u.location_id = $6::uuid)
       )
-ON CONFLICT (user_id, type, visit_request_id) DO NOTHING
+ON CONFLICT (user_id, type, visit_request_id) DO UPDATE SET
+  message = EXCLUDED.message,
+  created_at = EXCLUDED.created_at
+WHERE EXCLUDED.type = 'visit_rescheduled'
+  AND notification.created_at < EXCLUDED.created_at
 `
 
 type InsertStaffNotificationsParams struct {
@@ -101,11 +105,20 @@ type InsertStaffNotificationsParams struct {
 //
 // IDEMPOTENCY
 //
-//	Every insert carries ON CONFLICT (user_id, type, visit_request_id) DO
-//	NOTHING. That unique constraint is the SINGLE de-duplication mechanism: it
-//	makes the reminder sweep safe across ticks, restarts and concurrent
-//	workers, and lets the one-off backfill command be re-run without
-//	double-posting.
+//	Every insert carries ON CONFLICT (user_id, type, visit_request_id) handling
+//	on that unique constraint, the SINGLE de-duplication mechanism: it makes
+//	the reminder sweep safe across ticks, restarts and concurrent workers, and
+//	lets the one-off backfill command be re-run without double-posting.
+//	For every type EXCEPT visit_rescheduled the conflict is a no-op (DO
+//	NOTHING via the WHERE guard below evaluating to false), so the first
+//	notice wins exactly as before. visit_rescheduled rows instead REFRESH
+//	message + created_at to the latest emission, so a repeated reschedule
+//	keeps exactly one bell row per recipient whose content follows the newest
+//	schedule (the detail page already shows the latest reason via
+//	GetLatestStatusNote; this aligns the bell with it). The refresh is
+//	newer-wins (EXCLUDED.created_at must exceed the stored one), so replays
+//	with older timestamps - backfill re-runs, retried emits - can never move
+//	the bell backwards; the read flag is never touched.
 //
 // READ PATH
 //
@@ -117,7 +130,9 @@ type InsertStaffNotificationsParams struct {
 // Fan-out to the visit's staff audience: every active super_admin (national,
 // including the hidden dev-superadmin which passes every super_admin gate)
 // plus the active admin/security at the visit's location. ON CONFLICT keeps the
-// write idempotent per (recipient, type, visit).
+// write idempotent per (recipient, type, visit): other types are a no-op on
+// conflict, while a repeat visit_rescheduled REFRESHES message + created_at
+// to the latest emission (WHERE guard on the upsert below).
 func (q *Queries) InsertStaffNotifications(ctx context.Context, arg InsertStaffNotificationsParams) error {
 	_, err := q.db.Exec(ctx, insertStaffNotifications,
 		arg.VisitRequestID,
@@ -142,7 +157,11 @@ FROM users u
 JOIN role r ON r.id = u.role_id
 WHERE u.id = $6::uuid
   AND r.name = 'vendor'
-ON CONFLICT (user_id, type, visit_request_id) DO NOTHING
+ON CONFLICT (user_id, type, visit_request_id) DO UPDATE SET
+  message = EXCLUDED.message,
+  created_at = EXCLUDED.created_at
+WHERE EXCLUDED.type = 'visit_rescheduled'
+  AND notification.created_at < EXCLUDED.created_at
 `
 
 type InsertVendorNotificationParams struct {
@@ -156,7 +175,9 @@ type InsertVendorNotificationParams struct {
 
 // Single-recipient insert: the visit's vendor user, but only if that account is a
 // 'vendor'. A vendor account that is internal staff (admin-posted request) receives
-// nothing here; the staff fan-out above already covers them.
+// nothing here; the staff fan-out above already covers them. ON CONFLICT is a
+// no-op for other types, while a repeat visit_rescheduled REFRESHES message +
+// created_at to the latest emission (WHERE guard on the upsert below).
 func (q *Queries) InsertVendorNotification(ctx context.Context, arg InsertVendorNotificationParams) error {
 	_, err := q.db.Exec(ctx, insertVendorNotification,
 		arg.VisitRequestID,
@@ -244,8 +265,11 @@ type ListBackfillNotificationEventsRow struct {
 //
 // The command maps each row through the domain templates and inserts through
 // InsertStaffNotifications / InsertVendorNotification, so duplicate event types
-// collapse on the unique constraint. No time parameter: the full history is
-// replayed once, and re-running is a no-op thanks to ON CONFLICT DO NOTHING.
+//
+//	collapse on the unique constraint. No time parameter: the full history is
+//	replayed once, and re-running is a no-op (other types hit the no-op
+//	branch; rescheduled replays carry older timestamps than the live rows and
+//	lose the newer-wins guard).
 func (q *Queries) ListBackfillNotificationEvents(ctx context.Context) ([]ListBackfillNotificationEventsRow, error) {
 	rows, err := q.db.Query(ctx, listBackfillNotificationEvents)
 	if err != nil {
@@ -346,6 +370,120 @@ func (q *Queries) ListNotificationsForUser(ctx context.Context, arg ListNotifica
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStaffEmailRecipients = `-- name: ListStaffEmailRecipients :many
+SELECT u.email
+FROM users u
+JOIN role r ON r.id = u.role_id
+WHERE u.status = 'active'
+  AND (
+        r.name IN ('super_admin', 'dev-superadmin')
+        OR (r.name IN ('admin', 'security') AND u.location_id = $1::uuid)
+      )
+ORDER BY u.email ASC
+`
+
+type ListStaffEmailRecipientsParams struct {
+	LocationID uuid.UUID `json:"location_id"`
+}
+
+// Active-only email mirror of InsertStaffNotifications: every ACTIVE national
+// super_admin (including the hidden dev-superadmin, which passes every
+// super_admin gate) plus the ACTIVE admin/security stationed at the visit's
+// branch. The predicate is the fan-out one plus the email projection, so the
+// two can never address different sets. Blank addresses are returned as-is:
+// the Go caller skips (and logs) them so the skip stays observable.
+func (q *Queries) ListStaffEmailRecipients(ctx context.Context, arg ListStaffEmailRecipientsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listStaffEmailRecipients, arg.LocationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		items = append(items, email)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSuperAdminEmails = `-- name: ListSuperAdminEmails :many
+SELECT u.email
+FROM users u
+JOIN role r ON r.id = u.role_id
+WHERE u.status = 'active'
+  AND r.name IN ('super_admin', 'dev-superadmin')
+ORDER BY u.email ASC
+`
+
+// Active-only email set behind the vendor-registration fan-out (migration
+// 000020): every ACTIVE national super_admin, including the hidden
+// dev-superadmin which passes every super_admin gate, ordered by email. There
+// is deliberately NO location predicate and NO admin/security roles here (a
+// national queue, not a visit at one branch). Blank addresses are returned
+// as-is: the Go caller skips (and logs) them so the skip stays observable.
+func (q *Queries) ListSuperAdminEmails(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listSuperAdminEmails)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		items = append(items, email)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVendorEmailRecipient = `-- name: ListVendorEmailRecipient :many
+SELECT u.email
+FROM users u
+JOIN role r ON r.id = u.role_id
+WHERE u.id = $1::uuid
+  AND r.name = 'vendor'
+  AND u.status = 'active'
+`
+
+type ListVendorEmailRecipientParams struct {
+	VendorUserID uuid.UUID `json:"vendor_user_id"`
+}
+
+// Active-only email mirror of InsertVendorNotification: the visit's vendor
+// user, but only when that account holds the 'vendor' role AND is active.
+// Zero rows (inactive/pending/blacklisted, non-vendor or missing account)
+// means zero emails, never an error. At most one row: users.id is the key.
+func (q *Queries) ListVendorEmailRecipient(ctx context.Context, arg ListVendorEmailRecipientParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listVendorEmailRecipient, arg.VendorUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		items = append(items, email)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

@@ -17,6 +17,10 @@ type Querier interface {
 	// Companion count; predicate is byte-for-byte the ListNotificationsForUser one
 	// so {items,total} cannot drift from the page it counts.
 	CountNotificationsForUser(ctx context.Context, arg CountNotificationsForUserParams) (int64, error)
+	// Companion bell count; predicate is the ListPendingVendorRegistrations one
+	// (pending notices, each with exactly one user row via the FK), so the count
+	// cannot drift from the page it accompanies.
+	CountPendingVendorRegistrationNotices(ctx context.Context) (int64, error)
 	// DELETE /users/:id pre-check 2: gate and audit rows written BY the account
 	// as staff (check_in.checked_in_by, check_out.checked_out_by,
 	// status_history.changed_by, all without cascade). A non-zero total blocks
@@ -220,6 +224,40 @@ type Querier interface {
 	// pairing the Go validation missed (check_violation -> 400 via MapError) and
 	// users_email_key rejects a duplicate email (23505 -> 409 via MapError).
 	InsertManagedUser(ctx context.Context, arg InsertManagedUserParams) (InsertManagedUserRow, error)
+	// =============================================================================
+	// vendor_registration_notices.sql - Superadmin approval queue (migration 000020).
+	//
+	// The durable per-vendor row behind GET /notifications/pending-registrations
+	// and the superadmin approval bell: public self-registration (migration
+	// 000018) creates one pending vendor account, which gains exactly one row
+	// here, resolved when a superadmin flips the account status
+	// (PATCH /users/:id/status).
+	//
+	// SCOPE NOTE
+	//   This file owns ONLY the notices queue. The dev-superadmin parity
+	//   predicate (ListStaffEmailRecipients) and any recipient fan-out live in
+	//   notifications.sql and are deliberately untouched here.
+	//
+	// IDEMPOTENCY
+	//   UNIQUE (vendor_user_id) is the anchor: every insert carries
+	//   ON CONFLICT (vendor_user_id) DO NOTHING, so re-registration retries,
+	//   worker restarts and the backfill CLI never double-post and never touch
+	//   the first row.
+	//
+	// READ PATH
+	//   ListPendingVendorRegistrations serves the newest pending rows first
+	//   (ORDER BY created_at DESC, id DESC rides the partial index
+	//   idx_vendor_registration_notices_pending). CountPendingVendorRegistrationNotices
+	//   shares the same WHERE status = 'pending' predicate plus the users join
+	//   shape, so {items,total,pending_count} cannot drift from the page it
+	//   counts: the FK (vendor_user_id -> users, ON DELETE CASCADE) guarantees
+	//   every pending notice has exactly one user row.
+	// =============================================================================
+	// Queue one pending vendor account. ON CONFLICT DO NOTHING keeps the retry
+	// idempotent per UNIQUE(vendor_user_id): a second call for the same vendor
+	// affects zero rows and leaves the first row (its id, status, created_at)
+	// untouched.
+	InsertPendingVendorRegistrationNotice(ctx context.Context, arg InsertPendingVendorRegistrationNoticeParams) error
 	// POST /purposes (super_admin only). New rows start active; a blank name is
 	// rejected in Go before this runs so no CHECK is needed.
 	InsertPurpose(ctx context.Context, arg InsertPurposeParams) (Purpose, error)
@@ -244,11 +282,20 @@ type Querier interface {
 	//              'vendor' role (company-wide fan-out is deliberately rejected).
 	//
 	// IDEMPOTENCY
-	//   Every insert carries ON CONFLICT (user_id, type, visit_request_id) DO
-	//   NOTHING. That unique constraint is the SINGLE de-duplication mechanism: it
-	//   makes the reminder sweep safe across ticks, restarts and concurrent
-	//   workers, and lets the one-off backfill command be re-run without
-	//   double-posting.
+	//   Every insert carries ON CONFLICT (user_id, type, visit_request_id) handling
+	//   on that unique constraint, the SINGLE de-duplication mechanism: it makes
+	//   the reminder sweep safe across ticks, restarts and concurrent workers, and
+	//   lets the one-off backfill command be re-run without double-posting.
+	//   For every type EXCEPT visit_rescheduled the conflict is a no-op (DO
+	//   NOTHING via the WHERE guard below evaluating to false), so the first
+	//   notice wins exactly as before. visit_rescheduled rows instead REFRESH
+	//   message + created_at to the latest emission, so a repeated reschedule
+	//   keeps exactly one bell row per recipient whose content follows the newest
+	//   schedule (the detail page already shows the latest reason via
+	//   GetLatestStatusNote; this aligns the bell with it). The refresh is
+	//   newer-wins (EXCLUDED.created_at must exceed the stored one), so replays
+	//   with older timestamps - backfill re-runs, retried emits - can never move
+	//   the bell backwards; the read flag is never touched.
 	//
 	// READ PATH
 	//   Reads are user-scoped (WHERE user_id = caller). The optional location_id
@@ -258,14 +305,18 @@ type Querier interface {
 	// Fan-out to the visit's staff audience: every active super_admin (national,
 	// including the hidden dev-superadmin which passes every super_admin gate)
 	// plus the active admin/security at the visit's location. ON CONFLICT keeps the
-	// write idempotent per (recipient, type, visit).
+	// write idempotent per (recipient, type, visit): other types are a no-op on
+	// conflict, while a repeat visit_rescheduled REFRESHES message + created_at
+	// to the latest emission (WHERE guard on the upsert below).
 	InsertStaffNotifications(ctx context.Context, arg InsertStaffNotificationsParams) error
 	// Atomic audit append (PRD L129). changed_by is NULL for the background
 	// auto-rule worker, which has no acting user.
 	InsertStatusHistory(ctx context.Context, arg InsertStatusHistoryParams) (StatusHistory, error)
 	// Single-recipient insert: the visit's vendor user, but only if that account is a
 	// 'vendor'. A vendor account that is internal staff (admin-posted request) receives
-	// nothing here; the staff fan-out above already covers them.
+	// nothing here; the staff fan-out above already covers them. ON CONFLICT is a
+	// no-op for other types, while a repeat visit_rescheduled REFRESHES message +
+	// created_at to the latest emission (WHERE guard on the upsert below).
 	InsertVendorNotification(ctx context.Context, arg InsertVendorNotificationParams) error
 	// visit_purpose is a pure join table (ERD L107-110) whose composite primary key
 	// already rejects a duplicate (visit, purpose) pair.
@@ -342,8 +393,10 @@ type Querier interface {
 	//   check_out : every gate check-out at its timestamp
 	// The command maps each row through the domain templates and inserts through
 	// InsertStaffNotifications / InsertVendorNotification, so duplicate event types
-	// collapse on the unique constraint. No time parameter: the full history is
-	// replayed once, and re-running is a no-op thanks to ON CONFLICT DO NOTHING.
+	//   collapse on the unique constraint. No time parameter: the full history is
+	//   replayed once, and re-running is a no-op (other types hit the no-op
+	//   branch; rescheduled replays carry older timestamps than the live rows and
+	//   lose the newer-wins guard).
 	ListBackfillNotificationEvents(ctx context.Context) ([]ListBackfillNotificationEventsRow, error)
 	// Batched existence read for the R2 no-show sweep: one round trip for the
 	// whole candidate set instead of one GetCheckInByVisitRequest probe per
@@ -363,13 +416,36 @@ type Querier interface {
 	// One page of the caller's own notifications, newest first, joined to the visit
 	// and its location for the visit_id/location_name the wire shape needs.
 	ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]ListNotificationsForUserRow, error)
+	// One page of the superadmin approval queue, newest first, joined onto the
+	// vendor account (plus its catalogue vendor name) so the approval screen
+	// renders the openapi PendingRegistrationItem without a second hop.
+	ListPendingVendorRegistrations(ctx context.Context, arg ListPendingVendorRegistrationsParams) ([]ListPendingVendorRegistrationsRow, error)
 	// GET /users/security (openapi L119-138). `sqlc.narg('location_id')` is the whole
 	// scoping mechanism: an admin/security caller passes its own location (PRD L110),
 	// a super_admin passes NULL to see every branch or a location to filter (PRD L109).
 	// ORDER BY created_at DESC keeps pagination stable for the account modal.
 	ListSecurityUsers(ctx context.Context, arg ListSecurityUsersParams) ([]ListSecurityUsersRow, error)
+	// Active-only email mirror of InsertStaffNotifications: every ACTIVE national
+	// super_admin (including the hidden dev-superadmin, which passes every
+	// super_admin gate) plus the ACTIVE admin/security stationed at the visit's
+	// branch. The predicate is the fan-out one plus the email projection, so the
+	// two can never address different sets. Blank addresses are returned as-is:
+	// the Go caller skips (and logs) them so the skip stays observable.
+	ListStaffEmailRecipients(ctx context.Context, arg ListStaffEmailRecipientsParams) ([]string, error)
 	// Status timeline on SCR-04 (openapi L832+, PRD L232).
 	ListStatusHistory(ctx context.Context, arg ListStatusHistoryParams) ([]ListStatusHistoryRow, error)
+	// Active-only email set behind the vendor-registration fan-out (migration
+	// 000020): every ACTIVE national super_admin, including the hidden
+	// dev-superadmin which passes every super_admin gate, ordered by email. There
+	// is deliberately NO location predicate and NO admin/security roles here (a
+	// national queue, not a visit at one branch). Blank addresses are returned
+	// as-is: the Go caller skips (and logs) them so the skip stays observable.
+	ListSuperAdminEmails(ctx context.Context) ([]string, error)
+	// Active-only email mirror of InsertVendorNotification: the visit's vendor
+	// user, but only when that account holds the 'vendor' role AND is active.
+	// Zero rows (inactive/pending/blacklisted, non-vendor or missing account)
+	// means zero emails, never an error. At most one row: users.id is the key.
+	ListVendorEmailRecipient(ctx context.Context, arg ListVendorEmailRecipientParams) ([]string, error)
 	ListVisitPurposes(ctx context.Context, arg ListVisitPurposesParams) ([]ListVisitPurposesRow, error)
 	// Suggestion source for the roster "Jabatan" combobox (openapi GET /jabatan).
 	// Jabatan is free text, never a catalogue: the distinct values actually typed
@@ -409,6 +485,10 @@ type Querier interface {
 	// guard: a notification owned by somebody else matches no row and the caller
 	// answers 404.
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error)
+	// Flip one pending notice to approved/rejected and stamp resolved_at. The
+	// status = 'pending' guard makes a repeated decision a no-op instead of
+	// re-stamping: an already resolved (or missing) row affects zero rows.
+	ResolveVendorRegistrationNotice(ctx context.Context, arg ResolveVendorRegistrationNoticeParams) (int64, error)
 	// R2: any pre-arrival status, past end_date + 2h (domain.NoShowGrace), and
 	// check_in has no row for the visit. Uses idx_visit_status for the status scan
 	// and the UNIQUE index on check_in(visit_request_id) for the anti-join probe.
@@ -500,11 +580,16 @@ type Querier interface {
 	// fresh bcrypt hash the usecase minted, never a plaintext password; the row
 	// must exist (a missing id surfaces no rows, mapped to ErrNotFound upstream).
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
-	// Self-service profile write. The usecase resolves the final name, phone and
-	// avatar (empty -> NULL) and this statement stores them verbatim, then re-reads
-	// the SAME projection as GetUserByID so the caller gets the complete profile
-	// row. A plain UPDATE ... RETURNING cannot join role/location/vendor, so the
-	// CTE carries the updated row into the joined projection unchanged.
+	// Self-service profile write. The usecase resolves the final name, phone,
+	// avatar (empty -> NULL) and email and this statement stores them verbatim,
+	// then re-reads the SAME projection as GetUserByID so the caller gets the
+	// complete profile row. Email is a plain overwrite: only the email-change
+	// confirm path passes a different address, after the token binding and the
+	// freeness re-check both pass; every other caller passes the stored address
+	// back through (PATCH /auth/me never carries email at all), so the column
+	// only moves on a verified flip. A plain UPDATE ... RETURNING cannot join
+	// role/location/vendor, so the CTE carries the updated row into the joined
+	// projection unchanged.
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error)
 	// PATCH /users/security/{id}/status (openapi L161-188). Accepts only
 	// 'active'/'inactive' at the request boundary; the superadmin path

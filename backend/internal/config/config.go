@@ -20,12 +20,13 @@ import (
 // VPS should raise MaxConns/MinConns via the environment (see .env.example);
 // every value below is overridable except the fixed dial timeout.
 const (
-	defaultAppName   = "THC-VMS-Backend"
-	defaultAppEnv    = "local"
-	defaultAppPort   = 8080
-	defaultDBHost    = "localhost"
-	defaultDBPort    = 5432
-	defaultDBSSLMode = "disable"
+	defaultAppName         = "THC-VMS-Backend"
+	defaultAppEnv          = "local"
+	defaultAppPort         = 8080
+	defaultDBHost          = "localhost"
+	defaultFrontendBaseURL = "http://localhost:3210"
+	defaultDBPort          = 5432
+	defaultDBSSLMode       = "disable"
 
 	defaultMaxConns     = 10
 	defaultMinConns     = 0
@@ -55,6 +56,16 @@ const (
 	// fetchable. Short enough that a leaked <a>/<img> href dies quickly,
 	// long enough for a guard to open it from the visit detail page.
 	defaultPresignTTLMinutes = 15
+
+	// Mail defaults: SMTP stays optional (Enabled=false) so existing boots
+	// never break. Port 465 is the implicit-TLS submission default; From is
+	// left empty here and falls back to User inside the mail adapter at
+	// construction-read time, never in config.
+	defaultMailPort    = 465
+	defaultMailTimeout = 30 * time.Second
+	// defaultMailFromName is the sender display name inbox clients show
+	// instead of the bare address.
+	defaultMailFromName = "THC VMS"
 )
 
 // Config is the fully validated runtime configuration.
@@ -64,6 +75,7 @@ type Config struct {
 	JWT     JWT
 	Storage Storage
 	Upload  Upload
+	Mail    Mail
 }
 
 // App carries the HTTP server settings.
@@ -72,6 +84,9 @@ type App struct {
 	Environment string
 	Port        int
 	Debug       bool
+	// FrontendBaseURL is the public web origin (FRONTEND_BASE_URL) the
+	// verification mail links back to. It never affects API routing.
+	FrontendBaseURL string
 }
 
 // Database carries the pgxpool connection settings.
@@ -165,6 +180,25 @@ type Upload struct {
 	AllowedMIMETypes []string
 }
 
+// Mail carries the SMTP settings. Optional: Enabled defaults to false so
+// existing boots never break. When Enabled is true, Host is required. An
+// empty From means the mail adapter sends as User; that fallback lives in
+// the adapter, not here. DryRun logs the rendered subject/recipient instead
+// of dialing, for CI legs without Mailpit or any network.
+type Mail struct {
+	Enabled  bool
+	Host     string
+	Port     int
+	User     string
+	Password string
+	From     string
+	// FromName is the human-readable sender display name rendered as
+	// `"THC VMS" <noreply@...>`. Empty means a bare address From.
+	FromName string
+	Timeout  time.Duration
+	DryRun   bool
+}
+
 // Load reads every variable, applies defaults, and fails on the first
 // malformed value, naming the offending variable. A missing or empty
 // JWT_SECRET is always an error: a signing key must never be defaulted.
@@ -175,6 +209,16 @@ type Upload struct {
 func Load() (*Config, error) {
 	if err := LoadDotEnv(DotEnvFile); err != nil {
 		return nil, err
+	}
+
+	// Fail-fast: the local-dev open-mode sentinel (AUTH_RATE_LIMIT=-1)
+	// disables BOTH the login and the register throttles (see the wiring in
+	// cmd/server/main.go). A copied local .env reaching production would
+	// silently leave the two most exposed unauthenticated endpoints
+	// unthrottled, so production refuses to boot instead. Every other
+	// environment keeps today's behavior byte-identical.
+	if stringEnv("APP_ENV", defaultAppEnv) == "production" && os.Getenv("AUTH_RATE_LIMIT") == "-1" {
+		return nil, errors.New("AUTH_RATE_LIMIT=-1 is forbidden when APP_ENV=production: refusing to boot without login and register rate limiters")
 	}
 
 	appPort, err := intEnv("APP_PORT", defaultAppPort)
@@ -262,12 +306,34 @@ func Load() (*Config, error) {
 		presignTTLMinutes = defaultPresignTTLMinutes
 	}
 
+	mailEnabled, err := boolEnv("SMTP_ENABLED", false)
+	if err != nil {
+		return nil, err
+	}
+	mailPort, err := intEnv("SMTP_PORT", defaultMailPort)
+	if err != nil {
+		return nil, err
+	}
+	mailTimeout, err := durationEnv("SMTP_TIMEOUT", defaultMailTimeout)
+	if err != nil {
+		return nil, err
+	}
+	mailDryRun, err := boolEnv("SMTP_DRY_RUN", false)
+	if err != nil {
+		return nil, err
+	}
+	mailHost := os.Getenv("SMTP_HOST")
+	if mailEnabled && mailHost == "" {
+		return nil, errors.New("SMTP_HOST is required when SMTP_ENABLED=true: refusing to run a half-configured mailer")
+	}
+
 	return &Config{
 		App: App{
-			Name:        stringEnv("APP_NAME", defaultAppName),
-			Environment: stringEnv("APP_ENV", defaultAppEnv),
-			Port:        appPort,
-			Debug:       appDebug,
+			Name:            stringEnv("APP_NAME", defaultAppName),
+			Environment:     stringEnv("APP_ENV", defaultAppEnv),
+			Port:            appPort,
+			Debug:           appDebug,
+			FrontendBaseURL: stringEnv("FRONTEND_BASE_URL", defaultFrontendBaseURL),
 		},
 		DB: Database{
 			Host:                  stringEnv("DB_HOST", defaultDBHost),
@@ -306,6 +372,17 @@ func Load() (*Config, error) {
 			MaxIngestMB:      maxIngestMB,
 			MaxIngestBytes:   maxIngestBytes,
 			AllowedMIMETypes: splitList(stringEnv("ALLOWED_MIME_TYPES", defaultAllowedMIMEs)),
+		},
+		Mail: Mail{
+			Enabled:  mailEnabled,
+			Host:     mailHost,
+			Port:     mailPort,
+			User:     os.Getenv("SMTP_USER"),
+			Password: os.Getenv("SMTP_PASSWORD"),
+			From:     os.Getenv("SMTP_FROM"),
+			FromName: stringEnv("SMTP_FROM_NAME", defaultMailFromName),
+			Timeout:  mailTimeout,
+			DryRun:   mailDryRun,
 		},
 	}, nil
 }

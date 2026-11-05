@@ -134,8 +134,7 @@ func (r *notificationRepository) MarkAllRead(ctx context.Context, userID domain.
 // InsertForVisit writes the notice for one visit, timestamped now. Used by the
 // reminder worker; every lifecycle write inside a status transaction goes
 // through emit instead so it shares that transaction. Nil template is a no-op.
-func (r *notificationRepository) InsertForVisit(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate) error {
-	if tpl == nil {
+func (r *notificationRepository) InsertForVisit(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate) error {	if tpl == nil {
 		return nil
 	}
 	visitRequestID, err := fromDomainUUID(visit.ID)
@@ -151,4 +150,21 @@ func (r *notificationRepository) InsertForVisit(ctx context.Context, visit domai
 		return err
 	}
 	return emit(ctx, db.New(r.pool), tpl, visitRequestID, locationID, vendorUserID, time.Now())
+}
+
+// ResolveEmailRecipients returns the active-only email addresses for one
+// audience, mirroring the InsertForVisit fan-out the worker just wrote.
+// Inactive, pending, blacklisted, non-vendor and missing accounts resolve to
+// zero addresses, never an error, so the caller skips the send instead of
+// failing the sweep.
+func (r *notificationRepository) ResolveEmailRecipients(ctx context.Context, visit domain.VisitRequest, audience domain.NotificationAudience) ([]string, error) {
+	locationID, err := fromDomainUUID(visit.LocationID)
+	if err != nil {
+		return nil, err
+	}
+	vendorUserID, err := fromDomainUUID(visit.VendorUserID)
+	if err != nil {
+		return nil, err
+	}
+	return resolveEmailRecipients(ctx, db.New(r.pool), locationID, vendorUserID, audience)
 }

@@ -11,8 +11,10 @@ import (
 
 // BackfillNotifications replays the visit lifecycle history into the
 // notification store for rows created before it existed, so existing visits
-// appear in every recipient's feed. It is idempotent: every write rides
-// ON CONFLICT DO NOTHING, so a second run leaves the row count unchanged.
+// appear in every recipient's feed. It is idempotent: other types ride the
+// ON CONFLICT no-op branch, and rescheduled replays carry older timestamps
+// than the live rows so the newer-wins guard leaves them untouched - a
+// second run leaves the row count and content unchanged.
 // Returns the number of source events examined.
 func BackfillNotifications(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	q := db.New(pool)
