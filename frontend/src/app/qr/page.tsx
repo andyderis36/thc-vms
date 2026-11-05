@@ -3,14 +3,23 @@
 import { useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { QrCode } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Spinner } from '@/components/ui/Spinner'
 import { VendorMobileShell } from '@/components/layouts/VendorMobileShell'
-import { useVisitsQuery } from '@/lib/api/hooks'
+import { qrResolverRefetchInterval, useVisitsQuery } from '@/lib/api/hooks'
+import { queryKeys } from '@/lib/api/query-keys'
+import type { VisitListParams, VisitListResult } from '@/lib/api/types'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 import { RequireRole } from '@/lib/auth/guards'
 import { selectActiveQrVisit } from '@/lib/visits/active-qr-ticket'
+
+/**
+ * Params resolver tiket — konstanta modul agar kunci query yang dibaca dari
+ * cache (untuk keputusan interval) identik dengan kunci yang di-subscribe hook.
+ */
+const QR_RESOLVER_PARAMS: VisitListParams = { limit: 50 }
 
 /**
  * SCR-04 entry — "Tiket QR Aktif" milik Vendor/Mitra (desain 02-design-system 6.4).
@@ -35,7 +44,22 @@ export default function QrTicketPage() {
 
 function QrResolver() {
   const router = useRouter()
-  const visitsQuery = useVisitsQuery({ limit: 50 })
+  const queryClient = useQueryClient()
+  // Keputusan interval dibaca dari cache (pola yang sama dengan
+  // `useVisitQrQuery` yang membaca status detail dari cache): mount pertama
+  // cache kosong → poll 30 dtk (unresolved); begitu data mendarat, render
+  // langganan membaca ulang cache terbaru → false saat tiket aktif terpilih
+  // atau semua baris terminal. Satu observer pada satu kunci — membalik nilai
+  // ini tidak pernah menciptakan timer ganda.
+  const cachedItems =
+    queryClient.getQueryData<VisitListResult>(
+      queryKeys.visits.list(QR_RESOLVER_PARAMS),
+    )?.items ?? []
+  const visitsQuery = useVisitsQuery(
+    QR_RESOLVER_PARAMS,
+    true,
+    qrResolverRefetchInterval(cachedItems),
+  )
   const items = useMemo(() => visitsQuery.data?.items ?? [], [visitsQuery.data])
 
   const active = useMemo(() => selectActiveQrVisit(items), [items])

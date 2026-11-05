@@ -162,6 +162,9 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | User['status']>('all')
+  // Filter cabang KHUSUS superadmin (admin terkunci ke cabangnya lewat
+  // effectiveLocationId, jadi tak butuh select ini). Sentinel 'all' = semua.
+  const [branchFilter, setBranchFilter] = useState<string>('all')
   // Pagination client-side: seluruh anggota cabang dimuat sekali, lalu dipotong
   // per halaman di peramban (GET /users/security tak punya param pagination).
   const [page, setPage] = useState(1)
@@ -177,9 +180,9 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
   // Filter/ukuran halaman berubah → kembali ke halaman 1: baris halaman N
   // tidak relevan untuk kombinasi filter baru. Presisi tiga dependensi ini.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- kontrak reset-on-filter: efek dengan deps persis [search, statusFilter, pageSize]
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- kontrak reset-on-filter: efek dengan deps persis [search, statusFilter, branchFilter, pageSize]
     setPage(1)
-  }, [search, statusFilter, pageSize])
+  }, [search, statusFilter, branchFilter, pageSize])
 
   const locationsQuery = useLocationsQuery()
   const toggleStatus = useUpdateSecurityUserStatusMutation()
@@ -201,6 +204,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
   const filteredUsers = useMemo(() => {
     const query = search.toLowerCase()
     return users.filter((member) => {
+      if (branchFilter !== 'all' && member.location_id !== branchFilter) return false
       if (statusFilter !== 'all' && member.status !== statusFilter) return false
       if (query === '') return true
       return (
@@ -209,7 +213,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
         (member.location_name ?? '').toLowerCase().includes(query)
       )
     })
-  }, [users, search, statusFilter])
+  }, [users, search, statusFilter, branchFilter])
 
   // `page` hasil clamp dari `paginate` yang WAJIB dirender (bukan state mentah):
   // setelah data ter-refetch menyusut, halaman basi tak pernah menampilkan slice kosong.
@@ -245,8 +249,8 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
   }))
   const canPickLocation = role !== null && isSuperAdminRole(role)
 
-  // Reset SEMUA filter bar ke default: pencarian (state mentah + state debounced)
-  // dan status. Pagination di sini SERBA KLIEN: panel memuat seluruh anggota
+  // Reset SEMUA filter bar ke default: pencarian (state mentah + state debounced),
+  // status, dan cabang. Pagination di sini SERBA KLIEN: panel memuat seluruh anggota
   // cabang dalam satu query lalu memotongnya per halaman, dan perubahan filter
   // memicu efek `setPage(1)` (lihat dependensi search/statusFilter di atas) —
   // jadi reset ini tak pernah meninggalkan pengguna di halaman basi.
@@ -256,11 +260,12 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
     setSearchInput('')
     setSearch('')
     setStatusFilter('all')
+    setBranchFilter('all')
   }
 
   // Tombol reset hanya aktif bila benar-benar ada filter yang menyimpang dari
-  // default (sentinel status 'all' + pencarian kosong) — hindari klik percuma.
-  const isFiltered = searchInput.trim() !== '' || search !== '' || statusFilter !== 'all'
+  // default (sentinel status 'all' + pencarian kosong) - hindari klik percuma.
+  const isFiltered = searchInput.trim() !== '' || search !== '' || statusFilter !== 'all' || branchFilter !== 'all'
 
   return (
     <div className="flex flex-col gap-4">
@@ -276,6 +281,16 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
       {/* Toolbar filter irisan SCR-02 — pola users benchmark: select berlabel
           + search ber-aria-label, wrap rapi di 375/768/1280 tanpa scroll. */}
       <div className="card flex flex-wrap items-end gap-3 p-4">
+        {canPickLocation ? (
+          <div className="min-w-40 flex-1 sm:w-48 sm:flex-none">
+            <Select
+              label="Cabang"
+              options={[{ value: 'all', label: 'Semua Cabang' }, ...locationOptions]}
+              value={branchFilter}
+              onChange={(event) => setBranchFilter(event.target.value)}
+            />
+          </div>
+        ) : null}
         <div className="min-w-40 flex-1 sm:w-48 sm:flex-none">
           <Select
             label="Status"

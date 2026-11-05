@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -57,7 +57,9 @@ function stateOf(dot: Element): RenderedState {
   throw new Error(`kelas titik status tak dikenal: ${dot.className}`)
 }
 
-function renderTimeline(status: VisitStatus) {
+const REASON = 'Vendor tidak membawa surat tugas yang sah untuk kunjungan ini.'
+
+function renderTimeline(status: VisitStatus, statusNote?: string | null) {
   return render(
     createElement(Timeline, {
       status,
@@ -66,6 +68,7 @@ function renderTimeline(status: VisitStatus) {
       endDate: END,
       checkInAt: CHECK_IN,
       checkOutAt: CHECK_OUT,
+      statusNote,
     }),
   )
 }
@@ -98,9 +101,9 @@ describe('Timeline node status', () => {
   })
 
   it.each(['rejected', 'cancelled', 'not_visit'] as const)(
-    '%s: byte-identik — 1 node done + footer X',
+    '%s: byte-identik — 1 node done + footer X (alasan hanya di footer)',
     (status) => {
-      const { container } = renderTimeline(status)
+      const { container } = renderTimeline(status, REASON)
 
       const nodes = stepNodes(container)
       expect(nodes).toHaveLength(1)
@@ -114,8 +117,50 @@ describe('Timeline node status', () => {
       expect(footerDot.className.split(/\s+/)).toContain('bg-neutral-bg')
       expect(footerDot.querySelector('svg')).not.toBeNull()
 
+      expect(within(footer!).getByText(REASON)).toBeInTheDocument()
+      expect(screen.getAllByText(REASON)).toHaveLength(1)
+
       expect(container.querySelectorAll('ol > li')).toHaveLength(2)
       expect(container.querySelector('[aria-current="step"]')).toBeNull()
+    },
+  )
+
+  it.each(['rejected', 'cancelled', 'not_visit'] as const)(
+    '%s: footer Status akhir memuat alasan lengkap di bawah badge',
+    (status) => {
+      const { container } = renderTimeline(status, REASON)
+
+      const footer = screen.getByText('Status akhir').closest('li')
+      expect(footer).not.toBeNull()
+
+      const badge = footer!.querySelector('.status-badge')
+      expect(badge).not.toBeNull()
+
+      const reason = within(footer!).getByText(REASON)
+      expect(reason).toBeInTheDocument()
+      expect(
+        badge!.compareDocumentPosition(reason) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+
+      const classes = reason.className.split(/\s+/)
+      expect(classes).toContain('break-words')
+      expect(classes).toContain('text-ink-secondary')
+
+      expect(screen.getAllByText(REASON)).toHaveLength(1)
+      expect(container.querySelectorAll('ol > li')).toHaveLength(2)
+    },
+  )
+
+  it.each([null, undefined, '', '   '] as const)(
+    'footer tidak menambah node alasan saat statusNote=%s',
+    (statusNote) => {
+      const { container } = renderTimeline('rejected', statusNote)
+
+      const footer = screen.getByText('Status akhir').closest('li')
+      expect(footer).not.toBeNull()
+      expect(footer!.querySelector('.status-badge')).not.toBeNull()
+      expect(footer!.querySelectorAll('p')).toHaveLength(1)
+      expect(container.querySelectorAll('ol > li')).toHaveLength(2)
     },
   )
 

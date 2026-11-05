@@ -59,6 +59,12 @@ vi.mock('./AvatarCropDialog', () => ({
   },
 }))
 
+// Seksi ganti email diuji di EmailChangeSection.test.tsx; di sini cukup
+// dipasang null supaya label "Kata sandi saat ini" tidak ganda (dua seksi).
+vi.mock('./EmailChangeSection', () => ({
+  EmailChangeSection: () => null,
+}))
+
 function makeUser(overrides: Partial<User> = {}): User {
   return {
     id: 'u1',

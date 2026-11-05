@@ -447,6 +447,7 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                   endDate={visit.end_date}
                   checkInAt={visit.check_in_at ?? null}
                   checkOutAt={visit.check_out_at ?? null}
+                  statusNote={visit.status_note ?? null}
                 />
               </div>
             </CardBody>
@@ -492,6 +493,14 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                       : 'Tidak ada catatan.'
                   }
                 />
+                {visit.status === 'rescheduled' &&
+                visit.status_note != null &&
+                visit.status_note.trim() !== '' ? (
+                  <InfoRow
+                    label="Alasan Perubahan Jadwal"
+                    value={visit.status_note}
+                  />
+                ) : null}
               </dl>
             </CardBody>
           </Card>

@@ -25,6 +25,7 @@ import {
 import { MAX_UPLOAD_INGEST_BYTES } from '@/lib/uploads/validation'
 
 import { AvatarCropDialog } from './AvatarCropDialog'
+import { EmailChangeSection } from './EmailChangeSection'
 
 /** MIME yang boleh dipilih untuk foto profil (cermin backend `profile_photo`). */
 const AVATAR_MIME_TYPES = ['image/jpeg', 'image/png'] as const
@@ -333,6 +334,7 @@ export function ProfileForm() {
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
         {heading}
         {passwordSection}
+        <EmailChangeSection />
         <section className="card p-4 sm:p-6" aria-label="Informasi akun">
           <h2 className="text-base font-semibold text-ink">Informasi Akun</h2>
           <p className="mt-1 text-sm text-ink-secondary">
@@ -480,6 +482,8 @@ export function ProfileForm() {
       </form>
 
       {passwordSection}
+
+      <EmailChangeSection />
 
       <AvatarCropDialog
         open={cropFile !== null}
