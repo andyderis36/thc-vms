@@ -216,7 +216,7 @@ func run(ctx context.Context) error {
 		// objects best-effort after the commit (row-first, object-second).
 		// Approving or rejecting a pending vendor also drains its
 		// registration queue row (best-effort, never fails the flip).
-	).WithStorage(store).WithCheckIns(checkins).WithMailer(mailPort).WithRegistrationResolver(authSvc)
+	).WithStorage(store).WithCheckIns(checkins).WithMailer(mailPort).WithRegistrationResolver(authSvc).WithFrontendBaseURL(cfg.App.FrontendBaseURL)
 	avatarSvc := avatar.NewService(avatar.Deps{Users: users, Objects: store})
 	avatarHandler := handlers.NewAvatarHandler(avatarSvc)
 	uploadHandler := handlers.NewUploadHandler(store, cfg.Upload.MaxIngestBytes)
@@ -283,6 +283,7 @@ func run(ctx context.Context) error {
 			List: visitHandler.List, Create: visitHandler.Create, Get: visitHandler.Get,
 			QR: visitHandler.QR, Reschedule: visitHandler.Reschedule, Cancel: visitHandler.Cancel,
 			Approve: visitHandler.Approve, Reject: visitHandler.Reject,
+			UpdateVisitorContact: visitHandler.UpdateVisitorContact,
 			Jabatan: visitHandler.ListJabatan,
 		},
 		Gate: deliveryhttp.GateRoutes{

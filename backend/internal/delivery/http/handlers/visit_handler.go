@@ -28,6 +28,7 @@ type VisitService interface {
 	Reject(ctx context.Context, actor visit.Actor, visitID domain.UUID, reason string) error
 	Cancel(ctx context.Context, actor visit.Actor, visitID domain.UUID, note string) error
 	Reschedule(ctx context.Context, actor visit.Actor, visitID domain.UUID, start, end time.Time, reason string) error
+	UpdateVisitorContact(ctx context.Context, actor visit.Actor, visitID, visitorID domain.UUID, phone, idNumber *string) (domain.Visitor, error)
 	ListJabatan(ctx context.Context) ([]string, error)
 }
 
@@ -370,6 +371,14 @@ func checkCreateBody(body createVisitBody) string {
 		if visitor.Jabatan != nil {
 			if validation.RuneLen(strings.TrimSpace(*visitor.Jabatan)) > validation.JabatanMaxLength {
 				return "Jabatan pengunjung ke-" + strconv.Itoa(n) + " maksimal " + strconv.Itoa(validation.JabatanMaxLength) + " karakter."
+			}
+		}
+		// Member contact address (migration 000022): absent or blank means
+		// "no mail" and passes; a filled value must parse as a mailbox
+		// within the 254-rune cap, like the usecase backstop below.
+		if visitor.Email != nil {
+			if email := strings.TrimSpace(*visitor.Email); email != "" && !validation.ValidEmail(email) {
+				return "Email pengunjung ke-" + strconv.Itoa(n) + " tidak valid."
 			}
 		}
 	}

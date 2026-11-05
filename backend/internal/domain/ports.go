@@ -252,6 +252,16 @@ type VisitRepository interface {
 	// Reschedule writes the new window, flips the status to rescheduled and
 	// appends the history row atomically; reason is stored as the history note.
 	Reschedule(ctx context.Context, id UUID, start, end time.Time, changedBy UUID, reason string) error
+	// UpdateVisitorContact corrects one roster member's phone number and its
+	// persistent edited marker in ONE atomic row-locked write
+	// (PATCH /visits/{id}/visitors/{visitorId}, migration 000021). The
+	// caller resolves the final value AND the final flag first
+	// (read-modify-write, never a partial patch): the adapter locks the
+	// visitor row (SELECT ... FOR UPDATE), refuses a visitor that does not
+	// belong to visitID with ErrNotFound, writes the columns verbatim and
+	// returns the refreshed visitor. The flag is monotonic by contract:
+	// callers only ever pass TRUE forward, never FALSE over a stored TRUE.
+	UpdateVisitorContact(ctx context.Context, visitID, visitorID UUID, phone string, phoneEdited bool) (Visitor, error)
 	// DeleteVisit removes one visit row in any status (DELETE /visits/:id,
 	// super_admin only). The child tables (visitor, visit_purpose,
 	// status_history, check_in, check_out) all carry ON DELETE CASCADE, so

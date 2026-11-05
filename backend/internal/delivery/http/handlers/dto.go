@@ -30,6 +30,14 @@ type visitorDTO struct {
 	// Jabatan is the optional free-text position (migration 000012); it is
 	// never a catalogue member and renders omitted when absent.
 	Jabatan *string `json:"jabatan,omitempty"`
+	// Email is the optional member contact address (migration 000022),
+	// used only as the notification-mail recipient; omitted when absent.
+	Email *string `json:"email,omitempty"`
+	// PhoneEdited is the persistent marker of the creator contact correction
+	// (migration 000021, PATCH /visits/{id}/visitors/{visitorId}). It always
+	// renders, even false: false means the phone was never corrected after
+	// submission.
+	PhoneEdited bool `json:"phone_edited"`
 }
 
 // locationDTO mirrors Location. Name/type ride along from the usecase join
@@ -163,7 +171,37 @@ type createVisitBody struct {
 		// Jabatan is the optional free-text position (migration 000012); the
 		// usecase trims it, caps it at 120 and maps a blank input to absent.
 		Jabatan *string `json:"jabatan"`
+		// Email is the optional member contact address (migration 000022);
+		// the usecase trims it, validates it and maps a blank input to
+		// absent, so the echo cannot carry whitespace.
+		Email *string `json:"email"`
 	} `json:"visitors"`
+}
+
+// toVisitorDTO maps one domain roster entry onto the openapi VisitorItem
+// shape. It is shared by the visit detail roster and the single-member
+// PATCH /visits/{id}/visitors/{visitorId} response so both render the same
+// keys, including the migration 000021 edited markers.
+func toVisitorDTO(w domain.Visitor) visitorDTO {
+	dto := visitorDTO{
+		Name: w.Name, IDNumber: w.IDNumber, Phone: w.Phone,
+		IDCardPhotoURL: w.IDCardPhotoURL, PhotoURL: w.PhotoURL,
+		Jabatan: w.Jabatan, Email: w.Email,
+		PhoneEdited: w.PhoneEdited,
+	}
+	if w.ID != "" {
+		id := string(w.ID)
+		dto.ID = &id
+	}
+	if w.VendorID != "" {
+		id := string(w.VendorID)
+		dto.VendorID = &id
+	}
+	if w.VendorName != "" {
+		name := w.VendorName
+		dto.VendorName = &name
+	}
+	return dto
 }
 
 // toVisitDetail maps one domain visit onto the openapi VisitDetail shape.
@@ -226,24 +264,7 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 		detail.Purposes = append(detail.Purposes, dto)
 	}
 	for _, w := range v.Visitors {
-		dto := visitorDTO{
-			Name: w.Name, IDNumber: w.IDNumber, Phone: w.Phone,
-			IDCardPhotoURL: w.IDCardPhotoURL, PhotoURL: w.PhotoURL,
-			Jabatan: w.Jabatan,
-		}
-		if w.ID != "" {
-			id := string(w.ID)
-			dto.ID = &id
-		}
-		if w.VendorID != "" {
-			id := string(w.VendorID)
-			dto.VendorID = &id
-		}
-		if w.VendorName != "" {
-			name := w.VendorName
-			dto.VendorName = &name
-		}
-		detail.Visitors = append(detail.Visitors, dto)
+		detail.Visitors = append(detail.Visitors, toVisitorDTO(w))
 	}
 	if v.AssignmentLetterURL != nil {
 		url := *v.AssignmentLetterURL
@@ -326,6 +347,13 @@ func toCreateInput(body createVisitBody, start, end time.Time) visit.CreateVisit
 		if w.Jabatan != nil {
 			jabatan := *w.Jabatan
 			visitor.Jabatan = &jabatan
+		}
+		// The member address travels as-is; the usecase trims it, validates
+		// it and stores a blank input as absent, so the echo cannot carry
+		// whitespace.
+		if w.Email != nil {
+			email := *w.Email
+			visitor.Email = &email
 		}
 		in.Visitors = append(in.Visitors, visitor)
 	}

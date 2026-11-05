@@ -102,7 +102,16 @@ type Visitor struct {
 	// typed earlier are offered back only as a suggestion list (GET /jabatan)
 	// while the field stays freely editable.
 	Jabatan   *string
+	// Email is the optional member contact address (migration 000022) used
+	// only as the notification-mail recipient. A *string so a stored NULL
+	// maps onto nil; absence and empty both mean "no mail".
+	Email     *string
 	CreatedAt time.Time
+	// PhoneEdited is the persistent marker of the creator contact correction
+	// (migration 000021, PATCH /visits/{id}/visitors/{visitorId}): TRUE the
+	// first time the owning vendor corrects the phone number and never
+	// returns to FALSE. It renders on the wire as VisitorItem phone_edited.
+	PhoneEdited bool
 }
 
 // VisitPurpose mirrors the VISIT_PURPOSE table: the composite link between a

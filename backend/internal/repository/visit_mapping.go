@@ -143,6 +143,27 @@ func visitorModelToDomain(row db.ListVisitorsRow) domain.Visitor {
 		VendorName:         resolveVendorDisplayName(row.VendorNameOverride, row.VendorName),
 		VendorNameOverride: textPtr(row.VendorNameOverride),
 		Jabatan:            textPtr(row.Jabatan),
+		Email:              textPtr(row.Email),
+		PhoneEdited:        row.PhoneEdited,
+		CreatedAt:          row.CreatedAt,
+	}
+}
+
+func dbVisitorToDomain(row db.Visitor, vendorName pgtype.Text) domain.Visitor {
+	return domain.Visitor{
+		ID:                 mustDomainUUID(row.ID),
+		VisitRequestID:     mustDomainUUID(row.VisitRequestID),
+		Name:               row.Name,
+		IDNumber:           row.IDNumber,
+		Phone:              row.Phone,
+		IDCardPhotoURL:     textPtr(row.IDCardPhotoUrl),
+		PhotoURL:           textPtr(row.PhotoUrl),
+		VendorID:           nullUUIDToDomain(row.VendorID),
+		VendorName:         resolveVendorDisplayName(row.VendorNameOverride, vendorName),
+		VendorNameOverride: textPtr(row.VendorNameOverride),
+		Jabatan:            textPtr(row.Jabatan),
+		Email:              textPtr(row.Email),
+		PhoneEdited:        row.PhoneEdited,
 		CreatedAt:          row.CreatedAt,
 	}
 }

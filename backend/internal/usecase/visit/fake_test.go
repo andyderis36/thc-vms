@@ -141,6 +141,28 @@ func (f *fakeVisitRepo) Reschedule(_ context.Context, id domain.UUID, start time
 	return nil
 }
 
+// UpdateVisitorContact mirrors the PostgreSQL adapter over the fake roster:
+// a member outside visitID answers NotFoundEntity("Kunjungan") like a missing
+// id, hiding cross-visit existence exactly like the production row lock.
+func (f *fakeVisitRepo) UpdateVisitorContact(_ context.Context, visitID, visitorID domain.UUID, phone string, phoneEdited bool) (domain.Visitor, error) {
+	f.recordWrite()
+	visit, ok := f.byID[visitID]
+	if !ok {
+		return domain.Visitor{}, domain.NotFoundEntity("Kunjungan")
+	}
+	for i, v := range visit.Visitors {
+		if v.ID != visitorID {
+			continue
+		}
+		v.Phone = phone
+		v.PhoneEdited = phoneEdited
+		visit.Visitors[i] = v
+		f.byID[visitID] = visit
+		return v, nil
+	}
+	return domain.Visitor{}, domain.NotFoundEntity("Kunjungan")
+}
+
 // ListVisitorJabatan mirrors the domain.VisitRepository contract over the raw
 // stored values: blank rows are dropped, duplicates collapse, the remainder is
 // sorted ascending and the list is capped at 50.

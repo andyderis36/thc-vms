@@ -105,6 +105,11 @@ func (f *fakeVisitRepo) ListVisitorJabatan(_ context.Context) ([]string, error) 
 	return nil, nil
 }
 
+// UpdateVisitorContact satisfies domain.VisitRepository; the gate path never uses it.
+func (f *fakeVisitRepo) UpdateVisitorContact(_ context.Context, _, _ domain.UUID, _ string, _ bool) (domain.Visitor, error) {
+	return domain.Visitor{}, fmt.Errorf("fakeVisitRepo: unimplemented: %w", domain.ErrNotFound)
+}
+
 // DeleteVisit removes one visit from the fake roster. The gate path never
 // calls it; it exists only so the fake keeps satisfying domain.VisitRepository.
 func (f *fakeVisitRepo) DeleteVisit(_ context.Context, id domain.UUID) error {
