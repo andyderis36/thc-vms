@@ -15,7 +15,25 @@
 	encode zstd gzip
 
 	handle /api/* {
-		reverse_proxy backend:8080
+		# IP klien nyata hanya ada di X-Real-IP yang ditulis Traefik
+		# (X-Forwarded-For dari Traefik tidak konsisten: mayoritas berisi IP
+		# Traefik sendiri — terbukti via capture + spoof-test: header palsu
+		# dari luar selalu ditimpa Traefik, jadi nilai yang tiba di sini
+		# tepercaya HANYA bila peer langsung adalah Traefik).
+		# Aturan di bawah bersifat deny-by-default: koneksi langsung (peer
+		# bukan Traefik) mendapat XFF = IP peer-nya sendiri dan X-Real-IP
+		# dibuang, sehingga header palsu tak pernah sampai ke backend.
+		@viaTraefik remote_ip 58.147.187.14/32
+		handle @viaTraefik {
+			reverse_proxy backend:8080 {
+				header_up X-Forwarded-For {http.request.header.X-Real-Ip}
+			}
+		}
+		handle {
+			reverse_proxy backend:8080 {
+				header_up -X-Real-IP
+			}
+		}
 	}
 
 	handle_path /s3/* {
