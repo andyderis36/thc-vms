@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,14 +22,29 @@ import (
 // owns atomic transitions, and visit_mapping.go owns row projections.
 type visitRepository struct {
 	pool *pgxpool.Pool
+	// mailer is the outbound email port, wired after construction via
+	// WithMailer mirroring the visit usecase. It is OPTIONAL: nil only
+	// disables email fan-out, it never fails a write. The SMTP transport
+	// stays in infrastructure; the adapter is only ever Send-queued.
+	mailer domain.Mailer
 }
 
 // Compile-time proof that the adapter satisfies its port.
 var _ domain.VisitRepository = (*visitRepository)(nil)
 
-// NewVisitRepository builds the PostgreSQL-backed domain.VisitRepository.
-func NewVisitRepository(pool *pgxpool.Pool) domain.VisitRepository {
+// NewVisitRepository builds the PostgreSQL-backed visit repository. The
+// concrete type is returned so the composition root can chain WithMailer;
+// it still satisfies domain.VisitRepository wherever the port is taken.
+func NewVisitRepository(pool *pgxpool.Pool) *visitRepository {
 	return &visitRepository{pool: pool}
+}
+
+// WithMailer wires the outbound email port and returns the repository for
+// chaining at the composition root, mirroring the visit usecase. A nil mailer
+// only disables email fan-out, it never fails a write.
+func (r *visitRepository) WithMailer(mailer domain.Mailer) *visitRepository {
+	r.mailer = mailer
+	return r
 }
 
 // visitCodeAttempts caps the VST-code regeneration loop on a code clash.
@@ -151,6 +167,32 @@ func (r *visitRepository) FindByID(ctx context.Context, id domain.UUID) (domain.
 		return domain.VisitRequest{}, err
 	}
 	return r.withVisitors(ctx, visit)
+}
+
+// GetLatestStatusNote returns the note of the most recent status_history row
+// for the visit, or nil when there is none. A missing history row is not an
+// error: a freshly created visit may have no history row yet.
+func (r *visitRepository) GetLatestStatusNote(ctx context.Context, id domain.UUID) (*string, error) {
+	parsed, err := fromDomainUUID(id)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.New(r.pool).ListStatusHistory(ctx, db.ListStatusHistoryParams{VisitRequestID: parsed})
+	if err != nil {
+		return nil, MapError(err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	last := rows[len(rows)-1]
+	if !last.Notes.Valid {
+		return nil, nil
+	}
+	note := strings.TrimSpace(last.Notes.String)
+	if note == "" {
+		return nil, nil
+	}
+	return &note, nil
 }
 
 // FindByVisitCode resolves one visit by its printed VST-XXXXXXXXXX code: the

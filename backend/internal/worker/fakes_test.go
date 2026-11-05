@@ -59,6 +59,10 @@ func (f *fakeVisitRepo) FindByID(_ context.Context, id domain.UUID) (domain.Visi
 	return v, nil
 }
 
+func (f *fakeVisitRepo) GetLatestStatusNote(_ context.Context, _ domain.UUID) (*string, error) {
+	return nil, nil
+}
+
 func (f *fakeVisitRepo) FindByVisitCode(_ context.Context, _ string) (domain.VisitRequest, error) {
 	return domain.VisitRequest{}, fmt.Errorf("fakeVisitRepo: unimplemented: %w", domain.ErrNotFound)
 }
@@ -169,8 +173,10 @@ type notifyWrite struct {
 }
 
 type fakeNotificationRepo struct {
-	writes    []notifyWrite
-	insertErr error
+	writes         []notifyWrite
+	insertErr      error
+	recipients     []string
+	recipientsErr  error
 }
 
 func (f *fakeNotificationRepo) List(_ context.Context, _ domain.NotificationFilter) ([]domain.Notification, int64, int64, error) {
@@ -191,6 +197,15 @@ func (f *fakeNotificationRepo) InsertForVisit(_ context.Context, visit domain.Vi
 	}
 	f.writes = append(f.writes, notifyWrite{visit: visit, tpl: tpl})
 	return nil
+}
+
+// ResolveEmailRecipients returns the canned recipient set so reminder email
+// tests stay hermetic; the SQL mirror is proven by the repository suite.
+func (f *fakeNotificationRepo) ResolveEmailRecipients(_ context.Context, _ domain.VisitRequest, _ domain.NotificationAudience) ([]string, error) {
+	if f.recipientsErr != nil {
+		return nil, f.recipientsErr
+	}
+	return f.recipients, nil
 }
 
 func mkVisit(id domain.UUID, status domain.VisitStatus, createdAt, start, end time.Time) domain.VisitRequest {

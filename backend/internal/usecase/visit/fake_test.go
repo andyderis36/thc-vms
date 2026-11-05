@@ -96,9 +96,13 @@ func (f *fakeVisitRepo) FindByID(_ context.Context, id domain.UUID) (domain.Visi
 		return domain.VisitRequest{}, domain.NotFoundEntity("Kunjungan")
 	}
 	return visit, nil
-}
+	}
 
-func (f *fakeVisitRepo) FindByVisitCode(_ context.Context, code string) (domain.VisitRequest, error) {
+	func (f *fakeVisitRepo) GetLatestStatusNote(_ context.Context, _ domain.UUID) (*string, error) {
+		return nil, nil
+	}
+
+	func (f *fakeVisitRepo) FindByVisitCode(_ context.Context, code string) (domain.VisitRequest, error) {
 	visit, ok := f.byCode[code]
 	if !ok {
 		return domain.VisitRequest{}, domain.NotFoundEntity("Kunjungan")

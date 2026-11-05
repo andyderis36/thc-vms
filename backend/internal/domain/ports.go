@@ -117,6 +117,13 @@ type ProfileUpdate struct {
 	Phone        string
 	AvatarURL    string
 	PasswordHash string
+	// Email carries the account email for the write: a plain overwrite, so
+	// the caller always resolves the final address first (read-modify-write,
+	// never a partial patch). PATCH /auth/me passes the stored address back
+	// through, which never carries email at all; only the email-change
+	// confirm path passes a different address, after the token binding and
+	// the freeness re-check both pass.
+	Email string
 }
 
 // UserRepository is the port the PostgreSQL adapter implements for accounts.
@@ -226,6 +233,10 @@ type VisitRepository interface {
 	Create(ctx context.Context, visit VisitRequest, visitors []Visitor, purposeIDs []UUID) (VisitRequest, error)
 	FindByID(ctx context.Context, id UUID) (VisitRequest, error)
 	FindByVisitCode(ctx context.Context, code string) (VisitRequest, error)
+	// GetLatestStatusNote returns the note of the most recent status_history
+	// row for the visit (the note attached to the current status transition),
+	// or nil when there is no history or the latest row carries no note.
+	GetLatestStatusNote(ctx context.Context, id UUID) (*string, error)
 	List(ctx context.Context, filter VisitFilter) (visits []VisitRequest, total int64, err error)
 	// ListVisitorJabatan returns the distinct, alphabetically sorted Jabatan
 	// values already registered on visitor rows, with blanks dropped and the

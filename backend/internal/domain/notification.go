@@ -25,7 +25,7 @@ import (
 // actor-role plumbing. See TransitionNotification.
 
 // NotificationType is the closed notification vocabulary pinned by
-// docs/4. openapi.yaml. Eight values: four staff lifecycle notices, three
+// docs/4. openapi.yaml. Nine values: five staff lifecycle notices, three
 // vendor decision notices, one vendor reminder.
 type NotificationType string
 
@@ -34,6 +34,7 @@ const (
 	NotificationVisitRescheduled   NotificationType = "visit_rescheduled"
 	NotificationVisitCheckIn       NotificationType = "visit_check_in"
 	NotificationVisitCheckOut      NotificationType = "visit_check_out"
+	NotificationVisitCancelled     NotificationType = "visit_cancelled"
 	NotificationVisitApproved      NotificationType = "visit_approved"
 	NotificationVisitRejected      NotificationType = "visit_rejected"
 	NotificationVisitReminder      NotificationType = "visit_reminder"
@@ -67,7 +68,10 @@ type NotificationTemplate struct {
 // Nil cases are deliberate:
 //   - completed by the worker (R3 auto-complete) is administrative housekeeping,
 //     not an event the branch staff need to be told about;
-//   - cancelled by a human is already a deliberate, attributable action.
+//   - cancelled by a human emits nothing here because the notice is
+//     actor-directed (vendor-cancel routes to staff, admin-cancel routes to
+//     the vendor) and built by HumanCancelledNotification in the repository
+//     write path, which knows the actor; see UpdateStatus.
 func TransitionNotification(to VisitStatus, system bool, visitCode string) *NotificationTemplate {
 	switch to {
 	case VisitStatusRescheduled:
@@ -152,6 +156,42 @@ func ReminderNotification(visitCode string) *NotificationTemplate {
 	}
 }
 
+// HumanCancelledNotification is the notice for a human-driven cancellation:
+// a vendor cancelling its own visit tells the branch staff (byVendor=true),
+// while an admin/superadmin cancelling a vendor visit tells the vendor
+// (byVendor=false). The automatic worker path never builds this template -
+// it keeps emitting visit_auto_cancelled through TransitionNotification.
+func HumanCancelledNotification(visitCode string, byVendor bool) *NotificationTemplate {
+	if byVendor {
+		return &NotificationTemplate{
+			Type:     NotificationVisitCancelled,
+			Title:    "Kunjungan dibatalkan vendor",
+			Message:  "Permintaan " + visitCode + " dibatalkan oleh vendor.",
+			Audience: NotificationAudienceStaff,
+		}
+	}
+	return &NotificationTemplate{
+		Type:     NotificationVisitCancelled,
+		Title:    "Kunjungan dibatalkan",
+		Message:  "Permintaan " + visitCode + " dibatalkan oleh admin.",
+		Audience: NotificationAudienceVendor,
+	}
+}
+
+// RescheduledVendorNotification is the vendor's copy of a reschedule: the
+// staff feed keeps its own visit_rescheduled row from TransitionNotification
+// and the vendor feed gains this second row with the same type. Repeat
+// reschedules collapse on the store's unique constraint, so re-emission is
+// idempotent.
+func RescheduledVendorNotification(visitCode string) *NotificationTemplate {
+	return &NotificationTemplate{
+		Type:     NotificationVisitRescheduled,
+		Title:    "Jadwal kunjungan diperbarui",
+		Message:  "Permintaan " + visitCode + " dijadwalkan ulang.",
+		Audience: NotificationAudienceVendor,
+	}
+}
+
 // Notification is one stored notice, already narrowed to a single recipient.
 // VisitID/LocationName are read through the visit_request/location joins so the
 // wire shape can render them without a second hop.
@@ -194,9 +234,13 @@ type NotificationFilter struct {
 // NotificationRepository is the persistence port. Reads are always user-scoped;
 // writes fan out to the audience encoded in the template. InsertForVisit is
 // idempotent per (user, type, visit) through the store's unique constraint.
+// ResolveEmailRecipients is the active-only email mirror of that fan-out for
+// the async after-commit mailer: it returns addresses, never an error, for
+// inactive or unknown audiences.
 type NotificationRepository interface {
 	List(ctx context.Context, filter NotificationFilter) (items []Notification, total, unread int64, err error)
 	MarkRead(ctx context.Context, id, userID UUID) (bool, error)
 	MarkAllRead(ctx context.Context, userID UUID) (int64, error)
 	InsertForVisit(ctx context.Context, visit VisitRequest, tpl *NotificationTemplate) error
+	ResolveEmailRecipients(ctx context.Context, visit VisitRequest, audience NotificationAudience) ([]string, error)
 }

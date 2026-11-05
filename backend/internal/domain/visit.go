@@ -39,6 +39,10 @@ type VisitRequest struct {
 	// null on the VisitDetail purpose_note member. It never enters the
 	// purpose catalogue: the dropdown reads purpose rows only.
 	PurposeNote *string
+	// StatusNote is the note of the current status transition (rejection,
+	// cancellation, or reschedule reason). Best-effort display data loaded
+	// from status_history on the single-GET path; nil when none.
+	StatusNote *string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	// VendorName is the display name of VendorID resolved from the vendor

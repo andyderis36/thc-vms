@@ -54,6 +54,10 @@ func (s *stubVisitRepos) FindByVisitCode(_ context.Context, _ string) (domain.Vi
 	return domain.VisitRequest{}, domain.ErrNotFound
 }
 
+func (s *stubVisitRepos) GetLatestStatusNote(_ context.Context, _ domain.UUID) (*string, error) {
+	return nil, nil
+}
+
 func (s *stubVisitRepos) List(_ context.Context, _ domain.VisitFilter) ([]domain.VisitRequest, int64, error) {
 	return nil, 0, nil
 }

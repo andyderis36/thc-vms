@@ -29,6 +29,10 @@ func (f *fakeNotificationRepo) InsertForVisit(_ context.Context, _ domain.VisitR
 	return nil
 }
 
+func (f *fakeNotificationRepo) ResolveEmailRecipients(_ context.Context, _ domain.VisitRequest, _ domain.NotificationAudience) ([]string, error) {
+	return nil, nil
+}
+
 func TestService_AdminScopedToOwnLocation(t *testing.T) {
 	repo := &fakeNotificationRepo{}
 	svc := NewService(repo)

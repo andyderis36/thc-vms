@@ -63,6 +63,10 @@ func (f *fakeVisitRepo) FindByID(_ context.Context, id domain.UUID) (domain.Visi
 	return v, nil
 }
 
+func (f *fakeVisitRepo) GetLatestStatusNote(_ context.Context, _ domain.UUID) (*string, error) {
+	return nil, nil
+}
+
 func (f *fakeVisitRepo) FindByVisitCode(_ context.Context, code string) (domain.VisitRequest, error) {
 	if f.findErr != nil {
 		return domain.VisitRequest{}, f.findErr

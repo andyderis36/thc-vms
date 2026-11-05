@@ -87,6 +87,12 @@ type Service struct {
 	// WithTrustedFileOrigins so existing NewService callers keep compiling;
 	// an empty list keeps the strict rule (https only, plus the dev hosts).
 	trustedFileOrigins FileOriginAllowlist
+	// mailer is the outbound email port, wired after construction via
+	// WithMailer so existing NewService callers keep compiling. It is
+	// OPTIONAL: nil only disables email fan-out, it never fails a write.
+	// The service holds only this domain port; the SMTP transport stays in
+	// infrastructure.
+	mailer domain.Mailer
 }
 
 // WithTrustedFileOrigins records the deployment's own object-storage hosts so
@@ -94,6 +100,14 @@ type Service struct {
 // hands out on a LAN deployment without TLS.
 func (s *Service) WithTrustedFileOrigins(allow FileOriginAllowlist) *Service {
 	s.trustedFileOrigins = allow
+	return s
+}
+
+// WithMailer wires the outbound email port and returns the service for
+// chaining at the composition root, mirroring WithFileLinks. A nil mailer
+// only disables email fan-out, it never fails a write.
+func (s *Service) WithMailer(mailer domain.Mailer) *Service {
+	s.mailer = mailer
 	return s
 }
 
