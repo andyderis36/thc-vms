@@ -583,6 +583,64 @@ func (q *Queries) GetVisitByVisitCodeForUpdate(ctx context.Context, arg GetVisit
 	return i, err
 }
 
+const getVisitorByIDForUpdate = `-- name: GetVisitorByIDForUpdate :one
+SELECT v.id, v.visit_request_id, v.name, v.id_number, v.phone, v.id_card_photo_url, v.photo_url, v.created_at, v.vendor_id, v.vendor_name_override, v.jabatan, v.phone_edited, v.email,
+    vn.name AS vendor_name
+FROM visitor v
+LEFT JOIN vendor vn ON vn.id = v.vendor_id
+WHERE v.id = $1
+FOR UPDATE OF v
+`
+
+type GetVisitorByIDForUpdateParams struct {
+	ID uuid.UUID `json:"id"`
+}
+
+type GetVisitorByIDForUpdateRow struct {
+	ID                 uuid.UUID   `json:"id"`
+	VisitRequestID     uuid.UUID   `json:"visit_request_id"`
+	Name               string      `json:"name"`
+	IDNumber           string      `json:"id_number"`
+	Phone              string      `json:"phone"`
+	IDCardPhotoUrl     pgtype.Text `json:"id_card_photo_url"`
+	PhotoUrl           pgtype.Text `json:"photo_url"`
+	CreatedAt          time.Time   `json:"created_at"`
+	VendorID           pgtype.UUID `json:"vendor_id"`
+	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	Jabatan            pgtype.Text `json:"jabatan"`
+	PhoneEdited        bool        `json:"phone_edited"`
+	Email              pgtype.Text `json:"email"`
+	VendorName         pgtype.Text `json:"vendor_name"`
+}
+
+// Row lock for the contact-correction write path (migration 000021,
+// PATCH /visits/{id}/visitors/{visitorId}). `FOR UPDATE OF v` is required
+// because the projection LEFT JOINs vendor, and PostgreSQL refuses `FOR
+// UPDATE` on the nullable side of an outer join. The caller verifies
+// visit_request_id against the path visit id so a member of another visit
+// answers 404 instead of being corrected.
+func (q *Queries) GetVisitorByIDForUpdate(ctx context.Context, arg GetVisitorByIDForUpdateParams) (GetVisitorByIDForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getVisitorByIDForUpdate, arg.ID)
+	var i GetVisitorByIDForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.VisitRequestID,
+		&i.Name,
+		&i.IDNumber,
+		&i.Phone,
+		&i.IDCardPhotoUrl,
+		&i.PhotoUrl,
+		&i.CreatedAt,
+		&i.VendorID,
+		&i.VendorNameOverride,
+		&i.Jabatan,
+		&i.PhoneEdited,
+		&i.Email,
+		&i.VendorName,
+	)
+	return i, err
+}
+
 const insertStatusHistory = `-- name: InsertStatusHistory :one
 INSERT INTO status_history (visit_request_id, status, changed_by, changed_at, notes)
 VALUES ($1, $2, $3, COALESCE($5::timestamptz, now()), $4)
@@ -637,9 +695,9 @@ func (q *Queries) InsertVisitPurpose(ctx context.Context, arg InsertVisitPurpose
 }
 
 const insertVisitor = `-- name: InsertVisitor :one
-INSERT INTO visitor (visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, vendor_id, vendor_name_override, jabatan)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, created_at, vendor_id, vendor_name_override, jabatan
+INSERT INTO visitor (visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, vendor_id, vendor_name_override, jabatan, email)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, created_at, vendor_id, vendor_name_override, jabatan, phone_edited, email
 `
 
 type InsertVisitorParams struct {
@@ -652,6 +710,7 @@ type InsertVisitorParams struct {
 	VendorID           pgtype.UUID `json:"vendor_id"`
 	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
 	Jabatan            pgtype.Text `json:"jabatan"`
+	Email              pgtype.Text `json:"email"`
 }
 
 // POST /visits visitors[] (openapi L816-822), up to 10 rows per visit (QA
@@ -660,7 +719,9 @@ type InsertVisitorParams struct {
 // (migration 000005), stored ONLY when vendor_id is absent: a sent vendor_id
 // wins and the Go caller passes NULL for the override. jabatan is the optional
 // free-text position (migration 000012); the Go caller has already trimmed it
-// and passes NULL for a blank input, so it never enters a catalogue. Cascades
+// and passes NULL for a blank input, so it never enters a catalogue. email is
+// the optional member contact address (migration 000022): NULL (or blank,
+// normalised to NULL by the caller) means "no mail". Cascades
 // to nothing on insert; the visit FK is ON DELETE CASCADE so deleting a visit
 // removes its roster.
 func (q *Queries) InsertVisitor(ctx context.Context, arg InsertVisitorParams) (Visitor, error) {
@@ -674,6 +735,7 @@ func (q *Queries) InsertVisitor(ctx context.Context, arg InsertVisitorParams) (V
 		arg.VendorID,
 		arg.VendorNameOverride,
 		arg.Jabatan,
+		arg.Email,
 	)
 	var i Visitor
 	err := row.Scan(
@@ -688,6 +750,8 @@ func (q *Queries) InsertVisitor(ctx context.Context, arg InsertVisitorParams) (V
 		&i.VendorID,
 		&i.VendorNameOverride,
 		&i.Jabatan,
+		&i.PhoneEdited,
+		&i.Email,
 	)
 	return i, err
 }
@@ -822,7 +886,7 @@ func (q *Queries) ListVisitorJabatan(ctx context.Context) ([]pgtype.Text, error)
 }
 
 const listVisitors = `-- name: ListVisitors :many
-SELECT v.id, v.visit_request_id, v.name, v.id_number, v.phone, v.id_card_photo_url, v.photo_url, v.created_at, v.vendor_id, v.vendor_name_override, v.jabatan,
+SELECT v.id, v.visit_request_id, v.name, v.id_number, v.phone, v.id_card_photo_url, v.photo_url, v.created_at, v.vendor_id, v.vendor_name_override, v.jabatan, v.phone_edited, v.email,
     vn.name AS vendor_name
 FROM visitor v
 LEFT JOIN vendor vn ON vn.id = v.vendor_id
@@ -846,12 +910,16 @@ type ListVisitorsRow struct {
 	VendorID           pgtype.UUID `json:"vendor_id"`
 	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
 	Jabatan            pgtype.Text `json:"jabatan"`
+	PhoneEdited        bool        `json:"phone_edited"`
+	Email              pgtype.Text `json:"email"`
 	VendorName         pgtype.Text `json:"vendor_name"`
 }
 
 // Roster for SCR-04 / SCR-05. Batched per page with a single IN (...) by the
 // repository to avoid an N+1 over the visit list. The vendor name rides along
-// for the openapi VisitorItem vendor_name member.
+// for the openapi VisitorItem vendor_name member. phone_edited rides along
+// for the VisitorItem edited marker (migration 000021): TRUE means the owning
+// vendor once corrected the phone via PATCH /visits/{id}/visitors/{visitorId}.
 func (q *Queries) ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]ListVisitorsRow, error) {
 	rows, err := q.db.Query(ctx, listVisitors, arg.VisitRequestIds)
 	if err != nil {
@@ -873,6 +941,8 @@ func (q *Queries) ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]L
 			&i.VendorID,
 			&i.VendorNameOverride,
 			&i.Jabatan,
+			&i.PhoneEdited,
+			&i.Email,
 			&i.VendorName,
 		); err != nil {
 			return nil, err
@@ -1381,6 +1451,47 @@ func (q *Queries) UpdateVisitStatus(ctx context.Context, arg UpdateVisitStatusPa
 		&i.UpdatedAt,
 		&i.PurposeNote,
 		&i.VendorNameOverride,
+	)
+	return i, err
+}
+
+const updateVisitorContact = `-- name: UpdateVisitorContact :one
+UPDATE visitor
+SET phone            = $2,
+    phone_edited     = phone_edited OR $3
+WHERE id = $1
+RETURNING id, visit_request_id, name, id_number, phone, id_card_photo_url, photo_url, created_at, vendor_id, vendor_name_override, jabatan, phone_edited, email
+`
+
+type UpdateVisitorContactParams struct {
+	ID          uuid.UUID `json:"id"`
+	Phone       string    `json:"phone"`
+	PhoneEdited bool      `json:"phone_edited"`
+}
+
+// The single write path for the creator contact correction (migration 000021,
+// PATCH /visits/{id}/visitors/{visitorId}). The caller must hold the
+// GetVisitorByIDForUpdate row lock and pass the fully resolved phone AND the
+// resolved flag (read-modify-write, never a partial patch); the adapter
+// writes them verbatim. The flag is monotonic by contract: the caller only
+// ever passes TRUE forward, so the adapter stores max(stored, passed) via OR.
+func (q *Queries) UpdateVisitorContact(ctx context.Context, arg UpdateVisitorContactParams) (Visitor, error) {
+	row := q.db.QueryRow(ctx, updateVisitorContact, arg.ID, arg.Phone, arg.PhoneEdited)
+	var i Visitor
+	err := row.Scan(
+		&i.ID,
+		&i.VisitRequestID,
+		&i.Name,
+		&i.IDNumber,
+		&i.Phone,
+		&i.IDCardPhotoUrl,
+		&i.PhotoUrl,
+		&i.CreatedAt,
+		&i.VendorID,
+		&i.VendorNameOverride,
+		&i.Jabatan,
+		&i.PhoneEdited,
+		&i.Email,
 	)
 	return i, err
 }

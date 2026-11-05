@@ -13,6 +13,8 @@ import {
   PHONE_DIGIT_MESSAGE,
   PHONE_MAX_LENGTH,
   PHONE_MIN_LENGTH,
+  isValidEmail,
+  isValidPhone,
 } from '@/lib/limits';
 import {
   getCheckinBlockReason,
@@ -404,6 +406,17 @@ function rejectSecurityNik(body: Record<string, unknown>): Response | null {
   return null;
 }
 
+// Seed fixture tidak membawa `id` baris visitor (echo create) — beri id stabil
+// sekali saat modul dimuat agar `PATCH .../visitors/:visitorId` MSW dapat
+// menemukan baris yang sama dengan yang dirender UI dari `GET` (satu sesi).
+for (const seededVisit of db.visits) {
+  seededVisit.visitors.forEach((visitor, index) => {
+    if (visitor.id === undefined || visitor.id === '') {
+      visitor.id = `${seededVisit.id}:visitor-${index}`;
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -657,6 +670,55 @@ export const handlers: RequestHandler[] = [
     return ok({ updated: owned.length });
   }),
 
+  // -- Pendaftaran vendor menunggu persetujuan (superadmin) -------------------
+  http.get(`${API_BASE}/notifications/pending-registrations`, async ({ request }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (!isSuperAdminRole(auth.role)) {
+      return fail(
+        'FORBIDDEN',
+        'Anda tidak memiliki izin untuk melihat pendaftaran vendor.',
+        403,
+      );
+    }
+    const url = new URL(request.url);
+    const locationParam = url.searchParams.get('location_id');
+    if (locationParam !== null && locationParam.trim() !== '') {
+      return fail(
+        'BAD_REQUEST',
+        'Filter location_id tidak didukung pada antre ini.',
+        400,
+      );
+    }
+    const pageRaw = Number.parseInt(url.searchParams.get('page') ?? '1', 10);
+    const limitRaw = Number.parseInt(url.searchParams.get('limit') ?? '20', 10);
+    const page = Number.isNaN(pageRaw) || pageRaw < 1 ? 1 : pageRaw;
+    const limit =
+      Number.isNaN(limitRaw) || limitRaw < 1
+        ? 20
+        : Math.min(limitRaw, 100);
+
+    const pendingUsers = db.users.filter(
+      (user) => user.role === 'vendor' && user.status === 'pending',
+    );
+    const total = pendingUsers.length;
+    const pendingCount = total;
+    const paged = pendingUsers.slice((page - 1) * limit, page * limit);
+    const items = paged.map((user) => ({
+      vendor_user_id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      nik: user.nik ?? '',
+      vendor_name: user.vendor_name ?? '',
+      created_at: new Date().toISOString(),
+      status: 'pending',
+    }));
+    return ok({ items, total, pending_count: pendingCount, page, limit });
+  }),
+
   // -- Visits: create ---------------------------------------------------------
   http.post(`${API_BASE}/visits`, async ({ request }) => {
     const auth = getAuthUser(request);
@@ -724,6 +786,20 @@ export const handlers: RequestHandler[] = [
     if (visitors.length > 10) {
       return fail('BAD_REQUEST', 'Jumlah teknisi maksimal 10 orang.', 400);
     }
+    // Email anggota: opsional, tapi bila diisi wajib valid & ≤254 — cermin
+    // `usecase/visit/create.go` ("Email pengunjung ke-N tidak valid.").
+    for (const [index, item] of visitors.entries()) {
+      if (!isRecord(item)) continue;
+      const rawEmail = item['email'];
+      if (typeof rawEmail !== 'string') continue;
+      if (rawEmail.trim() !== '' && !isValidEmail(rawEmail)) {
+        return fail(
+          'BAD_REQUEST',
+          `Email pengunjung ke-${index + 1} tidak valid.`,
+          400,
+        );
+      }
+    }
     if (isNdaAccepted !== true) {
       return fail(
         'BAD_REQUEST',
@@ -782,6 +858,12 @@ export const handlers: RequestHandler[] = [
           typeof item['vendor_name'] === 'string'
             ? item['vendor_name'].trim()
             : '';
+        // Email: trim; kosong = NULL (cermin `omitempty` respons BE — di sini
+        // `null` karena objek mock selalu membawa semua kunci).
+        const email =
+          typeof item['email'] === 'string' && item['email'].trim() !== ''
+            ? item['email'].trim()
+            : null;
         return [
           {
             name,
@@ -796,6 +878,7 @@ export const handlers: RequestHandler[] = [
                 : manualVendor !== '' && manualVendor.length <= 120
                   ? manualVendor
                   : null,
+            email,
           },
         ];
       }),
@@ -1011,6 +1094,65 @@ export const handlers: RequestHandler[] = [
     }
     return ok(null);
   }),
+
+  // -- Visits: visitor contact (creator-only inline edit) --------------------------
+  http.patch(
+    `${API_BASE}/visits/:id/visitors/:visitorId`,
+    async ({ request, params }) => {
+      const auth = getAuthUser(request);
+      if (auth === null) {
+        return unauthorized();
+      }
+      const id = params['id'];
+      const visitorId = params['visitorId'];
+      if (typeof id !== 'string' || typeof visitorId !== 'string') {
+        return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+      }
+      const visit = findVisit(id);
+      if (visit === undefined) {
+        return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+      }
+      // Hanya pembuat yang boleh mengubah — non-pemilik (termasuk peran
+      // lain) mendapat 404 agar keberadaan kunjungan tidak bocor.
+      if (visit.vendor_user.id !== auth.id) {
+        return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+      }
+      if (visit.status !== 'requested' && visit.status !== 'rescheduled') {
+        return fail(
+          'BAD_REQUEST',
+          'Data anggota hanya dapat diubah sebelum persetujuan.',
+          400,
+        );
+      }
+      const visitor = visit.visitors.find((row) => row.id === visitorId);
+      if (visitor === undefined) {
+        return fail('NOT_FOUND', 'Data yang diminta tidak ditemukan.', 404);
+      }
+      const body = await readJsonBody(request);
+      if ('id_number' in body) {
+        return fail(
+          'BAD_REQUEST',
+          'Hanya nomor telepon yang dapat diubah.',
+          400,
+        );
+      }
+      const phoneRaw = stringField(body, 'phone');
+      const phone = phoneRaw?.trim() ?? '';
+      if (phoneRaw === undefined || phone === '') {
+        return fail(
+          'BAD_REQUEST',
+          'Nomor telepon wajib diisi.',
+          400,
+        );
+      }
+      if (!isValidPhone(phone)) {
+        return fail('BAD_REQUEST', PHONE_DIGIT_MESSAGE, 400);
+      }
+      visitor.phone = phone;
+      visitor.phone_edited = true;
+      return ok(visitor);
+    },
+  ),
 
   // -- Visits: QR ---------------------------------------------------------------------
   http.get(`${API_BASE}/visits/:id/qr`, ({ request, params }) => {

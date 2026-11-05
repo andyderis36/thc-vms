@@ -17,6 +17,7 @@ import { UploadBox } from './UploadBox'
 import { technicianAnchorId } from './invalid-fields'
 import { useJabatanQuery, useVendorsQuery } from '@/lib/api/hooks'
 import {
+  EMAIL_MAX_LENGTH,
   ID_NUMBER_MAX_LENGTH,
   NAME_MAX_LENGTH,
   PHONE_MAX_LENGTH,
@@ -77,6 +78,7 @@ function emptyTechnician(defaultVendorName?: string): TechnicianFormValues {
     selfie: { url: '', name: '' },
     jabatan: '',
     vendor_name: defaultVendorName ?? '',
+    email: '',
   }
 }
 
@@ -265,6 +267,20 @@ function TechnicianRow({
               : undefined)
           }
           {...register(`technicians.${index}.vendor_name`)}
+        />
+        {/* Email anggota: OPSIONAL — tanpa tanda `required`, format divalidasi
+            zod hanya bila tidak kosong (maks 254, kontrak openapi). */}
+        <Input
+          label="Email"
+          fieldSize="gate"
+          type="email"
+          inputMode="email"
+          autoComplete="off"
+          maxLength={EMAIL_MAX_LENGTH}
+          placeholder="cth. nama@vendor.co.id"
+          error={rowError?.email?.message}
+          id={technicianAnchorId(index, 'email')}
+          {...register(`technicians.${index}.email`)}
         />
       </div>
     </div>

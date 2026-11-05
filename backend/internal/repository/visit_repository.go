@@ -121,9 +121,10 @@ func (r *visitRepository) Create(
 					Phone:              v.Phone,
 					IDCardPhotoUrl:     pgText(v.IDCardPhotoURL),
 					PhotoUrl:           pgText(v.PhotoURL),
-					VendorID:           vendorID,
-					VendorNameOverride: pgText(v.VendorNameOverride),
-					Jabatan:            pgText(v.Jabatan),
+				VendorID:           vendorID,
+				VendorNameOverride: pgText(v.VendorNameOverride),
+				Jabatan:            pgText(v.Jabatan),
+				Email:              pgTextBlankNull(v.Email),
 				}); err != nil {
 					return MapError(err)
 				}

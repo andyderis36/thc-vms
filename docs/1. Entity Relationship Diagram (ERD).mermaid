@@ -109,6 +109,8 @@ erDiagram
         uuid vendor_id FK "Nullable: perusahaan teknisi (000003)"
         text vendor_name_override "Nullable: manual company per teknisi, TIDAK terdaftar di katalog vendor (000005)"
         text jabatan "Nullable: teks bebas jabatan/peran pengunjung, maks 120 char, bukan katalog (000012)"
+        text email "Nullable: email kontak anggota (opsional, maks 254 char); NULL/kosong = tanpa surat (000022)"
+        boolean phone_edited "Default false: TRUE bila telepon pernah dikoreksi pemilik via PATCH /visits/{id}/visitors/{visitorId} sebelum approval (000021, monoton)"
         timestamp created_at
     }
 

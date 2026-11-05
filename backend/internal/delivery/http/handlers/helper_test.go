@@ -149,6 +149,13 @@ type fakeVisitService struct {
 	lastEnd          time.Time
 	lastResReason    string
 
+	memberErr       error
+	lastMemberVisit domain.UUID
+	lastMemberID    domain.UUID
+	lastMemberPhone *string
+	lastMemberIDNo  *string
+	updatedMember   *domain.Visitor
+
 	jabatan    []string
 	jabatanErr error
 }
@@ -220,6 +227,20 @@ func (f *fakeVisitService) ListJabatan(_ context.Context) ([]string, error) {
 		return nil, f.jabatanErr
 	}
 	return f.jabatan, nil
+}
+
+func (f *fakeVisitService) UpdateVisitorContact(_ context.Context, _ visit.Actor, visitID, visitorID domain.UUID, phone, idNumber *string) (domain.Visitor, error) {
+	f.lastMemberVisit = visitID
+	f.lastMemberID = visitorID
+	f.lastMemberPhone = phone
+	f.lastMemberIDNo = idNumber
+	if f.memberErr != nil {
+		return domain.Visitor{}, f.memberErr
+	}
+	if f.updatedMember != nil {
+		return *f.updatedMember, nil
+	}
+	return cannedVisit().Visitors[0], nil
 }
 
 // fakeGateService is a hand-written fake for handlers.GateService.

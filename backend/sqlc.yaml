@@ -39,6 +39,8 @@ sql:
       - "migrations/000016_dev_superadmin_role.up.sql"
       - "migrations/000017_visit_request_vendor_override.up.sql"
       - "migrations/000020_vendor_registration_notices.up.sql"
+      - "migrations/000021_visitor_contact_edited_flags.up.sql"
+      - "migrations/000022_visitor_email.up.sql"
     queries: "internal/repository/db/queries"
 
     gen:

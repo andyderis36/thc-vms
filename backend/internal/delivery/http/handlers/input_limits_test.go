@@ -64,6 +64,10 @@ func TestCreateVisit_RejectsOutOfLimitFields(t *testing.T) {
 		{"invalid phone", func(b map[string]any) { b["visitors"].([]map[string]any)[0]["phone"] = "0811" }},
 		{"vendor name too long", func(b map[string]any) { b["visitors"].([]map[string]any)[0]["vendor_name"] = strings.Repeat("a", 121) }},
 		{"jabatan too long", func(b map[string]any) { b["visitors"].([]map[string]any)[0]["jabatan"] = strings.Repeat("a", 121) }},
+		{"malformed member email", func(b map[string]any) { b["visitors"].([]map[string]any)[0]["email"] = "bukan-email" }},
+		{"overlong member email", func(b map[string]any) {
+			b["visitors"].([]map[string]any)[0]["email"] = strings.Repeat("a", 244) + "@example.co.id"
+		}},
 	}
 
 	for _, tc := range cases {

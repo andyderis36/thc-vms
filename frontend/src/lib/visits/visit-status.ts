@@ -34,3 +34,10 @@ export function isReschedulableStatus(status: VisitStatus): boolean {
 export function isCancelableStatus(status: VisitStatus): boolean {
   return status === 'requested' || status === 'approved' || status === 'rescheduled'
 }
+
+// Koreksi kontak anggota (No. HP saja) oleh pembuat: legal hanya sebelum
+// approval — status `requested` atau `rescheduled`. Status lain
+// (`approved`, `visiting`, terminal) dijawab 400 oleh backend.
+export function isVisitorContactEditableStatus(status: VisitStatus): boolean {
+  return status === 'requested' || status === 'rescheduled'
+}

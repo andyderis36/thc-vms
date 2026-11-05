@@ -55,6 +55,11 @@ type SuperAdminHandler struct {
 	// PATCH /users/:id/status: nil skips the resolve so hermetic tests and
 	// unwired callers behave exactly as before.
 	registrationResolver registrationResolver
+	// frontendBaseURL is the public web origin the approved notice links back
+	// to (for example http://localhost:3210 in local dev). The login CTA is
+	// frontendBaseURL + "/login". Empty keeps the relative "/login" fallback
+	// so hermetic tests stay link-free.
+	frontendBaseURL string
 }
 
 // WithAudit attaches the trail writer and returns the handler for chaining.
@@ -88,12 +93,15 @@ func (h *SuperAdminHandler) WithMailer(mailer domain.Mailer) *SuperAdminHandler 
 	return h
 }
 
-// registrationResolver flips one vendor-registration queue row when a
-// superadmin approves or rejects a pending vendor (PATCH /users/:id/status).
-// It is satisfied by the auth usecase; nil disables the resolve leg so
-// hermetic tests and unwired callers behave exactly as before.
+// registrationResolver keeps the vendor-registration queue in step with the
+// account status (PATCH /users/:id/status): resolve drains the row on approve
+// or reject, ensure re-queues it idempotently on a flip back to pending so a
+// pending account never stands without a bell row. It is satisfied by the
+// auth usecase; nil disables both legs so hermetic tests and unwired callers
+// behave exactly as before.
 type registrationResolver interface {
 	ResolveVendorRegistration(ctx context.Context, vendorUserID domain.UUID, approved bool) error
+	EnsureVendorRegistrationNotice(ctx context.Context, vendorUserID domain.UUID) error
 }
 
 // WithRegistrationResolver attaches the queue-drain port and returns the
@@ -101,6 +109,15 @@ type registrationResolver interface {
 // skips the resolve, never the status flip itself.
 func (h *SuperAdminHandler) WithRegistrationResolver(resolver registrationResolver) *SuperAdminHandler {
 	h.registrationResolver = resolver
+	return h
+}
+
+// WithFrontendBaseURL attaches the public web origin for the vendor-approved
+// notice login CTA and returns the handler for chaining. Production passes
+// cfg.App.FrontendBaseURL (env only); empty keeps the relative "/login"
+// fallback so hermetic tests stay link-free.
+func (h *SuperAdminHandler) WithFrontendBaseURL(baseURL string) *SuperAdminHandler {
+	h.frontendBaseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	return h
 }
 
@@ -819,6 +836,23 @@ func (h *SuperAdminHandler) UpdateUserStatus(c *gin.Context) {
 			slog.Warn("superadmin: vendor registration resolve failed", "user_id", string(targetID), "error", err)
 		}
 	}
+	// Flipping a vendor back TO pending re-queues its registration notice
+	// idempotently (ON CONFLICT DO NOTHING), closing the one path that could
+	// otherwise leave users.status=pending with no bell row. Best-effort: a
+	// nil resolver or an insert failure is logged and never fails the flip.
+	if updated.Role == domain.RoleVendor && status == domain.UserStatusPending {
+		if h.registrationResolver == nil {
+			slog.Warn("superadmin: vendor registration notice skipped: registrationResolver not wired", "user_id", string(targetID))
+		} else if err := h.registrationResolver.EnsureVendorRegistrationNotice(ctx, targetID); err != nil {
+			slog.Warn("superadmin: vendor registration notice insert failed", "user_id", string(targetID), "error", err)
+		}
+	}
+	// Approving a pending vendor (active only, never inactive/reject) mails
+	// the vendor inbox its verified notice with the login CTA. Best-effort:
+	// a send failure is logged and never fails the 200.
+	if updated.Role == domain.RoleVendor && status == domain.UserStatusActive {
+		h.sendVendorApprovedNotice(ctx, updated.User.Email)
+	}
 	response.OK(c, h.managedToAccount(updated))
 }
 
@@ -1000,6 +1034,30 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 	response.OK(c, h.managedToAccount(updated))
+}
+
+// sendVendorApprovedNotice queues the post-approval notice to the VENDOR
+// inbox: akun terverifikasi, silakan masuk untuk mengajukan kunjungan, with
+// the /login CTA. Best-effort like the email-override pair: a nil mailer or
+// a send failure only skips/logs, never the 200.
+func (h *SuperAdminHandler) sendVendorApprovedNotice(ctx context.Context, vendorEmail string) {
+	if h.mailer == nil {
+		return
+	}
+	to := strings.TrimSpace(vendorEmail)
+	if to == "" {
+		slog.Warn("superadmin: vendor approved notice skipped", "reason", "blank_address")
+		return
+	}
+	loginLink := "/login"
+	if h.frontendBaseURL != "" {
+		loginLink = h.frontendBaseURL + loginLink
+	}
+	text := "Akun vendor Anda telah terverifikasi. Silakan masuk untuk mengajukan kunjungan."
+	htmlBody := domain.RenderBrandedActionEmail("Akun Vendor Terverifikasi", text, "Masuk", loginLink)
+	if err := h.mailer.Send(ctx, []string{to}, "[THC-VMS] Akun Vendor Terverifikasi", text, htmlBody); err != nil {
+		slog.Warn("superadmin: vendor approved notice failed", "error", err)
+	}
 }
 
 // sendEmailOverrideNotices queues BOTH post-override notices, mirroring the

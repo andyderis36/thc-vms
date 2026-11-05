@@ -152,6 +152,13 @@ type Querier interface {
 	GetVisitByVisitCode(ctx context.Context, arg GetVisitByVisitCodeParams) (GetVisitByVisitCodeRow, error)
 	// Same lock, entered via the scanned/manual visit code.
 	GetVisitByVisitCodeForUpdate(ctx context.Context, arg GetVisitByVisitCodeForUpdateParams) (GetVisitByVisitCodeForUpdateRow, error)
+	// Row lock for the contact-correction write path (migration 000021,
+	// PATCH /visits/{id}/visitors/{visitorId}). `FOR UPDATE OF v` is required
+	// because the projection LEFT JOINs vendor, and PostgreSQL refuses `FOR
+	// UPDATE` on the nullable side of an outer join. The caller verifies
+	// visit_request_id against the path visit id so a member of another visit
+	// answers 404 instead of being corrected.
+	GetVisitorByIDForUpdate(ctx context.Context, arg GetVisitorByIDForUpdateParams) (GetVisitorByIDForUpdateRow, error)
 	// Batched detail read for the auto-rule worker hydrate(): one round trip for
 	// a whole capped sweep instead of FindByID-per-id (S1 N+1 kill). The
 	// projection is byte-for-byte the GetVisitByID one (visits.sql) so the same
@@ -327,7 +334,9 @@ type Querier interface {
 	// (migration 000005), stored ONLY when vendor_id is absent: a sent vendor_id
 	// wins and the Go caller passes NULL for the override. jabatan is the optional
 	// free-text position (migration 000012); the Go caller has already trimmed it
-	// and passes NULL for a blank input, so it never enters a catalogue. Cascades
+	// and passes NULL for a blank input, so it never enters a catalogue. email is
+	// the optional member contact address (migration 000022): NULL (or blank,
+	// normalised to NULL by the caller) means "no mail". Cascades
 	// to nothing on insert; the visit FK is ON DELETE CASCADE so deleting a visit
 	// removes its roster.
 	InsertVisitor(ctx context.Context, arg InsertVisitorParams) (Visitor, error)
@@ -456,7 +465,9 @@ type Querier interface {
 	ListVisitorJabatan(ctx context.Context) ([]pgtype.Text, error)
 	// Roster for SCR-04 / SCR-05. Batched per page with a single IN (...) by the
 	// repository to avoid an N+1 over the visit list. The vendor name rides along
-	// for the openapi VisitorItem vendor_name member.
+	// for the openapi VisitorItem vendor_name member. phone_edited rides along
+	// for the VisitorItem edited marker (migration 000021): TRUE means the owning
+	// vendor once corrected the phone via PATCH /visits/{id}/visitors/{visitorId}.
 	ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]ListVisitorsRow, error)
 	// Admin scope (PRD L110) and Security scope (PRD L111, L97). location_id is a
 	// REQUIRED plain parameter - the caller cannot pass NULL, so a bug in the auth
@@ -608,6 +619,13 @@ type Querier interface {
 	// updated_at is set here because the repository layer owns that column (see the
 	// migration header).
 	UpdateVisitStatus(ctx context.Context, arg UpdateVisitStatusParams) (VisitRequest, error)
+	// The single write path for the creator contact correction (migration 000021,
+	// PATCH /visits/{id}/visitors/{visitorId}). The caller must hold the
+	// GetVisitorByIDForUpdate row lock and pass the fully resolved phone AND the
+	// resolved flag (read-modify-write, never a partial patch); the adapter
+	// writes them verbatim. The flag is monotonic by contract: the caller only
+	// ever passes TRUE forward, so the adapter stores max(stored, passed) via OR.
+	UpdateVisitorContact(ctx context.Context, arg UpdateVisitorContactParams) (Visitor, error)
 }
 
 var _ Querier = (*Queries)(nil)

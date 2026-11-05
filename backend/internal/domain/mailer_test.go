@@ -195,6 +195,31 @@ func TestEmailGate_ExcludedTypesNeverReachSend(t *testing.T) {
 	}
 }
 
+// TestBuildEmail_TeamQRImageOnlyOnApproval proves the inline team QR image
+// and note render only on the approval mail; every other event keeps the
+// Kode-kunjungan text row as its sole code reference.
+func TestBuildEmail_TeamQRImageOnlyOnApproval(t *testing.T) {
+	visit := testVisit()
+	for _, tc := range emailSubjectCases {
+		tpl := &domain.NotificationTemplate{Type: tc.typ, Title: "judul in-app", Message: "pesan in-app"}
+		_, _, htmlBody := domain.BuildEmail(visit, tpl)
+		hasImg := strings.Contains(htmlBody, "cid:"+domain.TeamQRCID(visit.VisitID))
+		hasNote := strings.Contains(htmlBody, "Satu QR Code untuk 1 tim")
+		if tc.typ == domain.NotificationVisitApproved {
+			if !hasImg || !hasNote {
+				t.Errorf("approval HTML missing the inline team QR block:\n%s", htmlBody)
+			}
+			continue
+		}
+		if hasImg || hasNote {
+			t.Errorf("non-approval %q HTML carries the team QR block", tc.typ)
+		}
+		if !strings.Contains(htmlBody, visit.VisitID) {
+			t.Errorf("non-approval %q HTML lost the Kode-kunjungan text fallback", tc.typ)
+		}
+	}
+}
+
 func TestRenderBrandedActionEmail_ButtonAndEscaping(t *testing.T) {
 	htmlBody := domain.RenderBrandedActionEmail(
 		"Verifikasi Alamat Email Baru",

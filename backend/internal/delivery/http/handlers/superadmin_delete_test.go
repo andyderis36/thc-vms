@@ -74,6 +74,10 @@ func (s *stubVisitRepos) ListVisitorJabatan(_ context.Context) ([]string, error)
 	return nil, nil
 }
 
+func (s *stubVisitRepos) UpdateVisitorContact(_ context.Context, _, _ domain.UUID, _ string, _ bool) (domain.Visitor, error) {
+	return domain.Visitor{}, domain.ErrNotFound
+}
+
 func (s *stubVisitRepos) DeleteVisit(_ context.Context, id domain.UUID) error {
 	if s.deleteErr != nil {
 		return s.deleteErr

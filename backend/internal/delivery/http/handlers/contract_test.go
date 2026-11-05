@@ -17,6 +17,7 @@ var openapiKeys = map[string]map[string]bool{
 	"VisitorItem": {
 		"id": true, "name": true, "id_number": true, "phone": true, "id_card_photo_url": true,
 		"photo_url": true, "vendor_id": true, "vendor_name": true, "jabatan": true,
+		"email": true, "phone_edited": true,
 	},
 	"Location": {
 		"id": true, "name": true, "type": true, "address": true,
@@ -88,6 +89,7 @@ func TestResponseKeysAreSubsetOfOpenapi(t *testing.T) {
 	visitEngine.POST("/visits", vh.Create)
 	visitEngine.GET("/visits/:id", vh.Get)
 	visitEngine.GET("/visits/:id/qr", vh.QR)
+	visitEngine.PATCH("/visits/:id/visitors/:visitorId", vh.UpdateVisitorContact)
 
 	gateEngine := gin.New()
 	gateEngine.Use(withActor(domain.RoleSecurity, "loc-A"))
@@ -145,6 +147,13 @@ func TestResponseKeysAreSubsetOfOpenapi(t *testing.T) {
 		rec := serve(visitEngine, "GET", "/visits/visit-1/qr", nil, "")
 		mustStatus(t, rec, 200)
 		assertSubset(t, "QR", asObject(t, mustSuccess(t, rec).Data))
+	})
+
+	t.Run("member contact correction returns one VisitorItem", func(t *testing.T) {
+		rec := serveJSON(visitEngine, "PATCH", "/visits/visit-1/visitors/visitor-1", `{"phone": "081234567890"}`)
+		mustStatus(t, rec, 200)
+		member := asObject(t, mustSuccess(t, rec).Data)
+		assertSubset(t, "VisitorItem", member)
 	})
 
 	t.Run("checkin and checkout are bare success", func(t *testing.T) {

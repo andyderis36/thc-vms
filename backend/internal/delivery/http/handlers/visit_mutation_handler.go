@@ -107,8 +107,38 @@ func (h *VisitHandler) Reschedule(c *gin.Context) {
 	response.OK[any](c, nil)
 }
 
-// mutationTarget resolves the actor and the visit uuid for the four
-// state-changing edges. A VST- code is translated through GetVisit first so
+// UpdateVisitorContact serves PATCH /visits/{id}/visitors/{visitorId}. The
+// body carries the new phone number; a sent id_number is refused by the
+// usecase. Only the owning vendor may correct its members (creator-only);
+// everyone else answers 404. Answers 200 with the corrected VisitorItem,
+// including the persistent phone_edited marker.
+func (h *VisitHandler) UpdateVisitorContact(c *gin.Context) {
+	actor, visitID, ok := h.mutationTarget(c)
+	if !ok {
+		return
+	}
+	memberKey := strings.TrimSpace(c.Param("visitorId"))
+	if memberKey == "" {
+		response.Fail(c, domain.NotFoundEntity("Kunjungan"))
+		return
+	}
+	var body struct {
+		Phone    *string `json:"phone"`
+		IDNumber *string `json:"id_number"`
+	}
+	if !bindJSON(c, &body) {
+		return
+	}
+	updated, err := h.visits.UpdateVisitorContact(c.Request.Context(), actor, visitID, domain.UUID(memberKey), body.Phone, body.IDNumber)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, toVisitorDTO(updated))
+}
+
+// mutationTarget resolves the actor and the visit uuid for the state-changing
+// edges. A VST- code is translated through GetVisit first so
 // the manual-scan path works everywhere, not just on reads.
 func (h *VisitHandler) mutationTarget(c *gin.Context) (visit.Actor, domain.UUID, bool) {
 	actor, err := visitActor(c)

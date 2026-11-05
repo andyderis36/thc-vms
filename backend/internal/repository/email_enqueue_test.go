@@ -236,10 +236,12 @@ func TestEmailEnqueue_HumanCancelByAdminSendsOneVendorEmail(t *testing.T) {
 	assertToSet(t, fake, []string{fx.vendorEmail})
 }
 
-// TestEmailEnqueue_RescheduleSendsExactlyOneEmail proves the dual in_app emit
-// (staff row + vendor row, same visit_rescheduled type) collapses to exactly
-// ONE email addressed to the union of both audiences.
-func TestEmailEnqueue_RescheduleSendsExactlyOneEmail(t *testing.T) {
+// TestEmailEnqueue_RescheduleSendsStaffPlusVendorEmails proves the dual in_app emit
+// (staff row + vendor row, same visit_rescheduled type) fans out to exactly
+// TWO sends: one single send to the union staff set, plus one per-recipient
+// vendor send (the requester, extended by roster members when the visit
+// carries member emails — none here).
+func TestEmailEnqueue_RescheduleSendsStaffPlusVendorEmails(t *testing.T) {
 	pool := testPool(t)
 	resetTables(t, pool)
 	ctx := testContext(t)
@@ -259,11 +261,35 @@ func TestEmailEnqueue_RescheduleSendsExactlyOneEmail(t *testing.T) {
 	if n := countTypedNotifs(t, pool, fx.vendor, visitID, domain.NotificationVisitRescheduled); n != 1 {
 		t.Fatalf("vendor visit_rescheduled in_app rows = %d, want 1", n)
 	}
-	// ...but exactly one email goes out to the union audience.
-	want := append(append([]string{}, fx.staffEmails...), fx.vendorEmail)
-	call := assertToSet(t, fake, want)
-	if !strings.Contains(call.Subject, "VST-0000000305") {
-		t.Fatalf("subject = %q, want the visit code", call.Subject)
+	// ...the staff leg goes out as one send to the staff set...
+	if len(fake.Calls) != 2 {
+		t.Fatalf("email calls = %d, want exactly 2 (one staff send, one vendor send)", len(fake.Calls))
+	}
+	staffCall := fake.Calls[0]
+	if len(staffCall.To) != len(fx.staffEmails) {
+		t.Fatalf("staff recipients = %v, want the staff set %v", staffCall.To, fx.staffEmails)
+	}
+	seen := make(map[string]bool, len(staffCall.To))
+	for _, addr := range staffCall.To {
+		seen[addr] = true
+	}
+	for _, addr := range fx.staffEmails {
+		if !seen[addr] {
+			t.Fatalf("staff recipients = %v, want the staff set %v", staffCall.To, fx.staffEmails)
+		}
+	}
+	// ...and the vendor leg as one per-recipient send to the requester.
+	vendorCall := fake.Calls[1]
+	if len(vendorCall.To) != 1 || vendorCall.To[0] != fx.vendorEmail {
+		t.Fatalf("vendor recipients = %v, want [%s]", vendorCall.To, fx.vendorEmail)
+	}
+	for _, call := range fake.Calls {
+		if !strings.Contains(call.Subject, "VST-0000000305") {
+			t.Fatalf("subject = %q, want the visit code", call.Subject)
+		}
+		if len(call.QRPNG) != 0 || call.QRCID != "" {
+			t.Fatalf("reschedule mail carries a team QR, want none outside approvals")
+		}
 	}
 }
 

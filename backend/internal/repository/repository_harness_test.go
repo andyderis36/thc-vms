@@ -208,7 +208,7 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 // yields no error, because a re-applied file raises only "already there"
 // SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL} {
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL} {
 		if err := applyOne(ctx, pool, sql); err != nil {
 			return err
 		}
@@ -277,6 +277,37 @@ var migrationVisitVendorOverrideSQL = func() string {
 // object, so the duplicate-SQLSTATE tolerance is the whole story.
 var migrationVendorRegistrationNoticesSQL = func() string {
 	path := filepath.Join("..", "..", "migrations", "000020_vendor_registration_notices.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationVisitorContactEditedSQL is the visitor edited-markers follow-up
+// (migration 000021), loaded the same way so the scratch schema tracks the
+// phone_edited column the contact-correction write/read
+// paths use. It is re-runnable (duplicate ADD COLUMN raises 42701, which
+// applyOne tolerates; COMMENT ON COLUMN is idempotent), so applyOne covers it
+// with no once-gate.
+var migrationVisitorContactEditedSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000021_visitor_contact_edited_flags.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationVisitorEmailSQL is the visitor.email follow-up (migration
+// 000022), loaded the same way so the scratch schema tracks the member
+// contact column the visit write/read paths use. It is re-runnable
+// (duplicate ADD COLUMN raises 42701, which applyOne tolerates; COMMENT ON
+// COLUMN is idempotent), so applyOne covers it with no once-gate.
+var migrationVisitorEmailSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000022_visitor_email.up.sql")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)

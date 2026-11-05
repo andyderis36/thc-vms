@@ -80,6 +80,18 @@ func pgText(s *string) pgtype.Text {
 	return pgtype.Text{String: *s, Valid: true}
 }
 
+// pgTextBlankNull maps an optional string to a nullable text column, storing
+// SQL NULL for absent OR blank input. Member email uses it: "" means "no
+// mail", so a blank write must persist NULL, never an empty string.
+func pgTextBlankNull(s *string) pgtype.Text {
+	if s == nil {
+		return pgtype.Text{Valid: false}
+	}
+	if trimmed := strings.TrimSpace(*s); trimmed != "" {
+		return pgtype.Text{String: trimmed, Valid: true}
+	}
+	return pgtype.Text{Valid: false}
+}
 // textPtr converts a nullable text column back: NULL becomes nil.
 func textPtr(t pgtype.Text) *string {
 	if !t.Valid {

@@ -1389,6 +1389,60 @@ paths:
         '422':
           description: 'Validasi semantik usecase gagal (mis. pembatalan melewati batas hari-H). Amplop galat: { success: false, error: { code, message } }.'
 
+  /visits/{id}/visitors/{visitorId}:
+    patch:
+      tags: [Visits]
+      summary: Koreksi kontak anggota (Vendor pemilik kunjungan)
+      description: |
+        Mengoreksi nomor telepon satu anggota (teknisi) setelah kunjungan diajukan, hanya selama kunjungan masih sebelum persetujuan (status requested atau rescheduled). Hanya vendor yang mengajukan kunjungan (creator: role vendor dan id == visit.vendor_user_id) yang boleh memakai endpoint ini — admin, security, bahkan super_admin dijawab 404 agar keberadaan kunjungan tidak bocor. Nomor identitas (id_number) tidak dapat diubah: field id_number yang dikirim dijawab 400. Nilai telepon yang benar-benar berubah menaikkan penanda persistennya (phone_edited, monoton, tidak pernah kembali false); nilai yang sama dengan data tersimpan adalah no-op sukses tanpa tulis. Kunjungan berstatus selain requested/rescheduled (approved, visiting, rejected, cancelled, not_visit, completed) ditolak 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: UUID kunjungan atau kode bisnis `VST-...` (jalur scan manual).
+        - name: visitorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID baris anggota (visitor.id pada VisitorItem) — id_number (nomor KTP) tidak diterima.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                phone:
+                  type: string
+                  pattern: "^(?:62|0)[0-9]{9,15}$"
+                  maxLength: 16
+                  description: 'Nomor telepon baru (disimpan kanonik: hanya digit, awalan 62 diganti 0).'
+      responses:
+        '200':
+          description: Kontak anggota dikoreksi (atau tidak berubah — no-op sukses); data adalah VisitorItem termasuk phone_edited
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/VisitorItem'
+        '400':
+          description: 'Validasi gagal (body kosong/rusak, phone absen atau melanggar pola, id_number dikirim, atau status kunjungan bukan requested/rescheduled). Amplop galat: { success: false, error: { code, message } }.'
+        '404':
+          description: 'Kunjungan tidak ditemukan, bukan milik pemanggil, atau anggota tidak dikenal (semua dijawab 404 tanpa membocorkan keberadaan data). Amplop galat: { success: false, error: { code, message } }.'
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+
   /visits/{id}/qr:
     get:
       tags: [Visits]
@@ -2369,6 +2423,16 @@ components:
           type: [string, "null"]
           maxLength: 120
           description: Jabatan atau peran pengunjung di lokasi (mis. Teknisi, Mandor, Supervisor) sebagai teks bebas maks 120 karakter setelah trim; TIDAK divalidasi terhadap katalog — nilai pada GET /jabatan hanyalah saran combobox dan pengguna tetap bebas mengetik nilai baru; null bila tidak diisi
+        email:
+          type: [string, "null"]
+          format: email
+          maxLength: 254
+          description: Email kontak anggota pengunjung (opsional); null atau kosong berarti tidak ada surat yang dikirim
+        phone_edited:
+          type: boolean
+          readOnly: true
+          default: false
+          description: Penanda koreksi kontak anggota — TRUE bila nomor telepon pernah diubah pemilik kunjungan via PATCH /visits/{id}/visitors/{visitorId} sebelum persetujuan (monoton, tidak pernah kembali false)
 
     CreateVisitRequest:
       type: object

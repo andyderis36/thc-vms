@@ -73,6 +73,9 @@ type VisitRoutes struct {
 	Cancel     gin.HandlerFunc
 	Approve    gin.HandlerFunc
 	Reject     gin.HandlerFunc
+	// UpdateVisitorContact serves the creator-only roster-member correction
+	// (migration 000021): PATCH /visits/:id/visitors/:visitorId.
+	UpdateVisitorContact gin.HandlerFunc
 	Jabatan    gin.HandlerFunc
 }
 
@@ -274,6 +277,7 @@ func New(d Deps) *gin.Engine {
 	authed.GET("/visits/:id/qr", withFallback(d.Visits.QR))
 	authed.POST("/visits/:id/reschedule", withFallback(d.Visits.Reschedule))
 	authed.POST("/visits/:id/cancel", withFallback(d.Visits.Cancel))
+	authed.PATCH("/visits/:id/visitors/:visitorId", withFallback(d.Visits.UpdateVisitorContact))
 
 	approvers := authed.Group("")
 	approvers.Use(withFallback(d.Chain.ApproveOnly))

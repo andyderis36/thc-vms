@@ -112,6 +112,7 @@ export function VisitForm() {
           selfie: { url: '', name: '' },
           jabatan: '',
           vendor_name: '',
+          email: '',
         },
       ],
       is_nda_accepted: false,
@@ -184,6 +185,7 @@ export function VisitForm() {
         selfie: { url: '', name: '' },
         jabatan: row.jabatan ?? '',
         vendor_name: row.vendor_name,
+        email: '',
       })),
       { shouldDirty: false },
     )
@@ -341,6 +343,9 @@ export function VisitForm() {
         // Jabatan: teks bebas; kosong = field tidak dikirim sama sekali
         // (backend memperlakukan string kosong sebagai absen).
         const jabatan = (technician.jabatan ?? '').trim()
+        // Email anggota: opsional; kosong = field tidak dikirim sama sekali
+        // (backend memetakan input kosong ke NULL, kontrak openapi).
+        const email = (technician.email ?? '').trim()
         return {
           name: technician.name,
           id_number: technician.id_number,
@@ -348,6 +353,7 @@ export function VisitForm() {
           id_card_photo_url: technician.id_card_photo.url,
           photo_url: technician.selfie.url,
           ...(jabatan !== '' ? { jabatan } : {}),
+          ...(email !== '' ? { email } : {}),
           ...resolvedVendor,
         }
       }),

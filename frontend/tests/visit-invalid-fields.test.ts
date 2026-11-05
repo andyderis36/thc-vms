@@ -122,6 +122,25 @@ describe('collectInvalidFields — manifest berurutan', () => {
     ])
   })
 
+  it('mengembalikan entri Email dengan anchor visit-tech-N-email', () => {
+    const result = collectInvalidFields(
+      errorsOf({
+        technicians: [
+          { email: { message: 'Format email tidak valid.' } },
+        ],
+      }),
+    )
+
+    expect(result).toEqual([
+      {
+        path: 'technicians.0.email',
+        label: 'Email (Anggota 1)',
+        anchorId: 'visit-tech-0-email',
+      },
+    ])
+    expect(technicianAnchorId(0, 'email')).toBe('visit-tech-0-email')
+  })
+
   it('menghasilkan entri Daftar Anggota/Pengunjung untuk galat level array tanpa melempar', () => {
     const result = collectInvalidFields(
       errorsOf({

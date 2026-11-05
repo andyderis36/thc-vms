@@ -104,10 +104,14 @@ export function VisitorPhoto({ src, visitorName, variant, triggerLabel }: Visito
   const altText = photoAltText(variant, visitorName)
 
   let caption: string | null = null
-  if (hasImage) {
-    caption = label
-  } else if (loadFailed) {
-    caption = `${label} tidak dapat dimuat`
+  if (triggerLabel === undefined || triggerLabel === '') {
+    // Mode tombol-teks: label sudah ada di tombolnya sendiri, caption
+    // terpisah hanya mengulang ("Lihat Foto KTP" + "Foto KTP").
+    if (hasImage) {
+      caption = label
+    } else if (loadFailed) {
+      caption = `${label} tidak dapat dimuat`
+    }
   }
 
   /*

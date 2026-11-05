@@ -309,7 +309,7 @@ describe('NotificationsMenu', () => {
 
     await openMenu()
 
-    expect(await screen.findByText('Belum ada notifikasi.')).toBeInTheDocument()
+    expect(await screen.findByText('Tidak ada notifikasi.')).toBeInTheDocument()
   })
 
   it('menampilkan tombol muat lebih banyak dan garis progres saat total melebihi baris tampil', async () => {
