@@ -90,6 +90,10 @@ type visitDetailDTO struct {
 	// omitempty so the key is always present, null when the visit carries no
 	// free-typed purpose.
 	PurposeNote *string      `json:"purpose_note"`
+	// StatusNote mirrors VisitDetail.status_note: the note of the current
+	// status transition (rejection/cancellation/reschedule reason). Null when
+	// the transition carried no note.
+	StatusNote *string      `json:"status_note"`
 	Visitors    []visitorDTO `json:"visitors"`
 	CreatedAt   string       `json:"created_at"`
 	CheckInAt   *string      `json:"check_in_at,omitempty"`
@@ -253,6 +257,7 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 	// name carried by the domain visit, never the raw manual input, so a
 	// catalogue win can never leak the discarded manual text.
 	detail.PurposeNote = v.PurposeNote
+	detail.StatusNote = v.StatusNote
 	// Gate times come from the usecase enrichment, never invented here: nil
 	// pointers stay absent (omitempty) for requested/approved visits and for
 	// every list item, while visiting/completed single-GETs render RFC3339.

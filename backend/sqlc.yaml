@@ -38,6 +38,7 @@ sql:
       - "migrations/000015_audit_log_user_on_delete_set_null.up.sql"
       - "migrations/000016_dev_superadmin_role.up.sql"
       - "migrations/000017_visit_request_vendor_override.up.sql"
+      - "migrations/000020_vendor_registration_notices.up.sql"
     queries: "internal/repository/db/queries"
 
     gen:

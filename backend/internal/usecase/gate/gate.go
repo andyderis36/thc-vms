@@ -28,6 +28,9 @@ type Dependencies struct {
 	CheckIns domain.CheckInOutRepository
 	Clock    domain.Clock
 	Logger   *slog.Logger
+	// Mailer is the outbound email port. It is OPTIONAL: nil only disables
+	// email fan-out, it never fails a gate operation.
+	Mailer domain.Mailer
 	// TrustedFileOrigins lists the deployment's own object-storage hosts so the
 	// check-in photo allowlist accepts the plain-HTTP URLs the storage adapter
 	// hands out on a LAN deployment without TLS.
@@ -40,6 +43,10 @@ type Service struct {
 	checkIns domain.CheckInOutRepository
 	clock    domain.Clock
 	logger   *slog.Logger
+	// mailer is the outbound email port (OPTIONAL: nil only disables email
+	// fan-out). The service holds only this domain port; the SMTP transport
+	// stays in infrastructure.
+	mailer domain.Mailer
 	// trustedFileOrigins is the deployment's own object-storage hosts, used by
 	// the shared uploaded-file URL allowlist.
 	trustedFileOrigins visituc.FileOriginAllowlist
@@ -61,6 +68,7 @@ func NewService(deps Dependencies) *Service {
 		checkIns:           deps.CheckIns,
 		clock:              clock,
 		logger:             logger,
+		mailer:             deps.Mailer,
 		trustedFileOrigins: deps.TrustedFileOrigins,
 	}
 }

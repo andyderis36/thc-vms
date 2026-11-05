@@ -15,7 +15,7 @@ func wired() gin.HandlerFunc {
 // fullyWiredDeps builds a Deps whose every route member is bound, so a
 // failing check can only come from a member that was actually left out.
 func fullyWiredDeps() Deps {
-	auth := AuthRoutes{Login: wired(), Register: wired(), Me: wired(), PatchMe: wired(), Logout: wired()}
+	auth := AuthRoutes{Login: wired(), Register: wired(), Me: wired(), PatchMe: wired(), Logout: wired(), RequestEmailChange: wired(), ConfirmEmailChange: wired()}
 	users := UserRoutes{List: wired(), Create: wired(), UpdateStatus: wired(), Update: wired(), Delete: wired()}
 	super := SuperAdminRoutes{
 		CreateLocation: wired(), UpdateLocation: wired(), DeleteLocation: wired(),
@@ -34,10 +34,10 @@ func fullyWiredDeps() Deps {
 	file := FileRoutes{File: wired()}
 	avatar := AvatarRoutes{Avatar: wired()}
 	audit := AuditRoutes{List: wired()}
-	notifications := NotificationRoutes{List: wired(), MarkRead: wired(), MarkAllRead: wired()}
+	notifications := NotificationRoutes{List: wired(), MarkRead: wired(), MarkAllRead: wired(), PendingRegistrations: wired()}
 	health := HealthProbes{Health: wired(), Ready: wired()}
 	chain := Chain{
-		Recovery: wired(), CORS: wired(), BodyLimit: wired(), LoginLimiter: wired(),
+		Recovery: wired(), CORS: wired(), BodyLimit: wired(), LoginLimiter: wired(), RegisterLimiter: wired(),
 		Authenticate: wired(), AdminOnly: wired(), ApproveOnly: wired(),
 		GateOnly: wired(), SuperAdminOnly: wired(), NotifyOnly: wired(),
 	}

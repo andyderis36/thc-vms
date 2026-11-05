@@ -97,6 +97,29 @@ type Deps struct {
 	// upload namespace. It never mints read URLs: avatar reads stream through
 	// GET /avatars/{id}.
 	Storage domain.IStorageService
+	// Mailer delivers the email-change notices (the verification link to the
+	// new inbox, the security copy to the old address and the success copy to
+	// the new one). Every send is best-effort: a failure is logged and the
+	// request still succeeds. A nil value disables the notices (hermetic
+	// tests), never the token mint or the flip itself.
+	Mailer domain.Mailer
+	// EmailTokens mints and verifies the stateless tokens confirming an
+	// email-address change. A nil value disables Request/Confirm (500), never
+	// login/logout/me.
+	EmailTokens EmailChangeTokens
+	// FrontendBaseURL is the public web origin the verification mail links
+	// back to (for example http://localhost:3210 in local dev). The confirm
+	// link is FrontendBaseURL + "/verify-email?token=" + token, matching the
+	// frontend /verify-email route. Empty keeps the relative "/verify-email"
+	// fallback so hermetic tests stay link-free.
+	FrontendBaseURL string
+	// Notices is the vendor-registration queue port behind POST
+	// /auth/register. A nil value disables only the fan-out (no queue row,
+	// no superadmin email), never the registration itself.
+	Notices domain.VendorRegistrationNoticeRepository
+	// SuperAdmins resolves the active superadmin email set for the
+	// registration fan-out. A nil value disables only the email leg.
+	SuperAdmins SuperAdminDirectory
 }
 
 // Service is the authentication usecase.
@@ -113,7 +136,12 @@ type Service struct {
 	storage domain.IStorageService
 	managed domain.ManagedUserRepository
 	// vendorRoleID is stamped onto self-registered accounts (POST /auth/register).
-	vendorRoleID domain.UUID
+	vendorRoleID    domain.UUID
+	mailer          domain.Mailer
+	emailTokens     EmailChangeTokens
+	frontendBaseURL string
+	notices         domain.VendorRegistrationNoticeRepository
+	superAdmins     SuperAdminDirectory
 }
 
 // NewService wires the collaborators. A nil Clock defaults to SystemClock;
@@ -123,17 +151,22 @@ func NewService(d Deps) *Service {
 		d.Clock = domain.SystemClock{}
 	}
 	return &Service{
-		users:     d.Users,
-		roles:     d.Roles,
-		locations: d.Locations,
-		vendors:   d.Vendors,
-		issuer:    d.Issuer,
-		clock:     d.Clock,
-		audit:     d.Audit,
-		profiles:  d.Profiles,
-		storage:   d.Storage,
-		managed:   d.Managed,
-		vendorRoleID: d.VendorRoleID,
+		users:           d.Users,
+		roles:           d.Roles,
+		locations:       d.Locations,
+		vendors:         d.Vendors,
+		issuer:          d.Issuer,
+		clock:           d.Clock,
+		audit:           d.Audit,
+		profiles:        d.Profiles,
+		storage:         d.Storage,
+		managed:         d.Managed,
+		vendorRoleID:    d.VendorRoleID,
+		mailer:          d.Mailer,
+		emailTokens:     d.EmailTokens,
+		frontendBaseURL: strings.TrimRight(strings.TrimSpace(d.FrontendBaseURL), "/"),
+		notices:         d.Notices,
+		superAdmins:     d.SuperAdmins,
 	}
 }
 

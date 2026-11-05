@@ -23,6 +23,16 @@ vi.mock('@/lib/api/client', async (importOriginal) => {
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }))
 
+// Sesi non-superadmin: section pendaftaran vendor tidak ikut terpasang, sehingga
+// seluruh kasus lama tetap menguji feed/badge notifikasi apa adanya.
+vi.mock('@/lib/auth/session', () => ({
+  useSession: () => ({
+    user: { id: 'u-1', name: 'Admin Cabang', role: 'admin', location_id: 'loc-1' },
+    status: 'authenticated',
+    signOut: vi.fn(),
+  }),
+}))
+
 /** Bangun satu baris notifikasi tersimpan dengan nilai bawaan yang stabil. */
 function notification(overrides: Partial<NotificationItem> & Pick<NotificationItem, 'id' | 'type' | 'visit_request_id'>): NotificationItem {
   return {
@@ -262,7 +272,7 @@ describe('NotificationsMenu', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
-  it('mendukung kedelapan jenis notifikasi dari kontrak', async () => {
+  it('mendukung kesembilan jenis notifikasi dari kontrak', async () => {
     const types: NotificationType[] = [
       'visit_requested',
       'visit_rescheduled',
@@ -272,6 +282,7 @@ describe('NotificationsMenu', () => {
       'visit_rejected',
       'visit_reminder',
       'visit_auto_cancelled',
+      'visit_cancelled',
     ]
     const items = types.map((type, index) =>
       notification({

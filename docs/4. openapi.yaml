@@ -224,6 +224,68 @@ paths:
         '200':
           description: Logout berhasil
 
+  /auth/email-change/request:
+    post:
+      tags: [Auth]
+      summary: Minta tautan verifikasi ganti email mandiri (publik, dibatasi rate limiter)
+      description: |
+        Meminta tautan verifikasi ke alamat email baru. Wajib menyertakan
+        `current_password` sebagai bukti anti-pengambilalihan. Respons selalu
+        generik 202 agar tidak membocorkan apakah email sudah terdaftar:
+        `{ success: true, data: { message: "..." } }`. Tautan verifikasi
+        dikirim ke alamat email baru; base URL tautan di-resolve pada tugas
+        berikutnya (T5). Ganti email langsung lewat `PATCH /auth/me` tetap
+        ditolak 400 (kunci `email` tidak diterima).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailChangeRequest'
+      responses:
+        '202':
+          description: Permintaan diterima — tautan verifikasi dikirim ke email baru bila data valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailChangeRequestResponse'
+        '400':
+          description: 'Format data tidak valid (VALIDATION_ERROR). Amplop galat: { success: false, error: { code, message } }.'
+        '401':
+          description: 'Kata sandi saat ini salah (INVALID_CREDENTIALS, pesan "Password saat ini salah."). Amplop galat: { success: false, error: { code, message } }.'
+        '429':
+          description: 'Terlalu banyak percobaan (rate limiter login). Amplop galat: { success: false, error: { code: "RATE_LIMITED", message } }.'
+
+  /auth/email-change/confirm:
+    post:
+      tags: [Auth]
+      summary: Konfirmasi ganti email dengan token verifikasi
+      description: |
+        Menukar token verifikasi dari tautan yang dikirim ke alamat email baru
+        menjadi alamat email yang diperbarui. Token tidak valid atau kedaluwarsa
+        dijawab 400 `INVALID_TOKEN` dengan pesan generik
+        "Tautan tidak valid atau kedaluwarsa.".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailChangeConfirmRequest'
+      responses:
+        '200':
+          description: Email berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: 'Token tidak valid atau kedaluwarsa (INVALID_TOKEN, pesan "Tautan tidak valid atau kedaluwarsa."). Amplop galat: { success: false, error: { code, message } }.'
+        '401':
+          description: 'Tanpa token atau token kedaluwarsa (UNAUTHORIZED). Amplop galat: { success: false, error: { code, message } }.'
+        '429':
+          description: 'Terlalu banyak percobaan (rate limiter login). Amplop galat: { success: false, error: { code: "RATE_LIMITED", message } }.'
+
   # ============================================================
   # USER MANAGEMENT (BRANCH SECURITY)
   # ============================================================
@@ -754,6 +816,33 @@ paths:
           description: Format filter tidak valid
         '403':
           description: Akses ditolak (role di luar empat peran VMS)
+
+  /notifications/pending-registrations:
+    get:
+      tags: [UserManagement]
+      summary: Antre pendaftaran vendor menunggu persetujuan beserta jumlah belum diproses (Superadmin)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Antre pendaftaran vendor berhasil diambil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingRegistrationListResponse'
+        '400':
+          description: Format filter tidak valid
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
 
   /notifications/{id}:
     patch:
@@ -1693,6 +1782,54 @@ components:
           format: password
           description: Bukti kata sandi saat ini untuk rotasi milik sendiri (wajib bila `new_password` dikirim); salah dijawab 401 dengan pesan "Password saat ini salah.". Tidak pernah disimpan atau dikembalikan.
 
+    EmailChangeRequest:
+      type: object
+      required: [new_email, current_password]
+      additionalProperties: false
+      description: |
+        Permintaan tautan verifikasi ganti email mandiri. `new_email` adalah
+        alamat tujuan yang akan diverifikasi; `current_password` adalah bukti
+        kata sandi saat ini sebagai anti-pengambilalihan. Kunci lain (termasuk
+        `email`) TIDAK diterima — ganti email lewat `PATCH /auth/me` ditolak.
+      properties:
+        new_email:
+          type: string
+          format: email
+          maxLength: 254
+          description: Alamat email baru tujuan verifikasi.
+        current_password:
+          type: string
+          format: password
+          description: Bukti kata sandi saat ini; salah dijawab 401 dengan pesan "Password saat ini salah.". Tidak pernah disimpan atau dikembalikan.
+
+    EmailChangeRequestResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          required: [message]
+          additionalProperties: false
+          properties:
+            message:
+              type: string
+              example: Tautan verifikasi telah dikirim ke email baru Anda.
+
+    EmailChangeConfirmRequest:
+      type: object
+      required: [token]
+      additionalProperties: false
+      description: |
+        Konfirmasi ganti email dengan token verifikasi dari tautan yang dikirim
+        ke alamat email baru. Token tidak valid atau kedaluwarsa dijawab 400
+        INVALID_TOKEN dengan pesan generik "Tautan tidak valid atau kedaluwarsa.".
+      properties:
+        token:
+          type: string
+          description: Token verifikasi dari tautan email baru (opaque, sekali pakai).
+
     Location:
       type: object
       properties:
@@ -1989,7 +2126,7 @@ components:
           format: uuid
         type:
           type: string
-          enum: [visit_requested, visit_rescheduled, visit_check_in, visit_check_out, visit_approved, visit_rejected, visit_reminder, visit_auto_cancelled]
+          enum: [visit_requested, visit_rescheduled, visit_check_in, visit_check_out, visit_approved, visit_rejected, visit_reminder, visit_auto_cancelled, visit_cancelled]
         visit_request_id:
           type: string
           format: uuid
@@ -2061,6 +2198,50 @@ components:
           type: object
           properties:
             updated:
+              type: integer
+
+    PendingRegistrationItem:
+      type: object
+      properties:
+        vendor_user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        nik:
+          type: string
+        vendor_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+
+    PendingRegistrationListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/PendingRegistrationItem'
+            total:
+              type: integer
+            pending_count:
+              type: integer
+            page:
+              type: integer
+            limit:
               type: integer
 
     Purpose:
@@ -2281,6 +2462,9 @@ components:
           type: [string, "null"]
           maxLength: 200
           description: Tujuan kunjungan tambahan yang diketik bebas / "tujuan lain" (maks 200 karakter); null bila tidak ada; TIDAK terdaftar di katalog purpose
+        status_note:
+          type: [string, "null"]
+          description: Catatan pada transisi status saat ini (alasan penolakan, pembatalan, atau perubahan jadwal); null bila tidak ada
         visitors:
           type: array
           items:

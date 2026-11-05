@@ -25,6 +25,7 @@ import {
   cancelVisit,
   checkInVisit,
   checkOutVisit,
+  confirmEmailChange,
   createLocation,
   createManagedUser,
   createSecurityUser,
@@ -41,6 +42,7 @@ import {
   listLocations,
   listManagedUsers,
   listNotifications,
+  listPendingRegistrations,
   listPurposes,
   listSecurityUsers,
   listVendors,
@@ -48,6 +50,7 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
   rejectVisit,
+  requestEmailChange,
   rescheduleVisit,
   updateLocation,
   updateManagedUser,
@@ -59,7 +62,9 @@ import {
 } from '@/lib/api/client'
 import { ApiError } from '@/lib/api/fetcher'
 import { queryKeys } from '@/lib/api/query-keys'
+import { isSuperAdminRole } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
+import { selectActiveQrVisit } from '@/lib/visits/active-qr-ticket'
 import type {
   ApproveRequest,
   AuditLogListParams,
@@ -69,10 +74,13 @@ import type {
   CreateManagedUserRequest,
   CreateSecurityUserRequest,
   CreateVisitRequest,
+  EmailChangeConfirmRequest,
+  EmailChangeRequest,
   Location,
   ManagedUserListParams,
   NotificationListParams,
   NotificationListResult,
+  PendingRegistrationListParams,
   RejectRequest,
   RescheduleRequest,
   UpdateLocationRequest,
@@ -99,6 +107,38 @@ const MASTER_GC_TIME = 24 * 60 * 60 * 1000
 
 /** Kunjungan berubah cepat (approval, check-in) — 30 detik sudah cukup untuk layar. */
 const VISIT_STALE_TIME = 30 * 1000
+
+/**
+ * Interval polling default daftar kunjungan (dashboard/approvals/badge/prefill):
+ * 30 detik selama tab terlihat.
+ */
+const VISIT_LIST_REFETCH_INTERVAL = 30_000
+
+/**
+ * Interval bersyarat resolver tiket /qr: poll 30 dtk HANYA selama kunjungan
+ * belum resolved (requested/rescheduled, daftar kosong, atau galat yang
+ * mengosongkan items) agar approval yang mendarat tetap auto-advance seperti
+ * baseline; stop (false) begitu tiket aktif terpilih (approved/visiting —
+ * halaman detail mengambil alih + redirect melepas mount) atau semua baris
+ * terminal. Satu kunci + satu owner, jadi membalik nilai ini tidak pernah
+ * menciptakan timer ganda.
+ */
+export function qrResolverRefetchInterval(items: VisitDetail[]): number | false {
+  if (selectActiveQrVisit(items) !== null) return false
+  if (items.length === 0) return VISIT_LIST_REFETCH_INTERVAL
+  const awaitingDecision = items.some(
+    (visit) => visit.status === 'requested' || visit.status === 'rescheduled',
+  )
+  return awaitingDecision ? VISIT_LIST_REFETCH_INTERVAL : false
+}
+
+/**
+ * Tier kios gerbang: antrean pos jaga dipoll tiap 15 detik (OPT-IN, hanya
+ * dipakai 3 query /gate). Kunci query gerbang tidak pernah ter-mount
+ * bersamaan dengan pemilik 30 dtk pada kunci yang sama (halaman berbeda /
+ * role berbeda), jadi tidak ada timer ganda pada satu kunci.
+ */
+export const GATE_LIST_REFETCH_INTERVAL = 15_000
 
 /**
  * Pembaruan otomatis layar detail kunjungan (SCR-04 sisi vendor): QR &
@@ -167,6 +207,13 @@ const NOTIFICATIONS_REFETCH_INTERVAL = 30_000
  * notifikasi (mis. 126 baris untuk super_admin).
  */
 export const FEED_LIMIT = 10
+
+/**
+ * Jumlah entri pendaftaran vendor yang ditampilkan di section panel lonceng
+ * superadmin — daftar ringkas di atas feed notifikasi; pengelolaan penuh
+ * (setujui/tolak) tetap lewat `/vendor-registrations`.
+ */
+export const PENDING_FEED_LIMIT = 5
 
 /**
  * 401/403/404 bersifat definitif — mengulanginya hanya menambah beban API.
@@ -297,12 +344,25 @@ export const jabatanQueryOptions = queryOptions({
   retry: shouldRetry,
 })
 
-export function visitsQueryOptions(params: VisitListParams) {
+export function visitsQueryOptions(
+  params: VisitListParams,
+  refetchInterval: number | false = VISIT_LIST_REFETCH_INTERVAL,
+) {
   return queryOptions({
     queryKey: queryKeys.visits.list(params),
     queryFn: () => listVisits(params),
     staleTime: VISIT_STALE_TIME,
     retry: shouldRetry,
+    // Polling terlingkup daftar kunjungan (dashboard/approvals/gate/qr +
+    // badge usePendingApprovalCount): default 30 detik selama tab terlihat;
+    // tab latar diam (`refetchIntervalInBackground: false`); kembali fokus
+    // menyegarkan bila sudah basi (staleTime 30 detik yang menggerbanginya).
+    // Satu owner polling per queryKey — timer per-observer, bukan per-komponen.
+    // Override OPT-IN: gerbang oper `GATE_LIST_REFETCH_INTERVAL` (15 dtk),
+    // resolver /qr oper `false` (tanpa timer).
+    refetchInterval,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -384,6 +444,26 @@ export function notificationsQueryOptions(params: NotificationListParams = {}) {
     retry: shouldRetry,
     refetchInterval: NOTIFICATIONS_REFETCH_INTERVAL,
     refetchIntervalInBackground: false,
+    // Badge unread selalu menyala: kembali fokus menyegarkan bila sudah basi.
+    refetchOnWindowFocus: true,
+  })
+}
+
+/**
+ * Antre pendaftaran vendor menunggu persetujuan (superadmin). Probe ringan
+ * `limit: 1` mengikuti idiom `useUnreadNotificationCount`: angka badge
+ * diambil dari `pending_count` agregat server tanpa endpoint count terpisah.
+ * Polling & staleTime sama dengan feed lonceng (30 detik, latar mati).
+ */
+export function pendingRegistrationsQueryOptions(params: PendingRegistrationListParams = {}) {
+  return queryOptions({
+    queryKey: queryKeys.pendingRegistrations(params),
+    queryFn: () => listPendingRegistrations(params),
+    staleTime: VISIT_STALE_TIME,
+    retry: shouldRetry,
+    refetchInterval: NOTIFICATIONS_REFETCH_INTERVAL,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -411,8 +491,12 @@ export function useJabatanQuery(enabled = true) {
   return useQuery({ ...jabatanQueryOptions, enabled })
 }
 
-export function useVisitsQuery(params: VisitListParams, enabled = true) {
-  return useQuery({ ...visitsQueryOptions(params), enabled })
+export function useVisitsQuery(
+  params: VisitListParams,
+  enabled = true,
+  refetchInterval: number | false = VISIT_LIST_REFETCH_INTERVAL,
+) {
+  return useQuery({ ...visitsQueryOptions(params, refetchInterval), enabled })
 }
 
 /** Total antrean approval (requested + rescheduled) untuk badge shell — server-total, scope cabang/peran ikut backend. */
@@ -480,6 +564,7 @@ export function useNotificationsFeed(enabled = true) {
     retry: shouldRetry,
     refetchInterval: NOTIFICATIONS_REFETCH_INTERVAL,
     refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
     enabled,
   })
 }
@@ -488,6 +573,31 @@ export function useNotificationsFeed(enabled = true) {
 export function useUnreadNotificationCount() {
   const { data } = useNotificationsQuery({ limit: 1 })
   return data?.unread_count ?? 0
+}
+
+/**
+ * Jumlah pendaftaran vendor menunggu persetujuan — angka lonceng superadmin.
+ * Hook SELALU ter-mount di lonceng (semua shell), tetapi query hanya menyala
+ * untuk sesi `super_admin`/`dev-superadmin`; role lain: nol query. Probe
+ * `limit: 1` mengikuti `useUnreadNotificationCount`; `pending_count` agregat
+ * dari respons pertama (nol bila query nonaktif/galat).
+ */
+export function usePendingRegistrationCount() {
+  const { user } = useSession()
+  const enabled = user !== null && isSuperAdminRole(user.role)
+  const { data } = useQuery({ ...pendingRegistrationsQueryOptions({ limit: 1 }), enabled })
+  return enabled ? (data?.pending_count ?? 0) : 0
+}
+
+/**
+ * Entri pendaftaran vendor untuk section panel lonceng superadmin.
+ * `enabled = open ∧ super_admin`: panel tertutup atau role lain → nol query,
+ * tanpa polling latar; terbuka → ikut polling 30 detik seperti feed notifikasi.
+ */
+export function usePendingRegistrationsFeed(open: boolean) {
+  const { user } = useSession()
+  const enabled = open && user !== null && isSuperAdminRole(user.role)
+  return useQuery({ ...pendingRegistrationsQueryOptions({ limit: PENDING_FEED_LIMIT }), enabled })
 }
 
 // ---------------------------------------------------------------------------
@@ -679,6 +789,35 @@ export function useUpdateProfileMutation() {
   const { applyUser } = useSession()
   return useMutation({
     mutationFn: (body: UpdateSelfProfileRequest) => updateMe(body),
+    onSuccess: (user) => {
+      queryClient.setQueryData(queryKeys.me(), user)
+      applyUser(user)
+    },
+  })
+}
+
+/**
+ * `POST /auth/email-change/request` — permintaan tautan verifikasi ganti
+ * email. Tanpa invalidasi: respons 202 generik tidak mengubah data apa pun;
+ * konsekuensi (email berubah) baru terlihat setelah konfirmasi token.
+ */
+export function useRequestEmailChangeMutation() {
+  return useMutation({
+    mutationFn: (body: EmailChangeRequest) => requestEmailChange(body),
+  })
+}
+
+/**
+ * `POST /auth/email-change/confirm` — konfirmasi token ganti email. Respons
+ * membawa `User` terbaru, jadi cache `me` + sesi React ditulis sinkron
+ * (pola sama `useUpdateProfileMutation`); layar pemanggil tetap memanggil
+ * `refresh()` agar hidrasi `/auth/me` jadi kanonik sebelum redirect.
+ */
+export function useConfirmEmailChangeMutation() {
+  const queryClient = useQueryClient()
+  const { applyUser } = useSession()
+  return useMutation({
+    mutationFn: (body: EmailChangeConfirmRequest) => confirmEmailChange(body),
     onSuccess: (user) => {
       queryClient.setQueryData(queryKeys.me(), user)
       applyUser(user)

@@ -78,6 +78,8 @@ export interface TimelineProps {
   /** Stempel gerbang aktual dari GET /visits/{id}; null/absen = belum terjadi. */
   checkInAt?: string | null
   checkOutAt?: string | null
+  /** Alasan status akhir (`status_note`); hanya tampil pada status terminal. */
+  statusNote?: string | null
 }
 
 /**
@@ -105,7 +107,15 @@ export function gateDetail(
  * sehingga teknisi melihat "Masuk 26 Sep 2026, 14.30" persis seperti yang
  * dicatat pengawas di gerbang (QA GATE-01/02/09).
  */
-export function Timeline({ status, createdAt, startDate, endDate, checkInAt, checkOutAt }: TimelineProps) {
+export function Timeline({
+  status,
+  createdAt,
+  startDate,
+  endDate,
+  checkInAt,
+  checkOutAt,
+  statusNote,
+}: TimelineProps) {
   const activeIndex = ACTIVE_INDEX_BY_STATUS[status]
   const terminal = TERMINAL_STATUSES.has(status)
 
@@ -173,6 +183,9 @@ export function Timeline({ status, createdAt, startDate, endDate, checkInAt, che
           <div className="mt-1">
             <StatusBadge status={status} />
           </div>
+          {statusNote != null && statusNote.trim() !== '' && (
+            <p className="mt-1 break-words text-label text-ink-secondary">{statusNote}</p>
+          )}
         </li>
       )}
     </ol>

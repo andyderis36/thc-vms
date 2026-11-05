@@ -60,6 +60,14 @@ func (fakeAuthService) RegisterVendor(_ context.Context, _ auth.RegisterVendorIn
 	return auth.Profile{}, domain.ErrUnauthorized
 }
 
+func (fakeAuthService) RequestEmailChange(_ context.Context, _ domain.UUID, _, _, _ string) (string, error) {
+	return "", domain.ErrUnauthorized
+}
+
+func (fakeAuthService) ConfirmEmailChange(_ context.Context, _ domain.UUID, _ string) (auth.Profile, error) {
+	return auth.Profile{}, domain.ErrUnauthorized
+}
+
 // fakeVisitService answers every visit call with 404.
 type fakeVisitService struct{}
 
@@ -171,7 +179,10 @@ func (fakeStorage) ObjectKeyFromStoredURL(_ string) (string, error) {
 // MinIO, no tokens. The chain is the real middleware over denying
 // collaborators, so refusals prove the production path.
 func testEngine() *gin.Engine {
-	auth := handlers.NewAuthHandler(fakeAuthService{})
+	authSvc := fakeAuthService{}
+	auth := handlers.NewAuthHandler(authSvc)
+	emailChange := handlers.NewEmailChangeHandler(authSvc,
+		middleware.NewEmailChangeRateLimiter(middleware.DefaultEmailChangeLimits()))
 	visits := handlers.NewVisitHandler(fakeVisitService{})
 	gate := handlers.NewGateHandler(fakeGateService{})
 	master := handlers.NewMasterHandler(fakeMaster{})
@@ -182,6 +193,7 @@ func testEngine() *gin.Engine {
 	return deliveryhttp.New(deliveryhttp.Deps{
 		Auth: deliveryhttp.AuthRoutes{
 			Login: auth.Login, Register: auth.Register, Me: auth.Me, PatchMe: auth.PatchMe, Logout: auth.Logout,
+			RequestEmailChange: emailChange.RequestEmailChange, ConfirmEmailChange: emailChange.ConfirmEmailChange,
 		},
 		Users: deliveryhttp.UserRoutes{
 			List: users.ListSecurity, Create: users.CreateSecurity, UpdateStatus: users.UpdateSecurityStatus,
@@ -227,7 +239,7 @@ func serve(engine *gin.Engine, method, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 42 wired
+// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 45 wired
 // operations resolves to a registered route: a registered route may answer
 // 401/403/400/500 without credentials, but never 404. The two Phase-2
 // feedback and incident endpoints must 404.
@@ -241,6 +253,8 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/auth/me"},
 		{http.MethodPatch, "/api/v1/auth/me"},
 		{http.MethodPost, "/api/v1/auth/logout"},
+		{http.MethodPost, "/api/v1/auth/email-change/request"},
+		{http.MethodPost, "/api/v1/auth/email-change/confirm"},
 		{http.MethodGet, "/api/v1/users/security"},
 		{http.MethodPost, "/api/v1/users/security"},
 		{http.MethodPatch, "/api/v1/users/security/some-id/status"},
@@ -275,10 +289,11 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodDelete, "/api/v1/visits/some-id"},
 		{http.MethodGet, "/api/v1/audit-logs"},
 		{http.MethodGet, "/api/v1/notifications"},
+		{http.MethodGet, "/api/v1/notifications/pending-registrations"},
 		{http.MethodPost, "/api/v1/uploads"},
 	}
-	if len(wired) != 42 {
-		t.Fatalf("contract drift: wired routes = %d, want 42", len(wired))
+	if len(wired) != 45 {
+		t.Fatalf("contract drift: wired routes = %d, want 45", len(wired))
 	}
 	for _, route := range wired {
 		rec := serve(engine, route.method, route.path)
@@ -289,6 +304,11 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 	for _, forbidden := range []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/visits/some-id/feedback"},
 		{http.MethodPost, "/api/v1/visits/some-id/incident"},
+		// The email-change endpoints are POST-only: a state-changing GET
+		// must never exist (caches, prefetchers and logs must not trigger
+		// or record a token-bearing URL).
+		{http.MethodGet, "/api/v1/auth/email-change/request"},
+		{http.MethodGet, "/api/v1/auth/email-change/confirm"},
 	} {
 		if rec := serve(engine, forbidden.method, forbidden.path); rec.Code != http.StatusNotFound {
 			t.Errorf("%s %s must 404, got %d", forbidden.method, forbidden.path, rec.Code)

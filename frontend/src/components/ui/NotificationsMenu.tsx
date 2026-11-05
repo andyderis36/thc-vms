@@ -2,14 +2,17 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   AlertTriangle,
   Bell,
   Check,
+  CircleX,
   ClipboardList,
   LogIn,
   LogOut,
   RotateCcw,
+  UserPlus,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -19,9 +22,13 @@ import {
   useMarkAllNotificationsReadMutation,
   useMarkNotificationReadMutation,
   useNotificationsFeed,
+  usePendingRegistrationCount,
+  usePendingRegistrationsFeed,
   useUnreadNotificationCount,
 } from '@/lib/api/hooks'
 import type { NotificationItem, NotificationType } from '@/lib/api/types'
+import { isSuperAdminRole } from '@/lib/auth/capabilities'
+import { useSession } from '@/lib/auth/session'
 
 export interface NotificationsMenuProps {
   /**
@@ -83,7 +90,7 @@ const TRIGGER_TONE_CLASS = {
 } as const
 
 /**
- * Delapan jenis notifikasi tersimpan (kontrak openapi `Notification.type`).
+ * Sembilan jenis notifikasi tersimpan (kontrak openapi `Notification.type`).
  * `Record<NotificationType, …>` membuat jenis baru di backend gagal compile di
  * sini sampai ikonnya di peta di sini juga — tidak ada fallback senyap.
  */
@@ -96,6 +103,7 @@ const TYPE_META: Record<NotificationType, { Icon: LucideIcon }> = {
   visit_rejected: { Icon: X },
   visit_reminder: { Icon: Bell },
   visit_auto_cancelled: { Icon: AlertTriangle },
+  visit_cancelled: { Icon: CircleX },
 }
 
 /** Waktu relatif ringkas ala Indonesia; jatuh ke tanggal absolut bila > 30 hari. */
@@ -137,11 +145,16 @@ function targetHref(item: NotificationItem): string {
  */
 export function NotificationsMenu({ tone = 'light', className, onSelect }: NotificationsMenuProps) {
   const router = useRouter()
+  const { user } = useSession()
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const generatedId = useId()
   const buttonId = `${generatedId}-button`
   const menuId = `${generatedId}-menu`
+
+  // Section pendaftaran vendor hanya untuk superadmin (hook mengunci peran:
+  // role lain tidak pernah menembak API pending-registrations).
+  const isSuperAdmin = user !== null && isSuperAdminRole(user.role)
 
   // Feed progresif hanya saat panel terbuka: halaman 1 dulu, halaman
   // berikutnya lewat "Muat lebih banyak" — tidak ada polling latar tertutup.
@@ -155,6 +168,10 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
   } = useNotificationsFeed(open)
   // Badge harus tampil sebelum panel dibuka — query ringan yang selalu aktif.
   const unreadCount = useUnreadNotificationCount()
+  // Pendaftaran menunggu: selalu ter-mount, hanya menyala untuk superadmin.
+  const pendingCount = usePendingRegistrationCount()
+  // Entri section panel: hanya diambil saat panel terbuka (superadmin saja).
+  const pendingFeed = usePendingRegistrationsFeed(open)
 
   const markRead = useMarkNotificationReadMutation()
   const markAllRead = useMarkAllNotificationsReadMutation()
@@ -164,7 +181,11 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
   const firstPage = data?.pages[0]
   const total = firstPage?.total ?? 0
   const unreadInFeed = firstPage?.unread_count ?? 0
+  const pendingItems = pendingFeed.data?.items ?? []
   const hasUnread = unreadCount > 0
+  // Badge lonceng superadmin = unread + pendaftaran menunggu (99+ tetap).
+  const badgeCount = unreadCount + pendingCount
+  const hasBadge = badgeCount > 0
 
   useEffect(() => {
     if (!open) return
@@ -214,12 +235,12 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        aria-label={hasUnread ? `Notifikasi, ${unreadCount} belum dibaca` : 'Notifikasi'}
+        aria-label={hasBadge ? `Notifikasi, ${badgeCount} belum dibaca` : 'Notifikasi'}
         className={`relative shrink-0 ${TRIGGER_TONE_CLASS[tone]}`}
         onClick={() => setOpen((previous) => !previous)}
       >
         <Bell className="size-5" aria-hidden="true" />
-        {hasUnread ? (
+        {hasBadge ? (
           /* Latar magenta `bg-secondary` (#f43098) tetap dipertahankan;
              angka memakai `text-ink` (#18181b) = 4.83:1 (WCAG AA untuk
              teks kecil 11px bold). `text-secondary-contrast` (#ffffff)
@@ -229,13 +250,67 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
             data-testid="notifications-unread-badge"
             className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-badge bg-secondary px-1 text-badge font-bold leading-none tabular-nums text-ink"
           >
-            {formatUnreadBadge(unreadCount)}
+            {formatUnreadBadge(badgeCount)}
           </span>
         ) : null}
       </Button>
 
       {open ? (
         <div id={menuId} role="menu" aria-labelledby={buttonId} className={PANEL_CLASS}>
+          {isSuperAdmin ? (
+            /* Pita superadmin di paling atas panel: angka + entri antrean
+               pendaftaran vendor, tautan tunggal ke pengelolaan penuh. */
+            <div
+              data-testid="pending-registrations-section"
+              className="border-b border-border-mid bg-brand-soft/50 px-2 py-1"
+            >
+              <Link
+                href="/vendor-registrations"
+                onClick={() => setOpen(false)}
+                className="flex min-h-touch w-full items-center gap-2 rounded-control px-1 text-left transition hover:bg-brand/10 active:bg-brand/20"
+              >
+                <span
+                  aria-hidden="true"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-badge bg-brand text-brand-contrast"
+                >
+                  <UserPlus className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1 text-sm font-semibold text-ink">
+                  Pendaftaran vendor menunggu persetujuan
+                </span>
+                {pendingCount > 0 ? (
+                  <span
+                    data-testid="pending-registrations-badge"
+                    className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-badge bg-secondary px-1 text-badge font-bold leading-none tabular-nums text-ink"
+                  >
+                    {formatUnreadBadge(pendingCount)}
+                  </span>
+                ) : null}
+              </Link>
+              {pendingFeed.isError ? (
+                <p className="px-1 pb-1 text-xs text-ink-muted">Gagal memuat pendaftaran vendor.</p>
+              ) : pendingFeed.isPending ? (
+                <p className="px-1 pb-1 text-xs text-ink-muted">Memuat pendaftaran vendor…</p>
+              ) : pendingItems.length === 0 ? (
+                <p className="px-1 pb-1 text-xs text-ink-muted">
+                  Belum ada pendaftaran vendor menunggu.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-0.5 pb-1">
+                  {pendingItems.map((item) => (
+                    <li key={item.vendor_user_id} className="min-w-0 px-1 py-0.5">
+                      <p className="truncate text-xs font-semibold text-ink" title={item.name}>
+                        {item.name}
+                      </p>
+                      <p className="truncate text-xs text-ink-muted" title={item.vendor_name}>
+                        {item.vendor_name}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
           <div className="flex items-center justify-between gap-2 border-b border-border-mid px-3 py-2">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-ink">Notifikasi</p>

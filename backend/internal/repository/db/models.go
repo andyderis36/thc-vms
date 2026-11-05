@@ -120,6 +120,18 @@ type Vendor struct {
 	CreatedAt     time.Time   `json:"created_at"`
 }
 
+// Durable per-vendor registration queue - one row per pending vendor user behind GET /notifications/pending-registrations
+type VendorRegistrationNotice struct {
+	ID uuid.UUID `json:"id"`
+	// The pending vendor account; UNIQUE is the ON CONFLICT DO NOTHING idempotency anchor
+	VendorUserID uuid.UUID `json:"vendor_user_id"`
+	// Queue state; pending rows drive the superadmin approval bell
+	Status string `json:"status"`
+	// When a superadmin approved/rejected the registration; NULL while pending
+	ResolvedAt pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt  time.Time          `json:"created_at"`
+}
+
 type VisitPurpose struct {
 	VisitRequestID uuid.UUID `json:"visit_request_id"`
 	PurposeID      uuid.UUID `json:"purpose_id"`

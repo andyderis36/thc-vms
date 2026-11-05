@@ -32,10 +32,17 @@ var openapiKeys = map[string]map[string]bool{
 		"id": true, "visit_id": true, "status": true, "location": true,
 		"purposes": true, "vendor_user": true, "pic_user": true, "vendor_name": true,
 		"start_date": true, "end_date": true, "assignment_letter_url": true,
-		"notes": true, "purpose_note": true, "visitors": true, "created_at": true,
+		"notes": true, "purpose_note": true, "status_note": true, "visitors": true, "created_at": true,
 		"check_in_at": true, "check_out_at": true, "checked_in_by": true,
 	},
 	"VisitList": {"items": true, "total": true, "page": true, "limit": true},
+	"PendingRegistrationList": {
+		"items": true, "total": true, "pending_count": true, "page": true, "limit": true,
+	},
+	"PendingRegistrationItem": {
+		"vendor_user_id": true, "name": true, "email": true, "phone": true, "nik": true,
+		"vendor_name": true, "created_at": true, "status": true,
+	},
 	"QR":        {"visit_id": true, "qr_code_payload": true},
 	"Upload":    {"file_url": true, "file_name": true, "file_size": true, "mime_type": true},
 }

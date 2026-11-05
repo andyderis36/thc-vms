@@ -446,6 +446,20 @@ func ValidateUserListRole(raw string) (*domain.RoleName, error) {
 	}
 }
 
+// CheckUserUpdatePeer guards PATCH /users/:id: no super_admin row may be
+// edited by anyone but itself (the self row stays editable, so every other
+// super_admin row is untouchable). It mirrors CheckUserStatusChange so all
+// account mutations share one refusal vocabulary.
+func CheckUserUpdatePeer(actorID domain.UUID, target domain.ManagedUser) error {
+	if target.User.ID == actorID {
+		return nil
+	}
+	if domain.IsSuperAdminRole(target.Role) {
+		return forbidden("Tidak dapat mengubah akun super_admin lain.")
+	}
+	return nil
+}
+
 // CheckUserStatusChange guards PATCH /users/:id/status: the target must
 // exist (found=false renders 404 upstream), the status must be in the
 // active|pending|inactive vocabulary (pending admits the approval of a

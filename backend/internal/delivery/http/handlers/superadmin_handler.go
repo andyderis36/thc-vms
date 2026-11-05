@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
+	"html"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -45,6 +47,14 @@ type SuperAdminHandler struct {
 	// checkins resolves a visit's gate photo before the purge cascades the
 	// check_in row away; nil skips that key kind.
 	checkins domain.CheckInOutRepository
+	// mailer is the optional outbound mail port behind the PATCH /users/:id
+	// email-override dual notice: nil disables the fan-out so hermetic
+	// tests and unwired callers behave exactly as before.
+	mailer domain.Mailer
+	// registrationResolver is the optional queue-drain port behind
+	// PATCH /users/:id/status: nil skips the resolve so hermetic tests and
+	// unwired callers behave exactly as before.
+	registrationResolver registrationResolver
 }
 
 // WithAudit attaches the trail writer and returns the handler for chaining.
@@ -67,6 +77,30 @@ func (h *SuperAdminHandler) WithStorage(storage domain.IStorageService) *SuperAd
 // that key kind.
 func (h *SuperAdminHandler) WithCheckIns(checkins domain.CheckInOutRepository) *SuperAdminHandler {
 	h.checkins = checkins
+	return h
+}
+
+// WithMailer attaches the outbound mail port and returns the handler for
+// chaining. Production passes the SMTP adapter (nil when SMTP is disabled);
+// a nil port only skips the email-override notices, never the update itself.
+func (h *SuperAdminHandler) WithMailer(mailer domain.Mailer) *SuperAdminHandler {
+	h.mailer = mailer
+	return h
+}
+
+// registrationResolver flips one vendor-registration queue row when a
+// superadmin approves or rejects a pending vendor (PATCH /users/:id/status).
+// It is satisfied by the auth usecase; nil disables the resolve leg so
+// hermetic tests and unwired callers behave exactly as before.
+type registrationResolver interface {
+	ResolveVendorRegistration(ctx context.Context, vendorUserID domain.UUID, approved bool) error
+}
+
+// WithRegistrationResolver attaches the queue-drain port and returns the
+// handler for chaining. Production passes the auth service; a nil port only
+// skips the resolve, never the status flip itself.
+func (h *SuperAdminHandler) WithRegistrationResolver(resolver registrationResolver) *SuperAdminHandler {
+	h.registrationResolver = resolver
 	return h
 }
 
@@ -776,6 +810,15 @@ func (h *SuperAdminHandler) UpdateUserStatus(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
+	// Approving (active) or rejecting (inactive) a pending vendor drains its
+	// registration queue row; any other role or status has no row to drain.
+	// Best-effort: a resolve failure is logged and never fails the flip.
+	if h.registrationResolver != nil && updated.Role == domain.RoleVendor &&
+		(status == domain.UserStatusActive || status == domain.UserStatusInactive) {
+		if err := h.registrationResolver.ResolveVendorRegistration(ctx, targetID, status == domain.UserStatusActive); err != nil {
+			slog.Warn("superadmin: vendor registration resolve failed", "user_id", string(targetID), "error", err)
+		}
+	}
 	response.OK(c, h.managedToAccount(updated))
 }
 
@@ -901,8 +944,30 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 	if !h.checkPasswordReset(c, id.UserID, target, body, patch) {
 		return
 	}
+	// No super_admin row may be edited by anyone but itself: a peer's email
+	// (or any other field) is 403 here, mirroring the status/delete guards.
+	// It sits after validation and the password proof so refused shapes keep
+	// their existing 400/401/403 answers; every otherwise-valid peer patch
+	// stops here with zero writes, zero trail keys and zero notices.
+	if err := superadmin.CheckUserUpdatePeer(id.UserID, target); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	// emailOverrideChanged is the unchanged guard: only a real address move
+	// (case-insensitive) earns the override audit keys and the dual notice.
+	// Re-sending the stored address is a no-op for this path.
+	emailOverrideChanged := patch.Email != nil && !strings.EqualFold(target.User.Email, *patch.Email)
 	meta := map[string]string{"fields": managedUserChangedFields(patch)}
 	addUpdatePairs(meta, managedUserUpdatePairs(target.User, patch)...)
+	if emailOverrideChanged {
+		// The override move rides beside the generic before.email/after.email
+		// pair in the T4 old_email/new_email shape. The reachable worst case
+		// is a six-pair vendor patch (12 keys) + fields + these 3 = 16, exactly
+		// the domain SanitizeMetadata cap, never over it.
+		meta["source"] = "admin-override"
+		meta["old_email"] = target.User.Email
+		meta["new_email"] = *patch.Email
+	}
 	entry := auditEntry(c, id.UserID, domain.AuditActionUserUpdate,
 		domain.AuditEntityUser, &targetID, meta)
 	audited := false
@@ -919,12 +984,43 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 	if !audited {
 		h.appendAuditFallback(ctx, entry)
 	}
+	if emailOverrideChanged {
+		// A separate audited path, NOT a bypass of the self-service flow:
+		// self-service (T4) owns the verification guarantee (token handshake
+		// proving control of the new inbox), while this superadmin override
+		// performs no such handshake and compensates with observability
+		// (the source:admin-override trail row above) plus an immediate dual
+		// notice so a takeover victim learns where to turn. Best-effort:
+		// a mail failure is logged and never fails the 200.
+		h.sendEmailOverrideNotices(ctx, target.User.Email, *patch.Email)
+	}
 	updated, err := h.users.FindManagedByID(ctx, targetID)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
 	response.OK(c, h.managedToAccount(updated))
+}
+
+// sendEmailOverrideNotices queues BOTH post-override notices, mirroring the
+// self-service confirm fan-out: the verbatim security copy to the OLD inbox
+// (so a takeover victim learns where to turn) and the success copy to the
+// NEW one. Each send is independent and best-effort: one failing must not
+// cancel the other nor the 200, and a nil mailer only skips the fan-out.
+func (h *SuperAdminHandler) sendEmailOverrideNotices(ctx context.Context, oldEmail, newEmail string) {
+	if h.mailer == nil {
+		return
+	}
+	oldText := fmt.Sprintf("Email akun THC-VMS Anda baru saja diganti menjadi %s. Jika ini bukan Anda, segera hubungi admin dan ganti kata sandi.", newEmail)
+	if err := h.mailer.Send(ctx, []string{oldEmail}, "[THC-VMS] Email Akun Berubah",
+		oldText, `<p>`+html.EscapeString(oldText)+`</p>`); err != nil {
+		slog.Warn("superadmin: email-override old-address notice failed", "error", err)
+	}
+	newText := fmt.Sprintf("Email akun THC-VMS Anda telah berhasil diubah menjadi %s. Gunakan alamat ini untuk masuk mulai sekarang.", newEmail)
+	if err := h.mailer.Send(ctx, []string{newEmail}, "[THC-VMS] Email Akun Berhasil Diubah",
+		newText, `<p>`+html.EscapeString(newText)+`</p>`); err != nil {
+		slog.Warn("superadmin: email-override new-address notice failed", "error", err)
+	}
 }
 
 // managedHashStore reads one stored row WITH its bcrypt hash for the

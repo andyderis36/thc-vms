@@ -9,7 +9,9 @@
  *
  * Semua kunjungan yang dibuat dicatat dan dihapus di teardown memakai token
  * `super` (super_admin boleh menghapus lintas cabang). Objek MinIO hasil
- * unggahan ikut dihapus; kegagalan cleanup menggagalkan test.
+ * unggahan ikut dihapus — kecuali `E2E_SKIP_STORAGE_CLEANUP=1` (run live):
+ * objek yatim tetap di bucket (orphan, bukan galat); kegagalan cleanup
+ * kunjungan menggagalkan test.
  */
 
 import { test as base, expect } from '@playwright/test'
@@ -19,7 +21,6 @@ import {
   API_BASE,
   FRONTEND_BASE,
   LOCATIONS,
-  PURPOSES,
   TOKEN_STORAGE_KEY,
   apiFetchRaw,
   approveVisitViaApi,
@@ -37,13 +38,17 @@ import {
 import { jpegBuffer, pdfBuffer, pngBuffer } from './helpers/assets'
 import { deleteUploadedFiles } from './helpers/storage'
 
-/** Purpose default untuk kunjungan buatan harness. */
-const DEFAULT_PURPOSE_ID = PURPOSES.Survey
-
 /**
  * Surat Tugas pengganti saat `withFiles:false`. Backend mewajibkan
  * `assignment_letter_url` untuk setiap pengajuan baru, tetapi hanya
  * memvalidasi bentuk URL (http dev host diizinkan), bukan keberadaan objek.
+ *
+ * PERINGATAN: konstanta ini LOCAL-ONLY (host MinIO lokal). Pada run LIVE,
+ * `withFiles:false` MENULIS URL localhost ini ke baris production — tidak
+ * ada objek nyata di bucket prod (backend hanya memeriksa bentuk URL).
+ * Untuk run live, utamakan `withFiles:true` (unggah SPK/KTP/selfie nyata);
+ * untuk katalog tanpa purpose master, harness memakai jalur `purpose_note`
+ * (bukan placeholder) agar pengajuan tetap valid tanpa UUID seed.
  */
 const PLACEHOLDER_SPK_URL =
   'http://localhost:9000/thc-vms-bucket/assignment_letter/e2e-placeholder.pdf'
@@ -163,10 +168,6 @@ export const test = base.extend<{ h: Harness }>({
       },
 
       async createVisit(label, opts = {}) {
-        if (DEFAULT_PURPOSE_ID === undefined) {
-          throw new Error('[harness] purpose default tidak ditemukan di seed map.')
-        }
-
         const role = opts.role ?? 'vendor'
         const marker = harness.unique(label)
         const token = await tokenAs(role)

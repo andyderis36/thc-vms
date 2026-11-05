@@ -23,8 +23,8 @@ var handlerType = reflect.TypeOf((gin.HandlerFunc)(nil))
 // therefore calls ValidateDeps before mounting, so an unwired member aborts
 // the boot with the name of the missing handler.
 //
-// Chain.LoginLimiter is optional: the local dev open mode
-// (AUTH_RATE_LIMIT=-1) deliberately leaves it unset.
+// Chain.LoginLimiter and Chain.RegisterLimiter are optional: the local dev
+// open mode (AUTH_RATE_LIMIT=-1) deliberately leaves them unset.
 func ValidateDeps(d Deps) error {
 	groups := []struct {
 		name     string
@@ -43,7 +43,7 @@ func ValidateDeps(d Deps) error {
 		{"audit", d.Audit, nil},
 		{"notifications", d.Notifications, nil},
 		{"health", d.Health, nil},
-		{"chain", d.Chain, []string{"LoginLimiter"}},
+		{"chain", d.Chain, []string{"LoginLimiter", "RegisterLimiter"}},
 	}
 	for _, group := range groups {
 		if err := validateWired(group.name, group.routes, group.optional); err != nil {

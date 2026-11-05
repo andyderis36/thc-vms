@@ -5,7 +5,7 @@
  * kunci query secara manual di tempat lain.
  */
 
-import type { AuditLogListParams, ManagedUserListParams, NotificationListParams, VisitListParams } from '@/lib/api/types';
+import type { AuditLogListParams, ManagedUserListParams, NotificationListParams, PendingRegistrationListParams, VisitListParams } from '@/lib/api/types';
 
 export const queryKeys = {
   visits: {
@@ -23,5 +23,7 @@ export const queryKeys = {
   auditLogs: (params: AuditLogListParams) => ['audit-logs', 'list', params] as const,
   notifications: (params?: NotificationListParams) =>
     ['notifications', params ?? null] as const,
+  pendingRegistrations: (params?: PendingRegistrationListParams) =>
+    ['pending-registrations', params ?? null] as const,
   me: () => ['me'] as const,
 } as const;

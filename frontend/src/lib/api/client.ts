@@ -16,6 +16,9 @@ import type {
   CreateManagedUserRequest,
   CreateSecurityUserRequest,
   CreateVisitRequest,
+  EmailChangeConfirmRequest,
+  EmailChangeRequest,
+  EmailChangeRequestResult,
   JabatanList,
   Location,
   LoginRequest,
@@ -23,6 +26,8 @@ import type {
   ManagedUserListParams,
   NotificationListParams,
   NotificationListResult,
+  PendingRegistrationListParams,
+  PendingRegistrationListResult,
   Purpose,
   QrPayload,
   RegisterVendorRequest,
@@ -80,6 +85,32 @@ export async function logout(): Promise<void> {
  */
 export function registerVendor(body: RegisterVendorRequest): Promise<User> {
   return apiFetch<User>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * `POST /auth/email-change/request` — minta tautan verifikasi ganti email
+ * mandiri. Wajib membawa `current_password` sebagai bukti anti-pengambilalihan;
+ * respons selalu 202 generik `{ message }` agar tidak membocorkan apakah
+ * email sudah terdaftar. Tautan dikirim ke alamat BARU.
+ */
+export function requestEmailChange(body: EmailChangeRequest): Promise<EmailChangeRequestResult> {
+  return apiFetch<EmailChangeRequestResult>('/auth/email-change/request', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * `POST /auth/email-change/confirm` — tukar token verifikasi menjadi email
+ * baru (wajib auth; respons `User`). Token tidak valid/kedaluwarsa dijawab
+ * 400 INVALID_TOKEN dengan pesan generik — pemanggil wajib memperlakukan
+ * semua galat secara generik.
+ */
+export function confirmEmailChange(body: EmailChangeConfirmRequest): Promise<User> {
+  return apiFetch<User>('/auth/email-change/confirm', {
     method: 'POST',
     body: JSON.stringify(body),
   });
@@ -349,4 +380,29 @@ export function markNotificationRead(id: string): Promise<{ id: string; is_read:
 /** `POST /notifications/read-all` — tandai semua notifikasi milik pemanggil sebagai dibaca. */
 export function markAllNotificationsRead(): Promise<{ updated: number }> {
   return apiFetch<{ updated: number }>('/notifications/read-all', { method: 'POST' });
+}
+
+// ---------------------------------------------------------------------------
+// Pendaftaran vendor menunggu persetujuan (superadmin)
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET /notifications/pending-registrations` — antre pendaftaran vendor
+ * beserta `pending_count` agregat. Hanya superadmin (403 untuk role lain);
+ * dipakai lonceng untuk angka badge dan entri panel. Tidak ada endpoint
+ * count terpisah — `pending_count` diambil dari respons daftar (probe
+ * `limit: 1`, pola `useUnreadNotificationCount`).
+ */
+export function listPendingRegistrations(
+  params: PendingRegistrationListParams = {},
+): Promise<PendingRegistrationListResult> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const search = query.toString();
+  return apiFetch<PendingRegistrationListResult>(
+    search === ''
+      ? '/notifications/pending-registrations'
+      : `/notifications/pending-registrations?${search}`,
+  );
 }

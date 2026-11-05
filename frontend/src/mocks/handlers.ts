@@ -250,6 +250,10 @@ const NOTIFICATION_TEMPLATES: Record<
     title: 'Kunjungan dibatalkan otomatis',
     message: (code) => `Permintaan ${code} batal otomatis.`,
   },
+  visit_cancelled: {
+    title: 'Kunjungan dibatalkan',
+    message: (code) => `Permintaan ${code} dibatalkan.`,
+  },
 };
 
 /**

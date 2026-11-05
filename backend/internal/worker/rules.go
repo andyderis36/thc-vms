@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"thc-vms/backend/internal/domain"
@@ -111,12 +112,15 @@ type CheckInBatchProber interface {
 // Dependencies wires the sweep runner to its ports. Clock is mandatory in
 // production (domain.SystemClock) and frozen in tests; Logger defaults to
 // slog.Default when nil. Notifications is OPTIONAL: when nil the R4 reminder
-// sweep is skipped (R1-R3 need only Visits/Rules/CheckIns).
+// sweep is skipped (R1-R3 need only Visits/Rules/CheckIns). Mailer is
+// OPTIONAL: when nil no email fan-out is attempted; the enqueue task
+// nil-skips exactly like the Notifications precedent above.
 type Dependencies struct {
 	Visits        domain.VisitRepository
 	Rules         domain.VisitAutoRuleRepository
 	CheckIns      domain.CheckInOutRepository
 	Notifications domain.NotificationRepository
+	Mailer        domain.Mailer
 	Clock         domain.Clock
 	Logger        *slog.Logger
 }
@@ -146,6 +150,7 @@ type Service struct {
 	rules         domain.VisitAutoRuleRepository
 	checkIns      domain.CheckInOutRepository
 	notifications domain.NotificationRepository
+	mailer        domain.Mailer
 	clock         domain.Clock
 	logger        *slog.Logger
 }
@@ -166,6 +171,7 @@ func NewService(deps Dependencies) *Service {
 		rules:         deps.Rules,
 		checkIns:      deps.CheckIns,
 		notifications: deps.Notifications,
+		mailer:        deps.Mailer,
 		clock:         clock,
 		logger:        logger,
 	}
@@ -304,13 +310,50 @@ func (s *Service) sweepReminders(ctx context.Context, now time.Time, summary *Su
 			summary.Skipped++
 			continue
 		}
-		if err := s.notifications.InsertForVisit(ctx, visit, domain.ReminderNotification(visit.VisitID)); err != nil {
+		tpl := domain.ReminderNotification(visit.VisitID)
+		if err := s.notifications.InsertForVisit(ctx, visit, tpl); err != nil {
 			summary.Failures = append(summary.Failures, Failure{Rule: RuleReminder, VisitID: visit.ID, Err: err})
 			s.logger.Error("auto-rule reminder emit failed", "rule", RuleReminder, "visit_id", visit.ID, "err", err)
 			continue
 		}
 		summary.Reminded++
+		s.enqueueReminderEmail(ctx, visit, tpl)
 		s.logger.Info("auto-rule reminder emitted", "rule", RuleReminder, "visit_id", visit.ID)
+	}
+}
+
+// enqueueReminderEmail fans one R4 reminder out to email AFTER its in_app row
+// has been written. It never fails the sweep: a nil mailer (SMTP disabled),
+// an unresolvable or empty recipient set and every send failure only log and
+// return. No channel='email' row is ever written.
+func (s *Service) enqueueReminderEmail(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate) {
+	if s.mailer == nil || tpl == nil || !domain.EmailAllowed(tpl.Type) {
+		return
+	}
+	recipients, err := s.notifications.ResolveEmailRecipients(ctx, visit, domain.NotificationAudienceVendor)
+	if err != nil {
+		s.logger.Error("auto-rule reminder email resolver failed, dropping email",
+			"rule", RuleReminder, "visit_id", visit.ID, "err", err)
+		return
+	}
+	trimmed := make([]string, 0, len(recipients))
+	for _, addr := range recipients {
+		if t := strings.TrimSpace(addr); t != "" {
+			trimmed = append(trimmed, t)
+		} else {
+			s.logger.Warn("auto-rule reminder email skipped blank address",
+				"rule", RuleReminder, "visit_id", visit.ID)
+		}
+	}
+	if len(trimmed) == 0 {
+		s.logger.Info("auto-rule reminder email skipped: no active recipients",
+			"rule", RuleReminder, "visit_id", visit.ID)
+		return
+	}
+	subject, textBody, htmlBody := domain.BuildEmail(visit, tpl)
+	if err := s.mailer.Send(ctx, trimmed, subject, textBody, htmlBody); err != nil {
+		s.logger.Error("auto-rule reminder email dead-letter",
+			"rule", RuleReminder, "visit_id", visit.VisitID, "template", string(tpl.Type), "err", err)
 	}
 }
 

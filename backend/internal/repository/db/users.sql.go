@@ -778,6 +778,7 @@ WITH updated AS (
     SET name       = $2,
         phone      = $3,
         avatar_url = $4,
+        email      = $5,
         updated_at = now()
     WHERE users.id = $1
     RETURNING users.id, users.name, users.email, users.phone, users.nik, users.avatar_url, users.role_id, users.location_id, users.status, users.type, users.vendor_id, users.vendor_name_override, users.created_at
@@ -810,6 +811,7 @@ type UpdateUserProfileParams struct {
 	Name      string      `json:"name"`
 	Phone     pgtype.Text `json:"phone"`
 	AvatarUrl pgtype.Text `json:"avatar_url"`
+	Email     string      `json:"email"`
 }
 
 type UpdateUserProfileRow struct {
@@ -831,17 +833,23 @@ type UpdateUserProfileRow struct {
 	CreatedAt          time.Time   `json:"created_at"`
 }
 
-// Self-service profile write. The usecase resolves the final name, phone and
-// avatar (empty -> NULL) and this statement stores them verbatim, then re-reads
-// the SAME projection as GetUserByID so the caller gets the complete profile
-// row. A plain UPDATE ... RETURNING cannot join role/location/vendor, so the
-// CTE carries the updated row into the joined projection unchanged.
+// Self-service profile write. The usecase resolves the final name, phone,
+// avatar (empty -> NULL) and email and this statement stores them verbatim,
+// then re-reads the SAME projection as GetUserByID so the caller gets the
+// complete profile row. Email is a plain overwrite: only the email-change
+// confirm path passes a different address, after the token binding and the
+// freeness re-check both pass; every other caller passes the stored address
+// back through (PATCH /auth/me never carries email at all), so the column
+// only moves on a verified flip. A plain UPDATE ... RETURNING cannot join
+// role/location/vendor, so the CTE carries the updated row into the joined
+// projection unchanged.
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error) {
 	row := q.db.QueryRow(ctx, updateUserProfile,
 		arg.ID,
 		arg.Name,
 		arg.Phone,
 		arg.AvatarUrl,
+		arg.Email,
 	)
 	var i UpdateUserProfileRow
 	err := row.Scan(

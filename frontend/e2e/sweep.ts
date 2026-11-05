@@ -12,17 +12,26 @@
  *
  * Aturan aman:
  * - Hanya baris yang cocok pola nama harness yang disentuh:
- *   kunjungan: visit_id/notes/visitor name berawalan `E2E-`
-  *   pengguna : `<prefix>.e2e-...@transhybrid.net.id` atau `e2e-...@transhybrid.net.id`
-  *   fasilitas: nama berawalan `E2E-FAC`
-  * - Akun seed (`vendor1a@transhybrid.net.id`, `security1a@transhybrid.net.id`, dst.) tidak pernah
+ *   kunjungan: visit_id/visitor name berawalan `E2E-`, notes mengandung marker
+ *     ketat `E2E-<label>-<epoch>-<seq>-<rand>` (lihat `helpers/markers.ts`)
+ *   pengguna : PERSIS `e2e-<runid>-<role>@<domain>` (tanpa alternatif prefix
+ *     bertitik — pola longgar berisiko cocok akun produksi tak terkait)
+ * - Fasilitas/lokasi TIDAK disentuh: cleanup lokasi uji dimiliki tracker
+ *   `facilities.spec.ts`; sapuan tidak pernah menghapus master lokasi
+ *   (menghapus yang masih dirujuk = 409 = abort seluruh suite).
+ * - Akun seed (`vendor1a@transhybrid.net.id`, `security1a@transhybrid.net.id`, dst.) tidak pernah
  *   cocok dengan pola di atas.
  * - Respons hapus yang bukan 204/404 menghentikan seluruh sapuan (exit 1)
  *   supaya runner tidak lanjut menembak suite di atas state yang tidak bersih.
+ * - Daftar pengguna ditelusuri per halaman seperti kunjungan (batas
+ *   MAX_USER_PAGES fail-closed): backend tidak memaginasi, jadi halaman
+ *   berhenti saat tak ada id baru; bila paginasi terlampaui, sapuan batal
+ *   SEBELUM satu pun DELETE (tidak ada hapus parsial).
  *
  * Login/token/base URL memakai ulang `e2e/helpers/api.ts` (bukan klien HTTP
- * baru). Node 24 menjalankan `.ts` via type stripping, jadi tidak perlu
- * dependency tambahan.
+ * baru); penanda memakai ulang `e2e/helpers/markers.ts` (definisi yang sama
+ * dengan `global.setup.ts`, tanpa drift). Node 24 menjalankan `.ts` via type
+ * stripping, jadi tidak perlu dependency tambahan.
  */
 
 type Row = Record<string, unknown>
@@ -38,7 +47,7 @@ interface SweepApi {
   apiFetchRaw(token: string, method: string, path: string): Promise<ApiResponse>
 }
 
-type Kind = 'visit' | 'user' | 'facility'
+type Kind = 'visit' | 'user'
 
 interface Candidate {
   kind: Kind
@@ -47,13 +56,24 @@ interface Candidate {
   detail: string
 }
 
+interface MarkersApi {
+  HARNESS_NOTE_MARKER: RegExp
+  buildUserMarker(domains: Iterable<string>): RegExp
+  isHarnessNote(notes: string): boolean
+  isNemTempEmail(email: string): boolean
+}
+
 const APPLY = process.argv.includes('--apply')
 const API_MODULE_URL = new URL('./helpers/api.ts', import.meta.url).href
+const MARKERS_MODULE_URL = new URL('./helpers/markers.ts', import.meta.url).href
 const MAX_VISIT_PAGES = 200
-const VISIT_MARKER = /(?:^|\|\s*)E2E-[A-Za-z0-9]/
-// Domain akun seed bisa di-override (prod memakai @thc.net.id/@thc.com); regex
+const MAX_USER_PAGES = 200
+const USER_PAGE_SIZE = 100
+// Domain akun seed bisa di-override (prod memakai @thc.net.id/@thc.com); daftar
 // dibangun dari env yang sama dengan ACCOUNTS, default transhybrid.net.id, dan
-// tetap menerima domain default agar sapuan lokal tidak regresi.
+// tetap menerima domain default agar sapuan lokal tidak regresi. Regex exact
+// (`e2e-<runid>-<role>@`) dirakit oleh `helpers/markers.ts` (tanpa alternatif
+// prefix bertitik — live-safety).
 const SWEEP_USER_DOMAINS = new Set<string>(['transhybrid.net.id'])
 for (const candidate of [
   process.env.E2E_EMAIL_SUPERADMIN,
@@ -67,13 +87,6 @@ for (const candidate of [
   const domain = candidate?.includes('@') ? candidate.split('@')[1] : ''
   if (domain) SWEEP_USER_DOMAINS.add(domain)
 }
-const USER_MARKER = new RegExp(
-  `^(?:[a-z0-9]+\\.)?e2e-[a-z0-9][a-z0-9-]*@(?:${[...SWEEP_USER_DOMAINS]
-    .map((d) => d.replace(/\./g, '\\.'))
-    .join('|')})$`,
-  'i',
-)
-const FACILITY_MARKER = /^E2E-FAC/i
 
 function log(message: string): void {
   console.log(`[e2e-sweep] ${message}`)
@@ -112,6 +125,14 @@ async function loadApi(): Promise<SweepApi> {
     return (await import(API_MODULE_URL)) as unknown as SweepApi
   } catch (error) {
     fail(`gagal memuat helper API (${API_MODULE_URL}): ${errorMessage(error)}`)
+  }
+}
+
+async function loadMarkers(): Promise<MarkersApi> {
+  try {
+    return (await import(MARKERS_MODULE_URL)) as unknown as MarkersApi
+  } catch (error) {
+    fail(`gagal memuat penanda bersama (${MARKERS_MODULE_URL}): ${errorMessage(error)}`)
   }
 }
 
@@ -157,14 +178,48 @@ async function listAllVisits(api: SweepApi, token: string): Promise<Row[]> {
       return items
     }
   }
-  fail(`paginasi /visits melebihi ${MAX_VISIT_PAGES} halaman; hentikan sapuan`)
+    fail(`paginasi /visits melebihi ${MAX_VISIT_PAGES} halaman; hentikan sapuan`)
 }
 
-function isE2EVisit(row: Row): boolean {
+/**
+ * Telusuri seluruh daftar pengguna (`GET /users` atau `/users/security`).
+ * Backend tidak memaginasi endpoint ini (respons array penuh), jadi loop
+ * berhenti saat satu halaman tak menyumbang id baru — pola yang sama
+ * (halaman + batas fail-closed) dengan `listAllVisits`. Batas terlampaui =
+ * batal SEBELUM satu pun DELETE.
+ */
+async function listAllUsers(
+  api: SweepApi,
+  token: string,
+  path: '/users' | '/users/security',
+): Promise<Row[]> {
+  const items: Row[] = []
+  const seen = new Set<string>()
+  for (let page = 1; page <= MAX_USER_PAGES; page += 1) {
+    const result = await api.apiFetchRaw(token, 'GET', `${path}?page=${page}&limit=${USER_PAGE_SIZE}`)
+    const pageItems = expectArray(result, `GET ${path}?page=${page}`)
+    let fresh = 0
+    for (const row of pageItems) {
+      const id = str(row.id)
+      if (id === '' || seen.has(id)) {
+        continue
+      }
+      seen.add(id)
+      items.push(row)
+      fresh += 1
+    }
+    if (pageItems.length < USER_PAGE_SIZE || fresh === 0) {
+      return items
+    }
+  }
+  fail(`paginasi ${path} melebihi ${MAX_USER_PAGES} halaman; hentikan sapuan`)
+}
+
+function isE2EVisit(row: Row, markers: MarkersApi): boolean {
   if (/^E2E-/i.test(str(row.visit_id))) {
     return true
   }
-  if (VISIT_MARKER.test(str(row.notes).trim())) {
+  if (markers.isHarnessNote(str(row.notes).trim())) {
     return true
   }
   const visitors = row.visitors
@@ -187,8 +242,9 @@ function visitDetail(row: Row): string {
   return parts.join(' ')
 }
 
-function isE2EUser(row: Row): boolean {
-  return USER_MARKER.test(str(row.email).trim())
+function isE2EUser(row: Row, userMarker: RegExp, markers: MarkersApi): boolean {
+  const email = str(row.email).trim()
+  return userMarker.test(email) || markers.isNemTempEmail(email)
 }
 
 function userEndpoint(row: Row): string {
@@ -198,14 +254,6 @@ function userEndpoint(row: Row): string {
 
 function userDetail(row: Row): string {
   return `email=${str(row.email)} role=${str(row.role) || '-'} name="${str(row.name)}"`
-}
-
-function isE2EFacility(row: Row): boolean {
-  return FACILITY_MARKER.test(str(row.name).trim())
-}
-
-function facilityDetail(row: Row): string {
-  return `name="${str(row.name)}" type=${str(row.type) || '-'}`
 }
 
 function toCandidate(
@@ -227,6 +275,8 @@ async function main(): Promise<void> {
   }
 
   const api = await loadApi()
+  const markers = await loadMarkers()
+  const userMarker = markers.buildUserMarker(SWEEP_USER_DOMAINS)
   const account = api.ACCOUNTS.super
   if (account === undefined) {
     fail('akun super tidak ada di helper ACCOUNTS')
@@ -239,28 +289,23 @@ async function main(): Promise<void> {
     fail(`login ${account.email} gagal: ${errorMessage(error)}`)
   }
 
-  const visits = (await listAllVisits(api, token)).filter(isE2EVisit)
-  const managedUsers = expectArray(await api.apiFetchRaw(token, 'GET', '/users'), 'GET /users')
-  const securityUsers = expectArray(
-    await api.apiFetchRaw(token, 'GET', '/users/security'),
-    'GET /users/security',
-  )
-  const facilities = expectArray(
-    await api.apiFetchRaw(token, 'GET', '/locations?active_only=false'),
-    'GET /locations?active_only=false',
-  )
+  const visits = (await listAllVisits(api, token)).filter((row) => isE2EVisit(row, markers))
+  const managedUsers = await listAllUsers(api, token, '/users')
+  const securityUsers = await listAllUsers(api, token, '/users/security')
 
   const seenUsers = new Set<string>()
   const users = [...managedUsers, ...securityUsers].filter((row) => {
-    if (!isE2EUser(row)) return false
+    if (!isE2EUser(row, userMarker, markers)) return false
     const id = str(row.id)
     if (id === '' || seenUsers.has(id)) return false
     seenUsers.add(id)
     return true
   })
 
-  // Urutan penting: kunjungan dulu (melepas referensi), lalu pengguna
-  // (melepas referensi lokasi), terakhir fasilitas.
+  // Urutan penting: kunjungan dulu (melepas referensi kunjungan->akun),
+  // lalu pengguna. Lokasi/fasilitas SENGAJA tidak disapu (lihat aturan aman
+  // di kepala berkas): tidak ada kandidat `facility`, tidak ada DELETE
+  // /locations dari sapuan ini.
   const candidates: Candidate[] = [
     ...visits.map((row) =>
       toCandidate(
@@ -271,19 +316,9 @@ async function main(): Promise<void> {
       ),
     ),
     ...users.map((row) => toCandidate('user', row, userEndpoint(row), userDetail(row))),
-    ...facilities
-      .filter(isE2EFacility)
-      .map((row) =>
-        toCandidate(
-          'facility',
-          row,
-          `/locations/${encodeURIComponent(str(row.id))}`,
-          facilityDetail(row),
-        ),
-      ),
   ]
 
-  const counts: Record<Kind, number> = { visit: 0, user: 0, facility: 0 }
+  const counts: Record<Kind, number> = { visit: 0, user: 0 }
 
   if (candidates.length === 0) {
     log('tidak ada artefak E2E tersisa')
@@ -307,12 +342,9 @@ async function main(): Promise<void> {
     counts[candidate.kind] += 1
   }
 
-  const total = counts.visit + counts.user + counts.facility
+  const total = counts.visit + counts.user
   const label = APPLY ? 'ringkasan' : 'ringkasan (dry-run)'
-  log(
-    `${label}: visits=${counts.visit} users=${counts.user} ` +
-      `facilities=${counts.facility} total=${total}`,
-  )
+  log(`${label}: visits=${counts.visit} users=${counts.user} total=${total}`)
 }
 
 await main()

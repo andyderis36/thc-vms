@@ -18,11 +18,13 @@ import (
 
 // AuthRoutes carries the bound auth-handler methods.
 type AuthRoutes struct {
-	Login    gin.HandlerFunc
-	Register gin.HandlerFunc
-	Me       gin.HandlerFunc
-	PatchMe  gin.HandlerFunc
-	Logout   gin.HandlerFunc
+	Login              gin.HandlerFunc
+	Register           gin.HandlerFunc
+	Me                 gin.HandlerFunc
+	PatchMe            gin.HandlerFunc
+	Logout             gin.HandlerFunc
+	RequestEmailChange gin.HandlerFunc
+	ConfirmEmailChange gin.HandlerFunc
 }
 
 // UserRoutes carries the bound security-account handler methods.
@@ -102,11 +104,14 @@ type AuditRoutes struct {
 }
 
 // NotificationRoutes carries the bound notification handler methods (every
-// authenticated role: super_admin, admin, security and vendor).
+// authenticated role: super_admin, admin, security and vendor). The pending
+// vendor-registration queue is the exception: it is super_admin only and
+// therefore mounts behind SuperAdminOnly, never in the NotifyOnly group.
 type NotificationRoutes struct {
-	List        gin.HandlerFunc
-	MarkRead    gin.HandlerFunc
-	MarkAllRead gin.HandlerFunc
+	List                gin.HandlerFunc
+	MarkRead            gin.HandlerFunc
+	MarkAllRead         gin.HandlerFunc
+	PendingRegistrations gin.HandlerFunc
 }
 
 // Chain is the pre-built middleware for each route group.
@@ -115,6 +120,7 @@ type Chain struct {
 	CORS           gin.HandlerFunc
 	BodyLimit      gin.HandlerFunc
 	LoginLimiter   gin.HandlerFunc
+	RegisterLimiter gin.HandlerFunc
 	Authenticate   gin.HandlerFunc
 	AdminOnly      gin.HandlerFunc
 	ApproveOnly    gin.HandlerFunc
@@ -163,8 +169,9 @@ func withFallback(next gin.HandlerFunc) gin.HandlerFunc {
 }
 
 // New builds the Gin engine serving the whole MVP API under /api/v1.
-// Unauthenticated: POST /auth/login and POST /auth/register (both behind the
-// rate limiter), GET /health, GET /ready. Everything else mounts Authenticate (JWT -> RequireIdentity),
+// Unauthenticated: POST /auth/login (behind the shared LoginLimiter) and
+// POST /auth/register (behind its own RegisterLimiter: 5/hour per IP plus
+// 3/24h per target email), GET /health, GET /ready. Everything else mounts Authenticate (JWT -> RequireIdentity),
 // with AdminOnly narrowing the security-account routes, SuperAdminOnly
 // narrowing the back-office facility and account routes to super_admin,
 // ApproveOnly narrowing approve/reject to super_admin and admin (a vendor is
@@ -188,6 +195,11 @@ const UploadPath = "/api/v1/uploads"
 // back to pass-through middleware so tests can mount a subset.
 func New(d Deps) *gin.Engine {
 	engine := gin.New()
+	// Trust only the reverse proxies listed in TRUSTED_PROXIES (empty =
+	// trust nothing: ClientIP returns RemoteAddr and a forged
+	// X-Forwarded-For is ignored). Without this the per-IP limiter buckets
+	// key on the Caddy proxy address for every client.
+	applyTrustedProxies(engine)
 	engine.Use(withFallback(d.Chain.Recovery))
 	engine.Use(withFallback(d.Chain.CORS))
 
@@ -196,7 +208,7 @@ func New(d Deps) *gin.Engine {
 	// opts out inside the middleware because that handler owns its own ceiling.
 	v1.Use(withFallback(d.Chain.BodyLimit))
 	v1.POST("/auth/login", withFallback(d.Chain.LoginLimiter), withFallback(d.Auth.Login))
-	v1.POST("/auth/register", withFallback(d.Chain.LoginLimiter), withFallback(d.Auth.Register))
+	v1.POST("/auth/register", withFallback(d.Chain.RegisterLimiter), withFallback(d.Auth.Register))
 	v1.GET("/health", withFallback(d.Health.Health))
 	v1.GET("/ready", withFallback(d.Health.Ready))
 
@@ -205,6 +217,8 @@ func New(d Deps) *gin.Engine {
 	authed.GET("/auth/me", withFallback(d.Auth.Me))
 	authed.PATCH("/auth/me", withFallback(d.Auth.PatchMe))
 	authed.POST("/auth/logout", withFallback(d.Auth.Logout))
+	authed.POST("/auth/email-change/request", withFallback(d.Auth.RequestEmailChange))
+	authed.POST("/auth/email-change/confirm", withFallback(d.Auth.ConfirmEmailChange))
 
 	admins := authed.Group("")
 	admins.Use(withFallback(d.Chain.AdminOnly))
@@ -231,6 +245,10 @@ func New(d Deps) *gin.Engine {
 	super.DELETE("/users/:id", withFallback(d.SuperAdmin.DeleteUser))
 	super.DELETE("/visits/:id", withFallback(d.SuperAdmin.DeleteVisit))
 	super.GET("/audit-logs", withFallback(d.Audit.List))
+	// The pending vendor-registration queue is the superadmin approval
+	// backlog behind the console bell: global by design, hence SuperAdminOnly
+	// and never the branch-scoped NotifyOnly group.
+	super.GET("/notifications/pending-registrations", withFallback(d.Notifications.PendingRegistrations))
 
 	notify := authed.Group("")
 	notify.Use(withFallback(d.Chain.NotifyOnly))

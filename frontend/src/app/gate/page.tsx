@@ -18,6 +18,7 @@ import { isSuperAdminRole } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 import { SEARCH_QUERY_MAX_LENGTH } from '@/lib/limits'
 import {
+  GATE_LIST_REFETCH_INTERVAL,
   useCheckInVisitMutation,
   useCheckOutVisitMutation,
   usePendingApprovalCount,
@@ -166,18 +167,29 @@ function GateContent() {
   }, [searchInput])
 
   const filter: GateListFilter = { q: search, dateFrom, dateTo, page, pageSize, sortBy, order }
-  const visitsQuery = useVisitsQuery(toGateListParams(filter, TAB_STATUS[tab]))
+  // Tier kios 15 dtk (OPT-IN): ketiga query gerbang memakai interval yang
+  // sama pada kunci masing-masing — tanpa timer ganda, tanpa owner 30 dtk.
+  const visitsQuery = useVisitsQuery(
+    toGateListParams(filter, TAB_STATUS[tab]),
+    true,
+    GATE_LIST_REFETCH_INTERVAL,
+  )
   // Tab "Akan Hadir" juga menampilkan kunjungan `rescheduled` (keduanya
   // check-in-able). Query kedua HANYA aktif di tab upcoming agar tab lain
   // tetap single-query; hasilnya digabung client-side oleh mergeUpcomingQueue.
   const rescheduledQuery = useVisitsQuery(
     toGateListParams(filter, 'rescheduled'),
     isUpcoming,
+    GATE_LIST_REFETCH_INTERVAL,
   )
   // Badge "X Teknisi On-Site": query KHUSUS (bukan query tab) supaya angka
   // teknisi di lokasi tetap tampil di tab mana pun. Hanya untuk role kios —
   // badge-nya hanya dirender di SecurityKioskShell.
-  const onSiteQuery = useVisitsQuery(ON_SITE_COUNT_PARAMS, role === 'security')
+  const onSiteQuery = useVisitsQuery(
+    ON_SITE_COUNT_PARAMS,
+    role === 'security',
+    GATE_LIST_REFETCH_INTERVAL,
+  )
   const onSiteCount = useMemo(
     () => countOnSiteTechnicians(onSiteQuery.data?.items ?? []),
     [onSiteQuery.data],

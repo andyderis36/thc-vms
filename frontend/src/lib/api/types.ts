@@ -249,6 +249,7 @@ export interface VisitDetail {
   notes: string | null;
   /** "Tujuan lain" (teks bebas ≤200) — null/kosong bila tak diisi. */
   purpose_note?: string | null;
+  status_note?: string | null;
   visitors: VisitorItem[];
   created_at: string;
   check_in_at?: string | null;
@@ -380,6 +381,30 @@ export interface UpdateSelfProfileRequest {
   current_password?: string;
 }
 
+/**
+ * `POST /auth/email-change/request` — minta tautan verifikasi ganti email
+ * (publik, dibatasi rate limiter). Respons selalu generik 202 agar tidak
+ * membocorkan apakah email sudah terdaftar.
+ */
+export interface EmailChangeRequest {
+  new_email: string;
+  current_password: string;
+}
+
+/** `POST /auth/email-change/request` → 202 generik `{ success, data: { message } }`. */
+export interface EmailChangeRequestResult {
+  message: string;
+}
+
+/**
+ * `POST /auth/email-change/confirm` — tukar token verifikasi menjadi email
+ * baru (wajib auth, respons `User`). Token tidak valid/kedaluwarsa dijawab
+ * 400 INVALID_TOKEN "Tautan tidak valid atau kedaluwarsa.".
+ */
+export interface EmailChangeConfirmRequest {
+  token: string;
+}
+
 export interface CreateVisitRequest {
   location_id: string;
   /**
@@ -497,7 +522,8 @@ export type NotificationType =
   | 'visit_approved'
   | 'visit_rejected'
   | 'visit_reminder'
-  | 'visit_auto_cancelled';
+  | 'visit_auto_cancelled'
+  | 'visit_cancelled';
 
 export interface NotificationItem {
   id: string;
@@ -531,4 +557,39 @@ export interface NotificationListParams {
   page?: number;
   limit?: number;
   location_id?: string;
+}
+
+/**
+ * `GET /notifications/pending-registrations` — antre pendaftaran vendor
+ * menunggu persetujuan (superadmin saja; 403 untuk role lain). Bentuk dibekukan
+ * pada `docs/4. openapi.yaml` (`PendingRegistrationItem` /
+ * `PendingRegistrationListResponse`) — jangan diubah di sini.
+ */
+export type PendingRegistrationStatus = 'pending' | 'approved' | 'rejected';
+
+export interface PendingRegistrationItem {
+  vendor_user_id: string;
+  name: string;
+  email: string;
+  phone: string;
+  nik: string;
+  vendor_name: string;
+  /** RFC3339 waktu pendaftaran. */
+  created_at: string;
+  status: PendingRegistrationStatus;
+}
+
+export interface PendingRegistrationListResult {
+  items: PendingRegistrationItem[];
+  total: number;
+  /** Jumlah belum diproses (agregat server) — sumber angka badge lonceng. */
+  pending_count: number;
+  page: number;
+  limit: number;
+}
+
+/** Query `GET /notifications/pending-registrations`; hanya `page`/`limit`. */
+export interface PendingRegistrationListParams {
+  page?: number;
+  limit?: number;
 }
