@@ -7,6 +7,7 @@
 package mailer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -74,6 +75,11 @@ type mailJob struct {
 	subject  string
 	textBody string
 	htmlBody string
+	// qrPNG/cid carry the optional inline team QR: when both are set the
+	// PNG is embedded under the Content-ID the HTML references as
+	// "cid:<cid>". Empty on every non-approval mail.
+	qrPNG []byte
+	cid   string
 }
 
 // SMTPMailer queues visit notifications and flushes them through a pool of
@@ -239,6 +245,30 @@ func (m *SMTPMailer) Send(_ context.Context, to []string, subject, textBody, htm
 	}
 }
 
+// SendWithTeamQR enqueues one notification with its inline team QR attached
+// and returns immediately, mirroring Send: a full queue drops (never blocks)
+// and sending after Close is refused.
+func (m *SMTPMailer) SendWithTeamQR(_ context.Context, to []string, subject, textBody, htmlBody string, qrPNG []byte, cid string) error {
+	recipients := trimRecipients(to)
+	if len(recipients) == 0 {
+		return fmt.Errorf("mailer: at least one recipient is required: %w", domain.ErrValidation)
+	}
+	job := mailJob{to: recipients, subject: subject, textBody: textBody, htmlBody: htmlBody, qrPNG: qrPNG, cid: cid}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed {
+		return errors.New("mailer: mailer is closed")
+	}
+	select {
+	case m.queue <- job:
+		return nil
+	default:
+		dropped := m.dropped.Add(1)
+		slog.Warn("mailer: queue full, dropping email", "to", to, "subject", subject, "dropped_total", dropped)
+		return nil
+	}
+}
+
 // trimRecipients drops blank entries and copies the slice so later caller
 // mutation cannot change a queued job.
 func trimRecipients(to []string) []string {
@@ -368,6 +398,13 @@ func (m *SMTPMailer) compose(job mailJob) (*mail.Msg, error) {
 	msg.SetBodyString(mail.TypeTextPlain, job.textBody)
 	if job.htmlBody != "" {
 		msg.AddAlternativeString(mail.TypeTextHTML, job.htmlBody)
+	}
+	// The approval team QR rides along as the one inline attachment the
+	// HTML references through "cid:<cid>". Both halves are set together by
+	// SendWithTeamQR; a half-set job keeps the text fallback (the
+	// Kode-kunjungan row) instead of embedding a dangling reference.
+	if len(job.qrPNG) > 0 && job.cid != "" {
+		msg.EmbedReadSeeker("team-qr.png", bytes.NewReader(job.qrPNG), mail.WithFileContentID(job.cid))
 	}
 	return msg, nil
 }

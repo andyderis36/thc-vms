@@ -29,8 +29,12 @@ import (
 // Mailer is the outbound email port. Implementations (the go-mail SMTP
 // adapter) send one message; to holds the envelope recipients, subject is
 // the [THC-VMS] line, and textBody/htmlBody are the two MIME parts.
+// SendWithTeamQR sends the same message with one inline-CID PNG attached
+// (the approval team QR); qrPNG is the encoded image bytes and cid its
+// Content-ID, referenced from the HTML as "cid:<cid>".
 type Mailer interface {
 	Send(ctx context.Context, to []string, subject, textBody, htmlBody string) error
+	SendWithTeamQR(ctx context.Context, to []string, subject, textBody, htmlBody string, qrPNG []byte, cid string) error
 }
 
 // emailAllowedTypes is the single email allowlist. Exactly these seven
@@ -83,6 +87,16 @@ func EmailSubject(t NotificationType, visitCode string) string {
 // HTML context rows (day-month-year, 24-hour clock).
 const emailScheduleLayout = "02 Jan 2006 15:04"
 
+// TeamQRCID renders the deterministic Content-ID of the approval team QR
+// for a visit code: "qr-" + code. Deterministic so every fanned-out copy of
+// the same approval mail references the one shared inline image.
+func TeamQRCID(visitCode string) string {
+	return "qr-" + visitCode
+}
+
+// teamQRNote is the locked Indonesian copy under the approval team QR.
+const teamQRNote = "Satu QR Code untuk 1 tim. Pindai sekali untuk check-in bersama, dan sekali lagi untuk check-out bersama."
+
 // BuildEmail renders the (subject, textBody, htmlBody) triple for one
 // notification template in the context of its visit. The text body is the
 // in_app Message verbatim; the HTML body wraps the in_app Title/Message in
@@ -109,6 +123,10 @@ func renderEmailHTML(visit VisitRequest, tpl *NotificationTemplate) string {
 	if reason := strings.TrimSpace(derefString(visit.StatusNote)); reason != "" {
 		writeEmailRow(&rows, "Alasan", reason)
 	}
+	qr := ""
+	if tpl.Type == NotificationVisitApproved {
+		qr = renderTeamQRSection(visit.VisitID)
+	}
 
 	return `<!DOCTYPE html>` +
 		`<html lang="id"><head><meta charset="utf-8"></head>` +
@@ -121,11 +139,25 @@ func renderEmailHTML(visit VisitRequest, tpl *NotificationTemplate) string {
 		`<h2 style="margin:0 0 12px 0;color:#1f1b3a;font-size:18px;">` + html.EscapeString(tpl.Title) + `</h2>` +
 		`<p style="margin:0 0 16px 0;color:#3d3a52;font-size:14px;line-height:1.6;">` + html.EscapeString(tpl.Message) + `</p>` +
 		`<table style="width:100%;border-collapse:collapse;font-size:14px;">` + rows.String() + `</table>` +
+		qr +
 		`</div>` +
 		`<p style="margin:16px 0 0 0;color:#8a87a3;font-size:12px;text-align:center;">` +
 		`Email otomatis dari THC-VMS. Mohon tidak membalas email ini.` +
 		`</p>` +
 		`</div></body></html>`
+}
+
+// renderTeamQRSection builds the approval-only team QR block: the inline-CID
+// image (the attachment is embedded by the SMTP adapter under the same CID)
+// plus the locked team note. The Kode-kunjungan context row above stays the
+// text fallback, so a manually typed code still scans at the gate. The CID is
+// escaped like every other interpolated field.
+func renderTeamQRSection(visitCode string) string {
+	cid := html.EscapeString(TeamQRCID(visitCode))
+	return `<div style="margin:20px 0 4px 0;text-align:center;">` +
+		`<img src="cid:` + cid + `" alt="QR Code tim" style="width:200px;height:200px;"/>` +
+		`<p style="margin:12px 0 0 0;color:#3d3a52;font-size:14px;font-weight:bold;">` + teamQRNote + `</p>` +
+		`</div>`
 }
 
 // RenderBrandedActionEmail builds a branded HTML document like
@@ -184,12 +216,16 @@ func derefString(s *string) string {
 	return *s
 }
 
-// MailCall is one recorded FakeMailer.Send invocation.
+// MailCall is one recorded FakeMailer.Send invocation. QRPNG/QRCID carry
+// the team QR attached through SendWithTeamQR; both stay empty for plain
+// Send calls and for every non-approval mail.
 type MailCall struct {
 	To       []string
 	Subject  string
 	TextBody string
 	HTMLBody string
+	QRPNG    []byte
+	QRCID    string
 }
 
 // FakeMailer is the in-memory Mailer for unit tests: it records every Send
@@ -203,5 +239,13 @@ type FakeMailer struct {
 func (f *FakeMailer) Send(ctx context.Context, to []string, subject, textBody, htmlBody string) error {
 	_ = ctx
 	f.Calls = append(f.Calls, MailCall{To: to, Subject: subject, TextBody: textBody, HTMLBody: htmlBody})
+	return f.Err
+}
+
+// SendWithTeamQR records the call with its inline image and returns the
+// configured error, mirroring Send without touching the network.
+func (f *FakeMailer) SendWithTeamQR(ctx context.Context, to []string, subject, textBody, htmlBody string, qrPNG []byte, cid string) error {
+	_ = ctx
+	f.Calls = append(f.Calls, MailCall{To: to, Subject: subject, TextBody: textBody, HTMLBody: htmlBody, QRPNG: qrPNG, QRCID: cid})
 	return f.Err
 }

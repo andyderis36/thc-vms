@@ -173,4 +173,8 @@ type Visitor struct {
 	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
 	// Jabatan anggota pengunjung yang diketik bebas (mis. Teknisi, Mandor, Supervisor); TIDAK terdaftar di katalog dan hanya dipakai sebagai saran isian (bukan enumerasi)
 	Jabatan pgtype.Text `json:"jabatan"`
+	// Penanda koreksi kontak anggota: TRUE bila nomor telepon pernah diubah pemilik kunjungan via PATCH /visits/{id}/visitors/{visitorId} sebelum approval; monoton (tidak pernah kembali FALSE)
+	PhoneEdited bool `json:"phone_edited"`
+	// Email kontak anggota pengunjung (opsional, maks 254 char); NULL atau kosong berarti tidak ada surat yang dikirim
+	Email pgtype.Text `json:"email"`
 }

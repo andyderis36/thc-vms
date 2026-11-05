@@ -337,12 +337,33 @@ func (s *Service) enqueueReminderEmail(ctx context.Context, visit domain.VisitRe
 		return
 	}
 	trimmed := make([]string, 0, len(recipients))
-	for _, addr := range recipients {
+	seen := make(map[string]struct{})
+	collect := func(addr string) {
 		if t := strings.TrimSpace(addr); t != "" {
-			trimmed = append(trimmed, t)
+			if _, dup := seen[t]; !dup {
+				seen[t] = struct{}{}
+				trimmed = append(trimmed, t)
+			}
 		} else {
 			s.logger.Warn("auto-rule reminder email skipped blank address",
 				"rule", RuleReminder, "visit_id", visit.ID)
+		}
+	}
+	for _, addr := range recipients {
+		collect(addr)
+	}
+	// Roster members ride along on the vendor leg: one send per recipient
+	// sharing the same reminder. A blank or missing member email means no
+	// mail, never an error, so blanks skip silently.
+	for _, member := range visit.Visitors {
+		if member.Email == nil {
+			continue
+		}
+		if t := strings.TrimSpace(*member.Email); t != "" {
+			if _, dup := seen[t]; !dup {
+				seen[t] = struct{}{}
+				trimmed = append(trimmed, t)
+			}
 		}
 	}
 	if len(trimmed) == 0 {
@@ -351,9 +372,11 @@ func (s *Service) enqueueReminderEmail(ctx context.Context, visit domain.VisitRe
 		return
 	}
 	subject, textBody, htmlBody := domain.BuildEmail(visit, tpl)
-	if err := s.mailer.Send(ctx, trimmed, subject, textBody, htmlBody); err != nil {
-		s.logger.Error("auto-rule reminder email dead-letter",
-			"rule", RuleReminder, "visit_id", visit.VisitID, "template", string(tpl.Type), "err", err)
+	for _, addr := range trimmed {
+		if err := s.mailer.Send(ctx, []string{addr}, subject, textBody, htmlBody); err != nil {
+			s.logger.Error("auto-rule reminder email dead-letter",
+				"rule", RuleReminder, "visit_id", visit.VisitID, "template", string(tpl.Type), "err", err)
+		}
 	}
 }
 

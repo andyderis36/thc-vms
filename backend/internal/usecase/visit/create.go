@@ -54,6 +54,10 @@ type VisitorInput struct {
 	// trimmed and capped; a blank input becomes absent (NULL). It is NEVER a
 	// catalogue lookup: values typed earlier are suggestions only.
 	Jabatan *string
+	// Email is the optional contact address of this visiting member
+	// (migration 000022), used only as the notification-mail recipient.
+	// Trimmed and validated; absent or blank means "no mail" (NULL).
+	Email *string
 }
 
 // CreateVisitInput is the data needed to file a new visit request.
@@ -215,6 +219,9 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 		if jabatan := strings.TrimSpace(textOrEmpty(v.Jabatan)); jabatan != "" {
 			visitor.Jabatan = &jabatan
 		}
+		if email := strings.TrimSpace(textOrEmpty(v.Email)); email != "" {
+			visitor.Email = &email
+		}
 		visitors = append(visitors, visitor)
 	}
 	created, err := s.visits.Create(ctx, visit, visitors, in.PurposeIDs)
@@ -271,6 +278,9 @@ func validateVisitor(v VisitorInput, n int, allow FileOriginAllowlist) error {
 	}
 	if len([]rune(strings.TrimSpace(textOrEmpty(v.Jabatan)))) > maxJabatanLen {
 		return domain.ValidationFailure("Jabatan pengunjung ke-" + itoa(n) + " maksimal 120 karakter.")
+	}
+	if email := strings.TrimSpace(textOrEmpty(v.Email)); email != "" && !validation.ValidEmail(email) {
+		return domain.ValidationFailure("Email pengunjung ke-" + itoa(n) + " tidak valid.")
 	}
 	return nil
 }

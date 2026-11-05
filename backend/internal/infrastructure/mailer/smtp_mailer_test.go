@@ -306,3 +306,18 @@ func TestCompose_FromNameRendersDisplayName(t *testing.T) {
 		t.Fatalf("From = %+v, want bare address when no display name", from)
 	}
 }
+
+func TestCompose_TeamQRAttachesWithoutError(t *testing.T) {
+	// Given: a job carrying the approval team QR (PNG bytes + CID).
+	// When:  it is composed.
+	// Then:  composition succeeds; a half-set job (bytes without a CID)
+	//        degrades to the text fallback and still composes.
+	m := newSMTPMailer("noreply@example.internal", 5*time.Second, 5*time.Second, 10, 0, nil, realSleep)
+	qr := []byte{0x89, 'P', 'N', 'G'}
+	if _, err := m.compose(mailJob{to: []string{"a@x"}, subject: "s", textBody: "t", htmlBody: "<p>h</p>", qrPNG: qr, cid: "qr-VST-1"}); err != nil {
+		t.Fatalf("compose with team QR = %v", err)
+	}
+	if _, err := m.compose(mailJob{to: []string{"a@x"}, subject: "s", textBody: "t", qrPNG: qr}); err != nil {
+		t.Fatalf("compose with half-set QR = %v", err)
+	}
+}

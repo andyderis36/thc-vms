@@ -101,17 +101,28 @@ func TestEmailEnqueue_LogsNeverCarryRecipientAddresses(t *testing.T) {
 		return []string{staffAddr, vendorAddr}, nil
 	})
 
-	// Leg 1: resolver failure for one audience, surviving leg still sends.
+	// Leg 1: resolver failure for one audience, surviving leg still sends
+	// (one per-recipient send for each of its two resolved addresses).
 	buf := captureSlog(t)
 	fake := &domain.FakeMailer{}
 	visit, tpl := robustVisit()
 	enqueueEmail(context.Background(), fake, nil, visit, tpl,
 		uuid.New(), uuid.New(),
 		domain.NotificationAudienceStaff, domain.NotificationAudienceVendor)
-	if len(fake.Calls) != 1 {
-		t.Fatalf("email calls = %d, want 1 surviving send", len(fake.Calls))
+	if len(fake.Calls) != 2 {
+		t.Fatalf("email calls = %d, want 2 (one per surviving vendor recipient)", len(fake.Calls))
+	}
+	got := map[string]bool{}
+	for _, call := range fake.Calls {
+		if len(call.To) != 1 {
+			t.Fatalf("recipients = %v, want one recipient per send", call.To)
+		}
+		got[call.To[0]] = true
 	}
 	for _, addr := range []string{staffAddr, vendorAddr} {
+		if !got[addr] {
+			t.Fatalf(" surviving sends = %v, want one send each to %q and %q", fake.Calls, staffAddr, vendorAddr)
+		}
 		if strings.Contains(buf.String(), addr) {
 			t.Fatalf("resolver-failure log carries recipient %q:\n%s", addr, buf.String())
 		}
