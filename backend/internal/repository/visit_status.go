@@ -88,10 +88,18 @@ func (r *visitRepository) UpdateStatus(
 				return err
 			}
 			pending = &pendingEmail{visit: emailVisit(locked, locked.StartDate, locked.EndDate, notes), tpl: human, audiences: []domain.NotificationAudience{human.Audience}}
-			return nil
 		}
 		if first != nil {
 			pending = &pendingEmail{visit: emailVisit(locked, locked.StartDate, locked.EndDate, notes), tpl: first, audiences: []domain.NotificationAudience{first.Audience}}
+		}
+		// A pending vendor leg needs the roster for the member fan-out: load
+		// it inside the same transaction so the email sees the snapshot the
+		// in_app rows were written from. Staff-only moves (gate check-in/out)
+		// skip the extra lookup.
+		if pending != nil && hasVendorAudience(pending.audiences) {
+			if err := attachMembers(ctx, q, parsed, pending); err != nil {
+				return err
+			}
 		}
 		return nil
 	}); err != nil {
@@ -171,6 +179,9 @@ func (r *visitRepository) Reschedule(
 			visit:     emailVisit(locked, start, end, reason),
 			tpl:       staffTpl,
 			audiences: []domain.NotificationAudience{staffTpl.Audience, vendorTpl.Audience},
+		}
+		if err := attachMembers(ctx, q, parsed, pending); err != nil {
+			return err
 		}
 		return nil
 	}); err != nil {
