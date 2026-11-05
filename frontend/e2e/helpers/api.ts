@@ -243,6 +243,12 @@ export interface VisitRecord {
   start_date?: string
   end_date?: string
   notes?: string
+  /** Alasan transisi status saat ini (openapi `VisitDetail.status_note`). */
+  status_note?: string | null
+  /** Stempel gerbang aktual (openapi `VisitDetail.check_in_at`). */
+  check_in_at?: string | null
+  /** Stempel gerbang aktual (openapi `VisitDetail.check_out_at`). */
+  check_out_at?: string | null
   location?: { id: string; name?: string; type?: string }
   visitors?: Array<{
     id?: string
@@ -485,6 +491,15 @@ function toVisitRecord(data: unknown): VisitRecord {
   if (typeof data.start_date === 'string') record.start_date = data.start_date
   if (typeof data.end_date === 'string') record.end_date = data.end_date
   if (typeof data.notes === 'string') record.notes = data.notes
+  if (typeof data.status_note === 'string' || data.status_note === null) {
+    record.status_note = data.status_note
+  }
+  if (typeof data.check_in_at === 'string' || data.check_in_at === null) {
+    record.check_in_at = data.check_in_at
+  }
+  if (typeof data.check_out_at === 'string' || data.check_out_at === null) {
+    record.check_out_at = data.check_out_at
+  }
   if (locationId !== undefined) record.location_id = locationId
   if (location !== undefined) {
     record.location = {
@@ -630,6 +645,67 @@ export async function checkInViaApi(token: string, id: string): Promise<void> {
 /** `POST /visits/{id}/checkout` — id harus UUID (backend tidak menerima VST code). */
 export async function checkOutViaApi(token: string, id: string): Promise<void> {
   await apiFetch(token, 'POST', `/visits/${encodeURIComponent(id)}/checkout`, {})
+}
+
+/**
+ * `POST /visits/{id}/cancel` — openapi body opsional `{ reason? }`
+ * (maks 1000 karakter). Spec negatif memakai `apiFetchRaw` langsung agar bisa
+ * memeriksa status/kode galat sendiri.
+ */
+export async function cancelVisitViaApi(
+  token: string,
+  id: string,
+  reason?: string,
+): Promise<void> {
+  await apiFetch(token, 'POST', `/visits/${encodeURIComponent(id)}/cancel`, {
+    ...(reason === undefined ? {} : { reason }),
+  })
+}
+
+/**
+ * `POST /auth/email-change/request` (butuh auth) — mengembalikan pesan generik
+ * 202 openapi `EmailChangeRequestResponse`. Spec negatif memakai `apiFetchRaw`
+ * langsung agar bisa memeriksa 400/401/429 sendiri.
+ */
+export async function requestEmailChangeViaApi(
+  token: string,
+  newEmail: string,
+  currentPassword: string,
+): Promise<string> {
+  const result = await apiFetch<ApiEnvelope<{ message: string }>>(
+    token,
+    'POST',
+    '/auth/email-change/request',
+    { new_email: newEmail, current_password: currentPassword },
+  )
+  if (!isRecord(result.body) || result.body.success !== true) {
+    throw new Error(`[api] email-change request: amplop sukses tidak valid.`)
+  }
+  const message = (result.body.data as { message?: unknown }).message
+  if (typeof message !== 'string') {
+    throw new Error(`[api] email-change request: respons tanpa message yang valid.`)
+  }
+  return message
+}
+
+/**
+ * `POST /auth/email-change/confirm` (butuh auth) — menukar token verifikasi
+ * menjadi alamat email baru, mengembalikan proyeksi `User` 200.
+ */
+export async function confirmEmailChangeViaApi(
+  token: string,
+  emailToken: string,
+): Promise<User> {
+  const result = await apiFetch<ApiEnvelope<unknown>>(
+    token,
+    'POST',
+    '/auth/email-change/confirm',
+    { token: emailToken },
+  )
+  if (!isRecord(result.body) || result.body.success !== true) {
+    throw new Error(`[api] email-change confirm: amplop sukses tidak valid.`)
+  }
+  return result.body.data as User
 }
 
 /** `DELETE /visits/{id}` — super_admin, 204 tanpa body. */

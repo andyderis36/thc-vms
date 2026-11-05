@@ -49,6 +49,21 @@ services:
   # dan memaksa pull tiap start. Pembuatan bucket thc-vms-bucket sudah
   # ditangani backend EnsureBucket saat startup — bucket tetap privat.
 
+  # Mailpit DEV ONLY (SMTP palsu + UI inbox): tangkap semua email uji lokal
+  # tanpa pernah menyentuh domain asli. SMTP di localhost:1025 (plain,
+  # tanpa auth), UI/API di localhost:8025. JANGAN pernah menambah service
+  # ini ke docker-compose.prod.yml — produksi memakai SMTP_HOST asli.
+  mailpit:
+    image: axllent/mailpit:latest
+    pull_policy: missing
+    container_name: thc-vms-mailpit
+    restart: always
+    mem_limit: 256M
+    cpus: 0.5
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
 volumes:
   pgdata_local:
   miniodata_local:

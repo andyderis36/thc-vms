@@ -9,13 +9,14 @@ THC Visitor Management System mengatur izin kunjungan tamu dan teknisi di lingku
 
 Siklus status kunjungan:
 
-`requested` → `approved` → `visiting` → `completed`, plus cabang `rejected` / `cancelled`.
+`requested` → `approved` → `visiting` → `completed`, plus cabang `rejected` / `cancelled` / `rescheduled` / `not_visit`. Notifikasi membedakan `visit_cancelled` (manusia) vs `visit_auto_cancelled` (worker R1/R2).
 
 Aturan kunci yang selalu berlaku:
 
 - Jendela check-in: `start_date - 2 jam` sampai `end_date + 2 jam`. Di luar itu tolak dengan 400.
 - Satu tiket QR dipakai untuk check-in dan check-out.
 - Foto KTP dan foto selfie teknisi bisa dibuka lewat klik-preview di halaman detail dan di popup gate.
+- Kartu QR disembunyikan saat status `rescheduled`/`cancelled` (endpoint QR tetap melayani pemilik, tetapi UI tidak merender kartu).
 
 ## 2. Lingkungan uji
 
@@ -72,9 +73,9 @@ Catatan RBAC untuk semua sesi:
 
 ## 4. Peta rute dan API (rujukan cepat penguji)
 
-Rute FE: `/login`, `/` (redirect sesuai role), `/dashboard`, `/approvals`, `/facilities`, `/security`, `/gate`, `/qr`, `/users`, `/visits/new`, `/visits/[id]`.
+Rute FE: `/login`, `/` (redirect sesuai role), `/dashboard`, `/approvals`, `/facilities`, `/security`, `/gate`, `/qr`, `/coordinators`, `/vendor-registrations`, `/profile`, `/verify-email`, `/visits/new`, `/visits/[id]`. (`/users` dihapus → 404; lihat NAV-06.)
 
-Grup API: `/health`, `/ready`, `/auth/login|me|logout`, `/users/security` (+ `/{id}`, + `/{id}/status`), `/locations` (+ `/{id}`), `/users` (+ `/{id}`, + `/{id}/status`), `/purposes`, `/vendors`, `/uploads`, `/visits` (+ `/{id}`, `/{id}/file`, `/{id}/approve|reject|reschedule|cancel`, `/{id}/qr`, `/{id}/checkin|checkout`).
+Grup API: `/health`, `/ready`, `/auth/login|me|logout|email-change/request|email-change/confirm`, `/users/security` (+ `/{id}`, + `/{id}/status`), `/locations` (+ `/{id}`), `/users` (+ `/{id}`, + `/{id}/status`), `/purposes`, `/vendors`, `/uploads`, `/avatars/:id`, `/notifications` (+ `/:id`, `/read-all`), `/visits` (+ `/{id}`, `/{id}/file`, `/{id}/approve|reject|reschedule|cancel`, `/{id}/qr`, `/{id}/checkin|checkout`). Field `status_note` pada detail kunjungan.
 
 ## 5. Sesi uji manual
 
@@ -108,7 +109,7 @@ Tandai tiap kotak setelah lolos. Tulis ID bug di kolom kanan bila gagal.
 | S3-01 | admin | Sebagai admin cabang, buka `/approvals`, setujui satu kunjungan `requested` milik cabangnya | Status jadi `approved`, QR aktif untuk vendor | - [ ] |
 | S3-02 | admin | Tolak satu kunjungan `requested` lain milik cabangnya dengan alasan tertulis | Status jadi `rejected`, alasan tampil di sisi vendor | - [ ] |
 | S3-03 | admin | Reschedule satu kunjungan ke tanggal baru, lalu coba check-in langsung sebelum approve ulang | Status `rescheduled`, check-in ditolak sampai disetujui ulang. Setelah approve ulang, check-in bisa jalan | - [ ] |
-| S3-04 | admin | Batalkan satu kunjungan lewat aksi cancel | Status jadi `cancelled` dan keluar dari antrean aktif | - [ ] |
+| S3-04 | admin (cabang yang sama) | Batalkan satu kunjungan lewat aksi cancel | Status jadi `cancelled` dan keluar dari antrean aktif; admin cabang lain / security / vendor bukan pemilik ditolak (403/404) | - [ ] |
 | S3-05 | vendor | Sebagai vendor, buka halaman kunjungan yang menunggu approval | Tidak ada tombol Approve, Reject, atau Check-in | - [ ] |
 
 ### Sesi 4. Gate check-in dan check-out (termasuk triple-mode scan dan popup)
@@ -131,8 +132,8 @@ Triple-mode di `/gate`: (1) kamera langsung, (2) upload gambar QR dari galeri, (
 |---|---|---|---|---|
 | S5-01 | admin | Buka `/security`, daftarkan pengawas baru di cabangnya | Akun tercipta dan terkunci di cabang admin itu | - [ ] |
 | S5-02 | admin | Nonaktifkan dan aktifkan kembali satu akun pengawas (`/{id}/status`) | Status berubah dan tercermin di daftar | - [ ] |
-| S5-03 | admin | Buka `/users`, kelola user dalam cabangnya | Hanya user cabang sendiri yang bisa dikelola | - [ ] |
-| S5-04 | super_admin | Buka `/facilities` dan `/users`, ubah data lalu hapus satu data uji lewat DELETE | Ubah dan hapus sukses lintas cabang | - [ ] |
+| S5-03 | admin | Buka `/coordinators` (bukan `/users` — 404), kelola user dalam cabangnya | Hanya user cabang sendiri yang bisa dikelola | - [ ] |
+| S5-04 | super_admin | Buka `/facilities` dan `/coordinators`, ubah data lalu hapus satu data uji lewat DELETE | Ubah dan hapus sukses lintas cabang | - [ ] |
 | S5-05 | admin | Coba akses fungsi DELETE yang sama di `/facilities` atau `/users` | Ditolak. Tidak ada tombol hapus atau request gagal 403 | - [ ] |
 | S5-06 | security/vendor | Coba buka langsung `/users`, `/security`, `/facilities` lewat URL | Ditolak atau diarahkan pulang sesuai role | - [ ] |
 

@@ -76,7 +76,9 @@ Sistem ini dirancang khusus untuk mengelola izin masuk teknisi internal, vendor 
 
 > **Halaman back-office (di luar 5 layar inti, memakai ulang permukaan SCR-02):**
 > `/approvals` (antrean approval, admin+superadmin), `/security` (kelola pengawas, admin+superadmin),
-> `/facilities` + `/users` (superadmin), `/qr` (resolver tiket QR vendor → SCR-04).
+> `/facilities` + `/coordinators` + `/vendor-registrations` (superadmin), `/profile` (semua peran),
+> `/verify-email` (konfirmasi ganti email), `/qr` (resolver tiket QR vendor → SCR-04).
+> (`/users` dihapus → 404; filter peran pindah ke kolom "Peran" di `/coordinators`.)
 
 ### Arsitektur Base Layout Shell
 - `SHELL-01`: **Superadmin Shell** (Dark Sidebar 260px + Dropdown Switcher Cabang Nasional).
@@ -91,7 +93,7 @@ Sistem ini dirancang khusus untuk mengelola izin masuk teknisi internal, vendor 
 Panduan lengkap, kredensial akun uji coba, dan daftar dummy cabang tersedia di [`docs/5. LOCAL_DEV.md`](docs/5.%20LOCAL_DEV.md).
 
 ```bash
-# 1. Jalankan PostgreSQL 18 & MinIO S3 lokal
+# 1. Jalankan PostgreSQL 18, MinIO S3, dan (opsional) Mailpit lokal
 docker compose up -d
 
 # 2. Migrasi database & Seeder (di folder backend/)
@@ -99,7 +101,12 @@ cd backend
 migrate -path migrations -database "postgres://thc_user:thc_password_local@localhost:5432/thc_vms_db?sslmode=disable" up
 go run seeds/main.go
 
+# 2b. Backfill notifikasi persisted (one-off, idempotent) — setelah seeder
+go run cmd/backfill-notifications/main.go
+
 # 3. Jalankan Backend Go
+#    (set FRONTEND_BASE_URL=http://localhost:3210 di backend/.env untuk tautan
+#     verifikasi ganti email; SMTP_DRY_RUN=true bila tanpa Mailpit)
 go run cmd/server/main.go
 # API aktif di http://localhost:8080/api/v1
 
@@ -108,6 +115,9 @@ cd ../frontend
 npm install
 npm run dev
 # Web aktif di http://localhost:3210
+
+# 5. (Opsional) E2E Playwright
+#    e2e.cmd (root repo) = wrapper dengan preflight/autostart; npm run e2e = langsung
 ```
 
 ---

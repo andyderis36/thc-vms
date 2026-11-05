@@ -588,11 +588,15 @@ test('@PROF-06 field email, role, nik, dan location_id ditolak 400 VALIDATION_ER
 
     const page = await h.openAs('vendor')
     await openProfilePage(page)
-    await expect(page.getByLabel('Email')).toHaveCount(0)
     await expect(page.getByLabel('Peran')).toHaveCount(0)
+    // Formulir info profil TIDAK memuat input email (ganti email kini lewat
+    // seksi mandiri "Ganti email" di bawah seksi kata sandi, bukan PATCH
+    // /auth/me) — scope ke form pertama agar seksi baru tak terhitung.
+    await expect(page.locator('form').first().getByLabel('Email')).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Ganti email' })).toBeVisible()
     // Baris "kata sandi" TIDAK lagi diasertikan nol: halaman profil kini
     // sengaja memuat seksi "Ganti kata sandi" untuk semua peran.
-    await expect(page.locator('input[type="email"]')).toHaveCount(0)
+    await expect(page.locator('form').first().locator('input[type="email"]')).toHaveCount(0)
     await expect(page.locator('select')).toHaveCount(0)
   } finally {
     await restoreProfile(h, snapshot)

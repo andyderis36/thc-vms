@@ -5,6 +5,11 @@
  * sebelum suite dijalankan, lalu menghapus kunjungan yang tertinggal dari run
  * yang dibatalkan. Skrip ini tidak pernah menyalakan server sendiri - server
  * sengaja dikelola manual oleh developer/CI.
+ *
+ * Pada run live, pembersihan di sini NONAKTIF (`E2E_SKIP_STORAGE_CLEANUP=1`):
+ * artefak live dibersihkan oleh sapuan pra-suite `sweep --apply` milik
+ * `e2e.ps1`, dan objek MinIO/S3 yang diunggah TIDAK ikut terhapus (orphan di
+ * bucket — backend tidak mengekspos hapus objek, berkas hanya via presigned).
  */
 
 import {
@@ -15,6 +20,7 @@ import {
   type ApiEnvelope,
   type VisitRecord,
 } from './helpers/api'
+import { HARNESS_NOTE_MARKER } from './helpers/markers'
 
 const BACKEND_HEALTH_URL = `${process.env.E2E_API_BASE_URL ?? 'http://localhost:8080/api/v1'}/health`
 const FRONTEND_LOGIN_URL = `${process.env.E2E_FRONTEND_BASE_URL ?? 'http://localhost:3210'}/login`
@@ -24,13 +30,11 @@ const BACKEND_HINT =
   'Jalankan dari folder backend/: `docker compose up -d` (Postgres + MinIO) lalu `go run cmd/server/main.go`.'
 const FRONTEND_HINT = 'Jalankan dari folder frontend/: `npm run dev` (port 3210).'
 
-/**
- * Penanda kunjungan buatan harness (`h.unique`): `E2E-<label>-<epoch>-<seq>-<rand>`.
- * Run yang dibatalkan (Ctrl+C / timeout) melewati teardown, sehingga tiket
- * `approved` lama bisa membuat @QR-02 gagal pada run berikutnya. Hanya baris
- * dengan penanda ini yang dihapus; data non-E2E tidak pernah disentuh.
- */
-const HARNESS_MARKER = /E2E-[A-Za-z0-9]+-\d+-\d+-[a-z0-9]+/
+// Penanda kunjungan buatan harness (`h.unique`, definisi bersama di
+// `helpers/markers.ts` — sama persis dengan yang dipakai `sweep.ts`, tanpa
+// drift). Run yang dibatalkan (Ctrl+C / timeout) melewati teardown, sehingga
+// tiket `approved` lama bisa membuat @QR-02 gagal pada run berikutnya. Hanya
+// baris dengan penanda ini yang dihapus; data non-E2E tidak pernah disentuh.
 const CLEANUP_PAGE_SIZE = 100
 const CLEANUP_MAX_PAGES = 20
 
@@ -97,6 +101,8 @@ async function checkFrontend(): Promise<string | null> {
 
 async function cleanupLeftoverVisits(): Promise<void> {
   if (process.env.E2E_SKIP_STORAGE_CLEANUP === '1') {
+    // Live: kunjungan sisa dibersihkan sweep pra-suite (--apply), bukan di
+    // sini; objek bucket yang yatim tetap dibiarkan (orphan, bukan galat).
     console.log('[preflight] cleanup kunjungan sisa dilewati (E2E_SKIP_STORAGE_CLEANUP=1)')
     return
   }
@@ -117,7 +123,7 @@ async function cleanupLeftoverVisits(): Promise<void> {
         )
       }
       const items = result.body.data.items ?? []
-      leftovers.push(...items.filter((visit) => HARNESS_MARKER.test(visit.notes ?? '')))
+      leftovers.push(...items.filter((visit) => HARNESS_NOTE_MARKER.test(visit.notes ?? '')))
       if (items.length < CLEANUP_PAGE_SIZE) {
         break
       }

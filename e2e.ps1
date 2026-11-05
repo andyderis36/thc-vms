@@ -79,6 +79,10 @@ $LivePacingMs = if ($env:E2E_LIVE_PACING_MS) { $env:E2E_LIVE_PACING_MS } else { 
 $script:E2EInventoryCache = $null
 # Email akun harness terprovisi run ini (untuk ringkasan post-suite; tanpa password).
 $script:E2EProvisionedEmails = @()
+# True hanya saat run ini memegang thc-e2e-live.lock (dibuat di bawah, mode
+# live saja). Finally menghapus lock HANYA bila flag ini true, supaya path
+# lokal tidak pernah menghapus lock milik run live lain yang sedang berjalan.
+$script:LiveLockHeld = $false
 
 # -SlowMo eksplisit menang atas env; kalau tidak diisi, hormati $env:E2E_SLOWMO.
 if (-not $PSBoundParameters.ContainsKey('SlowMo')) {
@@ -270,20 +274,55 @@ function Ensure-DockerEngine {
 function Clear-E2EOverrides {
     # E2E_EMAIL_* dan E2E_PASSWORD sengaja TIDAK di-clear (pass-through) agar
     # operator bisa menyuplai kredensial prod via env tanpa terhapus.
+    # Selain itu SEMUA E2E_* yang diset runner di-clear: sisa live-run
+    # (flag provisi, run-id terprovisi, override S3/ledger) tidak boleh bocor
+    # ke local-run berikutnya di shell yang sama, begitu pula sebaliknya.
     foreach ($name in @(
             'E2E_BASE_URL',
             'E2E_API_BASE_URL',
             'E2E_FRONTEND_BASE_URL',
             'E2E_LIVE',
             'E2E_LOGIN_PACING_MS',
-            'E2E_SKIP_STORAGE_CLEANUP'
+            'E2E_SKIP_STORAGE_CLEANUP',
+            'E2E_SLOWMO',
+            'E2E_LIVE_PROVISION',
+            'E2E_LOCAL_PROVISION',
+            'E2E_RUN_ID',
+            'E2E_S3_ENDPOINT',
+            'E2E_S3_PORT',
+            'E2E_S3_ACCESS_KEY',
+            'E2E_S3_SECRET_KEY',
+            'E2E_S3_BUCKET',
+            'E2E_PROVISION_LEDGER',
+            'E2E_PROVISION_LEDGER_DIR'
         )) {
         Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
     }
 }
 
 function Set-LocalE2EEnv {
+    # Ingat opt-in lokal SEBELUM Clear: Clear menghapus semua flag E2E_* agar
+    # sisa live-run tidak bocor; kembalikan opt-in operator setelahnya supaya
+    # alur `$env:E2E_LOCAL_PROVISION=1` + `e2e.cmd` tetap berfungsi.
+    $wantLocalProvision = $env:E2E_LOCAL_PROVISION
     Clear-E2EOverrides
+    # Reset simetris: local tidak pernah memakai flag live — tegaskan absen
+    # (run-id/S3/ledger/provisi-live menarget prod bila bocor). Pertahanan
+    # lapis dua bila Clear-E2EOverrides dilewati di masa depan.
+    foreach ($name in @(
+            'E2E_LIVE_PROVISION',
+            'E2E_RUN_ID',
+            'E2E_S3_ENDPOINT',
+            'E2E_S3_PORT',
+            'E2E_S3_ACCESS_KEY',
+            'E2E_S3_SECRET_KEY',
+            'E2E_S3_BUCKET',
+            'E2E_PROVISION_LEDGER',
+            'E2E_PROVISION_LEDGER_DIR'
+        )) {
+        Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+    }
+    if ($wantLocalProvision -eq '1') { $env:E2E_LOCAL_PROVISION = '1' }
     $env:E2E_BASE_URL = 'http://localhost:3210'
     $env:E2E_API_BASE_URL = 'http://localhost:8080/api/v1'
     $env:E2E_FRONTEND_BASE_URL = 'http://localhost:3210'
@@ -498,7 +537,11 @@ function Invoke-E2ESweep([switch]$Apply) {
 }
 
 function Ensure-Dependencies {
-    if (-not (Test-Path -LiteralPath (Join-Path $Frontend 'node_modules\@playwright\test')) -or
+    # Tiap segmen di-Join terpisah: tanpa separator tersemat di nama child,
+    # sehingga provider path Windows selalu meresolusi direktori scoped
+    # `@playwright` dengan benar (bukan bergantung pada `\` literal).
+    $pwTestDir = Join-Path (Join-Path (Join-Path $Frontend 'node_modules') '@playwright') 'test'
+    if (-not (Test-Path -LiteralPath $pwTestDir) -or
         -not (Test-Path -LiteralPath $PlaywrightCli)) {
         Write-Step 'frontend: npm ci (node_modules/Playwright CLI belum lengkap)'
         Push-Location $Frontend
@@ -586,7 +629,7 @@ function Show-DryRun([string[]]$CliArgs, [string]$Target) {
     Write-Host "    cwd        : $Frontend"
     Write-Host "    cmd        : $(Format-Command $PlaywrightCli $CliArgs)"
     Write-Host '    env        :'
-    foreach ($name in @('E2E_BASE_URL', 'E2E_API_BASE_URL', 'E2E_FRONTEND_BASE_URL', 'E2E_LOGIN_PACING_MS', 'E2E_SKIP_STORAGE_CLEANUP', 'E2E_SLOWMO', 'E2E_PASSWORD', 'E2E_EMAIL_SUPERADMIN', 'E2E_EMAIL_ADMIN', 'E2E_EMAIL_ADMIN2', 'E2E_EMAIL_SECURITY', 'E2E_EMAIL_SECURITY2', 'E2E_EMAIL_VENDOR', 'E2E_EMAIL_VENDOR2')) {
+    foreach ($name in @('E2E_BASE_URL', 'E2E_API_BASE_URL', 'E2E_FRONTEND_BASE_URL', 'E2E_LOGIN_PACING_MS', 'E2E_SKIP_STORAGE_CLEANUP', 'E2E_SLOWMO', 'E2E_PASSWORD', 'E2E_EMAIL_SUPERADMIN', 'E2E_EMAIL_ADMIN', 'E2E_EMAIL_ADMIN2', 'E2E_EMAIL_SECURITY', 'E2E_EMAIL_SECURITY2', 'E2E_EMAIL_VENDOR', 'E2E_EMAIL_VENDOR2', 'E2E_RUN_ID', 'E2E_LIVE_PROVISION', 'E2E_LOCAL_PROVISION', 'E2E_S3_ENDPOINT', 'E2E_S3_PORT', 'E2E_S3_BUCKET', 'E2E_PROVISION_LEDGER', 'E2E_PROVISION_LEDGER_DIR')) {
         $value = [Environment]::GetEnvironmentVariable($name)
         if ($value) {
             if ($name -eq 'E2E_PASSWORD') { $value = '***' }
@@ -595,8 +638,8 @@ function Show-DryRun([string[]]$CliArgs, [string]$Target) {
     }
     $provFlag = if ($mode -in @('live', 'prod', 'production')) { 'E2E_LIVE_PROVISION' } else { 'E2E_LOCAL_PROVISION' }
     $provOn = ([Environment]::GetEnvironmentVariable($provFlag) -eq '1')
-    Write-Host "    provision  : $(if ($provOn) { "YA ($provFlag=1) -> node e2e/provision-live-users.ts, injeksi E2E_RUN_ID/E2E_EMAIL_*/E2E_PASSWORD ke Playwright" } else { "TIDAK ($provFlag bukan 1; kredensial seed)" })"
-    Write-Host '    teardown   : SELALU (finally, tanpa menutupi exit code): node e2e/provision-live-users.ts --teardown-only + sweep --apply (visits-first), ringkasan email + disclaimer orphan MinIO'
+    Write-Host "    provision  : $(if ($provOn) { "YA ($provFlag=1) -> node e2e/provision-live-users.ts, injeksi E2E_RUN_ID/E2E_EMAIL_* ke env proses Playwright (tanpa E2E_PASSWORD; password tetap milik operator/seed)" } else { "TIDAK ($provFlag bukan 1; kredensial seed)" })"
+    Write-Host '    teardown   : SELALU (finally, tanpa menutupi exit code): sweep --apply (visits-first, melepas FK kunjungan->akun) lalu node e2e/provision-live-users.ts --teardown-only, ringkasan email + disclaimer orphan MinIO'
     Write-Host '    sweep      : pre-suite (live saja, --apply) + post-suite (live & local, --apply; 204/404 toleran)'
     Write-Host "    inventaris : $($stats.Tests) test dalam $($stats.Files) file (sumber: $($stats.Source))"
     Write-Host ''
@@ -730,6 +773,13 @@ if ($isLive) {
         Write-Err2 $_.Exception.Message
         exit 1
     }
+    # Single-flight lock HANYA untuk live: dua run live bersamaan menulis ke
+    # PROD yang sama (akun/kunjungan/unggahan) dan bisa saling menghapus
+    # artefak. Run lokal SENGAJA tidak dikunci: stack lokal milik developer
+    # (iterasi cepat, terminal paralel), cleanup per-run idempoten (teardown
+    # hanya menyentuh id miliknya + sweep pola E2E-), dan preflight
+    # global.setup membersihkan sisa. Mengunci lokal hanya menserialkan loop
+    # dev tanpa manfaat keamanan.
     $LiveLockFile = Join-Path $env:TEMP 'thc-e2e-live.lock'
     if (Test-Path -LiteralPath $LiveLockFile) {
         $oldPid = ''
@@ -745,11 +795,13 @@ if ($isLive) {
         Remove-Item -LiteralPath $LiveLockFile -Force -ErrorAction SilentlyContinue
     }
     Set-Content -LiteralPath $LiveLockFile -Value "$PID" -NoNewline
+    $script:LiveLockHeld = $true
     try {
         Invoke-E2EProvision 'live' | Out-Null
     } catch {
         Write-Err2 $_.Exception.Message
         Remove-Item -LiteralPath $LiveLockFile -Force -ErrorAction SilentlyContinue
+        $script:LiveLockHeld = $false
         exit 1
     }
     Write-Step "menjalankan E2E headed ke $LiveUrl (slowMo $SlowMo ms)"
@@ -790,7 +842,13 @@ try {
     }
     Invoke-E2EProvisionTeardown
     Write-E2EProvisionSummary
-    Remove-Item -LiteralPath (Join-Path $env:TEMP 'thc-e2e-live.lock') -Force -ErrorAction SilentlyContinue
+    # Hapus lock HANYA bila run ini yang membuatnya (mode live). Path lokal
+    # tidak pernah memegang lock, jadi penghapusan tanpa syarat di sini bisa
+    # menghapus lock milik run live lain yang sedang berjalan.
+    if ($script:LiveLockHeld) {
+        Remove-Item -LiteralPath (Join-Path $env:TEMP 'thc-e2e-live.lock') -Force -ErrorAction SilentlyContinue
+        $script:LiveLockHeld = $false
+    }
 }
 
 Write-Host ''
