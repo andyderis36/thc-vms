@@ -18,6 +18,7 @@ type fakeNotices struct {
 	pendingCalls int
 	status       map[domain.UUID]domain.VendorRegistrationStatus
 	resolvedAt   map[domain.UUID]time.Time
+	insertErr    error
 	resolveErr   error
 }
 
@@ -30,6 +31,9 @@ func newFakeNotices() *fakeNotices {
 
 func (f *fakeNotices) InsertPending(_ context.Context, vendorUserID domain.UUID) error {
 	f.pendingCalls++
+	if f.insertErr != nil {
+		return f.insertErr
+	}
 	if _, ok := f.status[vendorUserID]; !ok {
 		f.status[vendorUserID] = domain.VendorRegistrationPending
 	}
@@ -124,8 +128,8 @@ func TestRegisterVendor_FansOutNoticeAndSuperAdminEmail(t *testing.T) {
 	if got := notices.status["user-vendor-new"]; got != domain.VendorRegistrationPending {
 		t.Fatalf("notice status = %q, want pending", got)
 	}
-	if len(mailer.Calls) != 1 {
-		t.Fatalf("mail calls = %d, want exactly 1", len(mailer.Calls))
+	if len(mailer.Calls) != 2 {
+		t.Fatalf("mail calls = %d, want exactly 2 (superadmin fan-out + vendor pending receipt)", len(mailer.Calls))
 	}
 	call := mailer.Calls[0]
 	wantSubject := domain.VendorRegistrationSubject("Dimas Prasetyo")
@@ -143,6 +147,10 @@ func TestRegisterVendor_FansOutNoticeAndSuperAdminEmail(t *testing.T) {
 		if !wantTo[addr] {
 			t.Fatalf("recipients = %v, want exactly the superadmin set (branch staff must be absent)", call.To)
 		}
+	}
+	pending := mailer.Calls[1]
+	if len(pending.To) != 1 || pending.To[0] != "dimas@vendor.example" {
+		t.Fatalf("pending receipt to = %v, want the vendor inbox only", pending.To)
 	}
 }
 
@@ -162,8 +170,30 @@ func TestRegisterVendor_MailerErrorStillReturns201(t *testing.T) {
 	if notices.pendingCalls != 1 {
 		t.Fatalf("pending inserts = %d, want exactly 1 even when mail fails", notices.pendingCalls)
 	}
-	if len(mailer.Calls) != 1 {
-		t.Fatalf("mail calls = %d, want the single best-effort attempt", len(mailer.Calls))
+	if len(mailer.Calls) != 2 {
+		t.Fatalf("mail calls = %d, want both best-effort attempts (superadmin + vendor pending)", len(mailer.Calls))
+	}
+}
+
+// TestRegisterVendor_NoticeInsertFailureStillReturns201 pins the S1
+// best-effort contract after the loud-failure hardening: a dying notice
+// queue is logged (slog.Error) and the registration still stands with 201.
+func TestRegisterVendor_NoticeInsertFailureStillReturns201(t *testing.T) {
+	managed := &fakeManagedUsers{}
+	notices := newFakeNotices()
+	notices.insertErr = errors.New("queue down")
+	directory := mixedStaff()
+	mailer := &domain.FakeMailer{}
+	svc := NewService(noticeDeps(managed, notices, directory, mailer))
+
+	if _, err := svc.RegisterVendor(auditCtx(), validRegisterInput()); err != nil {
+		t.Fatalf("registration must succeed despite notice insert failure: %v", err)
+	}
+	if len(managed.created) != 1 {
+		t.Fatal("row was not stored when the notice queue was down")
+	}
+	if notices.pendingCalls != 1 {
+		t.Fatalf("pending inserts = %d, want exactly 1 attempt even when the queue fails", notices.pendingCalls)
 	}
 }
 

@@ -79,6 +79,7 @@ func (s *Service) RegisterVendor(ctx context.Context, in RegisterVendorInput) (P
 	}
 	s.recordRegister(ctx, created.ID, strings.TrimSpace(in.Email))
 	s.publishVendorRegistration(ctx, created)
+	s.mailVendorPending(ctx, created)
 	return s.profile(ctx, created)
 }
 

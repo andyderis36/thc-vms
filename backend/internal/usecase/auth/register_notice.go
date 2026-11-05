@@ -30,10 +30,11 @@ type SuperAdminDirectory interface {
 // committed.
 func (s *Service) publishVendorRegistration(ctx context.Context, user domain.User) {
 	if s.notices == nil {
+		slog.Warn("auth: vendor registration notice skipped: VendorRegistrationNoticeRepository not wired", "user_id", string(user.ID))
 		return
 	}
 	if err := s.notices.InsertPending(ctx, user.ID); err != nil {
-		slog.Warn("auth: vendor registration notice insert failed", "user_id", string(user.ID), "error", err)
+		slog.Error("auth: vendor registration notice insert failed", "user_id", string(user.ID), "error", err)
 	}
 	s.mailSuperAdmins(ctx, user)
 }
@@ -75,6 +76,45 @@ func (s *Service) mailSuperAdmins(ctx context.Context, user domain.User) {
 	if err := s.mailer.Send(ctx, recipients, subject, textBody, htmlBody); err != nil {
 		slog.Warn("auth: vendor registration email failed", "user_id", string(user.ID), "error", err)
 	}
+}
+
+// mailVendorPending mails the pending receipt to the VENDOR inbox itself:
+// pendaftaran diterima, sedang diproses, mohon menunggu verifikasi admin.
+// Strictly best-effort like the superadmin leg: a nil mailer, a blank address
+// or a send failure only logs (slog.Warn) and never fails the 201, because
+// the account row already committed.
+func (s *Service) mailVendorPending(ctx context.Context, user domain.User) {
+	if s.mailer == nil {
+		return
+	}
+	to := strings.TrimSpace(user.Email)
+	if to == "" {
+		slog.Warn("auth: vendor pending mail skipped", "user_id", string(user.ID), "reason", "blank_address")
+		return
+	}
+	text := "Pendaftaran akun vendor Anda sudah diterima dan sedang diproses. Mohon menunggu verifikasi admin sebelum Anda dapat masuk dan mengajukan kunjungan."
+	htmlBody := domain.RenderBrandedActionEmail("Pendaftaran Diterima", text, "", "")
+	if err := s.mailer.Send(ctx, []string{to}, "[THC-VMS] Pendaftaran Diterima — Menunggu Verifikasi Admin", text, htmlBody); err != nil {
+		slog.Warn("auth: vendor pending mail failed", "user_id", string(user.ID), "error", err)
+	}
+}
+
+// EnsureVendorRegistrationNotice (re)queues one registration notice row for a
+// vendor account idempotently (UNIQUE vendor_user_id, ON CONFLICT DO
+// NOTHING). It is the usecase leg behind the superadmin account-status
+// change flipping a vendor back TO pending (PATCH /users/:id/status): the
+// account write itself stays on the managed-user path, this only anchors the
+// queue row so the bell cannot stay empty for a pending account. A nil queue
+// is a wiring bug (500); a store failure maps through FromError. Callers
+// treat both as best-effort: the status flip already committed.
+func (s *Service) EnsureVendorRegistrationNotice(ctx context.Context, vendorUserID domain.UUID) error {
+	if s.notices == nil {
+		return domain.FromError(errUnwired)
+	}
+	if err := s.notices.InsertPending(ctx, vendorUserID); err != nil {
+		return domain.FromError(err)
+	}
+	return nil
 }
 
 // ResolveVendorRegistration flips one registration queue row to
