@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,14 +85,32 @@ func TestMain(m *testing.M) {
 // left by an earlier run would fail the setup with 23514 before any test
 // even starts. The scratch database is test-owned, so scrubbing seed tables
 // here is safe; a failure is a setup bug and fails loudly.
+//
+// Every statement is existence-guarded: on a FRESH database (CI creates it
+// empty) none of the tables exist yet, and an unconditional TRUNCATE would
+// fail the whole package with 42P01 before applySchema ever runs.
 func scrubScratch(ctx context.Context, pool *pgxpool.Pool) error {
-	if _, err := pool.Exec(ctx, `TRUNCATE visit_request, users, status_history,
-		check_in, check_out, visitor, visit_purpose, vendor, location, purpose, audit_log, notification RESTART IDENTITY CASCADE`); err != nil {
-		return fmt.Errorf("scrub scratch tables: %w", err)
+	present, err := existingTables(ctx, pool, []string{
+		"visit_request", "users", "status_history",
+		"check_in", "check_out", "visitor", "visit_purpose", "vendor", "location", "purpose", "audit_log", "notification",
+	})
+	if err != nil {
+		return fmt.Errorf("probe scratch tables: %w", err)
 	}
-	if _, err := pool.Exec(ctx, `DELETE FROM role WHERE name NOT IN
-		('super_admin', 'admin', 'security', 'vendor')`); err != nil {
-		return fmt.Errorf("scrub extra roles: %w", err)
+	if len(present) > 0 {
+		if _, err := pool.Exec(ctx, `TRUNCATE `+strings.Join(present, ", ")+` RESTART IDENTITY CASCADE`); err != nil {
+			return fmt.Errorf("scrub scratch tables: %w", err)
+		}
+	}
+	roleExists, err := tableExists(ctx, pool, "role")
+	if err != nil {
+		return fmt.Errorf("probe role table: %w", err)
+	}
+	if roleExists {
+		if _, err := pool.Exec(ctx, `DELETE FROM role WHERE name NOT IN
+			('super_admin', 'admin', 'security', 'vendor')`); err != nil {
+			return fmt.Errorf("scrub extra roles: %w", err)
+		}
 	}
 	// The 000020 queue table may not exist yet on a scratch database
 	// provisioned before this migration: truncate it only when present.
@@ -111,6 +130,36 @@ func scrubScratch(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 	}
 	return nil
+}
+
+// tableExists reports whether a table is present in the current schema, so
+// scrub routines stay safe on a freshly created (still empty) database.
+func tableExists(ctx context.Context, pool *pgxpool.Pool, table string) (bool, error) {
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM information_schema.tables
+		WHERE table_schema = current_schema()
+		  AND table_name = $1
+	)`, table).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+// existingTables filters names down to the tables actually present, preserving
+// order, so a single TRUNCATE can cover exactly what exists.
+func existingTables(ctx context.Context, pool *pgxpool.Pool, tables []string) ([]string, error) {
+	present := make([]string, 0, len(tables))
+	for _, table := range tables {
+		exists, err := tableExists(ctx, pool, table)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			present = append(present, table)
+		}
+	}
+	return present, nil
 }
 
 // openScratchPool connects to the scratch database, creating it first when the
