@@ -60,6 +60,11 @@ func TestMain(m *testing.M) {
 				"repository: start it with `docker compose up -d postgres` to exercise these tests\n", err)
 		os.Exit(0)
 	}
+	if err := scrubScratch(ctx, pool); err != nil {
+		pool.Close()
+		fmt.Fprintf(os.Stderr, "repository: FATAL harness setup failed: %v\n", err)
+		os.Exit(1)
+	}
 	if err := applySchema(ctx, pool); err != nil {
 		pool.Close()
 		fmt.Fprintf(os.Stderr, "repository: FATAL harness setup failed: %v\n", err)
@@ -69,6 +74,43 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	pool.Close()
 	os.Exit(code)
+}
+
+// scrubScratch returns the scratch database to the true clean slate BEFORE
+// the migrations re-apply: the transactional tables are wiped exactly like
+// resetTables, and role rows outside the four base roles are removed. The
+// prune is what keeps migration 000006 re-runnable: its ADD CONSTRAINT
+// re-narrows chk_role_name to the base vocabulary, so a dev-superadmin row
+// left by an earlier run would fail the setup with 23514 before any test
+// even starts. The scratch database is test-owned, so scrubbing seed tables
+// here is safe; a failure is a setup bug and fails loudly.
+func scrubScratch(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `TRUNCATE visit_request, users, status_history,
+		check_in, check_out, visitor, visit_purpose, vendor, location, purpose, audit_log, notification RESTART IDENTITY CASCADE`); err != nil {
+		return fmt.Errorf("scrub scratch tables: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM role WHERE name NOT IN
+		('super_admin', 'admin', 'security', 'vendor')`); err != nil {
+		return fmt.Errorf("scrub extra roles: %w", err)
+	}
+	// The 000020 queue table may not exist yet on a scratch database
+	// provisioned before this migration: truncate it only when present.
+	// applySchema below creates it, and per-test resetTables truncates it
+	// unconditionally once it exists, so the guard only bridges the upgrade.
+	var hasNotices bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM information_schema.tables
+		WHERE table_schema = current_schema()
+		  AND table_name = 'vendor_registration_notices'
+	)`).Scan(&hasNotices); err != nil {
+		return fmt.Errorf("probe vendor_registration_notices: %w", err)
+	}
+	if hasNotices {
+		if _, err := pool.Exec(ctx, `TRUNCATE vendor_registration_notices RESTART IDENTITY CASCADE`); err != nil {
+			return fmt.Errorf("scrub registration notices: %w", err)
+		}
+	}
+	return nil
 }
 
 // openScratchPool connects to the scratch database, creating it first when the
@@ -117,10 +159,13 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 // yields no error, because a re-applied file raises only "already there"
 // SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL} {
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL} {
 		if err := applyOne(ctx, pool, sql); err != nil {
 			return err
 		}
+	}
+	if err := applyPendingStatus(ctx, pool); err != nil {
+		return err
 	}
 	return applyVendorUserRename(ctx, pool)
 }
@@ -174,6 +219,72 @@ var migrationVisitVendorOverrideSQL = func() string {
 	}
 	return string(raw)
 }()
+
+// migrationVendorRegistrationNoticesSQL is the vendor registration queue
+// (migration 000020), loaded the same way so the scratch schema tracks the
+// durable per-vendor row behind the superadmin approval bell. It is
+// re-runnable (CREATE TABLE/INDEX IF NOT EXISTS), so applyOne covers it with
+// no once-gate: unlike 000016/000018 nothing here renames or drops a live
+// object, so the duplicate-SQLSTATE tolerance is the whole story.
+var migrationVendorRegistrationNoticesSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000020_vendor_registration_notices.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationDevSuperadminSQL is the hidden dev-superadmin role (migration
+// 000016), loaded the same way so the scratch schema admits the national
+// operator account the staff email fan-out must keep in parity. Unlike the
+// pending-status migration below it is re-runnable (DROP CONSTRAINT IF
+// EXISTS, duplicate-tolerant ADD, CREATE OR REPLACE FUNCTION), so applyOne
+// covers it.
+var migrationDevSuperadminSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000016_dev_superadmin_role.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationPendingStatusSQL is the users 'pending' status (migration 000018),
+// loaded the same way so the scratch schema tracks the registration status
+// the email resolver must exclude.
+var migrationPendingStatusSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000018_user_pending_status.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// applyPendingStatus applies migration 000018 exactly once. That migration is
+// deliberately NOT re-runnable (a bare DROP CONSTRAINT fails loudly when the
+// old CHECK is already gone), so the harness gates it on the CHECK still
+// rejecting 'pending' instead of swallowing SQLSTATEs through applyOne — the
+// same once-gate shape as applyVendorUserRename below.
+func applyPendingStatus(ctx context.Context, pool *pgxpool.Pool) error {
+	var admits bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM pg_constraint
+			WHERE conname = 'chk_users_status'
+			  AND pg_get_constraintdef(oid) LIKE '%pending%'
+		)`).Scan(&admits); err != nil {
+		return fmt.Errorf("probe chk_users_status: %w", err)
+	}
+	if admits {
+		return nil
+	}
+	return applyOne(ctx, pool, migrationPendingStatusSQL)
+}
 
 // migrationAuditFKSetNullSQL is the audit_log.user_id ON DELETE SET NULL
 // follow-up, loaded the same way so the scratch schema tracks the embedded
@@ -271,6 +382,20 @@ var migrationAuditSQL = func() string {
 // notification adapter writes and reads.
 var migrationNotificationSQL = func() string {
 	path := filepath.Join("..", "..", "migrations", "000008_create_notification.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationNotificationVisitCancelledSQL is the chk_notification_type
+// widening (migration 000019) that admits the visit_cancelled notice the
+// human-cancel write path emits. Without it the scratch schema still carries
+// the 8-value CHECK from 000008 and every human cancellation rolls back.
+var migrationNotificationVisitCancelledSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000019_notification_visit_cancelled.up.sql")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
@@ -401,9 +526,16 @@ func resetTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := testContext(t)
 	_, err := pool.Exec(ctx, `TRUNCATE visit_request, users, status_history,
-		check_in, check_out, visitor, visit_purpose, vendor, location, purpose, audit_log, notification RESTART IDENTITY CASCADE`)
+		check_in, check_out, visitor, visit_purpose, vendor, location, purpose, audit_log, notification, vendor_registration_notices RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate scratch tables: %v", err)
+	}
+	// Non-base role rows (dev-superadmin seeded by an earlier test in this
+	// run) are pruned so every test starts from the four-role baseline the
+	// DDL re-apply shape assumes; users are already gone, so no FK can trip.
+	if _, err := pool.Exec(ctx, `DELETE FROM role WHERE name NOT IN
+		('super_admin', 'admin', 'security', 'vendor')`); err != nil {
+		t.Fatalf("prune extra roles: %v", err)
 	}
 	_, err = pool.Exec(ctx, `INSERT INTO role (name) VALUES
 		('super_admin'), ('admin'), ('security'), ('vendor')

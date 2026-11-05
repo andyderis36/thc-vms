@@ -141,9 +141,10 @@ func TestAudit_UserUpdateEmitsChangedFields(t *testing.T) {
 // TestAudit_UserUpdateMaxFieldsStayWithinCap pins the additive metadata
 // budget for user.update. The managed-user patch carries eight members; the
 // password member never takes a value pair, so the reachable worst case is
-// this seven-label vendor update: 6 pairs (12 keys) + fields = 13, and in
-// no case more than 7 pairs + fields = 15 keys — one under the domain's
-// 16-key SanitizeMetadata cap.
+// this seven-label vendor update: 6 pairs (12 keys) + fields = 13, plus the
+// 3 admin-override email keys (source/old_email/new_email ride beside the
+// generic before.email/after.email pair) = 16 — exactly the domain's
+// 16-key SanitizeMetadata cap, never over it.
 func TestAudit_UserUpdateMaxFieldsStayWithinCap(t *testing.T) {
 	users := newStubManagedUsers(managedAccount("vendor-1", "tek@vendor.local", domain.RoleVendor, nil))
 	audit := &fakeAuditRepo{}
@@ -163,8 +164,8 @@ func TestAudit_UserUpdateMaxFieldsStayWithinCap(t *testing.T) {
 	if entry.Metadata["fields"] != wantFields {
 		t.Fatalf("fields = %q, want %q (byte-identical CSV)", entry.Metadata["fields"], wantFields)
 	}
-	if len(entry.Metadata) > 15 {
-		t.Fatalf("metadata carries %d keys, want at most 15 (7 pairs + fields <= 16-cap)", len(entry.Metadata))
+	if len(entry.Metadata) > 16 {
+		t.Fatalf("metadata carries %d keys, want at most 16 (pairs + fields + override keys <= 16-cap)", len(entry.Metadata))
 	}
 	for _, field := range []string{"name", "email", "phone", "nik", "vendor_id", "vendor_name"} {
 		if _, ok := entry.Metadata["before."+field]; !ok {

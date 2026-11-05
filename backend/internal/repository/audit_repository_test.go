@@ -164,10 +164,7 @@ func TestAudit_SameTxRollbackOnMutationFailure(t *testing.T) {
 	// Deleting a missing visit fails BEFORE any audit row is written: nothing
 	// may be left behind.
 	missing := domain.UUID(uuid.NewString())
-	auditedVisits, ok := visits.(domain.AuditedVisitRepository)
-	if !ok {
-		t.Fatal("visit adapter must serve the audited port")
-	}
+	var auditedVisits domain.AuditedVisitRepository = visits
 	entry := domain.AuditEntry{
 		ActorID: &actor, Action: domain.AuditActionVisitDelete,
 		Entity: domain.AuditEntityVisit, EntityID: &missing,
@@ -232,7 +229,7 @@ func TestAudit_HappyPathWritesBoth(t *testing.T) {
 		Start: time.Now().Add(time.Hour), End: time.Now().Add(2 * time.Hour),
 		Status: domain.VisitStatusRequested,
 	})
-	auditedVisits := visits.(domain.AuditedVisitRepository)
+	auditedVisits := domain.AuditedVisitRepository(visits)
 	if err := auditedVisits.DeleteVisitAudited(ctx, visitID, domain.AuditEntry{
 		ActorID: &actor, Action: domain.AuditActionVisitDelete,
 		Entity: domain.AuditEntityVisit, EntityID: &visitID,

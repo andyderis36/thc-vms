@@ -31,12 +31,16 @@ func TestProfileRepository_UpdateProfile(t *testing.T) {
 		Name:      "Nama Baru",
 		Phone:     "081234567890",
 		AvatarURL: avatar,
+		Email:     "profil@thc.test",
 	})
 	if err != nil {
 		t.Fatalf("UpdateProfile: %v", err)
 	}
 	if updated.Name != "Nama Baru" || updated.Phone != "081234567890" || updated.AvatarURL != avatar {
 		t.Fatalf("updated profile = %+v, want the resolved values", updated)
+	}
+	if updated.Email != "profil@thc.test" {
+		t.Fatalf("updated email = %q, want the stored address passed back through", updated.Email)
 	}
 	if updated.LocationID == nil || *updated.LocationID != loc {
 		t.Fatalf("updated location = %+v, want %s", updated.LocationID, loc)
@@ -50,12 +54,23 @@ func TestProfileRepository_UpdateProfile(t *testing.T) {
 		t.Fatalf("FindByID = %+v, want the updated profile", found)
 	}
 
-	cleared, err := profiles.UpdateProfile(ctx, userID, domain.ProfileUpdate{Name: "Nama Baru"})
+	cleared, err := profiles.UpdateProfile(ctx, userID, domain.ProfileUpdate{Name: "Nama Baru", Email: "profil@thc.test"})
 	if err != nil {
 		t.Fatalf("UpdateProfile clearing avatar: %v", err)
 	}
 	if cleared.Phone != "" || cleared.AvatarURL != "" {
 		t.Fatalf("cleared profile = %+v, want empty phone/avatar", cleared)
+	}
+
+	flipped, err := profiles.UpdateProfile(ctx, userID, domain.ProfileUpdate{Name: "Nama Baru", Email: "profil-baru@thc.test"})
+	if err != nil {
+		t.Fatalf("UpdateProfile flipping email: %v", err)
+	}
+	if flipped.Email != "profil-baru@thc.test" {
+		t.Fatalf("flipped email = %q, want the new address", flipped.Email)
+	}
+	if _, err := NewUserRepository(pool).FindByEmail(ctx, "profil-baru@thc.test"); err != nil {
+		t.Fatalf("FindByEmail after flip: %v", err)
 	}
 
 	var stored pgtype.Text
@@ -89,6 +104,7 @@ func TestProfileRepository_UpdateProfilePasswordRotation(t *testing.T) {
 	rotated, err := profiles.UpdateProfile(ctx, userID, domain.ProfileUpdate{
 		Name:         "Pemegang Sandi",
 		Phone:        "081234567890",
+		Email:        "sandi@thc.test",
 		PasswordHash: "$2a$10$rotatedhashfortestpurposesonly0000000000000000000000",
 	})
 	if err != nil {
@@ -108,6 +124,7 @@ func TestProfileRepository_UpdateProfilePasswordRotation(t *testing.T) {
 	if _, err := profiles.UpdateProfile(ctx, userID, domain.ProfileUpdate{
 		Name:  "Pemegang Sandi",
 		Phone: "081234567890",
+		Email: "sandi@thc.test",
 	}); err != nil {
 		t.Fatalf("UpdateProfile keeping password: %v", err)
 	}

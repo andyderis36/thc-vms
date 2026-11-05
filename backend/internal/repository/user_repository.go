@@ -97,6 +97,7 @@ func (r *userRepository) UpdateProfile(ctx context.Context, id domain.UUID, upda
 			Name:      update.Name,
 			Phone:     pgText(phonePtr(update.Phone)),
 			AvatarUrl: pgText(avatarPtr(update.AvatarURL)),
+			Email:     update.Email,
 		})
 		if err != nil {
 			return domain.User{}, MapError(err)
@@ -123,6 +124,7 @@ func (r *userRepository) UpdateProfile(ctx context.Context, id domain.UUID, upda
 			Name:      update.Name,
 			Phone:     pgText(phonePtr(update.Phone)),
 			AvatarUrl: pgText(avatarPtr(update.AvatarURL)),
+			Email:     update.Email,
 		})
 		return MapError(err)
 	})

@@ -131,6 +131,10 @@ func (s *Service) UpdateSelf(ctx context.Context, actor SelfIdentity, in SelfUpd
 		Phone:        finalPhone,
 		AvatarURL:    finalAvatar,
 		PasswordHash: newHash,
+		// The shared write overwrites the address verbatim, so the stored
+		// address passes back through here; only the email-change confirm
+		// path may move it.
+		Email: current.Email,
 	})
 	if err != nil {
 		return Profile{}, domain.FromError(err)
