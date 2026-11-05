@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Kontrak section pendaftaran vendor menunggu pada lonceng notifikasi
+ * Kontrak pendaftaran vendor menunggu DI DALAM daftar lonceng notifikasi
  * (superadmin) — `frontend/src/components/ui/NotificationsMenu.tsx` +
  * hook di `src/lib/api/hooks.ts`.
  *
@@ -9,7 +9,9 @@
  *     sesi superadmin; probe `limit: 1` membaca `pending_count` agregat.
  *   · `usePendingRegistrationsFeed(open)` — hanya `open ∧ super_admin`.
  *   · Badge lonceng = `unread_count + pending_count` (cap 99+ dipertahankan).
- *   · Section panel menautkan ke `/vendor-registrations`.
+ *   · Baris pending dipin di ATAS daftar yang sama dengan komponen baris
+ *     persis seperti notifikasi kunjungan; klik menutup panel lalu menuju
+ *     `/vendor-registrations`.
  *
  * Strategi mock: `@/lib/api/client` di-mock pada level fungsi klien
  * (`listNotifications`, `listPendingRegistrations`), sehingga badan hook,
@@ -21,9 +23,12 @@
  *  · Role gating   = admin/security/vendor: NOL query pending, section absen.
  *  · Gating panel  = superadmin tertutup → hanya probe `limit: 1`; terbuka
  *                    → feed `limit: 5` ikut terambil.
- *  · Tautan        = section menautkan ke `/vendor-registrations`.
- *  · Kosong        = `pending_count` 0 → pesan kosong, tanpa pill angka.
- *  · Galat         = endpoint 404 (belum ada) → pesan galat, badge tetap.
+ *  · Baris pinned  = judul `Pendaftaran vendor baru`, pill `Perlu tindakan`
+ *                    (bukan `Belum dibaca`), urutan di atas notifikasi
+ *                    kunjungan; klik → `/vendor-registrations` + panel tutup.
+ *  · Kosong        = `pending_count` 0 + feed notifikasi kosong → pesan
+ *                    tunggal `Tidak ada notifikasi.`, tanpa pill angka.
+ *  · Galat         = endpoint 404 (belum ada) → pesan galat tunggal, badge tetap.
  */
 import '@testing-library/jest-dom/vitest'
 
@@ -35,6 +40,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationsMenu } from '@/components/ui/NotificationsMenu'
 import { ApiError } from '@/lib/api/fetcher'
 import type {
+  NotificationItem,
   NotificationListResult,
   PendingRegistrationItem,
   PendingRegistrationListResult,
@@ -183,50 +189,92 @@ describe('vendor-registration-notices — gating peran', () => {
   })
 })
 
-describe('vendor-registration-notices — section panel', () => {
-  it('menautkan section ke /vendor-registrations', async () => {
+describe('vendor-registration-notices — baris pinned dalam daftar', () => {
+  function visitNotification(): NotificationItem {
+    return {
+      id: 'visit-9:visit_requested',
+      type: 'visit_requested',
+      visit_request_id: 'visit-9',
+      visit_id: 'VST-9',
+      location_id: 'loc-1',
+      location_name: 'POP Test',
+      title: 'Judul kunjungan',
+      message: 'Pesan kunjungan.',
+      is_read: false,
+      occurred_at: '2026-11-01T02:00:00Z',
+    }
+  }
+
+  it('baris pending menuju /vendor-registrations dan menutup panel', async () => {
     listPendingRegistrations.mockResolvedValue(pendingQueue([pendingItem()]))
 
     renderMenu('super_admin')
     await openMenu()
 
-    const link = await screen.findByRole('link', {
-      name: /Pendaftaran vendor menunggu persetujuan/,
-    })
-    expect(link).toHaveAttribute('href', '/vendor-registrations')
+    const row = await screen.findByRole('menuitem', { name: /Pendaftaran vendor baru/ })
     expect(screen.getByTestId('pending-registrations-section')).toBeInTheDocument()
+
+    fireEvent.click(row)
+
+    await waitFor(() => {
+      expect(push).toHaveBeenCalledWith('/vendor-registrations')
+    })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
-  it('menampilkan entri antrean beserta pill jumlah pending', async () => {
+  it('menampilkan entri antrean sebagai baris pertama beserta pill jumlah pending', async () => {
     listPendingRegistrations.mockResolvedValue(pendingQueue([pendingItem()]))
 
     renderMenu('super_admin')
     await openMenu()
 
-    expect(await screen.findByText('Budi Santoso')).toBeInTheDocument()
+    expect(await screen.findByText('Pendaftaran vendor baru')).toBeInTheDocument()
+    expect(screen.getByText('Budi Santoso')).toBeInTheDocument()
     expect(screen.getByText('PT Mitra FO')).toBeInTheDocument()
+    expect(screen.getByText('Perlu tindakan')).toBeInTheDocument()
     expect(screen.getByTestId('pending-registrations-badge')).toHaveTextContent('1')
   })
 
-  it('keadaan kosong: pesan kosong tanpa pill angka', async () => {
+  it('mem-pin pendaftaran menunggu di atas notifikasi kunjungan dalam satu daftar', async () => {
+    listNotifications.mockResolvedValue({
+      items: [visitNotification()],
+      total: 1,
+      unread_count: 1,
+      page: 1,
+      limit: 10,
+    })
+    listPendingRegistrations.mockResolvedValue(pendingQueue([pendingItem()]))
+
+    renderMenu('super_admin')
+    await openMenu()
+
+    const rows = await screen.findAllByRole('menuitem')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toHaveTextContent('Pendaftaran vendor baru')
+    expect(rows[1]).toHaveTextContent('Judul kunjungan')
+    // Pending memakai pill `Perlu tindakan`, bukan `Belum dibaca`.
+    expect(screen.getAllByText('Belum dibaca')).toHaveLength(1)
+  })
+
+  it('keadaan kosong: pesan tunggal tanpa pill angka', async () => {
     listPendingRegistrations.mockResolvedValue(pendingQueue([], 0))
 
     renderMenu('super_admin')
     await openMenu()
 
-    expect(await screen.findByText('Belum ada pendaftaran vendor menunggu.')).toBeInTheDocument()
+    expect(await screen.findByText('Tidak ada notifikasi.')).toBeInTheDocument()
     expect(screen.queryByTestId('pending-registrations-badge')).not.toBeInTheDocument()
     expect(screen.getByTestId('pending-registrations-section')).toBeInTheDocument()
   })
 
-  it('keadaan galat: endpoint 404 (belum tersedia) menampilkan pesan galat', async () => {
+  it('keadaan galat: pesan galat tunggal, badge tetap', async () => {
     listNotifications.mockResolvedValue(notifications(2))
     listPendingRegistrations.mockRejectedValue(new ApiError('Not Found', 404, 'NOT_FOUND'))
 
     renderMenu('super_admin')
     await openMenu()
 
-    expect(await screen.findByText('Gagal memuat pendaftaran vendor.')).toBeInTheDocument()
+    expect(await screen.findByText('Gagal memuat notifikasi.')).toBeInTheDocument()
     // Badge lonceng tetap hidup dari unread meski pendaftaran gagal dimuat.
     expect(screen.getByTestId('notifications-unread-badge')).toHaveTextContent('2')
   })

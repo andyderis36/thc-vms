@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useState, type ReactNode } from 'react'
+import { use, useState, type FormEvent, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft,
@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardBody } from '@/components/ui/Card'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Input } from '@/components/ui/Input'
 import { Spinner } from '@/components/ui/Spinner'
 import { AdminBranchShell } from '@/components/layouts/AdminBranchShell'
 import { VendorMobileShell, isQrVisible } from '@/components/layouts/VendorMobileShell'
@@ -36,16 +37,26 @@ import { Timeline, formatTanggalWaktu } from '@/features/visits/detail/Timeline'
 import { VisitorPhoto } from '@/features/visits/detail/VisitorPhoto'
 import { VisitFilePhoto } from '@/features/visits/detail/VisitFilePhoto'
 import { ApiError } from '@/lib/api/fetcher'
-import { useDeleteVisitMutation, useVisitQuery } from '@/lib/api/hooks'
-import type { Role, VisitDetail, VisitStatus } from '@/lib/api/types'
+import {
+  useDeleteVisitMutation,
+  useUpdateVisitorContactMutation,
+  useVisitQuery,
+} from '@/lib/api/hooks'
+import type { Role, VisitDetail, VisitorItem, VisitStatus } from '@/lib/api/types'
 import { can, getLoginRedirect } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
+import {
+  PHONE_MAX_LENGTH,
+  isValidPhone,
+  sanitizePhoneInput,
+} from '@/lib/limits'
 import {
   isApprovableStatus,
   isCancelableStatus,
   isRejectableStatus,
   isReschedulableStatus,
+  isVisitorContactEditableStatus,
 } from '@/lib/visits/visit-status'
 import { visitVendorUser } from '@/lib/visits/vendor-user'
 import { visitVendorCompany } from '@/lib/visits/visit-company'
@@ -272,6 +283,181 @@ function PanelTitle({ icon: Icon, tone = 'brand', trailing, children }: PanelTit
   )
 }
 
+/** Pesan galat aman tampil dari `ApiError` atau galat tak dikenal. */
+function toContactErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.message
+  }
+  return 'Terjadi kesalahan. Silakan coba lagi.'
+}
+
+interface VisitorContactRowProps {
+  visitId: string
+  visitor: VisitorItem
+  /** `true` hanya untuk pembuat kunjungan pada status yang masih bisa diubah. */
+  canEdit: boolean
+}
+
+/**
+ * Satu baris anggota + editor kontak inline milik pembuat (No. HP saja).
+ * Kirim parsial (hanya bila berubah, pola `ProfileForm`); penanda `(diubah)`
+ * dirender dari `phone_edited` server.
+ */
+function VisitorContactRow({ visitId, visitor, canEdit }: VisitorContactRowProps) {
+  const [editing, setEditing] = useState(false)
+  const [phone, setPhone] = useState(visitor.phone)
+  const [phoneError, setPhoneError] = useState<string | undefined>(undefined)
+  const updateContact = useUpdateVisitorContactMutation()
+
+  const visitorId = visitor.id
+  const editable = canEdit && visitorId !== undefined
+
+  function openEditor(): void {
+    setPhone(visitor.phone)
+    setPhoneError(undefined)
+    setEditing(true)
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    if (visitorId === undefined) {
+      return
+    }
+    const nextPhone = phone.trim()
+    const phoneChanged = nextPhone !== visitor.phone
+    let valid = true
+    if (phoneChanged) {
+      if (nextPhone === '') {
+        setPhoneError('Nomor HP anggota wajib diisi.')
+        valid = false
+      } else if (!isValidPhone(nextPhone)) {
+        setPhoneError('Nomor HP anggota tidak valid (10-16 digit angka, diawali 0 atau 62).')
+        valid = false
+      } else {
+        setPhoneError(undefined)
+      }
+    } else {
+      setPhoneError(undefined)
+    }
+    if (!valid) {
+      return
+    }
+    if (!phoneChanged) {
+      setEditing(false)
+      return
+    }
+    try {
+      await updateContact.mutateAsync({
+        visitId,
+        visitorId,
+        body: { phone: nextPhone },
+      })
+      toast.success('Kontak anggota berhasil diperbarui.')
+      setEditing(false)
+    } catch {
+      // Pesan gagal ditampilkan dari `updateContact.error` di bawah.
+    }
+  }
+
+  return (
+    <div className="min-w-0 flex-1">
+      <p className="truncate text-sm font-semibold text-ink">
+        {visitor.name}
+      </p>
+      <p className="break-words text-label text-ink-secondary">
+        {`No. Identitas: ${visitor.id_number}`}
+      </p>
+      <p className="break-words text-label text-ink-secondary">
+        {`No. HP: ${visitor.phone !== '' ? visitor.phone : '—'}`}
+        {visitor.phone_edited === true ? (
+          <Badge tone="info" className="ml-2">(diubah)</Badge>
+        ) : null}
+      </p>
+      <p className="text-label text-ink-secondary">
+        {`Perusahaan: ${(visitor.vendor_name ?? '').trim() !== '' ? visitor.vendor_name : '—'}`}
+      </p>
+      <p className="text-label text-ink-secondary">
+        {`Jabatan: ${(visitor.jabatan ?? '').trim() !== '' ? visitor.jabatan : '—'}`}
+      </p>
+      <p className="text-label text-ink-secondary">
+        {`Email: ${(visitor.email ?? '').trim() !== '' ? visitor.email : '—'}`}
+      </p>
+      {editing ? (
+        <form onSubmit={handleSubmit} className="mt-2 flex flex-col gap-3">
+          {updateContact.isError ? (
+            <p role="alert" className="rounded-control bg-danger-bg px-3 py-2 text-sm text-danger-text">
+              {toContactErrorMessage(updateContact.error)}
+            </p>
+          ) : null}
+          <Input
+            label="Nomor HP"
+            value={phone}
+            error={phoneError}
+            inputMode="tel"
+            maxLength={PHONE_MAX_LENGTH}
+            onChange={(event) => setPhone(sanitizePhoneInput(event.target.value))}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="submit"
+              size="sm"
+              loading={updateContact.isPending}
+              className="min-h-touch"
+            >
+              Simpan
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="min-h-touch"
+              disabled={updateContact.isPending}
+              onClick={() => setEditing(false)}
+            >
+              Batal
+            </Button>
+          </div>
+        </form>
+      ) : null}
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        {editable && !editing ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-touch"
+            aria-label={`Ubah kontak ${visitor.name}`}
+            onClick={openEditor}
+          >
+            Ubah Kontak
+          </Button>
+        ) : null}
+        {visitor.id_card_photo_url !== null &&
+        visitor.id_card_photo_url !== undefined &&
+        visitor.id_card_photo_url !== '' ? (
+          <VisitFilePhoto
+            visitId={visitId}
+            visitor={visitor}
+            variant="ktp"
+            triggerLabel="Lihat Foto KTP"
+          />
+        ) : (
+          <span className="text-badge text-ink-muted">
+            Foto KTP tidak tersedia
+          </span>
+        )}
+        {visitor.photo_url === null ||
+        visitor.photo_url === undefined ||
+        visitor.photo_url === '' ? (
+          <span className="text-badge text-ink-muted">
+            Selfie tidak tersedia
+          </span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 interface VisitDetailViewProps {
   visit: VisitDetail
   visitId: string
@@ -279,6 +465,7 @@ interface VisitDetailViewProps {
 }
 
 function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
+  const { user: sessionUser } = useSession()
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [approveOpen, setApproveOpen] = useState(false)
@@ -290,6 +477,15 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
 
   // Pengaju Vendor/Mitra via helper transisi Fase 1 (fallback `pic_user`).
   const vendorUser = visitVendorUser(visit)
+  // Editor kontak anggota khusus pembuat: peran vendor + id sesi sama dengan
+  // pengaju + status masih sebelum persetujuan (requested/rescheduled —
+  // paritas dengan gerbang usecase backend; lihat isVisitorContactEditableStatus).
+  const isCreator =
+    role === 'vendor' &&
+    sessionUser !== null &&
+    vendorUser !== undefined &&
+    vendorUser.id === sessionUser.id
+  const canEditVisitorContact = isCreator && isVisitorContactEditableStatus(visit.status)
   // Kontrol aksi mengikuti matriks kapabilitas — Vendor/Mitra tidak pernah melihat
   // kontrol approval, dan pengawas tidak bisa mengubah jadwal/membatalkan.
   // Ubah Jadwal & Batal hanya dirender bila status sumbernya legal di backend:
@@ -535,7 +731,6 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                 <ul className="mt-4 flex flex-col gap-3">
                   {visit.visitors.map((visitor, index) => {
                     const selfieUrl = visitor.photo_url ?? null
-                    const ktpUrl = visitor.id_card_photo_url ?? null
                     return (
                       <li
                         key={`${index}-${visitor.id_number}`}
@@ -554,42 +749,11 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                             variant="selfie"
                           />
                         )}
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-ink">
-                            {visitor.name}
-                          </p>
-                          <p className="text-label text-ink-secondary">
-                            {`No. Identitas: ${visitor.id_number}`}
-                          </p>
-                          <p className="text-label text-ink-secondary">
-                            {visitor.phone !== '' ? visitor.phone : '—'}
-                          </p>
-                          <p className="text-label text-ink-secondary">
-                            {`Perusahaan: ${(visitor.vendor_name ?? '').trim() !== '' ? visitor.vendor_name : '—'}`}
-                          </p>
-                          <p className="text-label text-ink-secondary">
-                            {`Jabatan: ${(visitor.jabatan ?? '').trim() !== '' ? visitor.jabatan : '—'}`}
-                          </p>
-                          <div className="mt-1.5 flex flex-wrap gap-2">
-                            {ktpUrl !== null && ktpUrl !== '' ? (
-                              <VisitFilePhoto
-                                visitId={visit.id}
-                                visitor={visitor}
-                                variant="ktp"
-                                triggerLabel="Lihat Foto KTP"
-                              />
-                            ) : (
-                              <span className="text-badge text-ink-muted">
-                                Foto KTP tidak tersedia
-                              </span>
-                            )}
-                            {selfieUrl === null || selfieUrl === '' ? (
-                              <span className="text-badge text-ink-muted">
-                                Selfie tidak tersedia
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
+                        <VisitorContactRow
+                          visitId={visit.id}
+                          visitor={visitor}
+                          canEdit={canEditVisitorContact}
+                        />
                       </li>
                     )
                   })}

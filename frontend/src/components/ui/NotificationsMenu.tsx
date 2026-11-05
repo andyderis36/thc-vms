@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import {
   AlertTriangle,
   Bell,
@@ -135,6 +134,57 @@ function targetHref(item: NotificationItem): string {
   return `/visits/${item.visit_request_id}`
 }
 
+interface PanelRowProps {
+  Icon: LucideIcon
+  /** Wash + ikon brand untuk baris butuh perhatian (unread / menunggu verifikasi). */
+  emphasized: boolean
+  title: string
+  description: ReactNode
+  meta: ReactNode
+  statusLabel?: string
+  onSelect: () => void
+}
+
+/** Baris daftar tunggal untuk kedua feed — kelas & token identik dengan baris notifikasi lama. */
+function PanelRow({
+  Icon,
+  emphasized,
+  title,
+  description,
+  meta,
+  statusLabel,
+  onSelect,
+}: PanelRowProps) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onSelect}
+      className={`${ITEM_CLASS} ${emphasized ? ITEM_UNREAD_CLASS : ITEM_READ_CLASS}`}
+    >
+      <span
+        aria-hidden="true"
+        className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-badge ${
+          emphasized ? 'bg-brand text-brand-contrast' : 'bg-neutral-bg text-ink-muted'
+        }`}
+      >
+        <Icon className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-ink">{title}</span>
+        <span className="block break-words text-xs text-ink-secondary">{description}</span>
+        <span className="mt-0.5 flex items-center gap-2 text-badge text-ink-muted">{meta}</span>
+        {statusLabel ? (
+          <span className="mt-1 inline-flex items-center gap-1 rounded-badge bg-brand-soft px-1.5 py-0.5 text-badge font-semibold text-brand-dark">
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-brand" />
+            {statusLabel}
+          </span>
+        ) : null}
+      </span>
+    </button>
+  )
+}
+
 /**
  * Dropdown notifikasi untuk lonceng header (SHELL-01/02/03/04). Memakai ulang pola
  * interaksi `ProfileMenu` (klik-luar + Escape + refocus pemicu) tanpa
@@ -152,7 +202,7 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
   const buttonId = `${generatedId}-button`
   const menuId = `${generatedId}-menu`
 
-  // Section pendaftaran vendor hanya untuk superadmin (hook mengunci peran:
+  // Baris pendaftaran vendor hanya untuk superadmin (hook mengunci peran:
   // role lain tidak pernah menembak API pending-registrations).
   const isSuperAdmin = user !== null && isSuperAdminRole(user.role)
 
@@ -170,7 +220,8 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
   const unreadCount = useUnreadNotificationCount()
   // Pendaftaran menunggu: selalu ter-mount, hanya menyala untuk superadmin.
   const pendingCount = usePendingRegistrationCount()
-  // Entri section panel: hanya diambil saat panel terbuka (superadmin saja).
+  // Entri pendaftaran (dipin di atas daftar): hanya diambil saat panel terbuka
+  // (superadmin saja).
   const pendingFeed = usePendingRegistrationsFeed(open)
 
   const markRead = useMarkNotificationReadMutation()
@@ -186,6 +237,12 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
   // Badge lonceng superadmin = unread + pendaftaran menunggu (99+ tetap).
   const badgeCount = unreadCount + pendingCount
   const hasBadge = badgeCount > 0
+  // Treatment daftar tunggal: muat/galat menyangkut seluruh panel, keadaan
+  // kosong hanya bila KEDUA feed habis (tanpa pesan per-feed terpisah).
+  const showPendingBadge = isSuperAdmin && pendingCount > 0
+  const isPanelLoading = isPending || (isSuperAdmin && pendingFeed.isPending)
+  const isPanelError = isError || (isSuperAdmin && pendingFeed.isError)
+  const isPanelEmpty = items.length === 0 && pendingItems.length === 0
 
   useEffect(() => {
     if (!open) return
@@ -220,6 +277,13 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
       return
     }
     router.push(targetHref(item))
+  }
+
+  // Pendaftaran menunggu tidak punya estado "dibaca": baris hanya menutup
+  // panel lalu membuka antrean pengelolaan penuh; resolve lewat approve/reject.
+  const handlePendingSelect = (): void => {
+    setOpen(false)
+    router.push('/vendor-registrations')
   }
 
   const handleMarkAllRead = (): void => {
@@ -257,65 +321,22 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
 
       {open ? (
         <div id={menuId} role="menu" aria-labelledby={buttonId} className={PANEL_CLASS}>
-          {isSuperAdmin ? (
-            /* Pita superadmin di paling atas panel: angka + entri antrean
-               pendaftaran vendor, tautan tunggal ke pengelolaan penuh. */
-            <div
-              data-testid="pending-registrations-section"
-              className="border-b border-border-mid bg-brand-soft/50 px-2 py-1"
-            >
-              <Link
-                href="/vendor-registrations"
-                onClick={() => setOpen(false)}
-                className="flex min-h-touch w-full items-center gap-2 rounded-control px-1 text-left transition hover:bg-brand/10 active:bg-brand/20"
-              >
-                <span
-                  aria-hidden="true"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-badge bg-brand text-brand-contrast"
-                >
-                  <UserPlus className="size-4" />
-                </span>
-                <span className="min-w-0 flex-1 text-sm font-semibold text-ink">
-                  Pendaftaran vendor menunggu persetujuan
-                </span>
-                {pendingCount > 0 ? (
+          <div className="flex items-center justify-between gap-2 border-b border-border-mid px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-ink">Notifikasi</p>
+              {unreadInFeed > 0 ? (
+                <p className="text-badge text-ink-muted">{unreadInFeed} belum dibaca</p>
+              ) : null}
+              {showPendingBadge ? (
+                <p className="mt-0.5 flex items-center gap-1.5 text-badge text-ink-muted">
                   <span
                     data-testid="pending-registrations-badge"
                     className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-badge bg-secondary px-1 text-badge font-bold leading-none tabular-nums text-ink"
                   >
                     {formatUnreadBadge(pendingCount)}
                   </span>
-                ) : null}
-              </Link>
-              {pendingFeed.isError ? (
-                <p className="px-1 pb-1 text-xs text-ink-muted">Gagal memuat pendaftaran vendor.</p>
-              ) : pendingFeed.isPending ? (
-                <p className="px-1 pb-1 text-xs text-ink-muted">Memuat pendaftaran vendor…</p>
-              ) : pendingItems.length === 0 ? (
-                <p className="px-1 pb-1 text-xs text-ink-muted">
-                  Belum ada pendaftaran vendor menunggu.
+                  <span>perlu tindakan</span>
                 </p>
-              ) : (
-                <ul className="flex flex-col gap-0.5 pb-1">
-                  {pendingItems.map((item) => (
-                    <li key={item.vendor_user_id} className="min-w-0 px-1 py-0.5">
-                      <p className="truncate text-xs font-semibold text-ink" title={item.name}>
-                        {item.name}
-                      </p>
-                      <p className="truncate text-xs text-ink-muted" title={item.vendor_name}>
-                        {item.vendor_name}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ) : null}
-          <div className="flex items-center justify-between gap-2 border-b border-border-mid px-3 py-2">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-ink">Notifikasi</p>
-              {unreadInFeed > 0 ? (
-                <p className="text-badge text-ink-muted">{unreadInFeed} belum dibaca</p>
               ) : null}
             </div>
             <Button
@@ -329,53 +350,58 @@ export function NotificationsMenu({ tone = 'light', className, onSelect }: Notif
             </Button>
           </div>
           <div className="flex max-h-96 flex-col gap-1 overflow-y-auto px-1 py-1">
-            {isPending ? (
+            {isSuperAdmin ? (
+              <div
+                data-testid="pending-registrations-section"
+                className={pendingItems.length > 0 ? 'flex flex-col gap-1' : 'hidden'}
+              >
+                {pendingItems.map((item) => (
+                  <PanelRow
+                    key={item.vendor_user_id}
+                    Icon={UserPlus}
+                    emphasized
+                    title="Pendaftaran vendor baru"
+                    description={
+                      <>
+                        <span>{item.name}</span> • <span>{item.vendor_name}</span> menunggu
+                        verifikasi.
+                      </>
+                    }
+                    meta={
+                      <span className="truncate">mendaftar {formatOccurredAt(item.created_at)}</span>
+                    }
+                    statusLabel="Perlu tindakan"
+                    onSelect={handlePendingSelect}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {isPanelLoading ? (
               <p className="px-3 py-6 text-center text-sm text-ink-muted">Memuat notifikasi…</p>
-            ) : isError ? (
+            ) : isPanelError ? (
               <p className="px-3 py-6 text-center text-sm text-ink-muted">Gagal memuat notifikasi.</p>
-            ) : items.length === 0 ? (
-              <p className="px-3 py-6 text-center text-sm text-ink-muted">Belum ada notifikasi.</p>
+            ) : isPanelEmpty ? (
+              <p className="px-3 py-6 text-center text-sm text-ink-muted">Tidak ada notifikasi.</p>
             ) : (
               items.map((item) => {
                 const { Icon } = TYPE_META[item.type]
                 return (
-                  <button
+                  <PanelRow
                     key={item.id}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => handleSelect(item)}
-                    className={`${ITEM_CLASS} ${
-                      item.is_read ? ITEM_READ_CLASS : ITEM_UNREAD_CLASS
-                    }`}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-badge ${
-                        item.is_read ? 'bg-neutral-bg text-ink-muted' : 'bg-brand text-brand-contrast'
-                      }`}
-                    >
-                      <Icon className="size-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-ink">
-                        {item.title}
-                      </span>
-                      <span className="block break-words text-xs text-ink-secondary">
-                        {item.message}
-                      </span>
-                      <span className="mt-0.5 flex items-center gap-2 text-badge text-ink-muted">
+                    Icon={Icon}
+                    emphasized={!item.is_read}
+                    title={item.title}
+                    description={item.message}
+                    meta={
+                      <>
                         <span className="truncate">{item.location_name}</span>
                         <span aria-hidden="true">·</span>
                         <span className="shrink-0">{formatOccurredAt(item.occurred_at)}</span>
-                      </span>
-                      {!item.is_read ? (
-                        <span className="mt-1 inline-flex items-center gap-1 rounded-badge bg-brand-soft px-1.5 py-0.5 text-badge font-semibold text-brand-dark">
-                          <span aria-hidden="true" className="size-1.5 rounded-full bg-brand" />
-                          Belum dibaca
-                        </span>
-                      ) : null}
-                    </span>
-                  </button>
+                      </>
+                    }
+                    statusLabel={item.is_read ? undefined : 'Belum dibaca'}
+                    onSelect={() => handleSelect(item)}
+                  />
                 )
               })
             )}

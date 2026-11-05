@@ -10,6 +10,7 @@
 import { z } from 'zod'
 
 import {
+  EMAIL_MAX_LENGTH,
   ID_NUMBER_PATTERN,
   JABATAN_MAX_LENGTH,
   NAME_MAX_LENGTH,
@@ -20,6 +21,7 @@ import {
   PHONE_MAX_LENGTH,
   PHONE_MIN_LENGTH,
   VENDOR_NAME_MAX_LENGTH,
+  isValidEmail,
   isValidPhone,
 } from '@/lib/limits'
 
@@ -131,6 +133,18 @@ export const technicianSchema = z.object({
     .max(
       VENDOR_NAME_MAX_LENGTH,
       `Nama vendor maksimal ${VENDOR_NAME_MAX_LENGTH} karakter.`,
+    )
+    .optional(),
+  // Email kontak anggota (opsional — keputusan pemilik produk: boleh kosong).
+  // Trim dulu; kosong = dianggap absen (field tidak dikirim saat submit);
+  // non-kosong wajib berformat valid dan ≤254 karakter (kontrak openapi).
+  email: z
+    .string()
+    .trim()
+    .max(EMAIL_MAX_LENGTH, `Email maksimal ${EMAIL_MAX_LENGTH} karakter.`)
+    .refine(
+      (value) => value === '' || isValidEmail(value),
+      'Format email tidak valid.',
     )
     .optional(),
 })

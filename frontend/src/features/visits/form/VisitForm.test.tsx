@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CreateVisitRequest } from '@/lib/api/types'
 import {
+  EMAIL_MAX_LENGTH,
   ID_NUMBER_MAX_LENGTH,
   NAME_MAX_LENGTH,
   PHONE_MAX_LENGTH,
@@ -117,6 +118,7 @@ function uploadInto(
 async function fillVisitForm(options: {
   ktp: boolean
   jabatan?: string
+  email?: string
 }): Promise<HTMLElement> {
   const { container } = render(<VisitForm />)
 
@@ -145,6 +147,11 @@ async function fillVisitForm(options: {
   if (options.jabatan !== undefined) {
     fireEvent.change(screen.getByLabelText('Jabatan'), {
       target: { value: options.jabatan },
+    })
+  }
+  if (options.email !== undefined) {
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: options.email },
     })
   }
 
@@ -254,6 +261,44 @@ describe('VisitForm - roster anggota/pengunjung', () => {
     await waitFor(() => expect(createVisitMock).toHaveBeenCalledTimes(1))
     const body = createVisitMock.mock.calls[0]?.[0]?.body
     expect(body?.visitors[0]?.jabatan).toBe('Teknisi FO Baru XYZ')
+  })
+})
+
+describe('VisitForm - email anggota (opsional)', () => {
+  it('menampilkan input Email berlabel dengan inputMode email', () => {
+    render(<VisitForm />)
+
+    const email = screen.getByLabelText<HTMLInputElement>('Email')
+    expect(email).toBeInTheDocument()
+    expect(email).toHaveAttribute('inputmode', 'email')
+    expect(email).not.toHaveAttribute('required')
+    expect(email).toHaveAttribute('maxlength', String(EMAIL_MAX_LENGTH))
+  })
+
+  it('mengirim email yang diketik pada payload visitors[]', async () => {
+    await fillVisitForm({ ktp: true, email: 'teknisi@vendor.co.id' })
+    submitForm()
+
+    await waitFor(() => expect(createVisitMock).toHaveBeenCalledTimes(1))
+    const body = createVisitMock.mock.calls[0]?.[0]?.body
+    expect(body?.visitors[0]?.email).toBe('teknisi@vendor.co.id')
+  })
+
+  it('email kosong → field email tidak dikirim sama sekali', async () => {
+    await fillVisitForm({ ktp: true, email: '   ' })
+    submitForm()
+
+    await waitFor(() => expect(createVisitMock).toHaveBeenCalledTimes(1))
+    const body = createVisitMock.mock.calls[0]?.[0]?.body
+    expect(body?.visitors[0]).not.toHaveProperty('email')
+  })
+
+  it('email tidak valid memblokir submit dan menampilkan galat inline', async () => {
+    await fillVisitForm({ ktp: true, email: 'bukan-email' })
+    submitForm()
+
+    expect(await screen.findByText('Format email tidak valid.')).toBeInTheDocument()
+    expect(createVisitMock).not.toHaveBeenCalled()
   })
 })
 

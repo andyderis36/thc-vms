@@ -38,11 +38,13 @@ import type {
   UpdateSecurityUserRequest,
   UpdateSelfProfileRequest,
   UpdateUserStatusRequest,
+  UpdateVisitorContactRequest,
   User,
   Vendor,
   VisitDetail,
   VisitListParams,
   VisitListResult,
+  VisitorItem,
 } from '@/lib/api/types';
 
 /** `POST /uploads` — tetap di sini agar endpoint Storage punya satu penutup bertipe. */
@@ -204,6 +206,18 @@ export function cancelVisit(id: string, body?: CancelRequest): Promise<void> {
 
 export function getVisitQr(id: string): Promise<QrPayload> {
   return apiFetch<QrPayload>(`/visits/${id}/qr`);
+}
+
+/** `PATCH /visits/{id}/visitors/{visitorId}` — ubah parsial kontak anggota (pembuat saja). */
+export function updateVisitorContact(
+  visitId: string,
+  visitorId: string,
+  body: UpdateVisitorContactRequest,
+): Promise<VisitorItem> {
+  return apiFetch<VisitorItem>(`/visits/${visitId}/visitors/${visitorId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
 }
 
 export function checkInVisit(id: string, body?: CheckInRequest): Promise<void> {

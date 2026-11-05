@@ -58,6 +58,7 @@ import {
   updateMe,
   updateSecurityUser,
   updateSecurityUserStatus,
+  updateVisitorContact,
   uploadFile,
 } from '@/lib/api/client'
 import { ApiError } from '@/lib/api/fetcher'
@@ -88,6 +89,7 @@ import type {
   UpdateSecurityUserRequest,
   UpdateSelfProfileRequest,
   UpdateUserStatusRequest,
+  UpdateVisitorContactRequest,
   UploadCategory,
   User,
   VisitDetail,
@@ -821,6 +823,25 @@ export function useConfirmEmailChangeMutation() {
     onSuccess: (user) => {
       queryClient.setQueryData(queryKeys.me(), user)
       applyUser(user)
+    },
+  })
+}
+
+/** Hapus kunjungan → segarkan daftar + detail kunjungan itu (prefix ada). */
+export function useUpdateVisitorContactMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      visitId,
+      visitorId,
+      body,
+    }: {
+      visitId: string
+      visitorId: string
+      body: UpdateVisitorContactRequest
+    }) => updateVisitorContact(visitId, visitorId, body),
+    onSuccess: (_data, variables) => {
+      invalidateVisitStatus(queryClient, variables.visitId)
     },
   })
 }

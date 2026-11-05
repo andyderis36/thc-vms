@@ -213,6 +213,25 @@ export interface VisitorItem {
    * dari `GET /jabatan`; nilainya TIDAK divalidasi terhadap daftar itu.
    */
   jabatan?: string | null;
+  /**
+   * Email kontak anggota (opsional, maks 254 karakter setelah trim) —
+   * kontrak `VisitorItem.email` pada `docs/4. openapi.yaml`. Absen/null =
+   * tidak ada; kosong diperlakukan sebagai absen (field tidak dikirim).
+   */
+  email?: string | null;
+  /**
+   * Penanda baris kontak anggota yang pernah diubah pembuat kunjungan via
+   * `PATCH /visits/{id}/visitors/{visitorId}`. Absen = belum pernah diubah.
+   */
+  phone_edited?: boolean;
+}
+
+/**
+ * `PATCH /visits/{id}/visitors/{visitorId}` — hanya nomor telepon yang dapat
+ * dikoreksi pembuat sebelum persetujuan (requested/rescheduled).
+ */
+export interface UpdateVisitorContactRequest {
+  phone: string;
 }
 
 /**

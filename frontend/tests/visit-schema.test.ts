@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { visitFormSchema } from '@/features/visits/form/visit-schema'
 import {
+  EMAIL_MAX_LENGTH,
   NAME_MAX_LENGTH,
   PURPOSE_NOTE_MAX_LENGTH,
   TEXT_MAX_LENGTH,
@@ -196,6 +197,73 @@ describe('visitFormSchema — nomor identitas anggota', () => {
     expect(issueAt(result, 'technicians.0.id_number')?.message).toBe(
       'Nomor KTP/SIM anggota wajib diisi.',
     )
+  })
+})
+
+describe('visitFormSchema — email anggota (opsional)', () => {
+  it('menerima payload tanpa field email (opsional)', () => {
+    expect(visitFormSchema.safeParse(formWithTechnician({})).success).toBe(true)
+  })
+
+  it('menerima email kosong dan hanya spasi (dianggap absen)', () => {
+    expect(
+      visitFormSchema.safeParse(formWithTechnician({ email: '' })).success,
+    ).toBe(true)
+    expect(
+      visitFormSchema.safeParse(formWithTechnician({ email: '   ' })).success,
+    ).toBe(true)
+  })
+
+  it('menerima email valid', () => {
+    const result = visitFormSchema.safeParse(
+      formWithTechnician({ email: 'teknisi@vendor.co.id' }),
+    )
+
+    expect(result.success).toBe(true)
+  })
+
+  it('menolak email tanpa @ dengan pesan Indonesia', () => {
+    const result = visitFormSchema.safeParse(
+      formWithTechnician({ email: 'bukan-email' }),
+    )
+
+    expect(result.success).toBe(false)
+    expect(issueAt(result, 'technicians.0.email')?.message).toBe(
+      'Format email tidak valid.',
+    )
+  })
+
+  it('menolak email dengan spasi di tengah', () => {
+    const result = visitFormSchema.safeParse(
+      formWithTechnician({ email: 'dua@contoh.id @x.co' }),
+    )
+
+    expect(result.success).toBe(false)
+    expect(issueAt(result, 'technicians.0.email')?.message).toBe(
+      'Format email tidak valid.',
+    )
+  })
+
+  it('menolak email lebih dari EMAIL_MAX_LENGTH karakter', () => {
+    // 243 huruf + '@example.com' (12) = 255 karakter.
+    const overlong = `${'a'.repeat(EMAIL_MAX_LENGTH - 11)}@example.com`
+    const result = visitFormSchema.safeParse(
+      formWithTechnician({ email: overlong }),
+    )
+
+    expect(result.success).toBe(false)
+    expect(issueAt(result, 'technicians.0.email')?.message).toBe(
+      `Email maksimal ${EMAIL_MAX_LENGTH} karakter.`,
+    )
+  })
+
+  it('menerima email tepat EMAIL_MAX_LENGTH karakter', () => {
+    const exact = `${'a'.repeat(EMAIL_MAX_LENGTH - 12)}@example.com`
+    const result = visitFormSchema.safeParse(
+      formWithTechnician({ email: exact }),
+    )
+
+    expect(result.success).toBe(true)
   })
 })
 

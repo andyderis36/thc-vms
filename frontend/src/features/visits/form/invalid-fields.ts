@@ -86,6 +86,10 @@ const TECHNICIAN_SUBKEYS: readonly TechnicianSubkeySpec[] = [
     key: 'selfie',
     label: (index) => `Foto selfie anggota (Anggota ${index + 1})`,
   },
+  {
+    key: 'email',
+    label: (index) => `Email (Anggota ${index + 1})`,
+  },
 ]
 
 /** `id` anchor elemen input pada baris anggota (stabil & dapat diprediksi). */
