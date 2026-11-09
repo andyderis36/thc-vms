@@ -19,32 +19,34 @@ FROM visit_request vr
 JOIN users pu ON pu.id = vr.vendor_user_id
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-WHERE vr.location_id = $1::uuid
-  AND ($2::text IS NULL OR vr.status = $2::text)
-  AND ($3::timestamptz IS NULL OR vr.start_date >= $3::timestamptz)
-  AND ($4::timestamptz IS NULL OR vr.start_date < $4::timestamptz)
+WHERE ($1::bool OR vr.location_id = ANY($2::uuid[]))
+  AND ($3::text IS NULL OR vr.status = $3::text)
+  AND ($4::timestamptz IS NULL OR vr.start_date >= $4::timestamptz)
+  AND ($5::timestamptz IS NULL OR vr.start_date < $5::timestamptz)
   AND (
-        $5::text IS NULL
-     OR pu.name ILIKE '%' || $5::text || '%'
-     OR vr.visit_id ILIKE '%' || $5::text || '%'
-     OR v.name ILIKE '%' || $5::text || '%'
-     OR l.name ILIKE '%' || $5::text || '%'
-     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || $5::text || '%')
-     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || $5::text || '%')
+        $6::text IS NULL
+     OR pu.name ILIKE '%' || $6::text || '%'
+     OR vr.visit_id ILIKE '%' || $6::text || '%'
+     OR v.name ILIKE '%' || $6::text || '%'
+     OR l.name ILIKE '%' || $6::text || '%'
+     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || $6::text || '%')
+     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || $6::text || '%')
   )
 `
 
 type CountVisitsForLocationParams struct {
-	LocationID uuid.UUID          `json:"location_id"`
-	Status     pgtype.Text        `json:"status"`
-	DateFrom   pgtype.Timestamptz `json:"date_from"`
-	DateTo     pgtype.Timestamptz `json:"date_to"`
-	Search     pgtype.Text        `json:"search"`
+	IsGlobal    bool               `json:"is_global"`
+	LocationIds []uuid.UUID        `json:"location_ids"`
+	Status      pgtype.Text        `json:"status"`
+	DateFrom    pgtype.Timestamptz `json:"date_from"`
+	DateTo      pgtype.Timestamptz `json:"date_to"`
+	Search      pgtype.Text        `json:"search"`
 }
 
 func (q *Queries) CountVisitsForLocation(ctx context.Context, arg CountVisitsForLocationParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countVisitsForLocation,
-		arg.LocationID,
+		arg.IsGlobal,
+		arg.LocationIds,
 		arg.Status,
 		arg.DateFrom,
 		arg.DateTo,
@@ -61,33 +63,35 @@ FROM visit_request vr
 JOIN users pu ON pu.id = vr.vendor_user_id
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-WHERE ($1::uuid IS NULL OR vr.location_id = $1::uuid)
-  AND ($2::text IS NULL OR vr.status = $2::text)
-  AND ($3::timestamptz IS NULL OR vr.start_date >= $3::timestamptz)
-  AND ($4::timestamptz IS NULL OR vr.start_date < $4::timestamptz)
+WHERE ($1::bool OR vr.location_id = ANY($2::uuid[]))
+  AND ($3::text IS NULL OR vr.status = $3::text)
+  AND ($4::timestamptz IS NULL OR vr.start_date >= $4::timestamptz)
+  AND ($5::timestamptz IS NULL OR vr.start_date < $5::timestamptz)
   AND (
-        $5::text IS NULL
-     OR pu.name ILIKE '%' || $5::text || '%'
-     OR vr.visit_id ILIKE '%' || $5::text || '%'
-     OR v.name ILIKE '%' || $5::text || '%'
-     OR l.name ILIKE '%' || $5::text || '%'
-     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || $5::text || '%')
-     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || $5::text || '%')
+        $6::text IS NULL
+     OR pu.name ILIKE '%' || $6::text || '%'
+     OR vr.visit_id ILIKE '%' || $6::text || '%'
+     OR v.name ILIKE '%' || $6::text || '%'
+     OR l.name ILIKE '%' || $6::text || '%'
+     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || $6::text || '%')
+     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || $6::text || '%')
   )
 `
 
 type CountVisitsForSuperAdminParams struct {
-	LocationID pgtype.UUID        `json:"location_id"`
-	Status     pgtype.Text        `json:"status"`
-	DateFrom   pgtype.Timestamptz `json:"date_from"`
-	DateTo     pgtype.Timestamptz `json:"date_to"`
-	Search     pgtype.Text        `json:"search"`
+	IsGlobal    bool               `json:"is_global"`
+	LocationIds []uuid.UUID        `json:"location_ids"`
+	Status      pgtype.Text        `json:"status"`
+	DateFrom    pgtype.Timestamptz `json:"date_from"`
+	DateTo      pgtype.Timestamptz `json:"date_to"`
+	Search      pgtype.Text        `json:"search"`
 }
 
 // Companion count; predicate is byte-for-byte the ListVisitsForSuperAdmin one.
 func (q *Queries) CountVisitsForSuperAdmin(ctx context.Context, arg CountVisitsForSuperAdminParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countVisitsForSuperAdmin,
-		arg.LocationID,
+		arg.IsGlobal,
+		arg.LocationIds,
 		arg.Status,
 		arg.DateFrom,
 		arg.DateTo,
@@ -146,10 +150,10 @@ INSERT INTO visit_request (
     visit_id, vendor_user_id, vendor_id, location_id,
     start_date, end_date, is_multi_day, status,
     assignment_letter_url, is_nda_accepted, notes, purpose_note,
-    vendor_name_override
+    vendor_name_override, created_by
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10, $11, $12)
-RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note, vendor_name_override
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10, $11, $12, $13)
+RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note, vendor_name_override, created_by
 `
 
 type CreateVisitParams struct {
@@ -165,6 +169,7 @@ type CreateVisitParams struct {
 	Notes               pgtype.Text `json:"notes"`
 	PurposeNote         pgtype.Text `json:"purpose_note"`
 	VendorNameOverride  pgtype.Text `json:"vendor_name_override"`
+	CreatedBy           pgtype.UUID `json:"created_by"`
 }
 
 // =============================================================================
@@ -180,14 +185,21 @@ type CreateVisitParams struct {
 // SCOPE INVARIANT (PRD L109-112, AGENTS.md rule 6.1, rule 7.4)
 //
 //	Branch isolation is implemented as three statically-written queries - one
-//	per role scope - rather than one query with a dynamic predicate. A
-//	super_admin list can never accidentally carry a location filter it did not
-//	intend, and an admin/security list is a hard `vr.location_id = $1`
-//	equality that no caller can widen. Every scope value is a bound parameter;
-//	no role name, location id or search term is ever concatenated into SQL.
-//	  super_admin : ListVisitsForSuperAdmin  (location_id filter is OPTIONAL)
-//	  admin       : ListVisitsForLocation     (location_id REQUIRED)
-//	  security    : ListVisitsForLocation     (location_id REQUIRED,
+//	per role scope - rather than one query with a dynamic predicate. The branch
+//	and super_admin pairs share the union predicate
+//	`(is_global OR location_id = ANY(location_ids))`: the resolver stash behind
+//	thc.scope decides the scope, the query only enforces it. A global caller
+//	passes is_global TRUE with an empty union and sees every branch; a branch
+//	caller passes its user_locations union with is_global FALSE and sees
+//	exactly those branches; an empty union with FALSE matches no row
+//	(fail-closed, never the whole table). Every scope value is a bound
+//	parameter; no role name, location id or search term is ever concatenated
+//	into SQL.
+//	  super_admin : ListVisitsForSuperAdmin  (is_global TRUE, or a single-id
+//	                                           union to narrow by branch)
+//	  admin       : ListVisitsForLocation     (union REQUIRED, is_global FALSE
+//	                                           unless the stash says global)
+//	  security    : ListVisitsForLocation     (same union,
 //	                                           + date_from/date_to = TODAY, PRD L97)
 //	  vendor       : ListVisitsForVendorUser          (vendor_user_id REQUIRED)
 //	Each list query has a Count* twin with the identical predicate so the
@@ -199,6 +211,9 @@ type CreateVisitParams struct {
 // caller as 'VST-' || lpad(nextval('visit_seq'),10,'0'); the format is enforced
 // by chk_visit_request_visit_id_format. status is pinned to 'requested'
 // (PRD L133) and cannot be set by the request body.
+// vendor_user_id is the vendor ACCOUNT owning the visit (chosen by an
+// admin/superadmin, or the actor itself for a vendor caller); created_by is
+// ALWAYS the authenticated actor that submitted the row (migration 000024).
 func (q *Queries) CreateVisit(ctx context.Context, arg CreateVisitParams) (VisitRequest, error) {
 	row := q.db.QueryRow(ctx, createVisit,
 		arg.VisitID,
@@ -213,6 +228,7 @@ func (q *Queries) CreateVisit(ctx context.Context, arg CreateVisitParams) (Visit
 		arg.Notes,
 		arg.PurposeNote,
 		arg.VendorNameOverride,
+		arg.CreatedBy,
 	)
 	var i VisitRequest
 	err := row.Scan(
@@ -232,6 +248,7 @@ func (q *Queries) CreateVisit(ctx context.Context, arg CreateVisitParams) (Visit
 		&i.UpdatedAt,
 		&i.PurposeNote,
 		&i.VendorNameOverride,
+		&i.CreatedBy,
 	)
 	return i, err
 }
@@ -261,18 +278,21 @@ func (q *Queries) DeleteVisit(ctx context.Context, arg DeleteVisitParams) (uuid.
 
 const getVisitByID = `-- name: GetVisitByID :one
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override, vr.created_by,
     l.name AS location_name, l.type AS location_type,
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
     v.name AS vendor_name,
     pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
-    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name,
+    cb.name AS created_by_name, cr.name AS created_by_role_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
 LEFT JOIN vendor vu ON vu.id = pu.vendor_id
+LEFT JOIN users cb ON cb.id = vr.created_by
+LEFT JOIN role cr ON cr.id = cb.role_id
 WHERE vr.id = $1
 `
 
@@ -297,6 +317,7 @@ type GetVisitByIDRow struct {
 	UpdatedAt            time.Time   `json:"updated_at"`
 	PurposeNote          pgtype.Text `json:"purpose_note"`
 	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	CreatedBy            pgtype.UUID `json:"created_by"`
 	LocationName         string      `json:"location_name"`
 	LocationType         string      `json:"location_type"`
 	LocationAddress      pgtype.Text `json:"location_address"`
@@ -307,11 +328,16 @@ type GetVisitByIDRow struct {
 	VendorUserEmail      string      `json:"vendor_user_email"`
 	VendorUserPhone      pgtype.Text `json:"vendor_user_phone"`
 	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
+	CreatedByName        pgtype.Text `json:"created_by_name"`
+	CreatedByRoleName    pgtype.Text `json:"created_by_role_name"`
 }
 
 // Detail read for GET /visits/{id} (openapi L309-327) and for every
 // owner-scoped response. The projection is the visit row plus the joined names
 // the openapi VisitDetail schema needs (location, vendor_name, vendor_user).
+// The users/role LEFT JOINs ride the creator display data for the
+// GET /visits/{id} "Diajukan oleh" row (created_by is NULL on rows written
+// before migration 000024, hence LEFT JOIN and NULL-safe output columns).
 func (q *Queries) GetVisitByID(ctx context.Context, arg GetVisitByIDParams) (GetVisitByIDRow, error) {
 	row := q.db.QueryRow(ctx, getVisitByID, arg.ID)
 	var i GetVisitByIDRow
@@ -332,6 +358,7 @@ func (q *Queries) GetVisitByID(ctx context.Context, arg GetVisitByIDParams) (Get
 		&i.UpdatedAt,
 		&i.PurposeNote,
 		&i.VendorNameOverride,
+		&i.CreatedBy,
 		&i.LocationName,
 		&i.LocationType,
 		&i.LocationAddress,
@@ -342,13 +369,15 @@ func (q *Queries) GetVisitByID(ctx context.Context, arg GetVisitByIDParams) (Get
 		&i.VendorUserEmail,
 		&i.VendorUserPhone,
 		&i.VendorUserVendorName,
+		&i.CreatedByName,
+		&i.CreatedByRoleName,
 	)
 	return i, err
 }
 
 const getVisitByIDForUpdate = `-- name: GetVisitByIDForUpdate :one
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override, vr.created_by,
     l.name AS location_name, l.type AS location_type,
     v.name AS vendor_name,
     pu.name AS vendor_user_name,
@@ -383,6 +412,7 @@ type GetVisitByIDForUpdateRow struct {
 	UpdatedAt            time.Time   `json:"updated_at"`
 	PurposeNote          pgtype.Text `json:"purpose_note"`
 	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	CreatedBy            pgtype.UUID `json:"created_by"`
 	LocationName         string      `json:"location_name"`
 	LocationType         string      `json:"location_type"`
 	VendorName           pgtype.Text `json:"vendor_name"`
@@ -413,6 +443,7 @@ func (q *Queries) GetVisitByIDForUpdate(ctx context.Context, arg GetVisitByIDFor
 		&i.UpdatedAt,
 		&i.PurposeNote,
 		&i.VendorNameOverride,
+		&i.CreatedBy,
 		&i.LocationName,
 		&i.LocationType,
 		&i.VendorName,
@@ -424,18 +455,21 @@ func (q *Queries) GetVisitByIDForUpdate(ctx context.Context, arg GetVisitByIDFor
 
 const getVisitByVisitCode = `-- name: GetVisitByVisitCode :one
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override, vr.created_by,
     l.name AS location_name, l.type AS location_type,
     l.address AS location_address, l.city AS location_city,
     l.timezone AS location_timezone,
     v.name AS vendor_name,
     pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
-    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name,
+    cb.name AS created_by_name, cr.name AS created_by_role_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
 LEFT JOIN vendor vu ON vu.id = pu.vendor_id
+LEFT JOIN users cb ON cb.id = vr.created_by
+LEFT JOIN role cr ON cr.id = cb.role_id
 WHERE vr.visit_id = $1
 `
 
@@ -460,6 +494,7 @@ type GetVisitByVisitCodeRow struct {
 	UpdatedAt            time.Time   `json:"updated_at"`
 	PurposeNote          pgtype.Text `json:"purpose_note"`
 	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	CreatedBy            pgtype.UUID `json:"created_by"`
 	LocationName         string      `json:"location_name"`
 	LocationType         string      `json:"location_type"`
 	LocationAddress      pgtype.Text `json:"location_address"`
@@ -470,11 +505,15 @@ type GetVisitByVisitCodeRow struct {
 	VendorUserEmail      string      `json:"vendor_user_email"`
 	VendorUserPhone      pgtype.Text `json:"vendor_user_phone"`
 	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
+	CreatedByName        pgtype.Text `json:"created_by_name"`
+	CreatedByRoleName    pgtype.Text `json:"created_by_role_name"`
 }
 
 // Triple-Mode Scanner mode 3 (PRD L119): the guard types the printed code
 // `VST-XXXXXXXXXX` by hand. The code is UNIQUE (ERD L81) so this resolves at
 // most one visit, and idx_visit_id_code (PRD L208) makes it a single index probe.
+// The creator join mirrors GetVisitByID so both single-visit read paths carry
+// the "Diajukan oleh" display data.
 func (q *Queries) GetVisitByVisitCode(ctx context.Context, arg GetVisitByVisitCodeParams) (GetVisitByVisitCodeRow, error) {
 	row := q.db.QueryRow(ctx, getVisitByVisitCode, arg.VisitID)
 	var i GetVisitByVisitCodeRow
@@ -495,6 +534,7 @@ func (q *Queries) GetVisitByVisitCode(ctx context.Context, arg GetVisitByVisitCo
 		&i.UpdatedAt,
 		&i.PurposeNote,
 		&i.VendorNameOverride,
+		&i.CreatedBy,
 		&i.LocationName,
 		&i.LocationType,
 		&i.LocationAddress,
@@ -505,13 +545,15 @@ func (q *Queries) GetVisitByVisitCode(ctx context.Context, arg GetVisitByVisitCo
 		&i.VendorUserEmail,
 		&i.VendorUserPhone,
 		&i.VendorUserVendorName,
+		&i.CreatedByName,
+		&i.CreatedByRoleName,
 	)
 	return i, err
 }
 
 const getVisitByVisitCodeForUpdate = `-- name: GetVisitByVisitCodeForUpdate :one
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override, vr.created_by,
     l.name AS location_name, l.type AS location_type,
     v.name AS vendor_name,
     pu.name AS vendor_user_name,
@@ -546,6 +588,7 @@ type GetVisitByVisitCodeForUpdateRow struct {
 	UpdatedAt            time.Time   `json:"updated_at"`
 	PurposeNote          pgtype.Text `json:"purpose_note"`
 	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	CreatedBy            pgtype.UUID `json:"created_by"`
 	LocationName         string      `json:"location_name"`
 	LocationType         string      `json:"location_type"`
 	VendorName           pgtype.Text `json:"vendor_name"`
@@ -574,6 +617,7 @@ func (q *Queries) GetVisitByVisitCodeForUpdate(ctx context.Context, arg GetVisit
 		&i.UpdatedAt,
 		&i.PurposeNote,
 		&i.VendorNameOverride,
+		&i.CreatedBy,
 		&i.LocationName,
 		&i.LocationType,
 		&i.VendorName,
@@ -637,6 +681,48 @@ func (q *Queries) GetVisitorByIDForUpdate(ctx context.Context, arg GetVisitorByI
 		&i.PhoneEdited,
 		&i.Email,
 		&i.VendorName,
+	)
+	return i, err
+}
+
+const getWorkPhoto = `-- name: GetWorkPhoto :one
+SELECT wp.id, wp.visit_request_id, wp.kind, wp.url, wp.uploaded_by, wp.created_at,
+    COALESCE(u.name, '') AS uploaded_by_name
+FROM visit_work_photo wp
+LEFT JOIN users u ON u.id = wp.uploaded_by
+WHERE wp.visit_request_id = $1 AND wp.kind = $2
+`
+
+type GetWorkPhotoParams struct {
+	VisitRequestID uuid.UUID `json:"visit_request_id"`
+	Kind           string    `json:"kind"`
+}
+
+type GetWorkPhotoRow struct {
+	ID             uuid.UUID   `json:"id"`
+	VisitRequestID uuid.UUID   `json:"visit_request_id"`
+	Kind           string      `json:"kind"`
+	Url            string      `json:"url"`
+	UploadedBy     pgtype.UUID `json:"uploaded_by"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UploadedByName string      `json:"uploaded_by_name"`
+}
+
+// Single work-proof read for the 201-vs-200 answer of
+// POST /visits/{id}/work-photos. The uploader display name rides along from
+// the users join (NULL uploaded_by, e.g. a removed account, renders "").
+// A missing (visit, kind) pair surfaces pgx.ErrNoRows (-> first attach).
+func (q *Queries) GetWorkPhoto(ctx context.Context, arg GetWorkPhotoParams) (GetWorkPhotoRow, error) {
+	row := q.db.QueryRow(ctx, getWorkPhoto, arg.VisitRequestID, arg.Kind)
+	var i GetWorkPhotoRow
+	err := row.Scan(
+		&i.ID,
+		&i.VisitRequestID,
+		&i.Kind,
+		&i.Url,
+		&i.UploadedBy,
+		&i.CreatedAt,
+		&i.UploadedByName,
 	)
 	return i, err
 }
@@ -757,11 +843,20 @@ func (q *Queries) InsertVisitor(ctx context.Context, arg InsertVisitorParams) (V
 }
 
 const listStatusHistory = `-- name: ListStatusHistory :many
-SELECT sh.id, sh.visit_request_id, sh.status, sh.changed_by, sh.changed_at, sh.notes, u.name AS changed_by_name
-FROM status_history sh
-LEFT JOIN users u ON u.id = sh.changed_by
-WHERE sh.visit_request_id = $1
-ORDER BY sh.changed_at ASC, sh.id ASC
+SELECT s.id, s.visit_request_id, s.status, s.changed_by, s.changed_at, s.notes,
+       s.changed_by_name, s.changed_by_role
+FROM (
+    SELECT sh.id, sh.visit_request_id, sh.status, sh.changed_by, sh.changed_at, sh.notes,
+           u.name AS changed_by_name,
+           r.name AS changed_by_role
+    FROM status_history sh
+    LEFT JOIN users u ON u.id = sh.changed_by
+    LEFT JOIN role r ON r.id = u.role_id
+    WHERE sh.visit_request_id = $1
+    ORDER BY sh.changed_at DESC, sh.id DESC
+    LIMIT 50
+) s
+ORDER BY s.changed_at ASC, s.id ASC
 `
 
 type ListStatusHistoryParams struct {
@@ -776,9 +871,18 @@ type ListStatusHistoryRow struct {
 	ChangedAt      time.Time   `json:"changed_at"`
 	Notes          pgtype.Text `json:"notes"`
 	ChangedByName  pgtype.Text `json:"changed_by_name"`
+	ChangedByRole  pgtype.Text `json:"changed_by_role"`
 }
 
-// Status timeline on SCR-04 (openapi L832+, PRD L232).
+// Status timeline on SCR-04 (openapi VisitDetail.history, PRD L232), served
+// oldest -> newest: the 50 NEWEST rows are taken first (DESC + LIMIT) so an
+// ancient visit cannot grow an unbounded payload, then reversed to ASC for
+// chronological rendering; the window always contains the newest row, so the
+// current status note is derivable from the last returned event.
+// changed_by_name/changed_by_role come from the LEFT JOINs: changed_by IS
+// NULL (the background auto-rule worker) yields NULL actor columns; the raw
+// role NAME is mapped to its Indonesian display label by domain.RoleLabel in
+// the repository, never in SQL.
 func (q *Queries) ListStatusHistory(ctx context.Context, arg ListStatusHistoryParams) ([]ListStatusHistoryRow, error) {
 	rows, err := q.db.Query(ctx, listStatusHistory, arg.VisitRequestID)
 	if err != nil {
@@ -796,6 +900,7 @@ func (q *Queries) ListStatusHistory(ctx context.Context, arg ListStatusHistoryPa
 			&i.ChangedAt,
 			&i.Notes,
 			&i.ChangedByName,
+			&i.ChangedByRole,
 		); err != nil {
 			return nil, err
 		}
@@ -957,7 +1062,7 @@ func (q *Queries) ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]L
 
 const listVisitsForLocation = `-- name: ListVisitsForLocation :many
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override, vr.created_by,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
     pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
@@ -967,40 +1072,41 @@ JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
 LEFT JOIN vendor vu ON vu.id = pu.vendor_id
-WHERE vr.location_id = $1::uuid
-  AND ($2::text IS NULL OR vr.status = $2::text)
-  AND ($3::timestamptz IS NULL OR vr.start_date >= $3::timestamptz)
-  AND ($4::timestamptz IS NULL OR vr.start_date < $4::timestamptz)
+WHERE ($1::bool OR vr.location_id = ANY($2::uuid[]))
+  AND ($3::text IS NULL OR vr.status = $3::text)
+  AND ($4::timestamptz IS NULL OR vr.start_date >= $4::timestamptz)
+  AND ($5::timestamptz IS NULL OR vr.start_date < $5::timestamptz)
   AND (
-        $5::text IS NULL
-     OR pu.name ILIKE '%' || $5::text || '%'
-     OR vr.visit_id ILIKE '%' || $5::text || '%'
-     OR v.name ILIKE '%' || $5::text || '%'
-     OR l.name ILIKE '%' || $5::text || '%'
-     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || $5::text || '%')
-     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || $5::text || '%')
+        $6::text IS NULL
+     OR pu.name ILIKE '%' || $6::text || '%'
+     OR vr.visit_id ILIKE '%' || $6::text || '%'
+     OR v.name ILIKE '%' || $6::text || '%'
+     OR l.name ILIKE '%' || $6::text || '%'
+     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || $6::text || '%')
+     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || $6::text || '%')
   )
 ORDER BY
-  CASE WHEN COALESCE($6::text, 'created_at') = 'start_date' AND COALESCE($7::text, 'desc') = 'asc' THEN vr.start_date END ASC,
-  CASE WHEN COALESCE($6::text, 'created_at') = 'start_date' AND COALESCE($7::text, 'desc') <> 'asc' THEN vr.start_date END DESC,
-  CASE WHEN COALESCE($6::text, 'created_at') = 'end_date' AND COALESCE($7::text, 'desc') = 'asc' THEN vr.end_date END ASC,
-  CASE WHEN COALESCE($6::text, 'created_at') = 'end_date' AND COALESCE($7::text, 'desc') <> 'asc' THEN vr.end_date END DESC,
-  CASE WHEN COALESCE($6::text, 'created_at') = 'created_at' AND COALESCE($7::text, 'desc') = 'asc' THEN vr.created_at END ASC,
-  CASE WHEN COALESCE($6::text, 'created_at') = 'created_at' AND COALESCE($7::text, 'desc') <> 'asc' THEN vr.created_at END DESC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'start_date' AND COALESCE($8::text, 'desc') = 'asc' THEN vr.start_date END ASC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'start_date' AND COALESCE($8::text, 'desc') <> 'asc' THEN vr.start_date END DESC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'end_date' AND COALESCE($8::text, 'desc') = 'asc' THEN vr.end_date END ASC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'end_date' AND COALESCE($8::text, 'desc') <> 'asc' THEN vr.end_date END DESC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'created_at' AND COALESCE($8::text, 'desc') = 'asc' THEN vr.created_at END ASC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'created_at' AND COALESCE($8::text, 'desc') <> 'asc' THEN vr.created_at END DESC,
   vr.id DESC
-LIMIT $9 OFFSET $8
+LIMIT $10 OFFSET $9
 `
 
 type ListVisitsForLocationParams struct {
-	LocationID uuid.UUID          `json:"location_id"`
-	Status     pgtype.Text        `json:"status"`
-	DateFrom   pgtype.Timestamptz `json:"date_from"`
-	DateTo     pgtype.Timestamptz `json:"date_to"`
-	Search     pgtype.Text        `json:"search"`
-	SortBy     pgtype.Text        `json:"sort_by"`
-	SortOrder  pgtype.Text        `json:"sort_order"`
-	Offset     int32              `json:"offset"`
-	Limit      int32              `json:"limit"`
+	IsGlobal    bool               `json:"is_global"`
+	LocationIds []uuid.UUID        `json:"location_ids"`
+	Status      pgtype.Text        `json:"status"`
+	DateFrom    pgtype.Timestamptz `json:"date_from"`
+	DateTo      pgtype.Timestamptz `json:"date_to"`
+	Search      pgtype.Text        `json:"search"`
+	SortBy      pgtype.Text        `json:"sort_by"`
+	SortOrder   pgtype.Text        `json:"sort_order"`
+	Offset      int32              `json:"offset"`
+	Limit       int32              `json:"limit"`
 }
 
 type ListVisitsForLocationRow struct {
@@ -1020,6 +1126,7 @@ type ListVisitsForLocationRow struct {
 	UpdatedAt            time.Time   `json:"updated_at"`
 	PurposeNote          pgtype.Text `json:"purpose_note"`
 	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	CreatedBy            pgtype.UUID `json:"created_by"`
 	LocationName         string      `json:"location_name"`
 	LocationType         string      `json:"location_type"`
 	LocationTimezone     string      `json:"location_timezone"`
@@ -1030,15 +1137,17 @@ type ListVisitsForLocationRow struct {
 	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
 }
 
-// Admin scope (PRD L110) and Security scope (PRD L111, L97). location_id is a
-// REQUIRED plain parameter - the caller cannot pass NULL, so a bug in the auth
-// middleware surfaces as a scan error instead of a cross-branch data leak.
-// The security gate is a date range on the same query: the usecase pins
-// date_from/date_to to today for `security` (PRD L97 "Hari Ini") and leaves them
-// NULL for `admin`. The equality on vr.location_id uses idx_visit_request_location.
+// Admin scope (PRD L110) and Security scope (PRD L111, L97). The scope is the
+// caller's user_locations union with is_global FALSE: a bug in the auth
+// middleware surfaces as an empty union (zero rows, fail-closed) instead of a
+// cross-branch data leak. The security gate is a date range on the same query:
+// the usecase pins date_from/date_to to today for `security` (PRD L97
+// "Hari Ini") and leaves them NULL for `admin`. The ANY on vr.location_id
+// uses idx_visit_request_location.
 func (q *Queries) ListVisitsForLocation(ctx context.Context, arg ListVisitsForLocationParams) ([]ListVisitsForLocationRow, error) {
 	rows, err := q.db.Query(ctx, listVisitsForLocation,
-		arg.LocationID,
+		arg.IsGlobal,
+		arg.LocationIds,
 		arg.Status,
 		arg.DateFrom,
 		arg.DateTo,
@@ -1072,6 +1181,7 @@ func (q *Queries) ListVisitsForLocation(ctx context.Context, arg ListVisitsForLo
 			&i.UpdatedAt,
 			&i.PurposeNote,
 			&i.VendorNameOverride,
+			&i.CreatedBy,
 			&i.LocationName,
 			&i.LocationType,
 			&i.LocationTimezone,
@@ -1093,7 +1203,7 @@ func (q *Queries) ListVisitsForLocation(ctx context.Context, arg ListVisitsForLo
 
 const listVisitsForSuperAdmin = `-- name: ListVisitsForSuperAdmin :many
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override, vr.created_by,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
     pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
@@ -1103,40 +1213,41 @@ JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
 LEFT JOIN vendor vu ON vu.id = pu.vendor_id
-WHERE ($1::uuid IS NULL OR vr.location_id = $1::uuid)
-  AND ($2::text IS NULL OR vr.status = $2::text)
-  AND ($3::timestamptz IS NULL OR vr.start_date >= $3::timestamptz)
-  AND ($4::timestamptz IS NULL OR vr.start_date < $4::timestamptz)
+WHERE ($1::bool OR vr.location_id = ANY($2::uuid[]))
+  AND ($3::text IS NULL OR vr.status = $3::text)
+  AND ($4::timestamptz IS NULL OR vr.start_date >= $4::timestamptz)
+  AND ($5::timestamptz IS NULL OR vr.start_date < $5::timestamptz)
   AND (
-        $5::text IS NULL
-     OR pu.name ILIKE '%' || $5::text || '%'
-     OR vr.visit_id ILIKE '%' || $5::text || '%'
-     OR v.name ILIKE '%' || $5::text || '%'
-     OR l.name ILIKE '%' || $5::text || '%'
-     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || $5::text || '%')
-     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || $5::text || '%')
+        $6::text IS NULL
+     OR pu.name ILIKE '%' || $6::text || '%'
+     OR vr.visit_id ILIKE '%' || $6::text || '%'
+     OR v.name ILIKE '%' || $6::text || '%'
+     OR l.name ILIKE '%' || $6::text || '%'
+     OR EXISTS (SELECT 1 FROM visitor vi WHERE vi.visit_request_id = vr.id AND vi.name ILIKE '%' || $6::text || '%')
+     OR EXISTS (SELECT 1 FROM visit_purpose vp JOIN purpose p ON p.id = vp.purpose_id WHERE vp.visit_request_id = vr.id AND p.name ILIKE '%' || $6::text || '%')
   )
 ORDER BY
-  CASE WHEN COALESCE($6::text, 'created_at') = 'start_date' AND COALESCE($7::text, 'desc') = 'asc' THEN vr.start_date END ASC,
-  CASE WHEN COALESCE($6::text, 'created_at') = 'start_date' AND COALESCE($7::text, 'desc') <> 'asc' THEN vr.start_date END DESC,
-  CASE WHEN COALESCE($6::text, 'created_at') = 'end_date' AND COALESCE($7::text, 'desc') = 'asc' THEN vr.end_date END ASC,
-  CASE WHEN COALESCE($6::text, 'created_at') = 'end_date' AND COALESCE($7::text, 'desc') <> 'asc' THEN vr.end_date END DESC,
-  CASE WHEN COALESCE($6::text, 'created_at') = 'created_at' AND COALESCE($7::text, 'desc') = 'asc' THEN vr.created_at END ASC,
-  CASE WHEN COALESCE($6::text, 'created_at') = 'created_at' AND COALESCE($7::text, 'desc') <> 'asc' THEN vr.created_at END DESC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'start_date' AND COALESCE($8::text, 'desc') = 'asc' THEN vr.start_date END ASC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'start_date' AND COALESCE($8::text, 'desc') <> 'asc' THEN vr.start_date END DESC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'end_date' AND COALESCE($8::text, 'desc') = 'asc' THEN vr.end_date END ASC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'end_date' AND COALESCE($8::text, 'desc') <> 'asc' THEN vr.end_date END DESC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'created_at' AND COALESCE($8::text, 'desc') = 'asc' THEN vr.created_at END ASC,
+  CASE WHEN COALESCE($7::text, 'created_at') = 'created_at' AND COALESCE($8::text, 'desc') <> 'asc' THEN vr.created_at END DESC,
   vr.id DESC
-LIMIT $9 OFFSET $8
+LIMIT $10 OFFSET $9
 `
 
 type ListVisitsForSuperAdminParams struct {
-	LocationID pgtype.UUID        `json:"location_id"`
-	Status     pgtype.Text        `json:"status"`
-	DateFrom   pgtype.Timestamptz `json:"date_from"`
-	DateTo     pgtype.Timestamptz `json:"date_to"`
-	Search     pgtype.Text        `json:"search"`
-	SortBy     pgtype.Text        `json:"sort_by"`
-	SortOrder  pgtype.Text        `json:"sort_order"`
-	Offset     int32              `json:"offset"`
-	Limit      int32              `json:"limit"`
+	IsGlobal    bool               `json:"is_global"`
+	LocationIds []uuid.UUID        `json:"location_ids"`
+	Status      pgtype.Text        `json:"status"`
+	DateFrom    pgtype.Timestamptz `json:"date_from"`
+	DateTo      pgtype.Timestamptz `json:"date_to"`
+	Search      pgtype.Text        `json:"search"`
+	SortBy      pgtype.Text        `json:"sort_by"`
+	SortOrder   pgtype.Text        `json:"sort_order"`
+	Offset      int32              `json:"offset"`
+	Limit       int32              `json:"limit"`
 }
 
 type ListVisitsForSuperAdminRow struct {
@@ -1156,6 +1267,7 @@ type ListVisitsForSuperAdminRow struct {
 	UpdatedAt            time.Time   `json:"updated_at"`
 	PurposeNote          pgtype.Text `json:"purpose_note"`
 	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	CreatedBy            pgtype.UUID `json:"created_by"`
 	LocationName         string      `json:"location_name"`
 	LocationType         string      `json:"location_type"`
 	LocationTimezone     string      `json:"location_timezone"`
@@ -1166,17 +1278,19 @@ type ListVisitsForSuperAdminRow struct {
 	VendorUserVendorName string      `json:"vendor_user_vendor_name"`
 }
 
-// Superadmin scope (PRD L109): no location filter, or one optional location
-// filter. `status`, `date_from`, `date_to` and `search` are all NULLable
-// (narg) so "no filter" is expressed by a NULL bound value, never by removing
-// a predicate at runtime. sort_by/sort_order ride along as bound parameters
-// compared inside static CASE branches (never concatenated): an unknown or
-// NULL value matches no branch and the listing falls back to created_at desc.
-// ORDER BY is fully specified (id last) so LIMIT/OFFSET pagination cannot
-// repeat or drop a row.
+// Superadmin scope (PRD L109): the national view passes is_global TRUE with
+// an empty union; narrowing by branch passes that single branch as a one-id
+// union with is_global FALSE. `status`, `date_from`, `date_to` and `search`
+// are all NULLable (narg) so "no filter" is expressed by a NULL bound value,
+// never by removing a predicate at runtime. sort_by/sort_order ride along as
+// bound parameters compared inside static CASE branches (never concatenated):
+// an unknown or NULL value matches no branch and the listing falls back to
+// created_at desc. ORDER BY is fully specified (id last) so LIMIT/OFFSET
+// pagination cannot repeat or drop a row.
 func (q *Queries) ListVisitsForSuperAdmin(ctx context.Context, arg ListVisitsForSuperAdminParams) ([]ListVisitsForSuperAdminRow, error) {
 	rows, err := q.db.Query(ctx, listVisitsForSuperAdmin,
-		arg.LocationID,
+		arg.IsGlobal,
+		arg.LocationIds,
 		arg.Status,
 		arg.DateFrom,
 		arg.DateTo,
@@ -1210,6 +1324,7 @@ func (q *Queries) ListVisitsForSuperAdmin(ctx context.Context, arg ListVisitsFor
 			&i.UpdatedAt,
 			&i.PurposeNote,
 			&i.VendorNameOverride,
+			&i.CreatedBy,
 			&i.LocationName,
 			&i.LocationType,
 			&i.LocationTimezone,
@@ -1231,7 +1346,7 @@ func (q *Queries) ListVisitsForSuperAdmin(ctx context.Context, arg ListVisitsFor
 
 const listVisitsForVendorUser = `-- name: ListVisitsForVendorUser :many
 SELECT
-    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override,
+    vr.id, vr.visit_id, vr.vendor_user_id, vr.vendor_id, vr.location_id, vr.start_date, vr.end_date, vr.is_multi_day, vr.status, vr.assignment_letter_url, vr.is_nda_accepted, vr.notes, vr.created_at, vr.updated_at, vr.purpose_note, vr.vendor_name_override, vr.created_by,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
     v.name AS vendor_name,
     pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
@@ -1294,6 +1409,7 @@ type ListVisitsForVendorUserRow struct {
 	UpdatedAt            time.Time   `json:"updated_at"`
 	PurposeNote          pgtype.Text `json:"purpose_note"`
 	VendorNameOverride   pgtype.Text `json:"vendor_name_override"`
+	CreatedBy            pgtype.UUID `json:"created_by"`
 	LocationName         string      `json:"location_name"`
 	LocationType         string      `json:"location_type"`
 	LocationTimezone     string      `json:"location_timezone"`
@@ -1344,6 +1460,7 @@ func (q *Queries) ListVisitsForVendorUser(ctx context.Context, arg ListVisitsFor
 			&i.UpdatedAt,
 			&i.PurposeNote,
 			&i.VendorNameOverride,
+			&i.CreatedBy,
 			&i.LocationName,
 			&i.LocationType,
 			&i.LocationTimezone,
@@ -1363,6 +1480,61 @@ func (q *Queries) ListVisitsForVendorUser(ctx context.Context, arg ListVisitsFor
 	return items, nil
 }
 
+const listWorkPhotosByVisit = `-- name: ListWorkPhotosByVisit :many
+SELECT wp.id, wp.visit_request_id, wp.kind, wp.url, wp.uploaded_by, wp.created_at,
+    COALESCE(u.name, '') AS uploaded_by_name
+FROM visit_work_photo wp
+LEFT JOIN users u ON u.id = wp.uploaded_by
+WHERE wp.visit_request_id = $1
+ORDER BY wp.kind ASC
+`
+
+type ListWorkPhotosByVisitParams struct {
+	VisitRequestID uuid.UUID `json:"visit_request_id"`
+}
+
+type ListWorkPhotosByVisitRow struct {
+	ID             uuid.UUID   `json:"id"`
+	VisitRequestID uuid.UUID   `json:"visit_request_id"`
+	Kind           string      `json:"kind"`
+	Url            string      `json:"url"`
+	UploadedBy     pgtype.UUID `json:"uploaded_by"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UploadedByName string      `json:"uploaded_by_name"`
+}
+
+// Both work proofs for the GET /visits/{id} work_photos member and the
+// scoped file endpoint (work_before/work_after slots). At most two rows ride
+// the UNIQUE (visit_request_id, kind) anchor; kind order keeps the pair
+// deterministic (after < before alphabetically, callers key by kind anyway).
+func (q *Queries) ListWorkPhotosByVisit(ctx context.Context, arg ListWorkPhotosByVisitParams) ([]ListWorkPhotosByVisitRow, error) {
+	rows, err := q.db.Query(ctx, listWorkPhotosByVisit, arg.VisitRequestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkPhotosByVisitRow{}
+	for rows.Next() {
+		var i ListWorkPhotosByVisitRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VisitRequestID,
+			&i.Kind,
+			&i.Url,
+			&i.UploadedBy,
+			&i.CreatedAt,
+			&i.UploadedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateVisitSchedule = `-- name: UpdateVisitSchedule :one
 UPDATE visit_request
 SET start_date = $2,
@@ -1370,7 +1542,7 @@ SET start_date = $2,
     status     = $4,
     updated_at = now()
 WHERE id = $1
-RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note, vendor_name_override
+RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note, vendor_name_override, created_by
 `
 
 type UpdateVisitScheduleParams struct {
@@ -1408,6 +1580,7 @@ func (q *Queries) UpdateVisitSchedule(ctx context.Context, arg UpdateVisitSchedu
 		&i.UpdatedAt,
 		&i.PurposeNote,
 		&i.VendorNameOverride,
+		&i.CreatedBy,
 	)
 	return i, err
 }
@@ -1417,7 +1590,7 @@ UPDATE visit_request
 SET status     = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note, vendor_name_override
+RETURNING id, visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, is_multi_day, status, assignment_letter_url, is_nda_accepted, notes, created_at, updated_at, purpose_note, vendor_name_override, created_by
 `
 
 type UpdateVisitStatusParams struct {
@@ -1451,6 +1624,7 @@ func (q *Queries) UpdateVisitStatus(ctx context.Context, arg UpdateVisitStatusPa
 		&i.UpdatedAt,
 		&i.PurposeNote,
 		&i.VendorNameOverride,
+		&i.CreatedBy,
 	)
 	return i, err
 }
@@ -1492,6 +1666,52 @@ func (q *Queries) UpdateVisitorContact(ctx context.Context, arg UpdateVisitorCon
 		&i.Jabatan,
 		&i.PhoneEdited,
 		&i.Email,
+	)
+	return i, err
+}
+
+const upsertWorkPhoto = `-- name: UpsertWorkPhoto :one
+INSERT INTO visit_work_photo (visit_request_id, kind, url, uploaded_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (visit_request_id, kind) DO UPDATE
+SET url         = EXCLUDED.url,
+    uploaded_by = EXCLUDED.uploaded_by,
+    created_at  = now()
+RETURNING id, visit_request_id, kind, url, uploaded_by, created_at
+`
+
+type UpsertWorkPhotoParams struct {
+	VisitRequestID uuid.UUID   `json:"visit_request_id"`
+	Kind           string      `json:"kind"`
+	Url            string      `json:"url"`
+	UploadedBy     pgtype.UUID `json:"uploaded_by"`
+}
+
+// The single write path for POST /visits/{id}/work-photos. Callers must hold
+// the GetVisitByIDForUpdate row lock and must have verified the visit is
+// still `visiting` in the same transaction (the concurrent check-out gate).
+// UNIQUE (visit_request_id, kind) is the idempotency anchor: a re-attach
+// replaces the row (fresh url, uploaded_by and created_at) instead of
+// accumulating duplicates. A bad kind is rejected by the
+// chk_visit_work_photo_kind CHECK (-> 422 via MapError) as well as by the
+// usecase vocabulary check; the Go caller passes uploaded_by NULL only for
+// the empty actor (never in production: the usecase always passes the
+// authenticated caller).
+func (q *Queries) UpsertWorkPhoto(ctx context.Context, arg UpsertWorkPhotoParams) (VisitWorkPhoto, error) {
+	row := q.db.QueryRow(ctx, upsertWorkPhoto,
+		arg.VisitRequestID,
+		arg.Kind,
+		arg.Url,
+		arg.UploadedBy,
+	)
+	var i VisitWorkPhoto
+	err := row.Scan(
+		&i.ID,
+		&i.VisitRequestID,
+		&i.Kind,
+		&i.Url,
+		&i.UploadedBy,
+		&i.CreatedAt,
 	)
 	return i, err
 }

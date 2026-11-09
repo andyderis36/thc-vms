@@ -9,14 +9,21 @@
 --
 -- SCOPE INVARIANT (PRD L109-112, AGENTS.md rule 6.1, rule 7.4)
 --   Branch isolation is implemented as three statically-written queries - one
---   per role scope - rather than one query with a dynamic predicate. A
---   super_admin list can never accidentally carry a location filter it did not
---   intend, and an admin/security list is a hard `vr.location_id = $1`
---   equality that no caller can widen. Every scope value is a bound parameter;
---   no role name, location id or search term is ever concatenated into SQL.
---     super_admin : ListVisitsForSuperAdmin  (location_id filter is OPTIONAL)
---     admin       : ListVisitsForLocation     (location_id REQUIRED)
---     security    : ListVisitsForLocation     (location_id REQUIRED,
+--   per role scope - rather than one query with a dynamic predicate. The branch
+--   and super_admin pairs share the union predicate
+--   `(is_global OR location_id = ANY(location_ids))`: the resolver stash behind
+--   thc.scope decides the scope, the query only enforces it. A global caller
+--   passes is_global TRUE with an empty union and sees every branch; a branch
+--   caller passes its user_locations union with is_global FALSE and sees
+--   exactly those branches; an empty union with FALSE matches no row
+--   (fail-closed, never the whole table). Every scope value is a bound
+--   parameter; no role name, location id or search term is ever concatenated
+--   into SQL.
+--     super_admin : ListVisitsForSuperAdmin  (is_global TRUE, or a single-id
+--                                              union to narrow by branch)
+--     admin       : ListVisitsForLocation     (union REQUIRED, is_global FALSE
+--                                              unless the stash says global)
+--     security    : ListVisitsForLocation     (same union,
 --                                              + date_from/date_to = TODAY, PRD L97)
 --     vendor       : ListVisitsForVendorUser          (vendor_user_id REQUIRED)
 --   Each list query has a Count* twin with the identical predicate so the
@@ -29,19 +36,25 @@
 -- caller as 'VST-' || lpad(nextval('visit_seq'),10,'0'); the format is enforced
 -- by chk_visit_request_visit_id_format. status is pinned to 'requested'
 -- (PRD L133) and cannot be set by the request body.
+-- vendor_user_id is the vendor ACCOUNT owning the visit (chosen by an
+-- admin/superadmin, or the actor itself for a vendor caller); created_by is
+-- ALWAYS the authenticated actor that submitted the row (migration 000024).
 INSERT INTO visit_request (
     visit_id, vendor_user_id, vendor_id, location_id,
     start_date, end_date, is_multi_day, status,
     assignment_letter_url, is_nda_accepted, notes, purpose_note,
-    vendor_name_override
+    vendor_name_override, created_by
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10, $11, $12)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'requested', $8, $9, $10, $11, $12, $13)
 RETURNING *;
 
 -- Detail read for GET /visits/{id} (openapi L309-327) and for every
 -- owner-scoped response. The projection is the visit row plus the joined names
 -- the openapi VisitDetail schema needs (location, vendor_name, vendor_user).
 -- name: GetVisitByID :one
+-- The users/role LEFT JOINs ride the creator display data for the
+-- GET /visits/{id} "Diajukan oleh" row (created_by is NULL on rows written
+-- before migration 000024, hence LEFT JOIN and NULL-safe output columns).
 SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type,
@@ -49,18 +62,23 @@ SELECT
     l.timezone AS location_timezone,
     v.name AS vendor_name,
     pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
-    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name,
+    cb.name AS created_by_name, cr.name AS created_by_role_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
 LEFT JOIN vendor vu ON vu.id = pu.vendor_id
+LEFT JOIN users cb ON cb.id = vr.created_by
+LEFT JOIN role cr ON cr.id = cb.role_id
 WHERE vr.id = $1;
 
 -- name: GetVisitByVisitCode :one
 -- Triple-Mode Scanner mode 3 (PRD L119): the guard types the printed code
 -- `VST-XXXXXXXXXX` by hand. The code is UNIQUE (ERD L81) so this resolves at
 -- most one visit, and idx_visit_id_code (PRD L208) makes it a single index probe.
+-- The creator join mirrors GetVisitByID so both single-visit read paths carry
+-- the "Diajukan oleh" display data.
 SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type,
@@ -68,12 +86,15 @@ SELECT
     l.timezone AS location_timezone,
     v.name AS vendor_name,
     pu.name AS vendor_user_name, pu.email AS vendor_user_email, pu.phone AS vendor_user_phone,
-    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name
+    COALESCE(pu.vendor_name_override, vu.name, '') AS vendor_user_vendor_name,
+    cb.name AS created_by_name, cr.name AS created_by_role_name
 FROM visit_request vr
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
 LEFT JOIN vendor vu ON vu.id = pu.vendor_id
+LEFT JOIN users cb ON cb.id = vr.created_by
+LEFT JOIN role cr ON cr.id = cb.role_id
 WHERE vr.visit_id = $1;
 
 -- name: GetVisitByIDForUpdate :one
@@ -111,14 +132,15 @@ WHERE vr.visit_id = $1
 FOR UPDATE OF vr;
 
 -- name: ListVisitsForSuperAdmin :many
--- Superadmin scope (PRD L109): no location filter, or one optional location
--- filter. `status`, `date_from`, `date_to` and `search` are all NULLable
--- (narg) so "no filter" is expressed by a NULL bound value, never by removing
--- a predicate at runtime. sort_by/sort_order ride along as bound parameters
--- compared inside static CASE branches (never concatenated): an unknown or
--- NULL value matches no branch and the listing falls back to created_at desc.
--- ORDER BY is fully specified (id last) so LIMIT/OFFSET pagination cannot
--- repeat or drop a row.
+-- Superadmin scope (PRD L109): the national view passes is_global TRUE with
+-- an empty union; narrowing by branch passes that single branch as a one-id
+-- union with is_global FALSE. `status`, `date_from`, `date_to` and `search`
+-- are all NULLable (narg) so "no filter" is expressed by a NULL bound value,
+-- never by removing a predicate at runtime. sort_by/sort_order ride along as
+-- bound parameters compared inside static CASE branches (never concatenated):
+-- an unknown or NULL value matches no branch and the listing falls back to
+-- created_at desc. ORDER BY is fully specified (id last) so LIMIT/OFFSET
+-- pagination cannot repeat or drop a row.
 SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
@@ -130,7 +152,7 @@ JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
 LEFT JOIN vendor vu ON vu.id = pu.vendor_id
-WHERE (sqlc.narg('location_id')::uuid IS NULL OR vr.location_id = sqlc.narg('location_id')::uuid)
+WHERE (sqlc.arg('is_global')::bool OR vr.location_id = ANY(sqlc.arg('location_ids')::uuid[]))
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
   AND (sqlc.narg('date_to')::timestamptz IS NULL OR vr.start_date < sqlc.narg('date_to')::timestamptz)
@@ -160,7 +182,7 @@ FROM visit_request vr
 JOIN users pu ON pu.id = vr.vendor_user_id
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-WHERE (sqlc.narg('location_id')::uuid IS NULL OR vr.location_id = sqlc.narg('location_id')::uuid)
+WHERE (sqlc.arg('is_global')::bool OR vr.location_id = ANY(sqlc.arg('location_ids')::uuid[]))
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
   AND (sqlc.narg('date_to')::timestamptz IS NULL OR vr.start_date < sqlc.narg('date_to')::timestamptz)
@@ -175,12 +197,13 @@ WHERE (sqlc.narg('location_id')::uuid IS NULL OR vr.location_id = sqlc.narg('loc
   );
 
 -- name: ListVisitsForLocation :many
--- Admin scope (PRD L110) and Security scope (PRD L111, L97). location_id is a
--- REQUIRED plain parameter - the caller cannot pass NULL, so a bug in the auth
--- middleware surfaces as a scan error instead of a cross-branch data leak.
--- The security gate is a date range on the same query: the usecase pins
--- date_from/date_to to today for `security` (PRD L97 "Hari Ini") and leaves them
--- NULL for `admin`. The equality on vr.location_id uses idx_visit_request_location.
+-- Admin scope (PRD L110) and Security scope (PRD L111, L97). The scope is the
+-- caller's user_locations union with is_global FALSE: a bug in the auth
+-- middleware surfaces as an empty union (zero rows, fail-closed) instead of a
+-- cross-branch data leak. The security gate is a date range on the same query:
+-- the usecase pins date_from/date_to to today for `security` (PRD L97
+-- "Hari Ini") and leaves them NULL for `admin`. The ANY on vr.location_id
+-- uses idx_visit_request_location.
 SELECT
     vr.*,
     l.name AS location_name, l.type AS location_type, l.timezone AS location_timezone,
@@ -192,7 +215,7 @@ JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
 JOIN users pu ON pu.id = vr.vendor_user_id
 LEFT JOIN vendor vu ON vu.id = pu.vendor_id
-WHERE vr.location_id = sqlc.arg('location_id')::uuid
+WHERE (sqlc.arg('is_global')::bool OR vr.location_id = ANY(sqlc.arg('location_ids')::uuid[]))
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
   AND (sqlc.narg('date_to')::timestamptz IS NULL OR vr.start_date < sqlc.narg('date_to')::timestamptz)
@@ -221,7 +244,7 @@ FROM visit_request vr
 JOIN users pu ON pu.id = vr.vendor_user_id
 JOIN location l ON l.id = vr.location_id
 LEFT JOIN vendor v ON v.id = vr.vendor_id
-WHERE vr.location_id = sqlc.arg('location_id')::uuid
+WHERE (sqlc.arg('is_global')::bool OR vr.location_id = ANY(sqlc.arg('location_ids')::uuid[]))
   AND (sqlc.narg('status')::text IS NULL OR vr.status = sqlc.narg('status')::text)
   AND (sqlc.narg('date_from')::timestamptz IS NULL OR vr.start_date >= sqlc.narg('date_from')::timestamptz)
   AND (sqlc.narg('date_to')::timestamptz IS NULL OR vr.start_date < sqlc.narg('date_to')::timestamptz)
@@ -327,12 +350,29 @@ VALUES ($1, $2, $3, COALESCE(sqlc.narg('changed_at')::timestamptz, now()), $4)
 RETURNING *;
 
 -- name: ListStatusHistory :many
--- Status timeline on SCR-04 (openapi L832+, PRD L232).
-SELECT sh.*, u.name AS changed_by_name
-FROM status_history sh
-LEFT JOIN users u ON u.id = sh.changed_by
-WHERE sh.visit_request_id = $1
-ORDER BY sh.changed_at ASC, sh.id ASC;
+-- Status timeline on SCR-04 (openapi VisitDetail.history, PRD L232), served
+-- oldest -> newest: the 50 NEWEST rows are taken first (DESC + LIMIT) so an
+-- ancient visit cannot grow an unbounded payload, then reversed to ASC for
+-- chronological rendering; the window always contains the newest row, so the
+-- current status note is derivable from the last returned event.
+-- changed_by_name/changed_by_role come from the LEFT JOINs: changed_by IS
+-- NULL (the background auto-rule worker) yields NULL actor columns; the raw
+-- role NAME is mapped to its Indonesian display label by domain.RoleLabel in
+-- the repository, never in SQL.
+SELECT s.id, s.visit_request_id, s.status, s.changed_by, s.changed_at, s.notes,
+       s.changed_by_name, s.changed_by_role
+FROM (
+    SELECT sh.id, sh.visit_request_id, sh.status, sh.changed_by, sh.changed_at, sh.notes,
+           u.name AS changed_by_name,
+           r.name AS changed_by_role
+    FROM status_history sh
+    LEFT JOIN users u ON u.id = sh.changed_by
+    LEFT JOIN role r ON r.id = u.role_id
+    WHERE sh.visit_request_id = $1
+    ORDER BY sh.changed_at DESC, sh.id DESC
+    LIMIT 50
+) s
+ORDER BY s.changed_at ASC, s.id ASC;
 
 -- name: InsertVisitor :one
 -- POST /visits visitors[] (openapi L816-822), up to 10 rows per visit (QA
@@ -426,3 +466,45 @@ RETURNING id, visit_request_id, name, id_number, phone, id_card_photo_url, photo
 DELETE FROM visit_request
 WHERE id = $1
 RETURNING id;
+
+-- name: GetWorkPhoto :one
+-- Single work-proof read for the 201-vs-200 answer of
+-- POST /visits/{id}/work-photos. The uploader display name rides along from
+-- the users join (NULL uploaded_by, e.g. a removed account, renders "").
+-- A missing (visit, kind) pair surfaces pgx.ErrNoRows (-> first attach).
+SELECT wp.id, wp.visit_request_id, wp.kind, wp.url, wp.uploaded_by, wp.created_at,
+    COALESCE(u.name, '') AS uploaded_by_name
+FROM visit_work_photo wp
+LEFT JOIN users u ON u.id = wp.uploaded_by
+WHERE wp.visit_request_id = $1 AND wp.kind = $2;
+
+-- name: ListWorkPhotosByVisit :many
+-- Both work proofs for the GET /visits/{id} work_photos member and the
+-- scoped file endpoint (work_before/work_after slots). At most two rows ride
+-- the UNIQUE (visit_request_id, kind) anchor; kind order keeps the pair
+-- deterministic (after < before alphabetically, callers key by kind anyway).
+SELECT wp.id, wp.visit_request_id, wp.kind, wp.url, wp.uploaded_by, wp.created_at,
+    COALESCE(u.name, '') AS uploaded_by_name
+FROM visit_work_photo wp
+LEFT JOIN users u ON u.id = wp.uploaded_by
+WHERE wp.visit_request_id = $1
+ORDER BY wp.kind ASC;
+
+-- name: UpsertWorkPhoto :one
+-- The single write path for POST /visits/{id}/work-photos. Callers must hold
+-- the GetVisitByIDForUpdate row lock and must have verified the visit is
+-- still `visiting` in the same transaction (the concurrent check-out gate).
+-- UNIQUE (visit_request_id, kind) is the idempotency anchor: a re-attach
+-- replaces the row (fresh url, uploaded_by and created_at) instead of
+-- accumulating duplicates. A bad kind is rejected by the
+-- chk_visit_work_photo_kind CHECK (-> 422 via MapError) as well as by the
+-- usecase vocabulary check; the Go caller passes uploaded_by NULL only for
+-- the empty actor (never in production: the usecase always passes the
+-- authenticated caller).
+INSERT INTO visit_work_photo (visit_request_id, kind, url, uploaded_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (visit_request_id, kind) DO UPDATE
+SET url         = EXCLUDED.url,
+    uploaded_by = EXCLUDED.uploaded_by,
+    created_at  = now()
+RETURNING id, visit_request_id, kind, url, uploaded_by, created_at;

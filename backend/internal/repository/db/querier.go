@@ -63,14 +63,21 @@ type Querier interface {
 	//
 	// SCOPE INVARIANT (PRD L109-112, AGENTS.md rule 6.1, rule 7.4)
 	//   Branch isolation is implemented as three statically-written queries - one
-	//   per role scope - rather than one query with a dynamic predicate. A
-	//   super_admin list can never accidentally carry a location filter it did not
-	//   intend, and an admin/security list is a hard `vr.location_id = $1`
-	//   equality that no caller can widen. Every scope value is a bound parameter;
-	//   no role name, location id or search term is ever concatenated into SQL.
-	//     super_admin : ListVisitsForSuperAdmin  (location_id filter is OPTIONAL)
-	//     admin       : ListVisitsForLocation     (location_id REQUIRED)
-	//     security    : ListVisitsForLocation     (location_id REQUIRED,
+	//   per role scope - rather than one query with a dynamic predicate. The branch
+	//   and super_admin pairs share the union predicate
+	//   `(is_global OR location_id = ANY(location_ids))`: the resolver stash behind
+	//   thc.scope decides the scope, the query only enforces it. A global caller
+	//   passes is_global TRUE with an empty union and sees every branch; a branch
+	//   caller passes its user_locations union with is_global FALSE and sees
+	//   exactly those branches; an empty union with FALSE matches no row
+	//   (fail-closed, never the whole table). Every scope value is a bound
+	//   parameter; no role name, location id or search term is ever concatenated
+	//   into SQL.
+	//     super_admin : ListVisitsForSuperAdmin  (is_global TRUE, or a single-id
+	//                                              union to narrow by branch)
+	//     admin       : ListVisitsForLocation     (union REQUIRED, is_global FALSE
+	//                                              unless the stash says global)
+	//     security    : ListVisitsForLocation     (same union,
 	//                                              + date_from/date_to = TODAY, PRD L97)
 	//     vendor       : ListVisitsForVendorUser          (vendor_user_id REQUIRED)
 	//   Each list query has a Count* twin with the identical predicate so the
@@ -81,6 +88,9 @@ type Querier interface {
 	// caller as 'VST-' || lpad(nextval('visit_seq'),10,'0'); the format is enforced
 	// by chk_visit_request_visit_id_format. status is pinned to 'requested'
 	// (PRD L133) and cannot be set by the request body.
+	// vendor_user_id is the vendor ACCOUNT owning the visit (chosen by an
+	// admin/superadmin, or the actor itself for a vendor caller); created_by is
+	// ALWAYS the authenticated actor that submitted the row (migration 000024).
 	CreateVisit(ctx context.Context, arg CreateVisitParams) (VisitRequest, error)
 	// DELETE /locations/:id (super_admin only). A missing id surfaces
 	// pgx.ErrNoRows (-> 404 via MapError); a raced reference surfaces 23503
@@ -93,6 +103,11 @@ type Querier interface {
 	// DELETE /users/:id (super_admin only). A missing id surfaces pgx.ErrNoRows
 	// (-> 404 via MapError); a raced reference surfaces 23503 (-> 409).
 	DeleteUser(ctx context.Context, arg DeleteUserParams) (uuid.UUID, error)
+	// Dual-write leg of the account updates (delete-then-insert): clears the
+	// stale coverage before the effective primary is re-inserted above. A keep
+	// (NULL patch) re-inserts the stored primary, so the union is rewritten
+	// identically instead of drifting.
+	DeleteUserLocationsByUserID(ctx context.Context, arg DeleteUserLocationsByUserIDParams) error
 	// DELETE /visits/:id (super_admin only, any status). The child tables
 	// (visitor, visit_purpose, status_history, check_in, check_out) all carry
 	// ON DELETE CASCADE, so removing the single visit row cleans its roster,
@@ -109,9 +124,15 @@ type Querier interface {
 	GetActivePurposesByIDs(ctx context.Context, arg GetActivePurposesByIDsParams) ([]GetActivePurposesByIDsRow, error)
 	// Existence + fact read used by the auto-rule worker (SweepNoShowVisits)
 	// and by SCR-05 to render the "Sedang di Lokasi" badge. pgx reports a missing
-	// row as pgx.ErrNoRows, which is the existence check.
-	GetCheckInByVisitRequest(ctx context.Context, arg GetCheckInByVisitRequestParams) (CheckIn, error)
-	GetCheckOutByVisitRequest(ctx context.Context, arg GetCheckOutByVisitRequestParams) (CheckOut, error)
+	// row as pgx.ErrNoRows, which is the existence check. The users LEFT JOIN
+	// rides the display name of the acting staff for the GET /visits/{id}
+	// "Check-in oleh" row; the FK is NOT NULL but the LEFT JOIN keeps the column
+	// NULL-safe for a removed account.
+	GetCheckInByVisitRequest(ctx context.Context, arg GetCheckInByVisitRequestParams) (GetCheckInByVisitRequestRow, error)
+	// Same shape as GetCheckInByVisitRequest: the users LEFT JOIN rides the
+	// display name of the acting staff for the GET /visits/{id} "Check-out oleh"
+	// row (the read path used to drop the actor entirely).
+	GetCheckOutByVisitRequest(ctx context.Context, arg GetCheckOutByVisitRequestParams) (GetCheckOutByVisitRequestRow, error)
 	GetLocationByID(ctx context.Context, arg GetLocationByIDParams) (Location, error)
 	// Detail read for PATCH /users/{id}/status (super_admin only). Same
 	// projection as GetUserByID plus the resolved role NAME, which the status
@@ -122,10 +143,16 @@ type Querier interface {
 	// users.sql - Authentication, profile projection and branch security accounts.
 	//
 	// SCOPE INVARIANT (PRD L110 / L112, AGENTS.md rule 6.1)
-	//   Every query that exposes user rows takes its location scope as a BOUND
-	//   PARAMETER. `sqlc.narg('location_id')` is NULL only for super_admin, which is
-	//   the single case where no branch filter is correct. There is no query in this
-	//   file that interpolates a role name or a location id into SQL text.
+	//   Every query that exposes user rows takes its location scope as BOUND
+	//   PARAMETERS in scope-union shape: `location_ids` (the branch union) plus
+	//   `is_global` (the national bypass). is_global is true only for super_admin
+	//   (nil filter: every branch); admin/security callers pass is_global false
+	//   with their union as location_ids. A row matches when its primary is in the
+	//   union OR any of its user_locations coverage rows is, so a B-primary
+	//   account covering A is managed by the admin of A, while branch C stays
+	//   invisible. Legacy rows without coverage fall back to the primary check.
+	//   There is no query in this file that interpolates a role name or a location
+	//   id into SQL text.
 	// =============================================================================
 	// Login lookup (POST /auth/login). Returns the projection the openapi `User`
 	// schema needs (openapi L629-660) plus password_hash, which never leaves the
@@ -141,6 +168,9 @@ type Querier interface {
 	// Detail read for GET /visits/{id} (openapi L309-327) and for every
 	// owner-scoped response. The projection is the visit row plus the joined names
 	// the openapi VisitDetail schema needs (location, vendor_name, vendor_user).
+	// The users/role LEFT JOINs ride the creator display data for the
+	// GET /visits/{id} "Diajukan oleh" row (created_by is NULL on rows written
+	// before migration 000024, hence LEFT JOIN and NULL-safe output columns).
 	GetVisitByID(ctx context.Context, arg GetVisitByIDParams) (GetVisitByIDRow, error)
 	// Row lock for the status-write path. `FOR UPDATE OF vr` is required (not the
 	// bare form) because the projection LEFT JOINs vendor, and PostgreSQL refuses
@@ -149,9 +179,16 @@ type Querier interface {
 	// Triple-Mode Scanner mode 3 (PRD L119): the guard types the printed code
 	// `VST-XXXXXXXXXX` by hand. The code is UNIQUE (ERD L81) so this resolves at
 	// most one visit, and idx_visit_id_code (PRD L208) makes it a single index probe.
+	// The creator join mirrors GetVisitByID so both single-visit read paths carry
+	// the "Diajukan oleh" display data.
 	GetVisitByVisitCode(ctx context.Context, arg GetVisitByVisitCodeParams) (GetVisitByVisitCodeRow, error)
 	// Same lock, entered via the scanned/manual visit code.
 	GetVisitByVisitCodeForUpdate(ctx context.Context, arg GetVisitByVisitCodeForUpdateParams) (GetVisitByVisitCodeForUpdateRow, error)
+	// One roster member by primary key for GET /visits/member-suggestions/{id}.
+	// The usecase resolves the owning visit and applies the SAME read scope the
+	// visit detail uses BEFORE this row is returned; an out-of-scope or unknown
+	// id must stay indistinguishable (404). This is a plain read (no FOR UPDATE).
+	GetVisitorByID(ctx context.Context, arg GetVisitorByIDParams) (GetVisitorByIDRow, error)
 	// Row lock for the contact-correction write path (migration 000021,
 	// PATCH /visits/{id}/visitors/{visitorId}). `FOR UPDATE OF v` is required
 	// because the projection LEFT JOINs vendor, and PostgreSQL refuses `FOR
@@ -164,6 +201,11 @@ type Querier interface {
 	// projection is byte-for-byte the GetVisitByID one (visits.sql) so the same
 	// domain mapping applies; callers restore sweep order themselves.
 	GetVisitsByIDs(ctx context.Context, arg GetVisitsByIDsParams) ([]GetVisitsByIDsRow, error)
+	// Single work-proof read for the 201-vs-200 answer of
+	// POST /visits/{id}/work-photos. The uploader display name rides along from
+	// the users join (NULL uploaded_by, e.g. a removed account, renders "").
+	// A missing (visit, kind) pair surfaces pgx.ErrNoRows (-> first attach).
+	GetWorkPhoto(ctx context.Context, arg GetWorkPhotoParams) (GetWorkPhotoRow, error)
 	// =============================================================================
 	// audit.sql - Append-only audit trail (ERD L172-182, migration 000007).
 	//
@@ -284,9 +326,11 @@ type Querier interface {
 	//   internal/repository/notification_emit.go), so a notice can never exist
 	//   without its triggering transition. Recipients are resolved by SQL fan-out:
 	//     staff  = every ACTIVE national super_admin plus the ACTIVE admin/security
-	//              stationed at the visit's branch (users.location_id).
+	//              whose primary OR user_locations coverage holds the visit's
+	//              branch (the union, never the scalar primary alone).
 	//     vendor = the visit's vendor_user_id, but ONLY when that account holds the
-	//              'vendor' role (company-wide fan-out is deliberately rejected).
+	//              'vendor' role (company-wide fan-out is deliberately rejected:
+	//              the r.name guard owns that, never the union).
 	//
 	// IDEMPOTENCY
 	//   Every insert carries ON CONFLICT (user_id, type, visit_request_id) handling
@@ -305,13 +349,20 @@ type Querier interface {
 	//   the bell backwards; the read flag is never touched.
 	//
 	// READ PATH
-	//   Reads are user-scoped (WHERE user_id = caller). The optional location_id
-	//   narrows a super_admin's national feed by branch; it never widens a scoped
-	//   caller because the user_id predicate is always present.
+	//   Reads are user-scoped (WHERE user_id = caller) with the scope-union pair
+	//   (is_global + location_ids): super_admin passes is_global true for the
+	//   national feed (or is_global false with one branch to narrow it), vendor
+	//   passes is_global true (its own rows at any branch), and admin/security
+	//   pass is_global false with their scalar branch — the EXISTS leg below then
+	//   widens the match to every branch of the caller's own user_locations
+	//   union, so A-union-B callers see A-union-B notices while C stays out.
 	// =============================================================================
 	// Fan-out to the visit's staff audience: every active super_admin (national,
 	// including the hidden dev-superadmin which passes every super_admin gate)
-	// plus the active admin/security at the visit's location. ON CONFLICT keeps the
+	// plus the active admin/security whose primary OR coverage union holds the
+	// visit's branch. The vendor role never matches: the r.name guard owns that,
+	// so a vendor account holding a coverage row still receives nothing here.
+	// ON CONFLICT keeps the
 	// write idempotent per (recipient, type, visit): other types are a no-op on
 	// conflict, while a repeat visit_rescheduled REFRESHES message + created_at
 	// to the latest emission (WHERE guard on the upsert below).
@@ -319,6 +370,11 @@ type Querier interface {
 	// Atomic audit append (PRD L129). changed_by is NULL for the background
 	// auto-rule worker, which has no acting user.
 	InsertStatusHistory(ctx context.Context, arg InsertStatusHistoryParams) (StatusHistory, error)
+	// Dual-write leg of the account creates and updates: one coverage row for
+	// the effective primary (the first location_ids element, else the legacy
+	// location_id). Creates call it once; updates call it after the delete
+	// below, so the union is exactly the primary after every write.
+	InsertUserLocation(ctx context.Context, arg InsertUserLocationParams) error
 	// Single-recipient insert: the visit's vendor user, but only if that account is a
 	// 'vendor'. A vendor account that is internal staff (admin-posted request) receives
 	// nothing here; the staff fan-out above already covers them. ON CONFLICT is a
@@ -418,30 +474,66 @@ type Querier interface {
 	// =============================================================================
 	// GET /users (super_admin only). role narrows to one of admin|vendor|security
 	// (validated in Go before this runs); search matches nama atau email
-	// case-insensitively; location_id narrows to one branch. All three filters
-	// are optional, so an empty filter lists every account with no pagination,
-	// consistent with ListSecurityUsers. ORDER BY keeps the listing stable.
+	// case-insensitively; the scope-union pair (is_global + location_ids) narrows
+	// to the caller union the same way ListSecurityUsers does. All filters are
+	// optional: an empty filter lists every account with no pagination. ORDER BY
+	// keeps the listing stable.
 	ListManagedUsers(ctx context.Context, arg ListManagedUsersParams) ([]ListManagedUsersRow, error)
+	// Member reuse feed for admin/super_admin on GET /visits/member-suggestions.
+	// One row per (case-insensitive name, phone) pair, keeping the NEWEST visit
+	// (start_date, then id) so the reused contact data is the freshest. The list
+	// is photo-less on purpose: id_card_photo_url/photo_url are PII-heavy and are
+	// served only by the single-member pick endpoint. The row's visitor id is
+	// included so the client can call GET /visits/member-suggestions/{visitorId}
+	// directly for the detail (with photos) of the winning dedupe row. vendor_name
+	// narrows to the visits whose resolved vendor display name (visit
+	// override/catalogue) OR owning vendor-account company equals the trimmed
+	// value. q matches the member name anywhere (ILIKE) and is capped/validated by
+	// the usecase.
+	ListMemberSuggestionsForScope(ctx context.Context, arg ListMemberSuggestionsForScopeParams) ([]ListMemberSuggestionsForScopeRow, error)
+	// Vendor-role member reuse feed: STRICTLY the actor's own visits
+	// (visit_request.vendor_user_id = auth_user.id). The row's visitor id is
+	// included so the client can call GET /visits/member-suggestions/{visitorId}
+	// directly for the detail (with photos) of the winning dedupe row. There is
+	// deliberately no branch/location or vendor-name parameter here: ownership is
+	// the only scope, and the usecase ignores any client-supplied vendor filter for
+	// this role.
+	ListMemberSuggestionsForVendor(ctx context.Context, arg ListMemberSuggestionsForVendorParams) ([]ListMemberSuggestionsForVendorRow, error)
 	// One page of the caller's own notifications, newest first, joined to the visit
 	// and its location for the visit_id/location_name the wire shape needs.
+	// Scope-union scoping: is_global bypasses the branch match (super_admin
+	// national feed, vendor own-rows feed); otherwise the visit branch matches the
+	// passed union OR any branch of the caller's own user_locations coverage, so
+	// an A-union-B caller narrowing by A still sees B while C stays out.
 	ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]ListNotificationsForUserRow, error)
 	// One page of the superadmin approval queue, newest first, joined onto the
 	// vendor account (plus its catalogue vendor name) so the approval screen
 	// renders the openapi PendingRegistrationItem without a second hop.
 	ListPendingVendorRegistrations(ctx context.Context, arg ListPendingVendorRegistrationsParams) ([]ListPendingVendorRegistrationsRow, error)
-	// GET /users/security (openapi L119-138). `sqlc.narg('location_id')` is the whole
-	// scoping mechanism: an admin/security caller passes its own location (PRD L110),
-	// a super_admin passes NULL to see every branch or a location to filter (PRD L109).
-	// ORDER BY created_at DESC keeps pagination stable for the account modal.
+	// GET /users/security (openapi L119-138). Scope-union scoping: a super_admin
+	// passes is_global true (every branch, location_ids empty); an admin passes
+	// is_global false with its branch union. A row matches on its primary OR on
+	// any user_locations coverage row, so an admin of A manages the B-primary
+	// officer covering A. ORDER BY created_at DESC keeps pagination stable for
+	// the account modal.
 	ListSecurityUsers(ctx context.Context, arg ListSecurityUsersParams) ([]ListSecurityUsersRow, error)
 	// Active-only email mirror of InsertStaffNotifications: every ACTIVE national
 	// super_admin (including the hidden dev-superadmin, which passes every
-	// super_admin gate) plus the ACTIVE admin/security stationed at the visit's
-	// branch. The predicate is the fan-out one plus the email projection, so the
-	// two can never address different sets. Blank addresses are returned as-is:
+	// super_admin gate) plus the ACTIVE admin/security whose primary OR coverage
+	// union holds the visit's branch. The predicate is the fan-out one plus the
+	// email projection, so the two can never address different sets. Blank
+	// addresses are returned as-is:
 	// the Go caller skips (and logs) them so the skip stays observable.
 	ListStaffEmailRecipients(ctx context.Context, arg ListStaffEmailRecipientsParams) ([]string, error)
-	// Status timeline on SCR-04 (openapi L832+, PRD L232).
+	// Status timeline on SCR-04 (openapi VisitDetail.history, PRD L232), served
+	// oldest -> newest: the 50 NEWEST rows are taken first (DESC + LIMIT) so an
+	// ancient visit cannot grow an unbounded payload, then reversed to ASC for
+	// chronological rendering; the window always contains the newest row, so the
+	// current status note is derivable from the last returned event.
+	// changed_by_name/changed_by_role come from the LEFT JOINs: changed_by IS
+	// NULL (the background auto-rule worker) yields NULL actor columns; the raw
+	// role NAME is mapped to its Indonesian display label by domain.RoleLabel in
+	// the repository, never in SQL.
 	ListStatusHistory(ctx context.Context, arg ListStatusHistoryParams) ([]ListStatusHistoryRow, error)
 	// Active-only email set behind the vendor-registration fan-out (migration
 	// 000020): every ACTIVE national super_admin, including the hidden
@@ -450,11 +542,56 @@ type Querier interface {
 	// national queue, not a visit at one branch). Blank addresses are returned
 	// as-is: the Go caller skips (and logs) them so the skip stays observable.
 	ListSuperAdminEmails(ctx context.Context) ([]string, error)
+	// =============================================================================
+	// user_locations.sql - Branch-coverage union for multi-branch scoping.
+	//
+	// Hybrid primary+coverage architecture (migration 000023): users.location_id
+	// stays the primary assignment forever; user_locations is the single source
+	// of scope truth for admin/security branch unions. The backfill seeded the
+	// table; the account writes (InsertSecurityUser, InsertManagedUser,
+	// UpdateManagedUser) maintain it in the same transaction as the primary, so
+	// the two stores can never skew. No read lives beside another read's query:
+	// the scope SELECT stays above, the write legs below.
+	// =============================================================================
+	// Per-request scope resolution for the JWT middleware: the branch union of
+	// one user, ordered for determinism. An empty result is a real answer (no
+	// coverage), never NULL: sqlc emits an empty slice so callers fail closed.
+	ListUserLocationIDs(ctx context.Context, arg ListUserLocationIDsParams) ([]uuid.UUID, error)
+	// Batched coverage load for the account listings (ListManagedUsers,
+	// ListSecurityUsers): one round trip for the whole page instead of N+1
+	// per-user lookups. Rows arrive ordered by user then branch so the Go layer
+	// can regroup deterministically and force the primary first.
+	ListUserLocationsByUserIDs(ctx context.Context, arg ListUserLocationsByUserIDsParams) ([]UserLocation, error)
 	// Active-only email mirror of InsertVendorNotification: the visit's vendor
 	// user, but only when that account holds the 'vendor' role AND is active.
 	// Zero rows (inactive/pending/blacklisted, non-vendor or missing account)
 	// means zero emails, never an error. At most one row: users.id is the key.
 	ListVendorEmailRecipient(ctx context.Context, arg ListVendorEmailRecipientParams) ([]string, error)
+	// =============================================================================
+	// suggestions.sql - Read-only suggestion feeds for the visit request form
+	// (T8 vendor identity + T10 member reuse).
+	//
+	// These statements NEVER write. Manual typing stays client-side and never
+	// becomes master data: the vendor catalogue is only ever read here.
+	//
+	// SCOPE INVARIANT (PRD L109-112, AGENTS.md rule 6.1)
+	//   The branch union rides the same `(is_global OR location_id = ANY(...))`
+	//   predicate the visit list uses, so an admin sees only vendors/members that
+	//   appear on a visit inside its user_locations union. An empty union with
+	//   is_global FALSE matches no row (fail-closed). The vendor-role member feed
+	//   is a SEPARATE statement pinned to `vendor_user_id = auth_user.id`, so no
+	//   parameter can widen it to another vendor's history.
+	// =============================================================================
+	// Raw vendor-name sources for GET /vendors/suggestions, merged (dedupe +
+	// priority master > account > history) in the usecase so the rule is unit
+	// tested. Master = active vendor.catalogue name. Account = the MANUAL company
+	// override typed on a vendor-role account (users.vendor_name_override).
+	// History = the visit-level display name (override wins over the catalogue
+	// join). For a branch caller master/account names qualify ONLY when the same
+	// normalized name appears on a visit inside the caller's union, which is the
+	// "vendors with at least one visit in scope" rule; a global caller gets every
+	// source row. q is a trimmed prefix filter (NULL = unfiltered).
+	ListVendorSuggestionSources(ctx context.Context, arg ListVendorSuggestionSourcesParams) ([]ListVendorSuggestionSourcesRow, error)
 	ListVisitPurposes(ctx context.Context, arg ListVisitPurposesParams) ([]ListVisitPurposesRow, error)
 	// Suggestion source for the roster "Jabatan" combobox (openapi GET /jabatan).
 	// Jabatan is free text, never a catalogue: the distinct values actually typed
@@ -469,27 +606,34 @@ type Querier interface {
 	// for the VisitorItem edited marker (migration 000021): TRUE means the owning
 	// vendor once corrected the phone via PATCH /visits/{id}/visitors/{visitorId}.
 	ListVisitors(ctx context.Context, arg ListVisitorsParams) ([]ListVisitorsRow, error)
-	// Admin scope (PRD L110) and Security scope (PRD L111, L97). location_id is a
-	// REQUIRED plain parameter - the caller cannot pass NULL, so a bug in the auth
-	// middleware surfaces as a scan error instead of a cross-branch data leak.
-	// The security gate is a date range on the same query: the usecase pins
-	// date_from/date_to to today for `security` (PRD L97 "Hari Ini") and leaves them
-	// NULL for `admin`. The equality on vr.location_id uses idx_visit_request_location.
+	// Admin scope (PRD L110) and Security scope (PRD L111, L97). The scope is the
+	// caller's user_locations union with is_global FALSE: a bug in the auth
+	// middleware surfaces as an empty union (zero rows, fail-closed) instead of a
+	// cross-branch data leak. The security gate is a date range on the same query:
+	// the usecase pins date_from/date_to to today for `security` (PRD L97
+	// "Hari Ini") and leaves them NULL for `admin`. The ANY on vr.location_id
+	// uses idx_visit_request_location.
 	ListVisitsForLocation(ctx context.Context, arg ListVisitsForLocationParams) ([]ListVisitsForLocationRow, error)
-	// Superadmin scope (PRD L109): no location filter, or one optional location
-	// filter. `status`, `date_from`, `date_to` and `search` are all NULLable
-	// (narg) so "no filter" is expressed by a NULL bound value, never by removing
-	// a predicate at runtime. sort_by/sort_order ride along as bound parameters
-	// compared inside static CASE branches (never concatenated): an unknown or
-	// NULL value matches no branch and the listing falls back to created_at desc.
-	// ORDER BY is fully specified (id last) so LIMIT/OFFSET pagination cannot
-	// repeat or drop a row.
+	// Superadmin scope (PRD L109): the national view passes is_global TRUE with
+	// an empty union; narrowing by branch passes that single branch as a one-id
+	// union with is_global FALSE. `status`, `date_from`, `date_to` and `search`
+	// are all NULLable (narg) so "no filter" is expressed by a NULL bound value,
+	// never by removing a predicate at runtime. sort_by/sort_order ride along as
+	// bound parameters compared inside static CASE branches (never concatenated):
+	// an unknown or NULL value matches no branch and the listing falls back to
+	// created_at desc. ORDER BY is fully specified (id last) so LIMIT/OFFSET
+	// pagination cannot repeat or drop a row.
 	ListVisitsForSuperAdmin(ctx context.Context, arg ListVisitsForSuperAdminParams) ([]ListVisitsForSuperAdminRow, error)
 	// Vendor-user / external-staff scope (PRD L112, AGENTS.md rule 6.1): strictly
 	// WHERE vendor_user_id = auth_user.id. A vendor can never widen this to see another
 	// vendor's visits, whatever they send in the query string. Uses idx_visit_vendor_user
 	// (PRD L209).
 	ListVisitsForVendorUser(ctx context.Context, arg ListVisitsForVendorUserParams) ([]ListVisitsForVendorUserRow, error)
+	// Both work proofs for the GET /visits/{id} work_photos member and the
+	// scoped file endpoint (work_before/work_after slots). At most two rows ride
+	// the UNIQUE (visit_request_id, kind) anchor; kind order keeps the pair
+	// deterministic (after < before alphabetically, callers key by kind anyway).
+	ListWorkPhotosByVisit(ctx context.Context, arg ListWorkPhotosByVisitParams) ([]ListWorkPhotosByVisitRow, error)
 	// Mark every unread notification of the caller read; returns the count.
 	MarkAllNotificationsRead(ctx context.Context, arg MarkAllNotificationsReadParams) (int64, error)
 	// Mark ONE owned notification read. The user_id predicate is the ownership
@@ -626,6 +770,17 @@ type Querier interface {
 	// writes them verbatim. The flag is monotonic by contract: the caller only
 	// ever passes TRUE forward, so the adapter stores max(stored, passed) via OR.
 	UpdateVisitorContact(ctx context.Context, arg UpdateVisitorContactParams) (Visitor, error)
+	// The single write path for POST /visits/{id}/work-photos. Callers must hold
+	// the GetVisitByIDForUpdate row lock and must have verified the visit is
+	// still `visiting` in the same transaction (the concurrent check-out gate).
+	// UNIQUE (visit_request_id, kind) is the idempotency anchor: a re-attach
+	// replaces the row (fresh url, uploaded_by and created_at) instead of
+	// accumulating duplicates. A bad kind is rejected by the
+	// chk_visit_work_photo_kind CHECK (-> 422 via MapError) as well as by the
+	// usecase vocabulary check; the Go caller passes uploaded_by NULL only for
+	// the empty actor (never in production: the usecase always passes the
+	// authenticated caller).
+	UpsertWorkPhoto(ctx context.Context, arg UpsertWorkPhotoParams) (VisitWorkPhoto, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -23,8 +23,14 @@ RETURNING *;
 -- name: GetCheckInByVisitRequest :one
 -- Existence + fact read used by the auto-rule worker (SweepNoShowVisits)
 -- and by SCR-05 to render the "Sedang di Lokasi" badge. pgx reports a missing
--- row as pgx.ErrNoRows, which is the existence check.
-SELECT * FROM check_in WHERE visit_request_id = $1;
+-- row as pgx.ErrNoRows, which is the existence check. The users LEFT JOIN
+-- rides the display name of the acting staff for the GET /visits/{id}
+-- "Check-in oleh" row; the FK is NOT NULL but the LEFT JOIN keeps the column
+-- NULL-safe for a removed account.
+SELECT ci.*, u.name AS checked_in_by_name
+FROM check_in ci
+LEFT JOIN users u ON u.id = ci.checked_in_by
+WHERE ci.visit_request_id = $1;
 
 -- name: ExistsCheckIn :one
 -- Boolean form of the same check, for call sites that only need the flag.

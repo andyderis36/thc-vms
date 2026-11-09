@@ -110,6 +110,11 @@ type User struct {
 	AvatarUrl          pgtype.Text `json:"avatar_url"`
 }
 
+type UserLocation struct {
+	UserID     uuid.UUID `json:"user_id"`
+	LocationID uuid.UUID `json:"location_id"`
+}
+
 type Vendor struct {
 	ID            uuid.UUID   `json:"id"`
 	Name          string      `json:"name"`
@@ -156,6 +161,16 @@ type VisitRequest struct {
 	PurposeNote pgtype.Text `json:"purpose_note"`
 	// Nama perusahaan vendor/mitra yang diketik manual per kunjungan (admin/superadmin); TIDAK terdaftar di katalog vendor dan TIDAK pernah tampil di dropdown vendor (hanya dipakai sebagai vendor_name tampilan bila terisi)
 	VendorNameOverride pgtype.Text `json:"vendor_name_override"`
+	CreatedBy          pgtype.UUID `json:"created_by"`
+}
+
+type VisitWorkPhoto struct {
+	ID             uuid.UUID   `json:"id"`
+	VisitRequestID uuid.UUID   `json:"visit_request_id"`
+	Kind           string      `json:"kind"`
+	Url            string      `json:"url"`
+	UploadedBy     pgtype.UUID `json:"uploaded_by"`
+	CreatedAt      time.Time   `json:"created_at"`
 }
 
 type Visitor struct {
