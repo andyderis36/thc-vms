@@ -15,11 +15,11 @@ import (
 // internally.
 const reaperBatchLimit = 1000
 
-// pendingPrefixes are the ONLY four prefixes this job ever lists. They are
+// pendingPrefixes are the ONLY five prefixes this job ever lists. They are
 // fixed here rather than caller-supplied so no wiring mistake can widen the
 // scan: each is "<category dir>/pending/" with the trailing slash, exactly
 // the shape the ILM runbook (docs/5. LOCAL_DEV.md §9) mandates and exactly
-// what storage.categoryDirectories (object_key.go) maps the four upload
+// what storage.categoryDirectories (object_key.go) maps the five upload
 // categories onto (asserted against storage.PendingPrefixes in the tests).
 // Keys under any other owner segment — pending-<userID>, visit ids, visitor
 // ids — are out of scope for v1 and are never listed nor deleted; the check
@@ -30,6 +30,7 @@ var pendingPrefixes = []string{
 	"id_cards/pending/",
 	"checkin_photos/pending/",
 	"profile_photos/pending/",
+	"work_photos/pending/",
 }
 
 // ReaperStore is the object-storage seam the reaper needs: the Wave-1 key
@@ -60,8 +61,8 @@ type ReaperStore interface {
 type ReaperRepository interface {
 	// ListReferencedURLs returns every stored file URL the schema can point
 	// at: visit_request.assignment_letter_url, visitor.id_card_photo_url,
-	// visitor.photo_url, check_in.photo_url and users.avatar_url (NULLs and
-	// empty strings excluded).
+	// visitor.photo_url, check_in.photo_url, users.avatar_url and
+	// visit_work_photo.url (NULLs and empty strings excluded).
 	ListReferencedURLs(ctx context.Context) ([]string, error)
 	// TryLock takes the single-instance slot. ok=false means another replica
 	// holds it right now and the caller must skip the pass; release unlocks
@@ -96,7 +97,7 @@ type ReaperDeps struct {
 	Logger   *slog.Logger
 }
 
-// Reaper is the nightly pending/-only orphan reaper: it lists the four
+// Reaper is the nightly pending/-only orphan reaper: it lists the five
 // staging prefixes, drops objects younger than the grace window or still
 // referenced by a DB row, and batch-deletes the rest — or, in dry-run, only
 // logs them. Precision tool per the runbook: the 7-day ILM rule stays the
@@ -149,7 +150,7 @@ func (r *Reaper) Interval() time.Duration {
 
 // Run executes ONE reaper pass and returns its counters. It never panics and
 // never deletes anything that is not simultaneously (a) under one of the
-// four pendingPrefixes, (b) at least Grace old and (c) absent from the
+// five pendingPrefixes, (b) at least Grace old and (c) absent from the
 // DB-referenced set. Pass order is inventory → anti-join → classify →
 // delete: the referenced snapshot is taken as close to the delete as the
 // listing allows, so the window in which a row could start referencing an
@@ -209,7 +210,7 @@ func (r *Reaper) Start(ctx context.Context) {
 	}
 }
 
-// reap is the pass body: inventory the four prefixes, snapshot the
+// reap is the pass body: inventory the five prefixes, snapshot the
 // referenced set, classify, then delete (or, in dry-run, only log) the
 // remainder.
 func (r *Reaper) reap(ctx context.Context, summary *ReaperSummary) {

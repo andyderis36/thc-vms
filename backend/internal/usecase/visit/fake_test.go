@@ -54,12 +54,23 @@ type fakeVisitRepo struct {
 	createdVisitors []domain.Visitor
 	createdPurposes []domain.UUID
 	lastFilter      domain.VisitFilter
+	// listCalls counts List invocations so refusal tests can prove the
+	// repository query never ran.
+	listCalls       int
 	listResult      []domain.VisitRequest
 	listTotal       int64
 	// jabatanRows holds raw stored Jabatan values (blanks and duplicates
 	// included) so ListVisitorJabatan can model the SQL contract.
 	jabatanRows []string
 	jabatanErr  error
+	// history is the fake status_history table keyed by visit id (nil = no
+	// rows yet); historyErr reproduces a history-table outage.
+	history    map[domain.UUID][]domain.StatusEvent
+	historyErr error
+	// workPhotos is the fake visit_work_photo table: visit id to kind slot.
+	// AttachWorkPhoto upserts here so the replace-single-row tests can pin
+	// the production UNIQUE (visit_request_id, kind) anchor.
+	workPhotos map[domain.UUID]map[domain.WorkPhotoKind]domain.WorkPhoto
 }
 
 func newFakeVisitRepo(t *testing.T) *fakeVisitRepo {
@@ -98,8 +109,11 @@ func (f *fakeVisitRepo) FindByID(_ context.Context, id domain.UUID) (domain.Visi
 	return visit, nil
 	}
 
-	func (f *fakeVisitRepo) GetLatestStatusNote(_ context.Context, _ domain.UUID) (*string, error) {
-		return nil, nil
+	func (f *fakeVisitRepo) ListStatusHistory(_ context.Context, id domain.UUID) ([]domain.StatusEvent, error) {
+		if f.historyErr != nil {
+			return nil, f.historyErr
+		}
+		return f.history[id], nil
 	}
 
 	func (f *fakeVisitRepo) FindByVisitCode(_ context.Context, code string) (domain.VisitRequest, error) {
@@ -111,6 +125,7 @@ func (f *fakeVisitRepo) FindByID(_ context.Context, id domain.UUID) (domain.Visi
 }
 
 func (f *fakeVisitRepo) List(_ context.Context, filter domain.VisitFilter) ([]domain.VisitRequest, int64, error) {
+	f.listCalls++
 	f.lastFilter = filter
 	return f.listResult, f.listTotal, nil
 }
@@ -202,6 +217,60 @@ func (f *fakeVisitRepo) DeleteVisit(_ context.Context, id domain.UUID) error {
 	return nil
 }
 
+// AttachWorkPhoto mirrors the PostgreSQL adapter over the fake proof table:
+// a missing visit answers NotFoundEntity("Kunjungan"), any status but
+// visiting answers the 409 conflict, and the write upserts on
+// (visit, kind) so a re-attach replaces the single row instead of adding
+// one. The returned bool reports create (true) versus replace (false),
+// exactly like the production 201-vs-200 answer.
+func (f *fakeVisitRepo) AttachWorkPhoto(_ context.Context, visitID domain.UUID, kind domain.WorkPhotoKind, url string, uploadedBy domain.UUID) (domain.WorkPhoto, bool, error) {
+	visit, ok := f.byID[visitID]
+	if !ok {
+		return domain.WorkPhoto{}, false, domain.NotFoundEntity("Kunjungan")
+	}
+	if visit.Status != domain.VisitStatusVisiting {
+		return domain.WorkPhoto{}, false, domain.Conflict("Bukti pengerjaan hanya dapat dilampirkan saat kunjungan sedang berlangsung.")
+	}
+	f.recordWrite()
+	if f.workPhotos == nil {
+		f.workPhotos = make(map[domain.UUID]map[domain.WorkPhotoKind]domain.WorkPhoto)
+	}
+	slots, ok := f.workPhotos[visitID]
+	if !ok {
+		slots = make(map[domain.WorkPhotoKind]domain.WorkPhoto)
+		f.workPhotos[visitID] = slots
+	}
+	_, created := slots[kind]
+	photo := domain.WorkPhoto{
+		VisitRequestID: visitID,
+		Kind:           kind,
+		URL:            url,
+		UploadedAt:     testNow(),
+	}
+	if uploadedBy != "" {
+		by := uploadedBy
+		photo.UploadedBy = &by
+	}
+	slots[kind] = photo
+	return photo, !created, nil
+}
+
+// ListWorkPhotos mirrors the PostgreSQL adapter over the fake proof table: a
+// missing visit answers NotFoundEntity("Kunjungan"), a visit without proofs
+// yields an empty slice.
+func (f *fakeVisitRepo) ListWorkPhotos(_ context.Context, visitID domain.UUID) ([]domain.WorkPhoto, error) {
+	if _, ok := f.byID[visitID]; !ok {
+		return nil, domain.NotFoundEntity("Kunjungan")
+	}
+	out := make([]domain.WorkPhoto, 0, 2)
+	for _, kind := range []domain.WorkPhotoKind{domain.WorkPhotoAfter, domain.WorkPhotoBefore} {
+		if photo, ok := f.workPhotos[visitID][kind]; ok {
+			out = append(out, photo)
+		}
+	}
+	return out, nil
+}
+
 // fakeMasterRepo is a hand-written fake for domain.MasterDataRepository.
 type fakeMasterRepo struct {
 	locations map[domain.UUID]domain.Location
@@ -259,8 +328,42 @@ func newTestServiceWithVendors(repo *fakeVisitRepo, master *fakeMasterRepo, now 
 	return NewService(repo, master, fixedClock{now: now}, nil, &fakeVendorRepo{vendors: vendors})
 }
 
-func testActor(role domain.RoleName, id string, loc string) Actor {
-	actor := Actor{ID: domain.UUID(id), Role: role}
+// fakeAccountLookup is a hand-written fake for domain.UserAccountLookup: the
+// create path resolves a chosen vendor_user_id to its role and status.
+type fakeAccountLookup struct {
+	accounts map[domain.UUID]domain.ManagedUser
+	err      error
+	calls    int
+}
+
+func (f *fakeAccountLookup) FindManagedByID(_ context.Context, id domain.UUID) (domain.ManagedUser, error) {
+	f.calls++
+	if f.err != nil {
+		return domain.ManagedUser{}, f.err
+	}
+	account, ok := f.accounts[id]
+	if !ok {
+		return domain.ManagedUser{}, domain.NotFoundEntity("Akun")
+	}
+	return account, nil
+}
+
+// newTestServiceWithAccounts wires the create path to the account directory a
+// chosen vendor_user_id is validated against.
+func newTestServiceWithAccounts(repo *fakeVisitRepo, accounts domain.UserAccountLookup) *Service {
+	return newTestService(repo, nil, testNow()).WithAccountLookup(accounts)
+}
+
+// visitVendorAccount builds the account-directory projection of one vendor
+// account with the given lifecycle status.
+func visitVendorAccount(id string, status domain.UserStatus) domain.ManagedUser {
+	return domain.ManagedUser{
+		User: domain.User{ID: domain.UUID(id), Status: status, Type: domain.UserTypeExternal},
+		Role: domain.RoleVendor,
+	}
+}
+
+func testActor(role domain.RoleName, id string, loc string) Actor {	actor := Actor{ID: domain.UUID(id), Role: role}
 	if loc != "" {
 		locationID := domain.UUID(loc)
 		actor.LocationID = &locationID

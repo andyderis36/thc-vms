@@ -40,10 +40,10 @@ func NewFileHandler(svc FileService) *FileHandler {
 	return &FileHandler{files: svc}
 }
 
-// File serves GET /visits/:id/file?kind=assignment_letter|id_card|selfie&visitor_id=<uuid>.
+// File serves GET /visits/:id/file?kind=assignment_letter|id_card|selfie|work_before|work_after&visitor_id=<uuid>.
 // Identity is read first, so an unauthenticated caller is refused before any
 // query parameter is honoured. The {id} path segment must be a uuid; kind must
-// be one of the three slots; id_card and selfie additionally require a uuid
+// be one of the five slots; id_card and selfie additionally require a uuid
 // visitor_id. Every malformed request is a 400 and never reaches the usecase.
 // A usecase refusal projects through response.Fail (403/404/...). Success
 // streams the bytes inline via http.ServeContent, so Range, 206 and
@@ -96,11 +96,15 @@ func (h *FileHandler) File(c *gin.Context) {
 	http.ServeContent(c.Writer, c.Request, stream.FileName, stream.ModTime, bodySeeker(stream.Content, stream.Size))
 }
 
-// parseFileKind maps the raw kind query value onto the three known slots.
+// parseFileKind maps the raw kind query value onto the known slots: the
+// visit-level assignment letter, the per-visitor id_card/selfie (which need
+// visitor_id), and the per-visit work_before/work_after proofs (which do
+// not: a visit carries at most one proof per slot).
 func parseFileKind(raw string) (visit.FileKind, bool) {
 	kind := visit.FileKind(strings.TrimSpace(raw))
 	switch kind {
-	case visit.FileKindAssignmentLetter, visit.FileKindIDCard, visit.FileKindSelfie:
+	case visit.FileKindAssignmentLetter, visit.FileKindIDCard, visit.FileKindSelfie,
+		visit.FileKindWorkBefore, visit.FileKindWorkAfter:
 		return kind, true
 	default:
 		return "", false

@@ -18,13 +18,15 @@ const defaultListLimit = 10
 const maxListLimit = 100
 
 // List returns one page plus the total for the caller's scope. The dispatch is
-// total and branch-safe by construction: a location scope can only reach the
-// hard `location_id = $1` query, a vendor scope only the `vendor_user_id = $1`
-// query, and the unscoped super_admin query runs ONLY when both are nil, so
-// there is no code path where a branch caller silently receives every branch.
-// When both scopes are set the branch scope wins and the vendor scope is ignored;
-// the generated queries offer no combined predicate, and branch isolation is
-// the invariant that must never be widened.
+// total and branch-safe by construction: a union scope can only reach the
+// `is_global OR location_id = ANY(location_ids)` pair, a vendor scope only the
+// `vendor_user_id = $1` query, and the national super_admin query runs ONLY for
+// an explicit global filter with an empty union, so there is no code path
+// where a branch caller silently receives every branch. When both scopes are
+// set the branch scope wins and the vendor scope is ignored; the generated
+// queries offer no combined predicate, and branch isolation is the invariant
+// that must never be widened. An empty union with IsGlobal false matches no
+// row (fail-closed): the repository never invents a global view.
 func (r *visitRepository) List(
 	ctx context.Context,
 	filter domain.VisitFilter,
@@ -34,31 +36,66 @@ func (r *visitRepository) List(
 	limit32 := int32(limit)             //nolint:gosec // limit is clamped to maxListLimit
 	q := db.New(r.pool)
 
-	if filter.LocationID != nil {
-		locationID, err := fromDomainUUID(*filter.LocationID)
+	if filter.VendorUserID == nil {
+		ids, err := toRepoUUIDs(filter.LocationIDs)
 		if err != nil {
 			return nil, 0, err
 		}
+		if filter.IsGlobal && len(ids) == 0 {
+			rows, err := q.ListVisitsForSuperAdmin(ctx, db.ListVisitsForSuperAdminParams{
+				IsGlobal:    true,
+				LocationIds: ids,
+				Status:      statusParam(filter.Status),
+				DateFrom:    pgTimestamptz(filter.From),
+				DateTo:      pgTimestamptz(filter.To),
+				Search:      searchParam(filter.Search),
+				SortBy:      sortParam(string(filter.SortBy.Normalized())),
+				SortOrder:   sortParam(string(filter.Order.Normalized())),
+				Offset:      offset,
+				Limit:       limit32,
+			})
+			if err != nil {
+				return nil, 0, MapError(err)
+			}
+			total, err := q.CountVisitsForSuperAdmin(ctx, db.CountVisitsForSuperAdminParams{
+				IsGlobal:    true,
+				LocationIds: ids,
+				Status:      statusParam(filter.Status),
+				DateFrom:    pgTimestamptz(filter.From),
+				DateTo:      pgTimestamptz(filter.To),
+				Search:      searchParam(filter.Search),
+			})
+			if err != nil {
+				return nil, 0, MapError(err)
+			}
+			visits := superAdminRowsToDomain(rows)
+			if err := r.attachPageVisitors(ctx, visits); err != nil {
+				return nil, 0, err
+			}
+			return visits, total, nil
+		}
 		rows, err := q.ListVisitsForLocation(ctx, db.ListVisitsForLocationParams{
-			LocationID: locationID,
-			Status:     statusParam(filter.Status),
-			DateFrom:   pgTimestamptz(filter.From),
-			DateTo:     pgTimestamptz(filter.To),
-			Search:     searchParam(filter.Search),
-			SortBy:     sortParam(string(filter.SortBy.Normalized())),
-			SortOrder:  sortParam(string(filter.Order.Normalized())),
-			Offset:     offset,
-			Limit:      limit32,
+			IsGlobal:    filter.IsGlobal,
+			LocationIds: ids,
+			Status:      statusParam(filter.Status),
+			DateFrom:    pgTimestamptz(filter.From),
+			DateTo:      pgTimestamptz(filter.To),
+			Search:      searchParam(filter.Search),
+			SortBy:      sortParam(string(filter.SortBy.Normalized())),
+			SortOrder:   sortParam(string(filter.Order.Normalized())),
+			Offset:      offset,
+			Limit:       limit32,
 		})
 		if err != nil {
 			return nil, 0, MapError(err)
 		}
 		total, err := q.CountVisitsForLocation(ctx, db.CountVisitsForLocationParams{
-			LocationID: locationID,
-			Status:     statusParam(filter.Status),
-			DateFrom:   pgTimestamptz(filter.From),
-			DateTo:     pgTimestamptz(filter.To),
-			Search:     searchParam(filter.Search),
+			IsGlobal:    filter.IsGlobal,
+			LocationIds: ids,
+			Status:      statusParam(filter.Status),
+			DateFrom:    pgTimestamptz(filter.From),
+			DateTo:      pgTimestamptz(filter.To),
+			Search:      searchParam(filter.Search),
 		})
 		if err != nil {
 			return nil, 0, MapError(err)
@@ -70,12 +107,11 @@ func (r *visitRepository) List(
 		return visits, total, nil
 	}
 
-	if filter.VendorUserID != nil {
-		vendorUserID, err := fromDomainUUID(*filter.VendorUserID)
-		if err != nil {
-			return nil, 0, err
-		}
-		rows, err := q.ListVisitsForVendorUser(ctx, db.ListVisitsForVendorUserParams{
+	vendorUserID, err := fromDomainUUID(*filter.VendorUserID)
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := q.ListVisitsForVendorUser(ctx, db.ListVisitsForVendorUserParams{
 			VendorUserID: vendorUserID,
 			Status:       statusParam(filter.Status),
 			DateFrom:     pgTimestamptz(filter.From),
@@ -99,38 +135,7 @@ func (r *visitRepository) List(
 		if err != nil {
 			return nil, 0, MapError(err)
 		}
-		visits := vendorRowsToDomain(rows)
-		if err := r.attachPageVisitors(ctx, visits); err != nil {
-			return nil, 0, err
-		}
-		return visits, total, nil
-	}
-
-	rows, err := q.ListVisitsForSuperAdmin(ctx, db.ListVisitsForSuperAdminParams{
-		LocationID: pgtype.UUID{},
-		Status:     statusParam(filter.Status),
-		DateFrom:   pgTimestamptz(filter.From),
-		DateTo:     pgTimestamptz(filter.To),
-		Search:     searchParam(filter.Search),
-		SortBy:     sortParam(string(filter.SortBy.Normalized())),
-		SortOrder:  sortParam(string(filter.Order.Normalized())),
-		Offset:     offset,
-		Limit:      limit32,
-	})
-	if err != nil {
-		return nil, 0, MapError(err)
-	}
-	total, err := q.CountVisitsForSuperAdmin(ctx, db.CountVisitsForSuperAdminParams{
-		LocationID: pgtype.UUID{},
-		Status:     statusParam(filter.Status),
-		DateFrom:   pgTimestamptz(filter.From),
-		DateTo:     pgTimestamptz(filter.To),
-		Search:     searchParam(filter.Search),
-	})
-	if err != nil {
-		return nil, 0, MapError(err)
-	}
-	visits := superAdminRowsToDomain(rows)
+	visits := vendorRowsToDomain(rows)
 	if err := r.attachPageVisitors(ctx, visits); err != nil {
 		return nil, 0, err
 	}

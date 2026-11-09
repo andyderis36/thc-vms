@@ -11,8 +11,9 @@ import (
 const testOwnerID = "8f1c1f2e-0000-4000-8000-000000000001"
 
 // Given each supported category, when the object key is built, then the
-// directory segment is the plural name mandated by AGENTS.md 6.4 - the
-// category token itself never reaches the key.
+// directory segment is the storage directory the adapter owns - not a path the
+// caller chose. Most directories are the plural of the category token;
+// work_photos is the category whose token already is its directory.
 func TestBuildObjectKey_MapsCategoriesToStructuredPrefixes(t *testing.T) {
 	cases := []struct {
 		category string
@@ -22,6 +23,7 @@ func TestBuildObjectKey_MapsCategoriesToStructuredPrefixes(t *testing.T) {
 		{CategoryIDCard, "id_cards/"},
 		{CategoryCheckinPhoto, "checkin_photos/"},
 		{CategoryProfilePhoto, "profile_photos/"},
+		{CategoryWorkPhotos, "work_photos/"},
 	}
 
 	for _, tc := range cases {
@@ -34,19 +36,46 @@ func TestBuildObjectKey_MapsCategoriesToStructuredPrefixes(t *testing.T) {
 			if key != want {
 				t.Fatalf("buildObjectKey(%q) = %q, want %q", tc.category, key, want)
 			}
-			if strings.Contains(key, tc.category) {
-				// The mandated directory names are the PLURAL of the category
-				// token ("assignment_letter" -> "assignment_letters"), so a
-				// substring check can never pass. What must hold is that the
-				// caller's token is not used verbatim as the directory: the
-				// adapter, not the caller, picks the layout.
-				firstSegment := strings.SplitN(key, "/", 2)[0]
-				if firstSegment == tc.category {
-					t.Fatalf("key %q must not use the raw category token as its directory", key)
-				}
+			segments := strings.Split(key, "/")
+			if len(segments) != 3 || segments[0] != strings.TrimSuffix(tc.want, "/") || segments[1] != testOwnerID {
+				t.Fatalf("key %q must be <directory>/<owner>/<file> with directory %q", key, strings.TrimSuffix(tc.want, "/"))
 			}
 		})
 	}
+}
+
+// Given the category directory vocabulary, when the pending prefixes are
+// derived, then EVERY writable directory has a staging prefix. Without this a
+// category added to categoryDirectories could silently escape the reaper and
+// its orphans would never be collected.
+func TestPendingPrefixes_CoversEveryCategoryDirectory(t *testing.T) {
+	prefixes := PendingPrefixes()
+	for category, directory := range categoryDirectories {
+		want := directory + "/pending/"
+		found := false
+		for _, prefix := range prefixes {
+			if prefix == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("category %q has no pending prefix %q: %v", category, want, prefixes)
+		}
+	}
+	if want := "work_photos/pending/"; !containsString(prefixes, want) {
+		t.Fatalf("PendingPrefixes() = %v, want it to contain %q", prefixes, want)
+	}
+}
+
+// containsString reports whether values holds want.
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Given a hostile or oversized file name, when the object key is built, then
@@ -108,7 +137,7 @@ func TestBuildObjectKey_SanitizesFilename(t *testing.T) {
 // Given an unknown category, when the object key is built, then it is refused
 // instead of falling back to a caller-chosen directory.
 func TestBuildObjectKey_RejectsUnknownCategory(t *testing.T) {
-	for _, category := range []string{"", "secrets", "assignment_letters", "id_cards/../.."} {
+	for _, category := range []string{"", "secrets", "assignment_letters", "id_cards/../..", "work_photo"} {
 		key, err := buildObjectKey(category, testOwnerID, "surat-tugas.pdf")
 		if !errors.Is(err, domain.ErrStorageRejected) {
 			t.Fatalf("category %q must be refused with ErrStorageRejected, got key %q err %v", category, key, err)

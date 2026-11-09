@@ -103,8 +103,24 @@ func (fakeVisitService) UpdateVisitorContact(_ context.Context, _ visit.Actor, _
 	return domain.Visitor{}, domain.NotFoundEntity("Kunjungan")
 }
 
+func (fakeVisitService) AttachWorkPhoto(_ context.Context, _ visit.Actor, _ domain.UUID, _, _ string) (domain.WorkPhoto, bool, error) {
+	return domain.WorkPhoto{}, false, domain.NotFoundEntity("Kunjungan")
+}
+
 func (fakeVisitService) ListJabatan(_ context.Context) ([]string, error) {
 	return nil, domain.NotFoundEntity("Kunjungan")
+}
+
+func (fakeVisitService) ListVendorSuggestions(_ context.Context, _ visit.Actor, _ string) ([]domain.VendorSuggestion, error) {
+	return nil, domain.NotFoundEntity("Kunjungan")
+}
+
+func (fakeVisitService) ListMemberSuggestions(_ context.Context, _ visit.Actor, _ visit.MemberSuggestionsInput) ([]domain.MemberSuggestion, error) {
+	return nil, domain.NotFoundEntity("Kunjungan")
+}
+
+func (fakeVisitService) GetMemberSuggestion(_ context.Context, _ visit.Actor, _ domain.UUID) (domain.MemberSuggestionDetail, error) {
+	return domain.MemberSuggestionDetail{}, domain.NotFoundEntity("Kunjungan")
 }
 
 // fakeGateService answers every gate call with 404.
@@ -133,6 +149,12 @@ func (fakeMaster) ListPurposes(_ context.Context, _ bool) ([]domain.Purpose, err
 	return nil, nil
 }
 
+// ListVendors feeds the public and authenticated company catalogues so the
+// router can prove the anonymous /public/vendors path returns 200.
+func (fakeMaster) ListVendors(_ context.Context) ([]domain.Vendor, error) {
+	return []domain.Vendor{{ID: "ven-router", Name: "PT Router"}}, nil
+}
+
 // fakeUsers refuses every account call with 404.
 type fakeUsers struct{}
 
@@ -156,7 +178,7 @@ func (fakeUsers) UpdateLastLogin(_ context.Context, _ domain.UUID, _ time.Time) 
 	return nil
 }
 
-func (fakeUsers) ListSecurity(_ context.Context, _ *domain.UUID) ([]domain.User, error) {
+func (fakeUsers) ListSecurity(_ context.Context, _ []domain.UUID, _ bool) ([]domain.User, error) {
 	return nil, nil
 }
 
@@ -209,12 +231,14 @@ func testEngine() *gin.Engine {
 		SuperAdmin: deliveryhttp.SuperAdminRoutes{},
 		Master: deliveryhttp.MasterRoutes{
 			Locations: master.ListLocations, Purposes: master.ListPurposes,
+			Vendors: master.ListVendors, PublicVendors: master.PublicVendors,
 		},
 		Visits: deliveryhttp.VisitRoutes{
 			List: visits.List, Create: visits.Create, Get: visits.Get, QR: visits.QR,
 			Reschedule: visits.Reschedule, Cancel: visits.Cancel,
 			Approve: visits.Approve, Reject: visits.Reject,
 			UpdateVisitorContact: visits.UpdateVisitorContact,
+			AttachWorkPhoto:      visits.AttachWorkPhoto,
 		},
 		Gate: deliveryhttp.GateRoutes{
 			CheckIn: gate.CheckIn, CheckOut: gate.CheckOut,
@@ -225,7 +249,7 @@ func testEngine() *gin.Engine {
 			Recovery:     middleware.Recovery(),
 			CORS:         middleware.CORS(),
 			LoginLimiter: limiter.Middleware(),
-			Authenticate: middleware.JWT(denyParser{}, denyLoader{}),
+			Authenticate: middleware.JWT(denyParser{}, denyLoader{}, nil),
 			AdminOnly: middleware.RequireRoles(
 				domain.RoleSuperAdmin, domain.RoleAdmin),
 			ApproveOnly: middleware.RequireRoles(
@@ -244,7 +268,7 @@ func serve(engine *gin.Engine, method, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 46 wired
+// TestRouter_RegistersExactlyTheMVPContract asserts every one of the 49 wired
 // operations resolves to a registered route: a registered route may answer
 // 401/403/400/500 without credentials, but never 404. The two Phase-2
 // feedback and incident endpoints must 404.
@@ -255,12 +279,16 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodPost, "/api/v1/auth/register"},
 		{http.MethodGet, "/api/v1/health"},
 		{http.MethodGet, "/api/v1/ready"},
+		// Public vendor-company catalogue for the anonymous /register page.
+		{http.MethodGet, "/api/v1/public/vendors"},
 		{http.MethodGet, "/api/v1/auth/me"},
 		{http.MethodPatch, "/api/v1/auth/me"},
 		{http.MethodPost, "/api/v1/auth/logout"},
 		{http.MethodPost, "/api/v1/auth/email-change/request"},
 		{http.MethodPost, "/api/v1/auth/email-change/confirm"},
 		{http.MethodGet, "/api/v1/users/security"},
+		// Vendor-account directory for the visit form's owner picker.
+		{http.MethodGet, "/api/v1/users/vendors"},
 		{http.MethodPost, "/api/v1/users/security"},
 		{http.MethodPatch, "/api/v1/users/security/some-id/status"},
 		{http.MethodPatch, "/api/v1/users/security/some-id"},
@@ -289,6 +317,7 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodPost, "/api/v1/visits/some-id/reschedule"},
 		{http.MethodPost, "/api/v1/visits/some-id/cancel"},
 		{http.MethodPatch, "/api/v1/visits/some-id/visitors/some-member-id"},
+		{http.MethodPost, "/api/v1/visits/some-id/work-photos"},
 		{http.MethodGet, "/api/v1/visits/some-id/qr"},
 		{http.MethodPost, "/api/v1/visits/some-id/checkin"},
 		{http.MethodPost, "/api/v1/visits/some-id/checkout"},
@@ -298,8 +327,8 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/notifications/pending-registrations"},
 		{http.MethodPost, "/api/v1/uploads"},
 	}
-	if len(wired) != 46 {
-		t.Fatalf("contract drift: wired routes = %d, want 46", len(wired))
+	if len(wired) != 49 {
+		t.Fatalf("contract drift: wired routes = %d, want 49", len(wired))
 	}
 	for _, route := range wired {
 		rec := serve(engine, route.method, route.path)
@@ -319,6 +348,32 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		if rec := serve(engine, forbidden.method, forbidden.path); rec.Code != http.StatusNotFound {
 			t.Errorf("%s %s must 404, got %d", forbidden.method, forbidden.path, rec.Code)
 		}
+	}
+}
+
+// TestRouter_PublicVendorsNeedsNoToken asserts the anonymous catalogue read
+// answers 200 without a token, while the admin-gated vendor-account directory
+// on the same prefix still answers 401 first.
+func TestRouter_PublicVendorsNeedsNoToken(t *testing.T) {
+	engine := testEngine()
+	rec := serve(engine, http.MethodGet, "/api/v1/public/vendors")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /public/vendors = %d, want 200 without a token: %q", rec.Code, rec.Body.String())
+	}
+	var env struct {
+		Success bool              `json:"success"`
+		Data    []map[string]any  `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("public vendors response is not JSON: %v: %q", err, rec.Body.String())
+	}
+	if !env.Success || len(env.Data) != 1 || env.Data[0]["id"] != "ven-router" {
+		t.Fatalf("public vendors body = %q, want the fake catalogue row", rec.Body.String())
+	}
+
+	rec = serve(engine, http.MethodGet, "/api/v1/users/vendors")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET /users/vendors = %d, want 401 without a token", rec.Code)
 	}
 }
 

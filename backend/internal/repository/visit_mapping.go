@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ func visitRowToDomain(row db.VisitRequest) (domain.VisitRequest, error) {
 		ID:                  mustDomainUUID(row.ID),
 		VisitID:             row.VisitID,
 		VendorUserID:        mustDomainUUID(row.VendorUserID),
+		CreatedBy:           domainUUIDPtr(row.CreatedBy),
 		VendorID:            nullUUIDToDomain(row.VendorID),
 		LocationID:          mustDomainUUID(row.LocationID),
 		StartDate:           row.StartDate,
@@ -40,10 +42,11 @@ func visitRowToDomain(row db.VisitRequest) (domain.VisitRequest, error) {
 // The vendor display name rides along for the openapi VisitDetail vendor_name
 // member; location name/type ride along for the location member (kolom
 // Fasilitas FE); vendor name/email ride along for the vendor_user member (kartu
-// Informasi Kunjungan FE). The vendor profile beyond name/email stays id-only
+// Informasi Kunjungan FE); the creator name/role ride along for the
+// "Diajukan oleh" row. The vendor profile beyond name/email stays id-only
 // and belongs to user endpoints.
 func detailRowToDomain(row db.GetVisitByIDRow) (domain.VisitRequest, error) {
-	return visitFieldsToDomain(
+	visit, err := visitFieldsToDomain(
 		row.ID, row.VisitID, row.VendorUserID, row.VendorID, row.LocationID,
 		row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 		row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
@@ -52,11 +55,16 @@ func detailRowToDomain(row db.GetVisitByIDRow) (domain.VisitRequest, error) {
 		row.LocationName, row.LocationType,
 		row.VendorUserName, row.VendorUserEmail, row.VendorUserVendorName,
 	)
+	if err != nil {
+		return domain.VisitRequest{}, err
+	}
+	attachCreator(&visit, row.CreatedBy, row.CreatedByName, row.CreatedByRoleName)
+	return visit, nil
 }
 
 // visitCodeRowToDomain projects the scanner lookup row the same way.
 func visitCodeRowToDomain(row db.GetVisitByVisitCodeRow) (domain.VisitRequest, error) {
-	return visitFieldsToDomain(
+	visit, err := visitFieldsToDomain(
 		row.ID, row.VisitID, row.VendorUserID, row.VendorID, row.LocationID,
 		row.StartDate, row.EndDate, row.IsMultiDay, row.Status,
 		row.AssignmentLetterUrl, row.IsNdaAccepted, row.Notes,
@@ -65,6 +73,26 @@ func visitCodeRowToDomain(row db.GetVisitByVisitCodeRow) (domain.VisitRequest, e
 		row.LocationName, row.LocationType,
 		row.VendorUserName, row.VendorUserEmail, row.VendorUserVendorName,
 	)
+	if err != nil {
+		return domain.VisitRequest{}, err
+	}
+	attachCreator(&visit, row.CreatedBy, row.CreatedByName, row.CreatedByRoleName)
+	return visit, nil
+}
+
+// attachCreator pins the read-join creator display data onto one already
+// mapped visit: a NULL created_by (rows written before migration 000024) or
+// an unresolvable account leaves every pointer nil so the wire omits the
+// "Diajukan oleh" row instead of printing a bare UUID, and the raw role NAME
+// becomes its Indonesian label through domain.RoleLabel.
+func attachCreator(visit *domain.VisitRequest, createdBy pgtype.UUID, name, roleName pgtype.Text) {
+	visit.CreatedBy = domainUUIDPtr(createdBy)
+	if n := strings.TrimSpace(name.String); name.Valid && n != "" {
+		visit.CreatedByName = &n
+	}
+	if role := domain.RoleLabel(strings.TrimSpace(roleName.String)); roleName.Valid && role != "" {
+		visit.CreatedByRoleLabel = &role
+	}
 }
 
 // visitFieldsToDomain is the single mapping every visit read funnels through

@@ -166,6 +166,26 @@ func TestReaper_KeepsObjectsReferencedInDatabase(t *testing.T) {
 	}
 }
 
+// TestReaper_KeepsAgedWorkPhotoReferencedByVisitWorkPhoto proves the
+// visit_work_photo URL column participates in the anti-join: a work photo still
+// staged under pending/ survives once a visit row points at it.
+func TestReaper_KeepsAgedWorkPhotoReferencedByVisitWorkPhoto(t *testing.T) {
+	key := "work_photos/pending/before.jpg"
+	store := newFakeReaperStore()
+	store.add("work_photos/pending/", aged(key, aged48h))
+	repo := &fakeReaperRepo{urls: []string{reaperURL(key)}}
+	reaper, _ := newTestReaper(t, store, repo, liveConfig())
+
+	summary := reaper.Run(context.Background())
+
+	if summary.KeptReferenced != 1 || summary.Deleted != 0 {
+		t.Fatalf("summary = %+v, want KeptReferenced=1 Deleted=0", summary)
+	}
+	if batches := store.batches(); len(batches) != 0 {
+		t.Fatalf("referenced work photo was deleted: %v", batches)
+	}
+}
+
 // TestReaper_HardGuard_NonPendingKeysNeverTouchedEvenWhenOld is the v1 hard
 // rule: a lister that leaks keys outside <dir>/pending/ (final visit keys,
 // pending-<userID> owner segments, foreign directories) cannot make the
@@ -205,11 +225,11 @@ func TestReaper_HardGuard_NonPendingKeysNeverTouchedEvenWhenOld(t *testing.T) {
 	}
 }
 
-// TestReaper_ListsOnlyTheFourStoragePendingPrefixes pins the scan surface to
+// TestReaper_ListsExactlyStoragePendingPrefixes pins the scan surface to
 // storage.PendingPrefixes() — the same <dir>/pending/ set the ILM runbook
 // and object_key.go own — so a new category dir cannot silently escape the
 // reaper and no foreign prefix can ever be requested.
-func TestReaper_ListsOnlyTheFourStoragePendingPrefixes(t *testing.T) {
+func TestReaper_ListsExactlyStoragePendingPrefixes(t *testing.T) {
 	store := newFakeReaperStore()
 	repo := &fakeReaperRepo{}
 	reaper, _ := newTestReaper(t, store, repo, liveConfig())

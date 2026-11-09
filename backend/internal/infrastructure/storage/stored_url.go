@@ -16,6 +16,7 @@ var allowedKeyDirectories = map[string]struct{}{
 	"id_cards":           {},
 	"checkin_photos":     {},
 	"profile_photos":     {},
+	"work_photos":        {},
 }
 
 // ObjectKeyFromStoredURL reverses a stored absolute file URL back to its bucket

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -301,8 +302,50 @@ func TestCreateVisit_RejectsMalformedPerVisitorVendorID(t *testing.T) {
 	mustStatus(t, rec, 400)
 }
 
-func TestGetVisit_RendersVendorNameAndVisitorPhoto(t *testing.T) {
-	v := cannedVisit()
+// TestCreateVisit_MapsVendorUserID pins the request mapping: the optional
+// owning-account id travels from the body onto CreateVisitInput unchanged.
+func TestCreateVisit_MapsVendorUserID(t *testing.T) {
+	svc := &fakeVisitService{created: cannedVisit()}
+	engine := newVisitEngine(svc, domain.RoleSuperAdmin, "")
+
+	payload := `{
+		"location_id": "11111111-1111-1111-1111-111111111111",
+		"vendor_user_id": "44444444-4444-4444-4444-444444444444",
+		"purpose_ids": ["22222222-2222-2222-2222-222222222222"],
+		"start_date": "2026-10-01T09:00:00Z",
+		"end_date": "2026-10-01T17:00:00Z",
+		"is_nda_accepted": true,
+		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
+		"visitors": [{"name": "Andi", "id_number": "ID12345678", "phone": "081234567890"}]
+	}`
+	rec := serveJSON(engine, "POST", "/visits", payload)
+	mustStatus(t, rec, 201)
+	if svc.lastCreateIn.VendorUserID == nil || string(*svc.lastCreateIn.VendorUserID) != "44444444-4444-4444-4444-444444444444" {
+		t.Fatalf("usecase vendor_user_id not mapped: %v", svc.lastCreateIn.VendorUserID)
+	}
+}
+
+// TestCreateVisit_RejectsMalformedVendorUserID pins the boundary: a non-UUID
+// owning-account id is a 400 before any usecase call.
+func TestCreateVisit_RejectsMalformedVendorUserID(t *testing.T) {
+	svc := &fakeVisitService{}
+	engine := newVisitEngine(svc, domain.RoleSuperAdmin, "")
+
+	payload := `{
+		"location_id": "11111111-1111-1111-1111-111111111111",
+		"vendor_user_id": "bukan-uuid",
+		"purpose_ids": ["22222222-2222-2222-2222-222222222222"],
+		"start_date": "2026-10-01T09:00:00Z",
+		"end_date": "2026-10-01T17:00:00Z",
+		"is_nda_accepted": true,
+		"assignment_letter_url": "http://localhost:9000/thc-vms-bucket/assignment_letters/visit-1/spk.pdf",
+		"visitors": [{"name": "Andi", "id_number": "ID12345678", "phone": "081234567890"}]
+	}`
+	rec := serveJSON(engine, "POST", "/visits", payload)
+	mustStatus(t, rec, 400)
+}
+
+func TestGetVisit_RendersVendorNameAndVisitorPhoto(t *testing.T) {	v := cannedVisit()
 	svc := &fakeVisitService{visitByKey: map[string]domain.VisitRequest{"visit-1": v}}
 	engine := newVisitEngine(svc, domain.RoleAdmin, "loc-A")
 
@@ -465,6 +508,102 @@ func TestGetVisit_RendersVendorUserNameAndEmail(t *testing.T) {
 	}
 	if user["email"] != "dimas@vendor.example" {
 		t.Fatalf("pic_user.email = %v, want dimas@vendor.example", user["email"])
+	}
+}
+
+// TestGetVisit_RendersActorDisplayAndHistory pins the additive actor members
+// of GET /visits/{id}: the creator row, both gate actor names, and the
+// history array served oldest -> newest with explicit null actor members on
+// the system row. A visit without enrichment omits every actor key, so list
+// items and un-enriched reads stay byte-compatible.
+func TestGetVisit_RendersActorDisplayAndHistory(t *testing.T) {
+	createdAt := time.Date(2026, time.September, 20, 3, 0, 0, 0, time.UTC)
+	approvedAt := createdAt.Add(time.Hour)
+	systemAt := approvedAt.Add(time.Minute)
+
+	enriched := cannedVisit()
+	enriched.CreatedByName = strPtr("Wulan Sari")
+	enriched.CreatedByRoleLabel = strPtr("Vendor/Mitra")
+	enriched.CheckedInByName = strPtr("Bagus Prakoso")
+	enriched.CheckedOutByName = strPtr("Rina Wati")
+	enriched.History = []domain.StatusEvent{
+		{Status: domain.VisitStatusRequested, At: createdAt,
+			ActorName: strPtr("Wulan Sari"), ActorRoleLabel: strPtr("Vendor/Mitra")},
+		{Status: domain.VisitStatusApproved, At: approvedAt,
+			ActorName: strPtr("Siti Rahayu"), ActorRoleLabel: strPtr("Admin Cabang")},
+		// Auto-rule transition: changed_by IS NULL, so both actors are null.
+		{Status: domain.VisitStatusNotVisit, At: systemAt},
+	}
+	svc := &fakeVisitService{visitByKey: map[string]domain.VisitRequest{
+		"visit-1":        enriched,
+		"VST-0000000001": enriched,
+		"visit-9":        cannedVisit(),
+	}}
+	engine := newVisitEngine(svc, domain.RoleSuperAdmin, "")
+
+	rec := serve(engine, "GET", "/visits/visit-1", nil, "")
+	mustStatus(t, rec, 200)
+	detail := asObject(t, mustSuccess(t, rec).Data)
+	assertSubset(t, "VisitDetail", detail)
+
+	for key, want := range map[string]any{
+		"created_by_name":      "Wulan Sari",
+		"created_by_role_label": "Vendor/Mitra",
+		"checked_in_by_name":   "Bagus Prakoso",
+		"checked_out_by_name":  "Rina Wati",
+	} {
+		if detail[key] != want {
+			t.Errorf("%s = %v, want %v", key, detail[key], want)
+		}
+	}
+
+	history, ok := detail["history"].([]any)
+	if !ok || len(history) != 3 {
+		t.Fatalf("history = %v, want three ordered rows", detail["history"])
+	}
+	wantStatuses := []string{"requested", "approved", "not_visit"}
+	wantTimes := []time.Time{createdAt, approvedAt, systemAt}
+	for i, raw := range history {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("history[%d] is not an object: %v", i, raw)
+		}
+		assertSubset(t, "VisitHistoryEntry", entry)
+		if entry["status"] != wantStatuses[i] {
+			t.Errorf("history[%d].status = %v, want %s (oldest -> newest)", i, entry["status"], wantStatuses[i])
+		}
+		if entry["at"] != wantTimes[i].Format(time.RFC3339) {
+			t.Errorf("history[%d].at = %v, want %s", i, entry["at"], wantTimes[i].Format(time.RFC3339))
+		}
+	}
+	first := history[0].(map[string]any)
+	if first["actor_name"] != "Wulan Sari" || first["actor_role_label"] != "Vendor/Mitra" {
+		t.Errorf("history[0] actors = %v / %v, want Wulan Sari / Vendor/Mitra",
+			first["actor_name"], first["actor_role_label"])
+	}
+	second := history[1].(map[string]any)
+	if second["actor_name"] != "Siti Rahayu" || second["actor_role_label"] != "Admin Cabang" {
+		t.Errorf("history[1] actors = %v / %v, want Siti Rahayu / Admin Cabang",
+			second["actor_name"], second["actor_role_label"])
+	}
+	system := history[2].(map[string]any)
+	for _, key := range []string{"actor_name", "actor_role_label"} {
+		value, present := system[key]
+		if !present {
+			t.Errorf("system row must carry %s explicitly (null), key missing", key)
+		}
+		if value != nil {
+			t.Errorf("system row %s = %v, want null", key, value)
+		}
+	}
+
+	plainRec := serve(engine, "GET", "/visits/visit-9", nil, "")
+	mustStatus(t, plainRec, 200)
+	plain := asObject(t, mustSuccess(t, plainRec).Data)
+	for _, key := range []string{"created_by_name", "created_by_role_label", "checked_in_by_name", "checked_out_by_name", "history"} {
+		if _, present := plain[key]; present {
+			t.Errorf("un-enriched detail must omit %q, got %v", key, plain[key])
+		}
 	}
 }
 

@@ -279,6 +279,41 @@ func TestFile_SuccessStreamsInlineWithHeaders(t *testing.T) {
 	}
 }
 
+// Given an authorized read of a work-proof slot, when it is requested without
+// a visitor_id, then the kind reaches the usecase (a visit carries at most
+// one proof per slot, so no visitor_id is needed) and the bytes stream.
+func TestFile_WorkProofKindsStreamWithoutVisitorID(t *testing.T) {
+	for _, tc := range []struct {
+		kind     string
+		wantKind visit.FileKind
+	}{
+		{"work_before", visit.FileKindWorkBefore},
+		{"work_after", visit.FileKindWorkAfter},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			svc := &fakeFileService{
+				payload:     fileFixture,
+				contentType: "image/jpeg",
+				fileName:    "before.jpg",
+				modTime:     time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC),
+			}
+			engine := newAuthedFileEngine(svc, domain.RoleVendor, "")
+
+			rec := serve(engine, "GET", "/visits/"+fileVisitID+"/file?kind="+tc.kind, nil, "")
+			mustStatus(t, rec, 200)
+			if svc.calls != 1 {
+				t.Fatalf("usecase calls = %d, want 1", svc.calls)
+			}
+			if svc.lastKind != tc.wantKind {
+				t.Fatalf("kind = %q, want %q", svc.lastKind, tc.wantKind)
+			}
+			if !bytes.Equal(rec.Body.Bytes(), fileFixture) {
+				t.Fatalf("body = %q, want the fixture bytes", rec.Body.String())
+			}
+		})
+	}
+}
+
 // Given an authorized read with a byte range, when it is requested, then the
 // handler answers 206 with the partial body and the correct Content-Range.
 func TestFile_RangeRequestReturns206WithContentRange(t *testing.T) {

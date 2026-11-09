@@ -22,6 +22,9 @@ var (
 	ErrAccountInactive = errors.New("Akun Anda dinonaktifkan.")
 	// ErrForbiddenBranch backs the 403 cross-branch refusal.
 	ErrForbiddenBranch = errors.New("Tidak berhak mengelola kunjungan cabang lain")
+	// ErrForbidden backs 403 refusals whose reason is the caller's ROLE rather
+	// than a branch boundary (e.g. a vendor naming another vendor's account).
+	ErrForbidden = errors.New("Operasi tidak diizinkan untuk peran Anda.")
 	// ErrCheckInWindow backs the 400 check-in refusal, PRD L123 verbatim, used
 	// for ANY tolerance-window violation, too early as well as too late.
 	ErrCheckInWindow = errors.New("Kunjungan belum dibuka atau sudah melewati batas waktu toleransi.")
@@ -129,6 +132,17 @@ func ForbiddenBranch() *AppError {
 	}
 }
 
+// Forbidden builds a 403 for a role-level refusal, carrying the caller's
+// diagnosis while keeping the generic FORBIDDEN code family.
+func Forbidden(message string) *AppError {
+	return &AppError{
+		Status:  http.StatusForbidden,
+		Code:    "FORBIDDEN",
+		Message: message,
+		Err:     ErrForbidden,
+	}
+}
+
 // CheckInWindowExceeded builds the 400 tolerance-window refusal.
 func CheckInWindowExceeded() *AppError {
 	return &AppError{
@@ -198,6 +212,8 @@ func FromError(err error) *AppError {
 		return AccountInactive()
 	case errors.Is(err, ErrForbiddenBranch):
 		return ForbiddenBranch()
+	case errors.Is(err, ErrForbidden):
+		return &AppError{Status: http.StatusForbidden, Code: "FORBIDDEN", Message: ErrForbidden.Error(), Err: err}
 	case errors.Is(err, ErrCheckInWindow):
 		return CheckInWindowExceeded()
 	case errors.Is(err, ErrUnauthorized):

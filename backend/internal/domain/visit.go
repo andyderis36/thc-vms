@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // VisitRequest mirrors the VISIT_REQUEST table: one vendor-submitted permission
 // covering one facility, one schedule window and one or more visitors.
@@ -10,7 +13,13 @@ type VisitRequest struct {
 	ID           UUID
 	VisitID      string
 	VendorUserID UUID
-	VendorID     UUID
+	// CreatedBy is the authenticated actor that SUBMITTED the row (migration
+	// 000024), which differs from VendorUserID whenever an admin or superadmin
+	// files the request on a vendor's behalf. Nil on rows written before the
+	// migration was backfilled and on the create echo until the repository
+	// maps it back.
+	CreatedBy  *UUID
+	VendorID   UUID
 	LocationID   UUID
 	// LocationName/LocationType adalah display name + tipe dari join
 	// location (sudah diseleksi query list/detail, tanpa query tambahan).
@@ -43,6 +52,12 @@ type VisitRequest struct {
 	// cancellation, or reschedule reason). Best-effort display data loaded
 	// from status_history on the single-GET path; nil when none.
 	StatusNote *string
+	// WorkPhotos carries the before/after work proofs for the GET /visits/{id}
+	// work_photos member. It is populated ONLY on the single-GET path (the
+	// list path leaves it nil so a page never pays the extra lookup); nil
+	// means "not loaded", while a non-nil set with nil slots means "no proof
+	// attached yet".
+	WorkPhotos *WorkPhotoSet
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	// VendorName is the display name of VendorID resolved from the vendor
@@ -71,9 +86,36 @@ type VisitRequest struct {
 	// tables (one row per visit). Nil means "no gate record yet" (requested /
 	// approved). The list path leaves them nil on purpose so a 100-row page
 	// never pays 200 extra lookups; see usecase/visit/detail.go.
-	CheckInAt   *time.Time
-	CheckOutAt  *time.Time
-	CheckedInBy *UUID
+	CheckInAt    *time.Time
+	CheckOutAt   *time.Time
+	CheckedInBy  *UUID
+	CheckedOutBy *UUID
+	// CreatedByName/CreatedByRoleLabel are the resolved display name and
+	// Indonesian role label of CreatedBy: the "Diajukan oleh" row, resolved
+	// by the single-GET read join (visit_request.created_by JOIN users/role)
+	// and by the lifecycle email path. Nil means unresolved or no user row,
+	// in which case the row is omitted rather than printing a bare UUID.
+	CreatedByName      *string
+	CreatedByRoleLabel *string
+	// ActorName/ActorRoleLabel are the resolved display name and Indonesian
+	// role label of the user who performed the transition this email announces
+	// (email-only enrichment, never on the wire): the "Disetujui/Ditolak/
+	// Diubah/Dibatalkan oleh" row. Nil means a system/worker transition, which
+	// must not invent an actor.
+	ActorName      *string
+	ActorRoleLabel *string
+	// CheckedInByName/CheckedOutByName are the resolved display names of the
+	// gate actors (check_in/check_out JOIN users on the read path), filled by
+	// the same single-GET enrichment as CheckInAt/CheckOutAt. Nil means no
+	// gate record yet or an unresolvable account; list items stay nil.
+	CheckedInByName  *string
+	CheckedOutByName *string
+	// History is the actor-resolved status trail, oldest -> newest, for the
+	// GET /visits/{id} history member (the repository caps it to the 50
+	// newest rows). Populated ONLY on the single-GET path, like WorkPhotos:
+	// nil means "not loaded" (list items, create echo), a non-nil empty
+	// slice means "loaded with no rows".
+	History []StatusEvent
 }
 
 // Visitor mirrors the VISITOR table: one technician travelling under a
@@ -132,6 +174,21 @@ type StatusHistory struct {
 	Notes          *string
 }
 
+// StatusEvent is ONE actor-resolved status_history row as served on the
+// GET /visits/{id} history member: which status was entered, when, and who
+// performed the transition. ActorName/ActorRoleLabel are nil for a system
+// transition (changed_by IS NULL) and for an unresolvable role, so the wire
+// renders null and the UI drops the "oleh" clause instead of inventing an
+// actor. Notes carries the transition note for the StatusNote derivation and
+// is deliberately absent from the wire DTO.
+type StatusEvent struct {
+	Status         VisitStatus
+	At             time.Time
+	ActorName      *string
+	ActorRoleLabel *string
+	Notes          *string
+}
+
 // CheckIn mirrors the CHECK_IN table: the single gate record proving a visit
 // entered the facility, executed by security or the branch admin.
 type CheckIn struct {
@@ -139,8 +196,11 @@ type CheckIn struct {
 	VisitRequestID UUID
 	CheckedInAt    time.Time
 	CheckedInBy    UUID
-	PhotoURL       *string
-	BadgeCode      *string
+	// CheckedInByName is the resolved display name of CheckedInBy (read-path
+	// users join), never a stored column; nil when unresolved.
+	CheckedInByName *string
+	PhotoURL        *string
+	BadgeCode       *string
 }
 
 // CheckOut mirrors the CHECK_OUT table: the single gate record closing a
@@ -150,4 +210,52 @@ type CheckOut struct {
 	VisitRequestID UUID
 	CheckedOutAt   time.Time
 	CheckedOutBy   UUID
+	// CheckedOutByName is the resolved display name of CheckedOutBy (read-path
+	// users join), never a stored column; nil when unresolved.
+	CheckedOutByName *string
+}
+
+// WorkPhotoKind is the closed vocabulary of the visit_work_photo.kind column
+// (migration 000024): exactly one "before" and one "after" evidence photo
+// per visit, attached while the visit is being executed.
+type WorkPhotoKind string
+
+const (
+	// WorkPhotoBefore proves the site condition before the work starts.
+	WorkPhotoBefore WorkPhotoKind = "before"
+	// WorkPhotoAfter proves the site condition after the work finishes.
+	WorkPhotoAfter WorkPhotoKind = "after"
+)
+
+// ParseWorkPhotoKind converts a received string back into the closed
+// vocabulary, refusing anything outside before/after.
+func ParseWorkPhotoKind(raw string) (WorkPhotoKind, error) {
+	switch WorkPhotoKind(raw) {
+	case WorkPhotoBefore, WorkPhotoAfter:
+		return WorkPhotoKind(raw), nil
+	default:
+		return "", fmt.Errorf("jenis bukti pengerjaan tidak dikenal: %q: %w", raw, ErrValidation)
+	}
+}
+
+// WorkPhoto mirrors the VISIT_WORK_PHOTO table: one before/after evidence
+// photo attached to a visit while it is being executed. UploadedBy is nil
+// when the attaching account has since been removed (ON DELETE SET NULL);
+// UploadedByName is the resolved display name ("" when unknown) and is
+// display data only, never an identifier.
+type WorkPhoto struct {
+	ID             UUID
+	VisitRequestID UUID
+	Kind           WorkPhotoKind
+	URL            string
+	UploadedBy     *UUID
+	UploadedByName string
+	UploadedAt     time.Time
+}
+
+// WorkPhotoSet carries both evidence slots of one visit. A nil slot means
+// "not attached yet" and renders as JSON null on the wire.
+type WorkPhotoSet struct {
+	Before *WorkPhoto
+	After  *WorkPhoto
 }

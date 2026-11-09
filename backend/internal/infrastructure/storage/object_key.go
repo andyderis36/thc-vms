@@ -6,15 +6,16 @@ import (
 	"strings"
 )
 
-// Upload categories, exactly the four tokens the openapi /uploads multipart
-// contract accepts. The token itself never reaches an object key: each maps to
-// the plural directory mandated by AGENTS.md 6.4, so a caller cannot smuggle a
-// directory of its own choosing into the bucket.
+// Upload categories, exactly the five tokens the openapi /uploads multipart
+// contract accepts. The token itself never reaches an object key unless it is
+// also the mandated directory name: each maps to its storage directory, so a
+// caller cannot smuggle a directory of its own choosing into the bucket.
 const (
 	CategoryAssignmentLetter = "assignment_letter"
 	CategoryIDCard           = "id_card"
 	CategoryCheckinPhoto     = "checkin_photo"
 	CategoryProfilePhoto     = "profile_photo"
+	CategoryWorkPhotos       = "work_photos"
 )
 
 // rejectKey is the sentinel a sanitisation test compares against to mean "this
@@ -36,9 +37,11 @@ var categoryDirectories = map[string]string{
 	CategoryIDCard:           "id_cards",
 	CategoryCheckinPhoto:     "checkin_photos",
 	CategoryProfilePhoto:     "profile_photos",
+	// Work photos are the one category whose token already is its directory.
+	CategoryWorkPhotos: "work_photos",
 }
 
-// PendingPrefixes returns the four staging prefixes ("<dir>/pending/") in
+// PendingPrefixes returns the five staging prefixes ("<dir>/pending/") in
 // stable category order — exactly the set the ILM runbook (docs/5.
 // LOCAL_DEV.md §9) applies lifecycle rules to and the worker reaper scans.
 // It is derived from categoryDirectories so a newly added upload category
@@ -51,6 +54,7 @@ func PendingPrefixes() []string {
 		CategoryIDCard,
 		CategoryCheckinPhoto,
 		CategoryProfilePhoto,
+		CategoryWorkPhotos,
 	}
 	prefixes := make([]string, 0, len(order))
 	for _, category := range order {

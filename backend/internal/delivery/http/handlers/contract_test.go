@@ -26,7 +26,7 @@ var openapiKeys = map[string]map[string]bool{
 	"Purpose": {"id": true, "name": true, "is_active": true},
 	"User": {
 		"id": true, "name": true, "email": true, "phone": true, "nik": true, "role": true,
-		"location_id": true, "location_name": true, "status": true,
+		"location_id": true, "location_ids": true, "location_name": true, "status": true,
 		"type": true, "vendor_name": true, "avatar_url": true, "editable_fields": true,
 	},
 	"VisitDetail": {
@@ -35,6 +35,17 @@ var openapiKeys = map[string]map[string]bool{
 		"start_date": true, "end_date": true, "assignment_letter_url": true,
 		"notes": true, "purpose_note": true, "status_note": true, "visitors": true, "created_at": true,
 		"check_in_at": true, "check_out_at": true, "checked_in_by": true,
+		"created_by_name": true, "created_by_role_label": true,
+		"checked_in_by_name": true, "checked_out_by_name": true,
+		"history": true,
+		"work_photos": true,
+	},
+	"VisitHistoryEntry": {
+		"status": true, "at": true, "actor_name": true, "actor_role_label": true,
+	},
+	"WorkPhoto": {
+		"kind": true, "url": true, "uploaded_by": true, "uploaded_by_name": true,
+		"uploaded_at": true,
 	},
 	"VisitList": {"items": true, "total": true, "page": true, "limit": true},
 	"PendingRegistrationList": {
@@ -89,6 +100,7 @@ func TestResponseKeysAreSubsetOfOpenapi(t *testing.T) {
 	visitEngine.POST("/visits", vh.Create)
 	visitEngine.GET("/visits/:id", vh.Get)
 	visitEngine.GET("/visits/:id/qr", vh.QR)
+	visitEngine.POST("/visits/:id/work-photos", vh.AttachWorkPhoto)
 	visitEngine.PATCH("/visits/:id/visitors/:visitorId", vh.UpdateVisitorContact)
 
 	gateEngine := gin.New()
@@ -156,6 +168,58 @@ func TestResponseKeysAreSubsetOfOpenapi(t *testing.T) {
 		assertSubset(t, "VisitorItem", member)
 	})
 
+	t.Run("work photo attach answers 201 then 200 with one WorkPhoto", func(t *testing.T) {
+		body := `{"kind":"before","url":"http://localhost:9000/thc-vms-bucket/work_photos/visit-1/before.jpg"}`
+		rec := serveJSON(visitEngine, "POST", "/visits/visit-1/work-photos", body)
+		mustStatus(t, rec, 201)
+		first := asObject(t, mustSuccess(t, rec).Data)
+		assertSubset(t, "WorkPhoto", first)
+		if first["kind"] != "before" {
+			t.Fatalf("kind = %v, want before", first["kind"])
+		}
+		visitSvc.attachReplace = true
+		rec = serveJSON(visitEngine, "POST", "/visits/visit-1/work-photos", body)
+		mustStatus(t, rec, 200)
+		assertSubset(t, "WorkPhoto", asObject(t, mustSuccess(t, rec).Data))
+	})
+
+	t.Run("detail carries both work photo slots", func(t *testing.T) {
+		by := domain.UUID("vendor-1")
+		proofVisit := cannedVisit()
+		beforeURL := "https://signed.example/work_photos/visit-1/before.jpg?exp=15m0s"
+		afterURL := "https://signed.example/work_photos/visit-1/after.jpg?exp=15m0s"
+		proofVisit.WorkPhotos = &domain.WorkPhotoSet{
+			Before: &domain.WorkPhoto{Kind: domain.WorkPhotoBefore, URL: beforeURL, UploadedBy: &by, UploadedByName: "Dimas Prasetyo"},
+			After:  &domain.WorkPhoto{Kind: domain.WorkPhotoAfter, URL: afterURL},
+		}
+		proofSvc := &fakeVisitService{visitByKey: map[string]domain.VisitRequest{"visit-9": proofVisit}}
+		proofEngine := gin.New()
+		proofEngine.Use(withActor(domain.RoleSuperAdmin, ""))
+		proofEngine.GET("/visits/:id", handlers.NewVisitHandler(proofSvc).Get)
+
+		rec := serve(proofEngine, "GET", "/visits/visit-9", nil, "")
+		mustStatus(t, rec, 200)
+		detail := asObject(t, mustSuccess(t, rec).Data)
+		assertSubset(t, "VisitDetail", detail)
+		slots, ok := detail["work_photos"].(map[string]any)
+		if !ok || slots == nil {
+			t.Fatalf("work_photos missing or not an object: %v", detail["work_photos"])
+		}
+		for _, slot := range []string{"before", "after"} {
+			member, ok := slots[slot].(map[string]any)
+			if !ok || member == nil {
+				t.Fatalf("work_photos.%s missing: %v", slot, slots)
+			}
+			assertSubset(t, "WorkPhoto", member)
+		}
+		if slots["before"].(map[string]any)["url"] != beforeURL {
+			t.Fatalf("before url = %v, want the presigned link", slots["before"])
+		}
+		if _, present := slots["before"].(map[string]any)["kind"]; present {
+			t.Fatalf("detail slots must not carry kind: %v", slots["before"])
+		}
+	})
+
 	t.Run("checkin and checkout are bare success", func(t *testing.T) {
 		for _, path := range []string{"/visits/visit-1/checkin", "/visits/visit-1/checkout"} {
 			rec := serveJSON(gateEngine, "POST", path, `{}`)
@@ -190,6 +254,11 @@ func checkVisitDetailNesting(t *testing.T, detail map[string]any) {
 	if visitors, ok := detail["visitors"].([]any); ok {
 		for _, v := range visitors {
 			assertSubset(t, "VisitorItem", v.(map[string]any))
+		}
+	}
+	if history, ok := detail["history"].([]any); ok {
+		for _, h := range history {
+			assertSubset(t, "VisitHistoryEntry", h.(map[string]any))
 		}
 	}
 	user, ok := detail["vendor_user"].(map[string]any)

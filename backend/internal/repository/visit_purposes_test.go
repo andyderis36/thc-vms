@@ -108,7 +108,7 @@ func TestList_AttachesPurposesPerPage(t *testing.T) {
 	})
 	linkPurpose(t, pool, withPurpose, purpose)
 
-	visits, total, err := repos.List(ctx, domain.VisitFilter{LocationID: &loc, Page: 1, Limit: 10})
+	visits, total, err := repos.List(ctx, domain.VisitFilter{LocationIDs: []domain.UUID{loc}, Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

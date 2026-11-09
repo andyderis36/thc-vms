@@ -32,6 +32,7 @@ func TestObjectKeyFromStoredURL_AcceptsOwnBucketKeys(t *testing.T) {
 		{"ktp photo", testPublicBase + "/id_cards/visitor-9/ktp.jpg", "id_cards/visitor-9/ktp.jpg"},
 		{"checkin photo", testPublicBase + "/checkin_photos/visit-1/gate.jpg", "checkin_photos/visit-1/gate.jpg"},
 		{"profile photo", testPublicBase + "/profile_photos/user-1/avatar.jpg", "profile_photos/user-1/avatar.jpg"},
+		{"work photo", testPublicBase + "/work_photos/visit-1/before.jpg", "work_photos/visit-1/before.jpg"},
 		{"query stripped", testPublicBase + "/id_cards/visitor-9/ktp.jpg?X-Amz-Expires=900", "id_cards/visitor-9/ktp.jpg"},
 		{"lan ip host", "http://10.11.6.110/s3/thc-vms-bucket/assignment_letters/visit-1/spk.pdf", "assignment_letters/visit-1/spk.pdf"},
 		{"cloudflare tunnel host", "https://random-word-4711.trycloudflare.com/s3/thc-vms-bucket/id_cards/visitor-9/ktp.jpg", "id_cards/visitor-9/ktp.jpg"},

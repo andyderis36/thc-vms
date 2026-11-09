@@ -2,6 +2,7 @@ package visit
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/url"
 	"strings"
@@ -62,7 +63,12 @@ type VisitorInput struct {
 
 // CreateVisitInput is the data needed to file a new visit request.
 type CreateVisitInput struct {
-	LocationID    domain.UUID
+	LocationID domain.UUID
+	// VendorUserID names the vendor ACCOUNT that will own the request (the
+	// migration 000024 semantics). It is optional: absent keeps the historical
+	// behaviour (the authenticated actor owns it). Admin/superadmin may name any
+	// active vendor account; a vendor caller may only ever name itself.
+	VendorUserID  *domain.UUID
 	PurposeIDs    []domain.UUID
 	Visitors      []VisitorInput
 	StartDate     time.Time
@@ -134,7 +140,7 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 		return domain.VisitRequest{}, err
 	}
 	if actor.Role == domain.RoleAdmin {
-		if err := actor.requireBranch(in.LocationID); err != nil {
+		if err := actor.requireBranchAccess(in.LocationID); err != nil {
 			return domain.VisitRequest{}, err
 		}
 	}
@@ -169,8 +175,32 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 		}
 	}
 
+	// Resolve the account that owns the request. Absent keeps today's rule
+	// (the actor owns it). A vendor may only name itself: an explicit foreign
+	// id is refused with 403 rather than silently rewritten, so a caller can
+	// never believe it took ownership of someone else's request. An
+	// admin/superadmin naming an account must name an ACTIVE VENDOR account.
+	ownerID := actor.ID
+	if in.VendorUserID != nil {
+		chosen := domain.UUID(strings.TrimSpace(string(*in.VendorUserID)))
+		if chosen != "" {
+			if actor.Role == domain.RoleVendor {
+				if chosen != actor.ID {
+					return domain.VisitRequest{}, domain.Forbidden("Vendor hanya dapat mengajukan kunjungan untuk akunnya sendiri.")
+				}
+			} else if err := s.validateVendorAccount(ctx, chosen); err != nil {
+				return domain.VisitRequest{}, err
+			}
+			ownerID = chosen
+		}
+	}
+	// created_by always records the submitting actor, never the chosen owner:
+	// an admin-created visit belongs to the vendor but stays auditable.
+	creatorID := actor.ID
+
 	visit := domain.VisitRequest{
-		VendorUserID:  actor.ID,
+		VendorUserID:  ownerID,
+		CreatedBy:     &creatorID,
 		LocationID:    in.LocationID,
 		StartDate:     in.StartDate,
 		EndDate:       in.EndDate,
@@ -233,6 +263,30 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 	// created visit for the response echo.
 	created.Visitors = visitors
 	return created, nil
+}
+
+// validateVendorAccount proves the chosen account exists, holds the vendor
+// role and is active. A missing account, a non-vendor and a deactivated one
+// all surface as the same 422 validation family: naming any of them is a bad
+// request, never a 404 that would leak account existence.
+func (s *Service) validateVendorAccount(ctx context.Context, id domain.UUID) error {
+	if s.accounts == nil {
+		return domain.ValidationFailure("Akun vendor tidak dapat diverifikasi saat ini.")
+	}
+	account, err := s.accounts.FindManagedByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.ValidationFailure("Akun vendor tidak ditemukan.")
+		}
+		return err
+	}
+	if account.Role != domain.RoleVendor {
+		return domain.ValidationFailure("Akun yang dipilih bukan akun vendor.")
+	}
+	if account.User.Status != domain.UserStatusActive {
+		return domain.ValidationFailure("Akun vendor yang dipilih sedang tidak aktif.")
+	}
+	return nil
 }
 
 // validateWindow enforces that both schedule bounds are present and that the

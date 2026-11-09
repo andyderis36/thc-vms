@@ -97,12 +97,13 @@ func (r *checkInOutRepository) FindCheckInByVisit(ctx context.Context, visitID d
 		return domain.CheckIn{}, MapError(err)
 	}
 	return domain.CheckIn{
-		ID:             mustDomainUUID(row.ID),
-		VisitRequestID: mustDomainUUID(row.VisitRequestID),
-		CheckedInAt:    row.CheckedInAt,
-		CheckedInBy:    mustDomainUUID(row.CheckedInBy),
-		PhotoURL:       textPtr(row.PhotoUrl),
-		BadgeCode:      textPtr(row.BadgeCode),
+		ID:              mustDomainUUID(row.ID),
+		VisitRequestID:  mustDomainUUID(row.VisitRequestID),
+		CheckedInAt:     row.CheckedInAt,
+		CheckedInBy:     mustDomainUUID(row.CheckedInBy),
+		CheckedInByName: textPtr(row.CheckedInByName),
+		PhotoURL:        textPtr(row.PhotoUrl),
+		BadgeCode:       textPtr(row.BadgeCode),
 	}, nil
 }
 
@@ -117,10 +118,11 @@ func (r *checkInOutRepository) FindCheckOutByVisit(ctx context.Context, visitID 
 		return domain.CheckOut{}, MapError(err)
 	}
 	return domain.CheckOut{
-		ID:             mustDomainUUID(row.ID),
-		VisitRequestID: mustDomainUUID(row.VisitRequestID),
-		CheckedOutAt:   row.CheckedOutAt,
-		CheckedOutBy:   mustDomainUUID(row.CheckedOutBy),
+		ID:              mustDomainUUID(row.ID),
+		VisitRequestID:  mustDomainUUID(row.VisitRequestID),
+		CheckedOutAt:    row.CheckedOutAt,
+		CheckedOutBy:    mustDomainUUID(row.CheckedOutBy),
+		CheckedOutByName: textPtr(row.CheckedOutByName),
 	}, nil
 }
 
