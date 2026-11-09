@@ -65,7 +65,10 @@ jobs:
         run: |
           # Re-check right before the suite: the container can die between steps.
           bash ../.gitea/scripts/ci-pg.sh prepare
-          timeout 900 go test ./... -count=1 -coverprofile=coverage.out
+          # Serial packages (-p 1): this runner is shared with production and
+          # parallel packages exhaust the local Postgres connection budget
+          # (repository concurrency tests fail with begin-tx timeouts).
+          timeout 1800 go test ./... -count=1 -p 1 -coverprofile=coverage.out
 
       - name: Guard against false green
         # The repository harness exits 0 when Postgres is unreachable. If no
