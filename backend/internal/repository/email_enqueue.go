@@ -77,6 +77,23 @@ func attachMembers(ctx context.Context, q *db.Queries, visitID uuid.UUID, pendin
 	return nil
 }
 
+// attachPurposes loads the visit's reason catalogue inside the still-open
+// status-write transaction and pins it onto the pending email, so the
+// after-commit fan-out renders the same Purposes rows the single-GET read
+// serves. A catalogue read failure fails the write like any other
+// in-transaction storage error, mirroring attachMembers.
+func attachPurposes(ctx context.Context, q *db.Queries, visitID uuid.UUID, pending *pendingEmail) error {
+	rows, err := q.ListVisitPurposes(ctx, db.ListVisitPurposesParams{VisitRequestIds: []uuid.UUID{visitID}})
+	if err != nil {
+		return MapError(err)
+	}
+	pending.visit.Purposes = make([]domain.Purpose, 0, len(rows))
+	for _, row := range rows {
+		pending.visit.Purposes = append(pending.visit.Purposes, purposeModelToDomain(row))
+	}
+	return nil
+}
+
 // enqueueEmail fans one allowlisted template out to email AFTER the
 // transaction that wrote its in_app rows has committed. It never fails the
 // caller: a nil mailer (SMTP disabled), a nil or excluded template, an empty
@@ -92,7 +109,7 @@ func attachMembers(ctx context.Context, q *db.Queries, visitID uuid.UUID, pendin
 // non-blank email, all sharing the same subject and bodies. The approval mail
 // additionally carries the ONE team QR (payload = VST- code) as an inline-CID
 // image in every fanned-out copy.
-func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visit domain.VisitRequest, tpl *domain.NotificationTemplate, locationID, vendorUserID uuid.UUID, audiences ...domain.NotificationAudience) {
+func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visit domain.VisitRequest, tpl *domain.NotificationTemplate, locationID, vendorUserID uuid.UUID, frontendBaseURL string, audiences ...domain.NotificationAudience) {
 	if mailer == nil || tpl == nil || !domain.EmailAllowed(tpl.Type) {
 		return
 	}
@@ -150,7 +167,7 @@ func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visi
 			"visit_id", visit.VisitID, "template", string(tpl.Type))
 		return
 	}
-	subject, textBody, htmlBody := domain.BuildEmail(visit, tpl)
+	subject, textBody, htmlBody := domain.BuildEmail(visit, tpl, frontendBaseURL)
 	if len(staffRecipients) > 0 {
 		if err := mailer.Send(ctx, staffRecipients, subject, textBody, htmlBody); err != nil {
 			slog.Error("email dead-letter",

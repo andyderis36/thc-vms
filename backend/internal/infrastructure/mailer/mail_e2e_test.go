@@ -171,7 +171,7 @@ func TestMailE2E(t *testing.T) {
 	}{
 		{"approve", domain.TransitionNotification(domain.VisitStatusApproved, false, e2eVisitCode), "e2e-vendor@example.com"},
 		{"reject", domain.TransitionNotification(domain.VisitStatusRejected, false, e2eVisitCode), "e2e-vendor@example.com"},
-		{"cancel", domain.HumanCancelledNotification(e2eVisitCode, false), "e2e-vendor@example.com"},
+		{"cancel", domain.HumanCancelledNotification(e2eVisitCode, false, ""), "e2e-vendor@example.com"},
 		{"reschedule", domain.RescheduledVendorNotification(e2eVisitCode), "e2e-vendor@example.com"},
 		{"reminder", domain.ReminderNotification(e2eVisitCode), "e2e-vendor@example.com"},
 		{"check_in", domain.TransitionNotification(domain.VisitStatusVisiting, false, e2eVisitCode), "e2e-staff@example.com"},

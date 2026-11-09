@@ -380,6 +380,11 @@ func TestConfirmEmailChange_HappyPathFlipsAndNotifies(t *testing.T) {
 	if !strings.Contains(newNotice.TextBody, "baru@example.com") {
 		t.Fatalf("new notice = %q, want the success copy naming the address", newNotice.TextBody)
 	}
+	// CTA parity with the superadmin override path: the new-address success
+	// notice carries the same Masuk button in both flows.
+	if !strings.Contains(newNotice.HTMLBody, ">Masuk</a>") {
+		t.Fatalf("new notice HTML = %q, want the Masuk button like the admin-override path", newNotice.HTMLBody)
+	}
 	if _, err := svc.Login(context.Background(), "baru@example.com", "Password123!"); err != nil {
 		t.Fatalf("login with new email after confirm: %v", err)
 	}

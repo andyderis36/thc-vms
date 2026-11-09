@@ -116,13 +116,14 @@ type CheckInBatchProber interface {
 // OPTIONAL: when nil no email fan-out is attempted; the enqueue task
 // nil-skips exactly like the Notifications precedent above.
 type Dependencies struct {
-	Visits        domain.VisitRepository
-	Rules         domain.VisitAutoRuleRepository
-	CheckIns      domain.CheckInOutRepository
-	Notifications domain.NotificationRepository
-	Mailer        domain.Mailer
-	Clock         domain.Clock
-	Logger        *slog.Logger
+	Visits           domain.VisitRepository
+	Rules            domain.VisitAutoRuleRepository
+	CheckIns         domain.CheckInOutRepository
+	Notifications    domain.NotificationRepository
+	Mailer           domain.Mailer
+	FrontendBaseURL  string
+	Clock            domain.Clock
+	Logger           *slog.Logger
 }
 
 // Failure records one visit (or one sweep listing) the runner could not
@@ -146,13 +147,14 @@ type Summary struct {
 
 // Service runs the three automatic rules against the injected ports.
 type Service struct {
-	visits        domain.VisitRepository
-	rules         domain.VisitAutoRuleRepository
-	checkIns      domain.CheckInOutRepository
-	notifications domain.NotificationRepository
-	mailer        domain.Mailer
-	clock         domain.Clock
-	logger        *slog.Logger
+	visits           domain.VisitRepository
+	rules            domain.VisitAutoRuleRepository
+	checkIns         domain.CheckInOutRepository
+	notifications    domain.NotificationRepository
+	mailer           domain.Mailer
+	frontendBaseURL  string
+	clock            domain.Clock
+	logger           *slog.Logger
 }
 
 // NewService builds a sweep runner, defaulting a nil clock to the wall clock
@@ -167,13 +169,14 @@ func NewService(deps Dependencies) *Service {
 		logger = slog.Default()
 	}
 	return &Service{
-		visits:        deps.Visits,
-		rules:         deps.Rules,
-		checkIns:      deps.CheckIns,
-		notifications: deps.Notifications,
-		mailer:        deps.Mailer,
-		clock:         clock,
-		logger:        logger,
+		visits:          deps.Visits,
+		rules:           deps.Rules,
+		checkIns:        deps.CheckIns,
+		notifications:   deps.Notifications,
+		mailer:          deps.Mailer,
+		frontendBaseURL: strings.TrimSpace(deps.FrontendBaseURL),
+		clock:           clock,
+		logger:          logger,
 	}
 }
 
@@ -371,7 +374,7 @@ func (s *Service) enqueueReminderEmail(ctx context.Context, visit domain.VisitRe
 			"rule", RuleReminder, "visit_id", visit.ID)
 		return
 	}
-	subject, textBody, htmlBody := domain.BuildEmail(visit, tpl)
+	subject, textBody, htmlBody := domain.BuildEmail(visit, tpl, s.frontendBaseURL)
 	for _, addr := range trimmed {
 		if err := s.mailer.Send(ctx, []string{addr}, subject, textBody, htmlBody); err != nil {
 			s.logger.Error("auto-rule reminder email dead-letter",

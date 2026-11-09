@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,6 +152,27 @@ func TestRegisterVendor_FansOutNoticeAndSuperAdminEmail(t *testing.T) {
 	pending := mailer.Calls[1]
 	if len(pending.To) != 1 || pending.To[0] != "dimas@vendor.example" {
 		t.Fatalf("pending receipt to = %v, want the vendor inbox only", pending.To)
+	}
+	// Registration-alert polish: filled fields render their values, the
+	// empty company renders the em-dash fallback, and the CTA URL prints
+	// exactly once per part (text sentence, HTML button href) — never twice
+	// in the HTML where the button already carries it.
+	if !strings.Contains(call.TextBody, "Perusahaan: —") {
+		t.Fatalf("superadmin text = %q, want the em-dash fallback for the empty company", call.TextBody)
+	}
+	for _, want := range []string{"Telepon: 081234567890", "NIK: 3201010101900001", "Nama: Dimas Prasetyo"} {
+		if !strings.Contains(call.TextBody, want) {
+			t.Fatalf("superadmin text = %q, missing %q", call.TextBody, want)
+		}
+	}
+	if n := strings.Count(call.HTMLBody, "/vendor-registrations"); n != 1 {
+		t.Fatalf("superadmin HTML prints the CTA URL %d times, want exactly 1 (the button href)", n)
+	}
+	// The vendor pending receipt carries minimal context, not a bare one-liner.
+	for _, want := range []string{"Nama: Dimas Prasetyo", "Email: dimas@vendor.example", "Waktu pendaftaran:"} {
+		if !strings.Contains(pending.TextBody, want) {
+			t.Fatalf("pending receipt text = %q, missing %q", pending.TextBody, want)
+		}
 	}
 }
 
