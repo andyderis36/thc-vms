@@ -111,7 +111,7 @@ func run(ctx context.Context) error {
 	clock := domain.SystemClock{}
 	logger := slog.Default()
 	users := repository.NewUserRepository(pool)
-	visits := repository.NewVisitRepository(pool).WithMailer(mailPort)
+	visits := repository.NewVisitRepository(pool).WithMailer(mailPort).WithFrontendBaseURL(cfg.App.FrontendBaseURL)
 	master := repository.NewMasterDataRepository(pool)
 	checkins := repository.NewCheckInOutRepository(pool)
 	autorules := repository.NewVisitAutoRuleRepository(pool)
@@ -139,6 +139,8 @@ func run(ctx context.Context) error {
 		WithFileLinks(store, cfg.Storage.PresignTTL()).
 		WithObjectReader(store).
 		WithTrustedFileOrigins(fileOrigins).
+		WithAccountLookup(repository.NewManagedUserRepository(pool)).
+		WithSuggestions(visits).
 		WithMailer(mailPort)
 	gateSvc := gate.NewService(gate.Dependencies{
 		Visits: visits, CheckIns: checkins, Clock: clock, Logger: logger,
@@ -147,7 +149,8 @@ func run(ctx context.Context) error {
 	})
 	workerSvc := worker.NewService(worker.Dependencies{
 		Visits: visits, Rules: autorules, CheckIns: checkins, Notifications: notifications, Clock: clock, Logger: logger,
-		Mailer: mailPort,
+		Mailer:          mailPort,
+		FrontendBaseURL: cfg.App.FrontendBaseURL,
 	})
 
 	securityRoleID, err := dir.RoleIDByName(ctx, domain.RoleSecurity)
@@ -277,14 +280,18 @@ func run(ctx context.Context) error {
 		SuperAdmin: superAdminRoutes(superAdminHandler),
 		Master: deliveryhttp.MasterRoutes{
 			Locations: masterHandler.ListLocations, Purposes: masterHandler.ListPurposes,
-			Vendors: masterHandler.ListVendors,
+			Vendors: masterHandler.ListVendors, PublicVendors: masterHandler.PublicVendors,
 		},
 		Visits: deliveryhttp.VisitRoutes{
 			List: visitHandler.List, Create: visitHandler.Create, Get: visitHandler.Get,
 			QR: visitHandler.QR, Reschedule: visitHandler.Reschedule, Cancel: visitHandler.Cancel,
 			Approve: visitHandler.Approve, Reject: visitHandler.Reject,
 			UpdateVisitorContact: visitHandler.UpdateVisitorContact,
-			Jabatan: visitHandler.ListJabatan,
+			AttachWorkPhoto:      visitHandler.AttachWorkPhoto,
+			Jabatan:              visitHandler.ListJabatan,
+			VendorSuggestions:    visitHandler.ListVendorSuggestions,
+			MemberSuggestions:    visitHandler.ListMemberSuggestions,
+			MemberSuggestion:     visitHandler.GetMemberSuggestion,
 		},
 		Gate: deliveryhttp.GateRoutes{
 			CheckIn: gateHandler.CheckIn, CheckOut: gateHandler.CheckOut,
@@ -309,7 +316,7 @@ func run(ctx context.Context) error {
 			BodyLimit:    middleware.BodyLimit(validation.JSONBodyMaxBytes, deliveryhttp.UploadPath),
 			LoginLimiter: loginLimiter,
 			RegisterLimiter: registerLimiter,
-			Authenticate: middleware.JWT(jwtSvc, authSvc),
+			Authenticate: middleware.JWT(jwtSvc, authSvc, repository.NewUserLocationRepository(pool)),
 			AdminOnly: middleware.RequireRoles(
 				domain.RoleSuperAdmin, domain.RoleDevSuperAdmin, domain.RoleAdmin),
 			SuperAdminOnly: middleware.RequireSuperAdmin(),
@@ -448,6 +455,7 @@ func superAdminRoutes(h *handlers.SuperAdminHandler) deliveryhttp.SuperAdminRout
 		UpdatePurpose:    h.UpdatePurpose,
 		DeletePurpose:    h.DeletePurpose,
 		ListUsers:        h.ListUsers,
+		ListVendorAccounts: h.ListVendorAccounts,
 		CreateUser:       h.CreateUser,
 		UpdateUser:       h.UpdateUser,
 		UpdateUserStatus: h.UpdateUserStatus,

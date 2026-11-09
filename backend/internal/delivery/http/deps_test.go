@@ -22,13 +22,18 @@ func fullyWiredDeps() Deps {
 		CreatePurpose: wired(), UpdatePurpose: wired(), DeletePurpose: wired(),
 		ListUsers: wired(), CreateUser: wired(), UpdateUser: wired(),
 		UpdateUserStatus: wired(), DeleteUser: wired(), DeleteVisit: wired(),
+		ListVendorAccounts: wired(),
 	}
-	master := MasterRoutes{Locations: wired(), Purposes: wired(), Vendors: wired()}
+	master := MasterRoutes{Locations: wired(), Purposes: wired(), Vendors: wired(), PublicVendors: wired()}
 	visits := VisitRoutes{
 		List: wired(), Create: wired(), Get: wired(), QR: wired(),
 		Reschedule: wired(), Cancel: wired(), Approve: wired(), Reject: wired(),
 		UpdateVisitorContact: wired(),
-		Jabatan: wired(),
+		AttachWorkPhoto:      wired(),
+		Jabatan:              wired(),
+		VendorSuggestions:    wired(),
+		MemberSuggestions:    wired(),
+		MemberSuggestion:     wired(),
 	}
 	gate := GateRoutes{CheckIn: wired(), CheckOut: wired()}
 	upload := UploadRoutes{Upload: wired()}
