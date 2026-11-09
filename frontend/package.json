@@ -4,7 +4,7 @@
   "private": true,
   "description": "THC Visitor Management System (VMS) - ISP Edition. Frontend Next.js 16 App Router.",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "next dev -p 3210",
