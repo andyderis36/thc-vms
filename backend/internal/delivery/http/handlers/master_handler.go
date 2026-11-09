@@ -135,6 +135,26 @@ type vendorCatalogue interface {
 	ListVendors(ctx context.Context) ([]domain.Vendor, error)
 }
 
+// vendorCatalogueRows fetches the active company catalogue and projects it
+// onto the [{id, name}] dropdown rows shared by GET /vendors (authenticated)
+// and GET /public/vendors (open anonymous registration page). A store without
+// the catalogue fails closed with the database sentinel instead of panicking.
+func (h *MasterHandler) vendorCatalogueRows(ctx context.Context) ([]masterVendorDTO, error) {
+	catalogue, ok := h.master.(vendorCatalogue)
+	if !ok {
+		return nil, domain.ErrDatabase
+	}
+	vendors, err := catalogue.ListVendors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]masterVendorDTO, 0, len(vendors))
+	for _, v := range vendors {
+		out = append(out, masterVendorDTO{ID: string(v.ID), Name: v.Name})
+	}
+	return out, nil
+}
+
 // ListVendors serves GET /vendors with the active company catalogue. Every
 // authenticated role may read it (the FE company dropdown is shared by the
 // vendor application form and the admin consoles); blacklisted companies are
@@ -144,19 +164,23 @@ func (h *MasterHandler) ListVendors(c *gin.Context) {
 		response.Fail(c, domain.ErrUnauthorized)
 		return
 	}
-	catalogue, ok := h.master.(vendorCatalogue)
-	if !ok {
-		response.Fail(c, domain.ErrDatabase)
-		return
-	}
-	vendors, err := catalogue.ListVendors(c.Request.Context())
+	out, err := h.vendorCatalogueRows(c.Request.Context())
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	out := make([]masterVendorDTO, 0, len(vendors))
-	for _, v := range vendors {
-		out = append(out, masterVendorDTO{ID: string(v.ID), Name: v.Name})
+	response.OK(c, out)
+}
+
+// PublicVendors serves GET /public/vendors: the SAME active company catalogue
+// as GET /vendors, but reachable without a token so the public /register page
+// can suggest vendor companies before an account exists. It exposes only the
+// company identity (id + name), never account data.
+func (h *MasterHandler) PublicVendors(c *gin.Context) {
+	out, err := h.vendorCatalogueRows(c.Request.Context())
+	if err != nil {
+		response.Fail(c, err)
+		return
 	}
 	response.OK(c, out)
 }
