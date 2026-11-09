@@ -41,6 +41,7 @@ x-limits:
   badge_code_max_length: 64
   checkin_notes_max_length: 500
   search_query_max_length: 100
+  suggestion_query_max_length: 80
   vendor_name_max_length: 120
   jabatan_max_length: 120
   purpose_note_max_length: 200
@@ -984,6 +985,84 @@ paths:
         '409':
           description: Tujuan kunjungan masih dipakai oleh kunjungan
 
+  /public/vendors:
+    get:
+      tags: [MasterData]
+      summary: Katalog vendor aktif untuk halaman publik (tanpa autentikasi)
+      description: >-
+        Hanya `id` dan `name` vendor aktif (`is_blacklisted = false`). Dipakai
+        halaman `/register` yang berjalan tanpa sesi; `/vendors` yang
+        terautentikasi tetap menjawab 401 untuk pemanggil anonim.
+      security: []
+      responses:
+        '200':
+          description: Katalog vendor publik berhasil diambil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name]
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        name:
+                          type: string
+
+  /users/vendors:
+    get:
+      tags: [UserManagement]
+      summary: Akun vendor aktif untuk pemilih pemilik kunjungan (admin/superadmin)
+      description: >-
+        Hanya akun berperan `vendor` berstatus `active`. Response minimal
+        (`id`, `name`, `email`, `company`) tanpa NIK, telepon, atau alamat.
+        `admin` dan `superadmin` boleh; peran lain dijawab 403.
+      parameters:
+        - name: search
+          in: query
+          required: false
+          description: Pencarian nama, email, atau perusahaan akun vendor.
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: Daftar akun vendor aktif berhasil diambil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, email]
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        name:
+                          type: string
+                        email:
+                          type: string
+                          format: email
+                        company:
+                          type: [string, 'null']
+        '403':
+          description: Akses ditolak (hanya admin/superadmin)
+
   /vendors:
     get:
       tags: [MasterData]
@@ -995,6 +1074,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VendorListResponse'
+
+  /vendors/suggestions:
+    get:
+      tags: [MasterData]
+      summary: Saran identitas vendor untuk form kunjungan (read-only, terdedupe)
+      description: >-
+        Nama perusahaan unik hasil penggabungan tiga sumber dengan prioritas
+        `master` (katalog vendor aktif) > `account` (nama perusahaan manual pada
+        akun vendor) > `history` (nama vendor pada kunjungan). Dedupe
+        case-insensitive setelah trim; casing tampilan mengikuti sumber
+        pemenang. `super_admin`/`dev-superadmin` melihat global; `admin` hanya
+        melihat vendor yang memiliki minimal satu kunjungan pada cabang di
+        cakupannya (diturunkan server-side dari `visit_request.location_id`);
+        `security` dan `vendor` ditolak 403. Endpoint HANYA BACA: mengetik nama
+        baru di klien tidak pernah menulis data master.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Filter awalan (prefix, ILIKE) nama vendor setelah trim; maksimal 80 karakter - nilai lebih panjang ditolak 400 VALIDATION_ERROR.
+          schema:
+            type: string
+            maxLength: 80
+      responses:
+        '200':
+          description: Saran vendor berhasil diambil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorSuggestionListResponse'
+        '400':
+          description: 'Parameter q melebihi 80 karakter (VALIDATION_ERROR).'
+        '403':
+          description: 'Hanya super_admin, dev-superadmin, dan admin (FORBIDDEN_BRANCH).'
 
   /jabatan:
     get:
@@ -1053,8 +1166,8 @@ paths:
                   description: Berkas PDF/JPG/PNG. Plafon transport 20MB untuk berkas mentah; hasil akhir setelah kompresi wajib <= 5MB.
                 category:
                   type: string
-                  enum: [assignment_letter, id_card, checkin_photo, profile_photo]
-                  description: Kategori berkas untuk isolasi folder bucket MinIO. `profile_photo` hanya menerima `image/jpeg` dan `image/png`.
+                  enum: [assignment_letter, id_card, checkin_photo, profile_photo, work_photos]
+                  description: Kategori berkas untuk isolasi folder bucket MinIO. `profile_photo` dan `work_photos` hanya menerima `image/jpeg` dan `image/png`.
                 owner_id:
                   type: string
                   deprecated: true
@@ -1163,6 +1276,77 @@ paths:
         '422':
           description: 'Validasi semantik usecase gagal (mis. urutan jadwal, NDA belum diterima, purpose atau lokasi tidak dikenal, URL berbahaya). Amplop galat: { success: false, error: { code, message } }.'
 
+  /visits/member-suggestions:
+    get:
+      tags: [Visits]
+      summary: Saran anggota teknisi untuk dipakai ulang pada kunjungan baru
+      description: >-
+        Mengembalikan anggota roster dari kunjungan sebelumnya, distinct per
+        pasangan `(name, phone)` (case-insensitive pada nama) dengan data
+        kunjungan TERBARU (`last_visit_at`, lalu id), dibatasi 20 entri.
+        `vendor` dipaksa hanya kunjungan miliknya sendiri
+        (`visit_request.vendor_user_id` = akun pemanggil) dan parameter
+        `?vendor=` DIIABAIKAN untuk peran itu; `admin` dibatasi ke kunjungan
+        pada cabang di cakupannya; `super_admin`/`dev-superadmin` global;
+        `security` ditolak 403. Parameter `vendor_user_id` TIDAK diterima
+        (risiko enumerasi PII). Daftar ini SENGAJA tanpa URL foto; tautan foto
+        hanya tersedia pada endpoint pilih anggota.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Filter nama anggota (ILIKE, substring) setelah trim; maksimal 80 karakter - nilai lebih panjang ditolak 400 VALIDATION_ERROR.
+          schema:
+            type: string
+            maxLength: 80
+        - name: vendor
+          in: query
+          required: false
+          description: Opsional (admin/super_admin) - nama tampilan vendor untuk menyempitkan hasil ke anggota kunjungan dengan nama vendor kunjungan atau perusahaan akun vendor pemilik yang sama (case-insensitive, trim). Diabaikan untuk peran vendor.
+          schema:
+            type: string
+            maxLength: 120
+      responses:
+        '200':
+          description: Saran anggota berhasil diambil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberSuggestionListResponse'
+        '400':
+          description: 'Parameter q melebihi 80 karakter (VALIDATION_ERROR).'
+        '403':
+          description: 'Hanya super_admin, dev-superadmin, admin, dan vendor (FORBIDDEN_BRANCH).'
+
+  /visits/member-suggestions/{visitorId}:
+    get:
+      tags: [Visits]
+      summary: Ambil satu anggota pilihan beserta tautan foto untuk autofill
+      description: >-
+        Memakai cakupan yang SAMA dengan daftar saran anggota, diterapkan pada
+        kunjungan pemilik baris visitor. URL `id_card_photo_url` dan
+        `photo_url` adalah presigned MinIO/S3 berumur pendek (null bila tidak
+        ada berkas). Visitor yang tidak dikenal ATAU di luar cakupan pemanggil
+        dijawab 404 tanpa membocorkan keberadaannya.
+      parameters:
+        - name: visitorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Anggota pilihan berhasil diambil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberSuggestionDetailResponse'
+        '403':
+          description: 'Hanya super_admin, dev-superadmin, admin, dan vendor (FORBIDDEN_BRANCH).'
+        '404':
+          description: 'Visitor tidak dikenal atau di luar cakupan (NOT_FOUND).'
+
   /visits/{id}:
     get:
       tags: [Visits]
@@ -1221,14 +1405,14 @@ paths:
           required: true
           schema:
             type: string
-            enum: [assignment_letter, id_card, selfie]
-          description: Slot berkas yang disajikan. `assignment_letter` tinggal di baris kunjungan; `id_card`/`selfie` tinggal di baris tiap teknisi.
+            enum: [assignment_letter, id_card, selfie, work_before, work_after]
+          description: Slot berkas yang disajikan. `assignment_letter` tinggal di baris kunjungan; `id_card`/`selfie` tinggal di baris tiap teknisi; `work_before`/`work_after` tinggal di baris bukti pengerjaan (visit_work_photo).
         - name: visitor_id
           in: query
           schema:
             type: string
             format: uuid
-          description: UUID teknisi. Wajib untuk `id_card`/`selfie`; diabaikan untuk `assignment_letter`.
+          description: UUID teknisi. Wajib untuk `id_card`/`selfie`; diabaikan untuk `assignment_letter`/`work_before`/`work_after`.
       responses:
         '200':
           description: "Isi berkas disajikan inline (`Content-Disposition: inline`, `Cache-Control: private, no-store`, `Pragma: no-cache`, `X-Content-Type-Options: nosniff`, `Accept-Ranges: bytes` beserta `Content-Length`)"
@@ -1261,6 +1445,75 @@ paths:
           description: Kunjungan tidak dikenal, slot kosong, teknisi tidak dikenal, atau milik vendor lain (kode `NOT_FOUND`, pesan "Berkas tidak tersedia." atau "Kunjungan tidak ditemukan.")
         '500':
           description: Gagal baca storage (kode `INTERNAL_ERROR`)
+
+  /visits/{id}/work-photos:
+    post:
+      tags: [Visits]
+      summary: Lampirkan bukti pengerjaan sebelum/sesudah (Vendor / Admin / Security cabang)
+      description: |
+        Menyimpan satu foto bukti pengerjaan (`before` = kondisi sebelum mulai, `after` = kondisi sesudah selesai) untuk kunjungan yang sedang berlangsung. URL berkas berasal dari `POST /uploads` kategori `work_photos` dan wajib lolos allowlist tautan yang sama dengan payload kunjungan. Penulisan memakai UPSERT pada `UNIQUE (visit_request_id, kind)`: lampiran pertama menjawab 201, lampiran ulang pada slot yang sama MENGGANTIKAN baris (menjawab 200) tanpa menambah baris. Pemeriksaan status dan penulisan terjadi dalam SATU transaksi terkunci (`SELECT ... FOR UPDATE`), sehingga check-out yang bersamaan tidak bisa meloloskan foto setelah kunjungan selesai. Cakupan: vendor pemilik kunjungan (vendor lain dijawab 404 agar tidak membocorkan keberadaan data), admin/security dalam cabang kunjungan (luar cabang 403), super_admin global.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: UUID kunjungan atau kode bisnis `VST-...` (jalur scan manual).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, url]
+              additionalProperties: false
+              properties:
+                kind:
+                  type: string
+                  enum: [before, after]
+                  description: Slot bukti pengerjaan yang dilampirkan.
+                url:
+                  type: string
+                  format: uri
+                  maxLength: 2048
+                  description: URL berkas tersimpan dari `POST /uploads` (kategori `work_photos`).
+      responses:
+        '201':
+          description: Bukti pengerjaan dilampirkan pertama kali; data adalah WorkPhoto slot tersebut
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/WorkPhoto'
+        '200':
+          description: Bukti pengerjaan diganti (slot sudah pernah dilampirkan); data adalah WorkPhoto terbaru
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/WorkPhoto'
+        '400':
+          description: 'Validasi lapisan HTTP gagal (body JSON rusak, kind/url absen atau kosong). Amplop galat: { success: false, error: { code, message } }.'
+        '401':
+          description: JWT tidak ada/tidak valid (kode `UNAUTHORIZED`)
+        '403':
+          description: Lintas cabang untuk admin/security (kode `FORBIDDEN_BRANCH`) — tanpa membocorkan data
+        '404':
+          description: Kunjungan tidak ditemukan atau bukan milik vendor pemanggil (kode `NOT_FOUND`)
+        '409':
+          description: 'Kunjungan belum check-in (requested/approved/rescheduled) atau sudah selesai (completed/cancelled/not_visit/rejected) — bukti hanya dapat dilampirkan saat status visiting. Amplop galat: { success: false, error: { code, message } }.'
+        '413':
+          description: 'Ukuran body JSON melebihi 1 MiB (1048576 byte). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Validasi semantik usecase gagal (kind di luar before/after, atau URL di luar allowlist tautan berkas). Amplop galat: { success: false, error: { code, message } }.'
 
   /visits/{id}/approve:
     post:
@@ -1683,6 +1936,12 @@ components:
           type: [string, "null"]
           format: uuid
           description: ID cabang/POP penugasan (khusus admin & security, null untuk super_admin & vendor)
+        location_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Daftar cabang/POP penugasan (1-to-many branch scoping, model hibrida, accept-either/return-both dengan location_id); location_id tetap primer selamanya sebagai display-default/elemen pertama
         location_name:
           type: [string, "null"]
           description: Nama fasilitas cabang/POP penugasan
@@ -2006,6 +2265,12 @@ components:
           type: string
           format: uuid
           description: Wajib iff role admin; diabaikan iff role vendor
+        location_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Opsional — daftar cabang/POP penugasan (accept-either dengan location_id); location_id tetap primer selamanya sebagai display-default/elemen pertama
         vendor_id:
           type: string
           description: Opsional — relasi vendor untuk akun vendor
@@ -2092,6 +2357,12 @@ components:
           type: [string, "null"]
           format: uuid
           description: Absen/null = biarkan; mengikuti aturan peran target (admin wajib cabang, vendor tanpa cabang)
+        location_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Opsional — absen = biarkan (accept-either dengan location_id); location_id tetap primer selamanya sebagai display-default/elemen pertama
         vendor_id:
           type: [string, "null"]
           description: Absen/null = biarkan; hanya untuk role vendor
@@ -2370,6 +2641,30 @@ components:
           items:
             $ref: '#/components/schemas/Vendor'
 
+    VendorSuggestion:
+      type: object
+      required: [name, source]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          description: Nama perusahaan setelah trim, casing dari sumber pemenang.
+        source:
+          type: string
+          enum: [master, account, history]
+          description: Sumber dengan prioritas tertinggi untuk nama ini - master (katalog vendor) > account (nama manual akun vendor) > history (nama pada kunjungan).
+
+    VendorSuggestionListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          description: Nama vendor unik terdedupe, urut A-Z; bisa kosong (`[]`).
+          items:
+            $ref: '#/components/schemas/VendorSuggestion'
+
     JabatanListResponse:
       type: object
       properties:
@@ -2432,7 +2727,106 @@ components:
           type: boolean
           readOnly: true
           default: false
-          description: Penanda koreksi kontak anggota — TRUE bila nomor telepon pernah diubah pemilik kunjungan via PATCH /visits/{id}/visitors/{visitorId} sebelum persetujuan (monoton, tidak pernah kembali false)
+          description: Penanda koreksi kontak anggota - TRUE bila nomor telepon pernah diubah pemilik kunjungan via PATCH /visits/{id}/visitors/{visitorId} sebelum persetujuan (monoton, tidak pernah kembali false)
+
+    MemberSuggestion:
+      type: object
+      required: [name, id_number, phone, last_visit_at, visitor_id, source_visit_id]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        id_number:
+          type: string
+          pattern: "^[A-Za-z0-9]{8,20}$"
+          maxLength: 20
+          description: KTP / SIM / Passport anggota pada kunjungan terbaru.
+        phone:
+          type: string
+          pattern: "^(?:62|0)[0-9]{9,15}$"
+          maxLength: 16
+        email:
+          type: [string, "null"]
+          format: email
+          maxLength: 254
+          description: Email kontak anggota; null bila tidak diisi.
+        jabatan:
+          type: [string, "null"]
+          maxLength: 120
+          description: Jabatan/peran anggota; null bila tidak diisi.
+        last_visit_at:
+          type: string
+          format: date-time
+          description: Waktu mulai kunjungan terbaru tempat anggota ini terdaftar.
+        visitor_id:
+          type: string
+          format: uuid
+          description: ID baris visitor pemenang dedupe, dipakai untuk GET /visits/member-suggestions/{visitorId} (detail dengan foto).
+        source_visit_id:
+          type: string
+          format: uuid
+          description: ID kunjungan sumber data (kunjungan terbaru untuk pasangan nama+telepon ini).
+      description: >-
+        Satu kandidat anggota untuk dipakai ulang. SENGAJA tanpa
+        `id_card_photo_url`/`photo_url`; tautan foto hanya pada
+        MemberSuggestionDetail.
+
+    MemberSuggestionListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          description: Maksimal 20 anggota, distinct per (nama case-insensitive, telepon), kunjungan terbaru menang; bisa kosong (`[]`).
+          items:
+            $ref: '#/components/schemas/MemberSuggestion'
+
+    MemberSuggestionDetail:
+      type: object
+      required: [name, id_number, phone, source_visit_id]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        id_number:
+          type: string
+          pattern: "^[A-Za-z0-9]{8,20}$"
+          maxLength: 20
+        phone:
+          type: string
+          pattern: "^(?:62|0)[0-9]{9,15}$"
+          maxLength: 16
+        email:
+          type: [string, "null"]
+          format: email
+          maxLength: 254
+        jabatan:
+          type: [string, "null"]
+          maxLength: 120
+        vendor_name:
+          type: [string, "null"]
+          maxLength: 120
+          description: Perusahaan milik anggota sendiri (visitor override > katalog vendor), bukan "Vendor Pengaju" tingkat kunjungan; null bila tidak ada.
+        id_card_photo_url:
+          type: [string, "null"]
+          format: uri
+          description: URL presigned berumur pendek untuk foto KTP/SIM di bucket privat; null bila tidak ada berkas.
+        photo_url:
+          type: [string, "null"]
+          format: uri
+          description: URL presigned berumur pendek untuk foto selfie anggota; null bila tidak ada berkas.
+        source_visit_id:
+          type: string
+          format: uuid
+
+    MemberSuggestionDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/MemberSuggestionDetail'
 
     CreateVisitRequest:
       type: object
@@ -2441,6 +2835,10 @@ components:
         location_id:
           type: string
           format: uuid
+        vendor_user_id:
+          type: string
+          format: uuid
+          description: Opsional - ID akun vendor yang menjadi PEMILIK kunjungan ini (bukan pembuatnya). Hanya dihormati untuk admin/superadmin/dev-superadmin; untuk vendor diabaikan bila sama dengan akun pemanggil, sedangkan ID akun lain ditolak 403 FORBIDDEN. Akun target wajib berperan vendor dan berstatus aktif, jika tidak hasilnya 400/422 VALIDATION_ERROR. Kosong/absen = akun pemanggil menjadi pemilik (perilaku lama). Pembuat selalu dicatat di created_by.
         vendor_name:
           type: string
           maxLength: 120
@@ -2548,6 +2946,73 @@ components:
           type: [string, "null"]
           format: uuid
           description: ID petugas (security/admin) pelaksana check-in (tabel check_in.checked_in_by); null bila belum check-in
+        created_by_name:
+          type: [string, "null"]
+          description: Nama tampilan pengaju kunjungan dari join users (visit_request.created_by); diisi HANYA oleh GET /visits/{id} bila akun pengaju dikenal, absen bila tidak
+        created_by_role_label:
+          type: [string, "null"]
+          description: Label peran Bahasa Indonesia pengaju (Superadmin / Admin Cabang / Petugas Keamanan / Vendor/Mitra) dari join role; diisi HANYA bersama created_by_name
+        checked_in_by_name:
+          type: [string, "null"]
+          description: Nama tampilan petugas pelaksana check-in dari join users (tabel check_in.checked_in_by); diisi HANYA oleh GET /visits/{id} setelah check-in, absen bila belum
+        checked_out_by_name:
+          type: [string, "null"]
+          description: Nama tampilan petugas pelaksana check-out dari join users (tabel check_out.checked_out_by); diisi HANYA oleh GET /visits/{id} setelah check-out, absen bila belum
+        history:
+          type: array
+          description: Jejak perubahan status dengan pelaku yang sudah dinamai, urut tertua -> terbaru (maksimal 50 baris terbaru); diisi HANYA oleh GET /visits/{id}, absen pada item daftar
+          items:
+            $ref: '#/components/schemas/VisitHistoryEntry'
+        work_photos:
+          type: object
+          description: Bukti pengerjaan sebelum/sesudah (tabel visit_work_photo); diisi HANYA oleh GET /visits/{id}, tiap slot null hingga dilampirkan via POST /visits/{id}/work-photos
+          properties:
+            before:
+              $ref: '#/components/schemas/WorkPhoto'
+              nullable: true
+            after:
+              $ref: '#/components/schemas/WorkPhoto'
+              nullable: true
+
+    VisitHistoryEntry:
+      type: object
+      description: Satu baris status_history pada riwayat kunjungan. actor_name dan actor_role_label null untuk transisi sistem (status_history.changed_by IS NULL, mis. aturan otomatis worker).
+      properties:
+        status:
+          $ref: '#/components/schemas/VisitStatus'
+        at:
+          type: string
+          format: date-time
+          description: Waktu transisi (status_history.changed_at) dalam RFC3339
+        actor_name:
+          type: [string, "null"]
+          description: Nama tampilan pelaku transisi dari join users; null bila transisi sistem
+        actor_role_label:
+          type: [string, "null"]
+          description: Label peran Bahasa Indonesia pelaku dari join role (Superadmin / Admin Cabang / Petugas Keamanan / Vendor/Mitra); null bila transisi sistem atau peran tak dikenal
+
+    WorkPhoto:
+      type: object
+      description: Satu slot bukti pengerjaan kunjungan (visit_work_photo.kind). `url` pada respons lampir adalah URL tersimpan; pada detail kunjungan adalah URL presigned berumur pendek (null bila tautan tidak tersedia). `uploaded_by` null bila akun pengunggah sudah dihapus.
+      properties:
+        kind:
+          type: string
+          enum: [before, after]
+          description: Slot bukti pengerjaan; hanya pada respons POST /visits/{id}/work-photos (slot detail sudah menamainya dari posisi)
+        url:
+          type: [string, "null"]
+          format: uri
+        uploaded_by:
+          type: [string, "null"]
+          format: uuid
+          description: ID akun pengunggah bukti; null bila akun sudah dihapus
+        uploaded_by_name:
+          type: [string, "null"]
+          description: Nama tampilan pengunggah bukti dari join users; null bila tidak dikenal
+        uploaded_at:
+          type: string
+          format: date-time
+          description: Waktu lampiran tersimpan (diperbarui setiap penggantian)
 
     VisitDetailResponse:
       type: object

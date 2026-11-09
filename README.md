@@ -21,11 +21,11 @@ Sistem ini dirancang khusus untuk mengelola izin masuk teknisi internal, vendor 
    - Pengawasan nasional lintas seluruh kantor cabang dan POP.
    - Mengelola master data (kantor, POP, tujuan kunjungan, user admin).
 2. **`admin` (Admin Kantor Cabang / POP)**:
-   - Terisolasi penuh pada `location_id` cabangnya.
+   - Terisolasi pada cabang penugasannya (primary `location_id` + coverage `user_locations` untuk multi-branch).
    - Menyetujui/menolak permohonan kunjungan (*approval workflow*).
    - Mengelola akun pengawas di cabangnya & eksekusi check-in cadangan (*dual-role*).
 3. **`security` (Petugas Jaga Pos / Shelter)**:
-   - Terisolasi penuh pada `location_id` pos jaganya.
+   - Terisolasi pada cabang penugasannya (primary `location_id` + coverage `user_locations` untuk multi-branch).
    - Operasional harian verifikasi tamu check-in & check-out via *Triple-Mode QR Scanner*.
 4. **`vendor` (Vendor/Mitra — Customer / Teknisi Vendor Mitra Eksternal)**:
    - Mengajukan permohonan izin kunjungan fasilitas THC.
@@ -128,7 +128,7 @@ npm run dev
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | **Supreme Directive untuk AI Agent**: Aturan emas git, arsitektur, larangan, & standar koding |
 | [`docs/0. PRD - THC Visitor App.md`](docs/0.%20PRD%20-%20THC%20Visitor%20App.md) | Product Requirement Document resmi v3.1 (ISP Scope, RBAC, Dual-Role Check-in) |
-| [`docs/1. Entity Relationship Diagram (ERD).mermaid`](docs/1.%20Entity%20Relationship%20Diagram%20(ERD).mermaid) | Skema relasional PostgreSQL, 10 entitas MVP, foreign key, & index indexing |
+| [`docs/1. Entity Relationship Diagram (ERD).mermaid`](docs/1.%20Entity%20Relationship%20Diagram%20(ERD).mermaid) | Skema relasional PostgreSQL, 12+ entitas MVP (termasuk `user_locations` untuk multi-branch scope dan `vendor_registration_notices` untuk antrean pendaftaran vendor), foreign key, & index indexing |
 | [`docs/2. User Flow Diagram/`](docs/2.%20User%20Flow%20Diagram/) | Alur pengguna (2.1 Request, 2.2 Approval, 2.3 Check-in, 2.4 Reschedule, 2.6 Auto-rules) |
 | [`docs/3. Arsitektur Auth (Internal vs Eksternal).mermaid`](docs/3.%20Arsitektur%20Auth%20(Internal%20vs%20Eksternal).mermaid) | Arsitektur JWT, Scoping Cabang, dan Integrasi MinIO Storage |
 | [`docs/4. openapi.yaml`](docs/4.%20openapi.yaml) | Kontrak REST API spesifikasi OpenAPI 3.1.0 (*Validasi 0-Error*) |
