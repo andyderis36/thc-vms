@@ -182,16 +182,126 @@ export function managedLocationFilterApplies(roles: readonly ManagedPageRole[]):
 // Afiliasi (cabang / vendor)
 // ---------------------------------------------------------------------------
 
-/** Afiliasi mentah: nama cabang, atau nama vendor, atau `null` (tanpa afiliasi). */
-export function userAffiliationValue(user: User): string | null {
-  if (user.location_name !== null && user.location_name !== '') return user.location_name
+/**
+ * Id cakupan cabang user (union multi-cabang): `location_ids[]` bila terisi,
+ * fallback `[location_id]`, fallback `[]`. Satu sumber untuk predikat
+ * union-aware (guard hapus, filter cabang, label afiliasi).
+ */
+export function userLocationIds(
+  user: Pick<User, 'location_id' | 'location_ids'>,
+): string[] {
+  if (user.location_ids !== undefined && user.location_ids.length > 0) {
+    return [...user.location_ids]
+  }
+  return user.location_id !== null ? [user.location_id] : []
+}
+
+/**
+ * Gabung daftar user multi-cabang dengan dedupe per id (urutan pertama
+ * menang). Dipakai daftar pengawas multi-branch: admin dengan cakupan
+ * `location_ids[]` meminta tiap cabang lalu digabung di sini.
+ */
+export function mergeUsersById(lists: ReadonlyArray<ReadonlyArray<User>>): User[] {
+  const seen = new Set<string>()
+  const merged: User[] = []
+  for (const list of lists) {
+    for (const user of list) {
+      if (seen.has(user.id)) continue
+      seen.add(user.id)
+      merged.push(user)
+    }
+  }
+  return merged
+}
+
+/** Afiliasi mentah union-aware: "N cabang", nama cabang tunggal, nama vendor, atau `null`. */
+export function userAffiliationValue(
+  user: User,
+  locations: ReadonlyArray<{ id: string; name: string }> = [],
+): string | null {
+  const branchNames = userBranchNames(user, locations)
+  if (branchNames.length > 1) return `${branchNames.length} cabang`
+  if (branchNames.length === 1) {
+    const only = branchNames[0]
+    if (only !== undefined) {
+      const isUnresolvedId = userLocationIds(user).includes(only)
+        && only === user.location_id
+        && (user.location_name === null || user.location_name === '')
+        && !locations.some((loc) => loc.id === only && loc.name !== '')
+      if (!isUnresolvedId) return only
+    }
+  }
   if (user.vendor_name !== null && user.vendor_name !== '') return user.vendor_name
   return null
 }
 
-/** Kolom Cabang/Vendor: nama cabang, atau nama vendor, atau strip. */
-export function userAffiliationLabel(user: User): string {
-  return userAffiliationValue(user) ?? '—'
+/** Kolom Cabang/Vendor union-aware: "N cabang", nama cabang, nama vendor, atau strip. */
+export function userAffiliationLabel(
+  user: User,
+  locations: ReadonlyArray<{ id: string; name: string }> = [],
+): string {
+  return userAffiliationValue(user, locations) ?? '—'
+}
+
+/**
+ * Judul tooltip afiliasi: nama SELURUH cabang digabung (detail
+ * multi-cabang), atau nama vendor, atau strip. Dipakai atribut `title`
+ * pada tabel/kartu pendamping label "N cabang".
+ */
+export function userAffiliationTitle(
+  user: User,
+  locations: ReadonlyArray<{ id: string; name: string }> = [],
+): string {
+  const branchNames = userBranchNames(user, locations)
+  if (branchNames.length === 1) {
+    const only = branchNames[0]
+    const isUnresolvedId = only !== undefined
+      && userLocationIds(user).includes(only)
+      && only === user.location_id
+      && (user.location_name === null || user.location_name === '')
+      && !locations.some((loc) => loc.id === only && loc.name !== '')
+    if (isUnresolvedId) {
+      if (user.vendor_name !== null && user.vendor_name !== '') return user.vendor_name
+      return '—'
+    }
+  }
+  if (branchNames.length > 0) return branchNames.join(', ')
+  if (user.vendor_name !== null && user.vendor_name !== '') return user.vendor_name
+  return '—'
+}
+
+/**
+ * Nama SELURUH cabang dalam cakupan user (model hibrida: `location_ids[]`
+ * dengan `location_id` sebagai primer), diurutkan sesuai urutan cakupan
+ * (lokasi utama dahulu). Dipakai baris "CABANG" pada modal detail supaya
+ * multi-cabang tak pernah hanya menampilkan cabang pertama.
+ *
+ * Resolusi nama memakai katalog `GET /locations`; cabang primer yang tak
+ * ada di katalog jatuh ke `location_name`, cabang lain yang hilang dari
+ * katalog tetap ditampilkan berupa id-nya (tak pernah dibuang diam-diam).
+ * `[]` bila tanpa cakupan (super_admin / vendor) — pemanggil yang
+ * menentukan strip atau fallback vendor.
+ */
+export function userBranchNames(
+  user: Pick<User, 'location_id' | 'location_ids' | 'location_name'>,
+  locations: ReadonlyArray<{ id: string; name: string }> = [],
+): string[] {
+  const scope =
+    user.location_ids !== undefined && user.location_ids.length > 0
+      ? user.location_ids
+      : user.location_id !== null
+        ? [user.location_id]
+        : []
+  if (scope.length === 0) return []
+  const nameById = new Map(locations.map((location) => [location.id, location.name]))
+  return scope.map((id) => {
+    const name = nameById.get(id)
+    if (name !== undefined && name !== '') return name
+    if (id === user.location_id && user.location_name !== null && user.location_name !== '') {
+      return user.location_name
+    }
+    return id
+  })
 }
 
 // ---------------------------------------------------------------------------

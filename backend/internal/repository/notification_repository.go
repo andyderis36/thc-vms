@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"thc-vms/backend/internal/domain"
@@ -23,9 +24,10 @@ func NewNotificationRepository(pool *pgxpool.Pool) domain.NotificationRepository
 }
 
 // List serves one page of the user's own notifications plus the companion
-// count and the user's GLOBAL unread count. LocationID nil means every branch
-// (super_admin national view / vendor); non-nil narrows a super_admin's feed to
-// one branch. The unread count is intentionally unfiltered by location so the
+// count and the user's GLOBAL unread count. A nil LocationID means no branch
+// narrowing (super_admin national view / vendor own-rows feed); a set one
+// matches the visit branch against the caller's union through the scope-union
+// predicate. The unread count is intentionally unfiltered by location so the
 // bell badge never misreports how many notices are still unread anywhere.
 func (r *notificationRepository) List(ctx context.Context, filter domain.NotificationFilter) ([]domain.Notification, int64, int64, error) {
 	// Page/Limit are documented to arrive already clamped by the usecase; this is
@@ -47,24 +49,34 @@ func (r *notificationRepository) List(ctx context.Context, filter domain.Notific
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	loc, err := pgNullUUIDPtr(filter.LocationID)
-	if err != nil {
-		return nil, 0, 0, err
+	var union []uuid.UUID
+	isGlobal := false
+	if filter.LocationID == nil {
+		union = []uuid.UUID{}
+		isGlobal = true
+	} else {
+		parsed, err := fromDomainUUID(*filter.LocationID)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		union = []uuid.UUID{parsed}
 	}
 
 	q := db.New(r.pool)
 	rows, err := q.ListNotificationsForUser(ctx, db.ListNotificationsForUserParams{
-		UserID:     userID,
-		LocationID: loc,
-		Offset:     offset,
-		Limit:      int32(limit),
+		UserID:      userID,
+		IsGlobal:    isGlobal,
+		LocationIds: union,
+		Offset:      offset,
+		Limit:       int32(limit),
 	})
 	if err != nil {
 		return nil, 0, 0, MapError(err)
 	}
 	total, err := q.CountNotificationsForUser(ctx, db.CountNotificationsForUserParams{
-		UserID:     userID,
-		LocationID: loc,
+		UserID:      userID,
+		IsGlobal:    isGlobal,
+		LocationIds: union,
 	})
 	if err != nil {
 		return nil, 0, 0, MapError(err)
@@ -134,7 +146,8 @@ func (r *notificationRepository) MarkAllRead(ctx context.Context, userID domain.
 // InsertForVisit writes the notice for one visit, timestamped now. Used by the
 // reminder worker; every lifecycle write inside a status transaction goes
 // through emit instead so it shares that transaction. Nil template is a no-op.
-func (r *notificationRepository) InsertForVisit(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate) error {	if tpl == nil {
+func (r *notificationRepository) InsertForVisit(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate) error {
+	if tpl == nil {
 		return nil
 	}
 	visitRequestID, err := fromDomainUUID(visit.ID)

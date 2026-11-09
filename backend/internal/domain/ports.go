@@ -136,13 +136,34 @@ type UserRepository interface {
 	// hot login path, so it must never be able to fail the login itself: the
 	// caller logs and continues when it errors.
 	UpdateLastLogin(ctx context.Context, id UUID, at time.Time) error
-	// ListSecurity returns the gate staff accounts for one branch. A nil
-	// locationID means "every branch" and is reserved for super_admin; admin and
-	// security callers must always pass their own location so the adapter can
-	// emit the branch-equality predicate (PRD L110).
-	ListSecurity(ctx context.Context, locationID *UUID) ([]User, error)
+	// ListSecurity returns the gate staff accounts for the given branch union.
+	// isGlobal true means "every branch" and is reserved for super_admin; admin
+	// and security callers pass isGlobal false with their branch union as
+	// locationIDs so the adapter emits the scope-union predicate (PRD L110).
+	ListSecurity(ctx context.Context, locationIDs []UUID, isGlobal bool) ([]User, error)
 }
 
+// UserAccountLookup is the smallest read port over the account directory that
+// carries the joined ROLE NAME plus status. The visit create path uses it to
+// prove a chosen vendor_user_id names an active vendor account before storing
+// it. The PostgreSQL user adapter satisfies it through FindManagedByID, so no
+// second adapter or query exists.
+type UserAccountLookup interface {
+	FindManagedByID(ctx context.Context, id UUID) (ManagedUser, error)
+}
+
+// UserLocationRepository is the branch-coverage port over user_locations
+// (migration 000023). It is separate from UserRepository for the same reason
+// ManagedUserRepository is (see admin.go): the older usecase/delivery fakes
+// implement only the narrow ports, so widening UserRepository would break
+// their compilation without changing behaviour. The PostgreSQL adapter
+// satisfies both ports with one struct.
+type UserLocationRepository interface {
+	// ListUserLocationIDs returns the branch-coverage union of one user,
+	// ordered for determinism. An empty (non-nil) slice means no coverage,
+	// never global; a lookup failure is an error so callers fail closed.
+	ListUserLocationIDs(ctx context.Context, userID UUID) ([]UUID, error)
+}
 // ProfileRepository is the self-service profile port. It is separate from
 // UserRepository for the same reason ManagedUserRepository is (see admin.go):
 // the older usecase/delivery fakes implement only the narrow ports, so
@@ -198,16 +219,21 @@ func (o VisitSortOrder) Normalized() VisitSortOrder {
 	}
 }
 
-// VisitFilter scopes a visit listing to the caller's branch and role, which
-// is how the backend enforces multi-branch isolation: admins and security
-// pass their own location_id, super_admin passes nil, and vendor passes its own
-// user id. Page starts at 1; Limit caps the page size. Search is the optional
+// VisitFilter scopes a visit listing to the caller's branch union and role,
+// which is how the backend enforces multi-branch isolation: admins and
+// security pass their user_locations union (LocationIDs) with IsGlobal false,
+// super_admin passes IsGlobal true for the national view or a single-id union
+// with IsGlobal false to narrow by branch, and vendor passes its own user id.
+// An empty union with IsGlobal false matches no branch (fail-closed), never
+// the whole table: there is no unscoped listing except the explicit global.
+// Page starts at 1; Limit caps the page size. Search is the optional
 // free-text filter (ILIKE over vendor user name / visit_id in SQL); empty means
 // unfiltered, never a widened scope. SortBy/Order select the ORDER BY column
 // and direction; both are whitelisted vocabularies, never raw SQL, and the
 // zero value means the legacy default (created_at desc).
 type VisitFilter struct {
-	LocationID   *UUID
+	LocationIDs  []UUID
+	IsGlobal     bool
 	VendorUserID *UUID
 	Status       *VisitStatus
 	Search       string
@@ -233,10 +259,12 @@ type VisitRepository interface {
 	Create(ctx context.Context, visit VisitRequest, visitors []Visitor, purposeIDs []UUID) (VisitRequest, error)
 	FindByID(ctx context.Context, id UUID) (VisitRequest, error)
 	FindByVisitCode(ctx context.Context, code string) (VisitRequest, error)
-	// GetLatestStatusNote returns the note of the most recent status_history
-	// row for the visit (the note attached to the current status transition),
-	// or nil when there is no history or the latest row carries no note.
-	GetLatestStatusNote(ctx context.Context, id UUID) (*string, error)
+	// ListStatusHistory returns the actor-resolved status trail of one visit,
+	// oldest -> newest, capped to the 50 newest rows. The current status note
+	// is derivable from the newest event, so this is the single read behind
+	// both VisitRequest.History and VisitRequest.StatusNote. An empty slice
+	// means the visit has no history rows yet, never an error.
+	ListStatusHistory(ctx context.Context, id UUID) ([]StatusEvent, error)
 	List(ctx context.Context, filter VisitFilter) (visits []VisitRequest, total int64, err error)
 	// ListVisitorJabatan returns the distinct, alphabetically sorted Jabatan
 	// values already registered on visitor rows, with blanks dropped and the
@@ -262,6 +290,21 @@ type VisitRepository interface {
 	// returns the refreshed visitor. The flag is monotonic by contract:
 	// callers only ever pass TRUE forward, never FALSE over a stored TRUE.
 	UpdateVisitorContact(ctx context.Context, visitID, visitorID UUID, phone string, phoneEdited bool) (Visitor, error)
+	// AttachWorkPhoto stores one before/after work proof
+	// (POST /visits/{id}/work-photos, migration 000024). The adapter locks
+	// the visit row first (SELECT ... FOR UPDATE), refuses any status but
+	// visiting with a 409 conflict, then upserts on
+	// UNIQUE (visit_request_id, kind): a re-attach replaces the row instead
+	// of accumulating duplicates. The status check and the write happen in
+	// ONE transaction so a concurrent check-out cannot let a photo land
+	// after completion. The returned bool reports whether the row was
+	// created (true, answer 201) or replaced (false, answer 200). A missing
+	// visit is ErrNotFound; uploadedBy is the authenticated actor.
+	AttachWorkPhoto(ctx context.Context, visitID UUID, kind WorkPhotoKind, url string, uploadedBy UUID) (WorkPhoto, bool, error)
+	// ListWorkPhotos returns both work proofs of one visit (at most the
+	// before and after rows), with the uploader display names resolved. A
+	// visit without proofs yields an empty slice, never nil.
+	ListWorkPhotos(ctx context.Context, visitID UUID) ([]WorkPhoto, error)
 	// DeleteVisit removes one visit row in any status (DELETE /visits/:id,
 	// super_admin only). The child tables (visitor, visit_purpose,
 	// status_history, check_in, check_out) all carry ON DELETE CASCADE, so

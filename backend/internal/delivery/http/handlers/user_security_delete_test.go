@@ -81,11 +81,18 @@ func (s *stubSecurityDeleteStore) UpdateLastLogin(_ context.Context, _ domain.UU
 	return nil
 }
 
-func (s *stubSecurityDeleteStore) ListSecurity(_ context.Context, locationID *domain.UUID) ([]domain.User, error) {
+func (s *stubSecurityDeleteStore) ListSecurity(_ context.Context, locationIDs []domain.UUID, isGlobal bool) ([]domain.User, error) {
 	out := []domain.User{}
 	for _, u := range s.users {
-		if locationID == nil || (u.LocationID != nil && *u.LocationID == *locationID) {
+		if isGlobal {
 			out = append(out, u)
+			continue
+		}
+		for _, lid := range locationIDs {
+			if u.LocationID != nil && *u.LocationID == lid {
+				out = append(out, u)
+				break
+			}
 		}
 	}
 	return out, nil
@@ -126,6 +133,9 @@ func (s *stubSecurityDeleteStore) UpdateManagedUser(_ context.Context, id domain
 	}
 	if patch.LocationID != nil {
 		u.LocationID = patch.LocationID
+	}
+	if patch.LocationIDs != nil {
+		u.LocationIDs = append([]domain.UUID{}, patch.LocationIDs...)
 	}
 	if patch.VendorID != nil {
 		u.VendorID = patch.VendorID

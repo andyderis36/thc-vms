@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { Select, type SelectOption } from '@/components/ui/Select'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
+import { BranchMultiSelect } from '@/features/users/components/BranchMultiSelect'
 import { requiresManagedLocation } from '@/features/users/managed-user-filters'
-import { useCreateManagedUserMutation, useVendorsQuery } from '@/lib/api/hooks'
+import { useVendorNameOptions } from '@/features/users/hooks/useVendorNameOptions'
+import { useCreateManagedUserMutation } from '@/lib/api/hooks'
 import type { CreateManagedUserRequest, ManagedUserRole } from '@/lib/api/types'
 import { getRoleLabel } from '@/lib/auth/capabilities'
 import {
@@ -62,25 +63,33 @@ export function ManagedUserCreateModal({
   const [emailError, setEmailError] = useState<string | undefined>(undefined)
   const [phoneError, setPhoneError] = useState<string | undefined>(undefined)
   const [passwordError, setPasswordError] = useState<string | undefined>(undefined)
-  const [locationId, setLocationId] = useState('')
+  // Multi-cabang: urutan = urut centang; ELEMEN PERTAMA menjadi lokasi utama
+  // (dikirim ganda: `location_id` untuk server lama + `location_ids[]`).
+  const [locationIds, setLocationIds] = useState<string[]>([])
+  const [locationError, setLocationError] = useState<string | undefined>(undefined)
   // Teks vendor bebas (bukan id): boleh pilih dari katalog via <datalist>
   // ATAU ketik manual; dipetakan saat submit lewat `resolveVendorInput`.
   const [vendorText, setVendorText] = useState('')
 
   const create = useCreateManagedUserMutation()
   const needsLocation = requiresManagedLocation(role)
-  // Katalog vendor hanya untuk Vendor/Mitra; dimuat hanya saat dibutuhkan.
-  const vendorsQuery = useVendorsQuery(role === 'vendor')
-  const locationOptions: SelectOption[] = locations.map((location) => ({
-    value: location.id,
-    label: location.name,
-  }))
+  // Katalog vendor + saran feed hanya untuk Vendor/Mitra; dimuat saat dibutuhkan.
+  const vendorOptions = useVendorNameOptions(role === 'vendor')
   const roleLabel = getRoleLabel(role)
+
+  const handleLocationChange = (next: string[]): void => {
+    setLocationIds(next)
+    if (locationError !== undefined) setLocationError(undefined)
+  }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
     if (name.trim() === '' || email.trim() === '' || password === '') return
-    if (needsLocation && locationId === '') return
+    const primaryLocationId = locationIds[0]
+    if (needsLocation && primaryLocationId === undefined) {
+      setLocationError('Pilih minimal satu cabang / POP.')
+      return
+    }
 
     const nextEmailError = isValidEmail(email) ? undefined : 'Format email tidak valid.'
     setEmailError(nextEmailError)
@@ -119,7 +128,7 @@ export function ManagedUserCreateModal({
     // pernah ditambahkan ke katalog vendor.
     const resolvedVendor = needsLocation
       ? {}
-      : resolveVendorInput(vendorText, vendorsQuery.data ?? [])
+      : resolveVendorInput(vendorText, vendorOptions.vendors)
 
     const body: CreateManagedUserRequest = {
       name: name.trim(),
@@ -128,7 +137,9 @@ export function ManagedUserCreateModal({
       ...(phone.trim() !== '' ? { phone: phone.trim() } : {}),
       nik: nik.trim(),
       role,
-      ...(needsLocation ? { location_id: locationId } : {}),
+      ...(needsLocation
+        ? { location_id: primaryLocationId, location_ids: locationIds }
+        : {}),
       ...resolvedVendor,
     }
     create.mutate(
@@ -237,13 +248,15 @@ export function ManagedUserCreateModal({
           required
         />
         {needsLocation ? (
-          <Select
+          <BranchMultiSelect
             label="Cabang Penugasan"
-            placeholder="Pilih cabang / POP"
-            options={locationOptions}
-            value={locationId}
-            onChange={(event) => setLocationId(event.target.value)}
             required
+            options={locations}
+            value={locationIds}
+            onChange={handleLocationChange}
+            error={locationError}
+            hint="Pilih satu atau beberapa cabang / POP. Pilihan pertama menjadi cabang utama."
+            autoSelectSingle
           />
         ) : (
           <>
@@ -252,7 +265,7 @@ export function ManagedUserCreateModal({
             <Input
               label="Vendor"
               placeholder={
-                vendorsQuery.isPending
+                vendorOptions.isPending
                   ? 'Memuat vendor…'
                   : 'Pilih dari daftar atau ketik nama vendor'
               }
@@ -264,8 +277,8 @@ export function ManagedUserCreateModal({
               maxLength={VENDOR_NAME_MAX_LENGTH}
             />
             <datalist id="users-create-vendor-datalist">
-              {(vendorsQuery.data ?? []).map((vendor) => (
-                <option key={vendor.id} value={vendor.name} />
+              {vendorOptions.names.map((name) => (
+                <option key={name} value={name} />
               ))}
             </datalist>
           </>

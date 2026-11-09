@@ -75,11 +75,11 @@ const DevSuperadminEmail = "dev-superadmin@transhybrid.net.id"
 
 // IsHiddenDevAccount reports whether a user row belongs to the hidden
 // dev-superadmin account and must be dropped from every user-facing listing.
-// The role name is the primary signal; the email fallback covers pre-000016
-// and data-drift rows whose role no longer reads dev-superadmin but whose
-// account is still the seeded platform operator.
 func IsHiddenDevAccount(role RoleName, email string) bool {
-	return role == RoleDevSuperAdmin || email == DevSuperadminEmail
+	if role == RoleDevSuperAdmin {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(email), DevSuperadminEmail)
 }
 
 // Role mirrors the ROLE table.
@@ -134,6 +134,13 @@ type User struct {
 	AvatarURL          string
 	RoleID             UUID
 	LocationID         *UUID
+	// LocationIDs is the full branch-coverage union written beside the
+	// primary (migration 000023): LocationID stays the primary forever and
+	// is always the first element. Empty on reads that predate the union
+	// (listings resolve the primary only); the account creates and the
+	// branch moves carry it so the dual-write lands the whole union in one
+	// transaction instead of deriving a singleton from the RETURNING row.
+	LocationIDs        []UUID
 	Type               UserType
 	Status             UserStatus
 	VendorID           *UUID

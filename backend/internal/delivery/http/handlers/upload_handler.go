@@ -36,10 +36,17 @@ var allowedUploadMIME = map[string]struct{}{
 	"image/png":       {},
 }
 
-// imageUploadMIME is the image-only subset a profile photo may use.
+// imageUploadMIME is the image-only subset a photo category may use.
 var imageUploadMIME = map[string]struct{}{
 	"image/jpeg": {},
 	"image/png":  {},
+}
+
+// imageOnlyCategories are the upload categories whose payload is a photo by
+// definition, so the shared allow-list's PDF entry is never valid for them.
+var imageOnlyCategories = map[string]struct{}{
+	"profile_photo": {},
+	"work_photos":   {},
 }
 
 // UploadHandler serves POST /uploads. It owns the HTTP framing only: the
@@ -115,7 +122,7 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 	}
 	category := strings.TrimSpace(firstFormValue(form.Value, "category"))
 	switch category {
-	case "assignment_letter", "id_card", "checkin_photo", "profile_photo":
+	case "assignment_letter", "id_card", "checkin_photo", "profile_photo", "work_photos":
 	default:
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Kategori berkas tidak dikenal.")
 		return
@@ -144,12 +151,13 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 		response.Fail(c, fmt.Errorf("tipe MIME berkas tidak diizinkan: %q: %w", mime, domain.ErrStorageRejected))
 		return
 	}
-	if category == "profile_photo" {
-		// The profile photo is rendered in the shell chrome, so it is an image
-		// by definition; the shared allow-list also admits PDF for the visit
-		// documents, which is never a valid avatar.
+	if _, imageOnly := imageOnlyCategories[category]; imageOnly {
+		// The profile photo is rendered in the shell chrome and the work
+		// photos are visual evidence, so both are images by definition; the
+		// shared allow-list also admits PDF for the visit documents, which is
+		// never a valid photo.
 		if _, ok := imageUploadMIME[mime]; !ok {
-			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Foto profil harus berupa gambar JPG atau PNG.")
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Berkas foto harus berupa gambar JPG atau PNG.")
 			return
 		}
 	}

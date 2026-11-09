@@ -2,7 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Controller,
   useForm,
@@ -23,12 +23,15 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
+import { Select } from '@/components/ui/Select'
 import { Textarea } from '@/components/ui/Textarea'
 import { ApiError } from '@/lib/api/fetcher'
 import {
   useCreateVisitMutation,
   useLocationsQuery,
   usePurposesQuery,
+  useVendorAccountsQuery,
+  useVendorSuggestionsQuery,
   useVendorsQuery,
   useVisitsQuery,
 } from '@/lib/api/hooks'
@@ -45,12 +48,8 @@ import {
   selectLatestVisit,
   toTechnicianRows,
 } from '@/lib/visits/prefill-last-visit'
-import {
-  areTechnicianRowsBlank,
-  loadTechnicianRoster,
-  saveTechnicianRoster,
-} from '@/lib/visits/technician-autosave'
-import { isLocationScopeUnresolved } from '@/lib/visits/location-scope'
+import { isLocationScopeUnresolved, scopeLocations } from '@/lib/visits/location-scope'
+import { mergeSuggestionNames } from '@/lib/visits/suggestions'
 import { resolveVendorInput } from '@/lib/visits/vendor-input'
 import { PurposeDropdown } from './PurposeDropdown'
 import { TechnicianList } from './TechnicianList'
@@ -78,14 +77,13 @@ export function VisitForm() {
   const purposesQuery = usePurposesQuery()
   const vendorsQuery = useVendorsQuery()
   const createVisit = useCreateVisitMutation()
-  const { user } = useSession()
+  const { user, status } = useSession()
 
   const {
     control,
     register,
     handleSubmit,
     setValue,
-    getValues,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<VisitFormValues>({
     resolver: zodResolver(visitFormSchema),
@@ -95,6 +93,7 @@ export function VisitForm() {
     shouldFocusError: false,
     defaultValues: {
       location_id: '',
+      vendor_user_id: '',
       vendor_name: '',
       purpose_ids: [],
       purpose_note: '',
@@ -122,6 +121,19 @@ export function VisitForm() {
   const purposeIds = useWatch({ control, name: 'purpose_ids' }) ?? []
 
   /*
+   * Saran "Vendor Pengaju": feed DB-backed `GET /vendors/suggestions`
+   * (di-debounce + di-clamp di dalam hook) dilengkapi katalog `GET /vendors`
+   * — supaya nama yang dulu tampil tidak pernah hilang ketika feed kosong /
+   * 403 (peran vendor) / galat. Ketikan manual tetap diterima apa adanya.
+   */
+  const visitVendorName = useWatch({ control, name: 'vendor_name' }) ?? ''
+  const vendorSuggestionsQuery = useVendorSuggestionsQuery(visitVendorName)
+  const vendorSuggestionNames = mergeSuggestionNames(
+    vendorSuggestionsQuery.data,
+    vendorsQuery.data ?? [],
+  )
+
+  /*
    * Prefill dari kunjungan terakhir (khusus peran `vendor`): halaman
    * riwayat `GET /visits?limit=20` diambil HANYA ketika tombol ditekan
    * (`enabled only when needed`) — pengurutan backend `start_date DESC`,
@@ -135,84 +147,48 @@ export function VisitForm() {
   // tetap memakai nama perusahaan per anggota seperti sebelumnya.
   const canSetVisitVendor =
     user !== null && (user.role === 'admin' || isSuperAdminRole(user.role))
+  /*
+   * Akun vendor aktif (pemilik kunjungan) — hanya untuk admin/superadmin;
+   * endpoint dijaga peran, jadi query nonaktif untuk peran lain agar tak
+   * pernah menembak 403. Opsi selalu menyertakan nilai kosong yang dapat
+   * dipilih untuk melepas pilihan.
+   */
+  const vendorAccountsQuery = useVendorAccountsQuery(canSetVisitVendor)
+  const vendorAccountOptions = useMemo(() => {
+    const accounts = canSetVisitVendor ? (vendorAccountsQuery.data ?? []) : []
+    return [
+      { value: '', label: '— Tanpa akun vendor —' },
+      ...accounts.map((account) => {
+        const company = account.company?.trim() ?? ''
+        return {
+          value: account.id,
+          label: company !== '' ? `${account.name} — ${company}` : account.name,
+        }
+      }),
+    ]
+  }, [canSetVisitVendor, vendorAccountsQuery.data])
+  const vendorAccountHint = vendorAccountsQuery.isError
+    ? 'Daftar akun vendor tidak dapat dimuat. Kunjungan tetap bisa diajukan tanpa akun vendor.'
+    : vendorAccountsQuery.isPending
+      ? 'Memuat akun vendor…'
+      : 'Opsional jika vendor punya akun. Bila dipilih, kunjungan menjadi milik akun vendor tersebut; kosongkan bila pengajuan atas nama Anda sendiri.'
   const prefillQuery = useVisitsQuery(
     { limit: 20 },
     isVendor && prefillRequested,
   )
 
-  // Prefill TEKS vendor milik pengguna yang sedang masuk pada baris anggota
-  // pertama, bila baris itu masih kosong. Katalog vendor TIDAK dipakai untuk
-  // mencocokkan nama di sini — pemetaan ke vendor_id/vendor_name terjadi saat
-  // submit lewat `resolveVendorInput`.
-  const ownVendorName = user?.vendor_name ?? ''
-  const userId = user?.id
-
-  /*
-   * Autosave roster per-akun (`localStorage` kunci
-   * `thc-vms:technicians:<userId>`): muat daftar anggota terakhir yang
-   * berhasil dikirim akun ini, hanya bila SEMUA baris awal masih kosong —
-   * ketikan pengguna tidak pernah ditimpa. Foto sengaja TIDAK pernah
-   * dipulihkan; berkas wajib dipilih ulang tiap pengajuan. Nomor KTP/SIM
-   * juga TIDAK pernah dipulihkan — autosave tidak pernah menyimpan PII
-   * identitas, jadi kolomnya selalu mulai kosong.
-   *
-   * Precedence isian baris (dan baris lain yang masih kosong):
-   *   saved-roster > nama vendor akun > kosong
-   * — roster tersimpan menang lebih dulu; nama vendor akun di bawah hanya
-   * mengisi bila roster (atau ketikan) meninggalkan baris masih kosong.
-   *
-   * URUTAN EFEK KRITIS: efek load ini DIDAHULUKAN dari prefill vendor akun.
-   * Keduanya berjalan berurutan pada commit yang sama saat sesi selesai
-   * hydrate; bila vendor akun jalan lebih dulu, baris 1 tak lagi kosong dan
-   * syarat "semua baris kosong" gagal — roster tidak akan pernah termuat.
-   */
-  useEffect(() => {
-    if (userId === undefined || userId === '') return
-    if (!areTechnicianRowsBlank(getValues('technicians'))) return
-    const saved = loadTechnicianRoster(userId)
-    if (saved === null) return
-    // `loadTechnicianRoster` sudah membatasi MAX_TECHNICIANS dan hanya
-    // mengembalikan 4 field teks (nama, No. HP, nama vendor, jabatan); Nomor
-    // KTP/SIM selalu dikosongkan (PII tidak pernah dipersist) dan foto
-    // dikosongkan (unduh ulang wajib).
-    setValue(
-      'technicians',
-      saved.map((row) => ({
-        name: row.name,
-        id_number: '',
-        phone: row.phone,
-        id_card_photo: { url: '', name: '' },
-        selfie: { url: '', name: '' },
-        jabatan: row.jabatan ?? '',
-        vendor_name: row.vendor_name,
-        email: '',
-      })),
-      { shouldDirty: false },
-    )
-  }, [userId, getValues, setValue])
-
-  useEffect(() => {
-    if (ownVendorName.trim() === '') return
-    const current = getValues('technicians.0.vendor_name')
-    if (current === undefined || current.trim() === '') {
-      setValue('technicians.0.vendor_name', ownVendorName, { shouldDirty: false })
-    }
-  }, [ownVendorName, getValues, setValue])
-
   /*
    * Penerapan prefill — berjalan HANYA setelah tombol ditekan (tidak pernah
-   * otomatis), sehingga tidak pernah bertarung dengan efek autosave roster /
-   * prefill nama vendor akun di atas. HANYA baris roster anggota yang
-   * ditimpa; fasilitas, tujuan, jadwal, SPK, catatan, dan SOP tetap pada
-   * nilai awal kosong (data itu bervariasi tiap kunjungan, hanya kru yang
-   * stabil).
+   * otomatis). HANYA baris roster anggota yang ditimpa; fasilitas, tujuan,
+   * jadwal, SPK, catatan, dan SOP tetap pada nilai awal kosong (data itu
+   * bervariasi tiap kunjungan, hanya kru yang stabil).
    *
    * Dipilih `setValue('technicians', …)` bertarget — BUKAN `reset()` seluruh
    * formulir — agar nilai + status dirty/touched field lain tidak tersentuh:
    * `reset()` akan me-re-baseline SEMUA field menjadi pristine dan mencuci
    * ketikan pengguna sebelum klik menjadi "bersih". `shouldDirty: false`
-   * (sama seperti efek autosave roster di atas) menjaga perilaku guard
-   * konfirmasi + `isDirty` identik dengan sebelumnya pada alur baku.
+   * menjaga perilaku guard konfirmasi + `isDirty` identik dengan sebelumnya
+   * pada alur baku.
    *
    * Guard `errorUpdatedAt`: refetch klik TERBARU dimulai pada commit yang
    * sama dengan klik, sedangkan snapshot galat di render itu masih milik
@@ -248,10 +224,22 @@ export function VisitForm() {
   }, [prefillRequested, prefillQuery, setValue])
 
   // `GET /locations` global-by-design; scoping per-peran dilakukan klien.
-  // Sesi belum ter-hydrate (`user` null) → fallback non-scope agar perilaku
-  // lama (tanpa filter) tetap sama.
-  const locationScopeUser = user ?? { role: 'vendor' as const, location_id: null }
-  const locationLocked = isLocationScopeUnresolved(locationScopeUser)
+  // Sesi belum ter-hydrate (`loading`/`user` null) → kosong & terkunci;
+  // fallback vendor (tanpa scope) hanya untuk sesi `authenticated` vendor.
+  const isSessionAuthenticated = status === 'authenticated' && user !== null
+  const locationScopeUser = isSessionAuthenticated ? user : null
+  const sessionNotReady = !isSessionAuthenticated
+  const locationLocked = sessionNotReady || (locationScopeUser !== null && isLocationScopeUnresolved(locationScopeUser))
+  /*
+   * Katalog fasilitas TERPAKU di layar ini sudah disaring ke cakupan sesi
+   * (`location_ids ?? [location_id]`): admin/security hanya melihat
+   * cabangnya, super_admin/vendor tetap katalog utuh. Satu sumber untuk
+   * KEDUA `<datalist>` dan resolusi `location_id` saat submit, sehingga
+   * payload admin tidak pernah memuat fasilitas di luar cakupannya.
+   */
+  const facilityCatalog = locationScopeUser !== null
+    ? scopeLocations(locationsQuery.data ?? [], locationScopeUser)
+    : []
 
   function togglePurpose(purposeId: string): void {
     const next = purposeIds.includes(purposeId)
@@ -308,13 +296,17 @@ export function VisitForm() {
     // kosong = field tidak dikirim sama sekali (BE memetakan ke NULL).
     const visitVendorName = (values.vendor_name ?? '').trim()
 
-    // Fasilitas tujuan: saran dari cache lokasi; ketikan (id atau nama)
-    // dipetakan ke location_id yang valid bila cocok, selain itu diteruskan
-    // apa adanya (backend yang menolak bila tidak valid).
-    const locations = locationsQuery.data ?? []
+    // Akun vendor pemilik kunjungan (admin/superadmin): kosong = absen,
+    // sehingga kunjungan tetap menjadi milik akun pemanggil.
+    const visitVendorUserId = (values.vendor_user_id ?? '').trim()
+
+    // Fasilitas tujuan: saran dari katalog SUDAH ter-scope cakupan sesi;
+    // ketikan (id atau nama) dipetakan ke location_id yang valid bila cocok,
+    // selain itu diteruskan apa adanya (backend menolak bila tidak valid —
+    // `requireBranchAccess` juga menutup fasilitas luar cakupan admin).
     const resolvedLocationId = (() => {
       const raw = (values.location_id ?? '').trim()
-      const match = locations.find(
+      const match = facilityCatalog.find(
         (location) => location.id === raw || location.name === raw,
       )
       return match !== undefined ? match.id : raw
@@ -322,6 +314,7 @@ export function VisitForm() {
 
     const body: CreateVisitRequest = {
       location_id: resolvedLocationId,
+      ...(visitVendorUserId !== '' ? { vendor_user_id: visitVendorUserId } : {}),
       ...(visitVendorName !== '' ? { vendor_name: visitVendorName } : {}),
       purpose_ids: matchedPurposeIds,
       // "Tujuan lain" mengisi kontrak `purpose_note` (≤200); `purpose_ids`
@@ -364,13 +357,6 @@ export function VisitForm() {
 
     try {
       const created = await createVisit.mutateAsync({ body })
-      // Autosave roster teks per-akun TEPAT SEBELUM navigasi: agar pengajuan
-      // berikutnya bisa pre-fill. Hanya 4 field teks (nama, HP, vendor,
-      // jabatan); nomor identitas (PII) dan foto tidak pernah disimpan. Tanpa user id
-      // → lewati (tanpa autosave, bukan galat).
-      if (user?.id !== undefined && user.id !== '') {
-        saveTechnicianRoster(user.id, values.technicians)
-      }
       toast.success(
         'Permohonan kunjungan berhasil dikirim dan sedang menunggu persetujuan admin cabang.',
       )
@@ -465,7 +451,7 @@ export function VisitForm() {
                 autoComplete="off"
                 maxLength={FACILITY_NAME_MAX_LENGTH}
                 placeholder={
-                  locationsQuery.isPending
+                  locationsQuery.isPending || sessionNotReady
                     ? 'Memuat fasilitas…'
                     : 'Pilih fasilitas (Cabang / POP / miniPOP)'
                 }
@@ -483,13 +469,13 @@ export function VisitForm() {
                 {...register('location_id')}
               />
               <datalist id="visit-facility-datalist">
-                {(locationsQuery.data ?? []).map((location) => (
+                {facilityCatalog.map((location) => (
                   <option key={location.id} value={location.name} />
                 ))}
               </datalist>
               {/* Alias id untuk kompatibilitas saran (cache yang sama). */}
               <datalist id="visit-location-datalist">
-                {(locationsQuery.data ?? []).map((location) => (
+                {facilityCatalog.map((location) => (
                   <option key={location.id} value={location.name} />
                 ))}
               </datalist>
@@ -521,11 +507,44 @@ export function VisitForm() {
             </div>
           </div>
 
-          {/* Perusahaan kunjungan manual — hanya admin/superadmin. Saran
-              HANYA dari katalog vendor terdaftar; ketikan manual tidak pernah
-              menjadi opsi maupun master data. */}
+          {/* Perusahaan kunjungan manual — hanya admin/superadmin. Saran dari
+              feed `GET /vendors/suggestions` + pelengkap katalog vendor
+              terdaftar; ketikan manual tidak pernah menjadi opsi maupun
+              master data. */}
           {canSetVisitVendor ? (
             <>
+              <Controller
+                control={control}
+                name="vendor_user_id"
+                render={({ field }) => (
+                  <Select
+                    id="visit-vendor-account"
+                    label="Akun Vendor (Pemilik Kunjungan)"
+                    fieldSize="gate"
+                    options={vendorAccountOptions}
+                    value={field.value ?? ''}
+                    onBlur={field.onBlur}
+                    disabled={vendorAccountsQuery.isPending}
+                    hint={vendorAccountHint}
+                    onChange={(event) => {
+                      const next = event.target.value
+                      field.onChange(next)
+                      // Pilihan kosong TIDAK menyentuh vendor_name yang sudah
+                      // diketik pengguna (hanya pilihan akun yang mengisi).
+                      if (next === '') return
+                      const account = (vendorAccountsQuery.data ?? []).find(
+                        (item) => item.id === next,
+                      )
+                      if (account === undefined) return
+                      setValue(
+                        'vendor_name',
+                        account.company?.trim() || account.name,
+                        { shouldDirty: true, shouldValidate: true },
+                      )
+                    }}
+                  />
+                )}
+              />
               <Input
                 id="visit-vendor-name"
                 label="Vendor Pengaju"
@@ -547,8 +566,8 @@ export function VisitForm() {
                 {...register('vendor_name')}
               />
               <datalist id="visit-company-datalist">
-                {(vendorsQuery.data ?? []).map((vendor) => (
-                  <option key={vendor.id} value={vendor.name} />
+                {vendorSuggestionNames.map((name) => (
+                  <option key={name} value={name} />
                 ))}
               </datalist>
             </>
@@ -615,18 +634,7 @@ export function VisitForm() {
         register={register}
         setValue={setValue}
         errors={errors}
-        defaultVendorName={ownVendorName}
       />
-      {/* Petunjuk halus: hanya nama, No. HP, nama vendor, dan jabatan dari
-          pengiriman terakhir yang tersimpan lokal per-akun di peramban ini;
-          nomor identitas (PII) dan foto tidak ikut. */}
-      <p className="-mt-2 px-1 text-xs text-ink-secondary">
-        Nama, No. HP, nama vendor, dan jabatan dari pengisian terakhir
-        tersimpan otomatis di peramban ini dan terisi kembali saat formulir
-        dibuka — semuanya masih bisa diedit. Nomor KTP/SIM tidak disimpan
-        (kolomnya selalu terisi kosong), dan foto (KTP / selfie) tidak disimpan
-        serta wajib diunggah ulang setiap kali.
-      </p>
 
       {/* 4. Surat Tugas / SPK Vendor */}
       <Card>

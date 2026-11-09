@@ -310,7 +310,7 @@ test('@NEM-01 approve memicu email vendor: baris visit_approved di vendor, nihil
     await approveVisitViaApi(await h.tokenAs('admin'), visit.id, 'Disetujui harness NEM-01.')
 
     const vendorRow = await expectFeedRow(temp.token, visit.id, 'visit_approved')
-    expect(vendorRow.title).toBe('Kunjungan disetujui')
+    expect(vendorRow.title).toBe('Kunjungan Disetujui')
     expect(vendorRow.message).toContain(visit.code)
     console.log(`[e2e-nemail] NEM-01 Gmail yang diharapkan: ${expectedSubject('visit_approved', visit.code)} -> ${temp.email}`)
 
@@ -341,7 +341,7 @@ test('@NEM-02 reject memicu email vendor: baris visit_rejected di vendor, nihil 
     )
 
     const vendorRow = await expectFeedRow(temp.token, visit.id, 'visit_rejected')
-    expect(vendorRow.title).toBe('Kunjungan ditolak')
+    expect(vendorRow.title).toBe('Kunjungan Ditolak')
     expect(vendorRow.message).toContain(visit.code)
     console.log(`[e2e-nemail] NEM-02 Gmail yang diharapkan: ${expectedSubject('visit_rejected', visit.code)} -> ${temp.email}`)
 
@@ -399,7 +399,7 @@ test('@NEM-04 check-in memicu email staff: baris visit_check_in di admin, nihil 
     await checkInViaApi(await h.tokenAs('security'), visit.id)
 
     const staffRow = await expectFeedRow(await h.tokenAs('admin'), visit.id, 'visit_check_in')
-    expect(staffRow.title).toBe('Check-in tamu')
+    expect(staffRow.title).toBe('Check-in Tercatat')
     expect(staffRow.message).toContain(visit.code)
     console.log(`[e2e-nemail] NEM-04 subjek staff (akun seed, konfirmasi manual bila perlu): ${expectedSubject('visit_check_in', visit.code)}`)
 
@@ -428,7 +428,7 @@ test('@NEM-05 check-out memicu email staff: baris visit_check_out di admin, nihi
     await checkOutViaApi(await h.tokenAs('security'), visit.id)
 
     const staffRow = await expectFeedRow(await h.tokenAs('admin'), visit.id, 'visit_check_out')
-    expect(staffRow.title).toBe('Check-out tamu')
+    expect(staffRow.title).toBe('Check-out Tercatat')
     expect(staffRow.message).toContain(visit.code)
     console.log(`[e2e-nemail] NEM-05 subjek staff (akun seed, konfirmasi manual bila perlu): ${expectedSubject('visit_check_out', visit.code)}`)
 
@@ -456,7 +456,7 @@ test('@NEM-06 vendor membatalkan: staff dapat visit_cancelled + email, vendor se
     await cancelVisitViaApi(temp.token, visit.id, h.unique('vendor membatalkan NEM-06'))
 
     const staffRow = await expectFeedRow(await h.tokenAs('admin'), visit.id, 'visit_cancelled')
-    expect(staffRow.title).toBe('Kunjungan dibatalkan vendor')
+    expect(staffRow.title).toBe('Kunjungan Dibatalkan Vendor')
     expect(staffRow.message).toContain(visit.code)
     console.log(`[e2e-nemail] NEM-06 subjek staff (akun seed, konfirmasi manual bila perlu): ${expectedSubject('visit_cancelled', visit.code)}`)
 
@@ -488,7 +488,7 @@ test('@NEM-07 admin membatalkan: vendor dapat visit_cancelled + email, staff nih
     )
 
     const vendorRow = await expectFeedRow(temp.token, visit.id, 'visit_cancelled')
-    expect(vendorRow.title).toBe('Kunjungan dibatalkan')
+    expect(vendorRow.title).toBe('Kunjungan Dibatalkan')
     expect(vendorRow.message).toContain(visit.code)
     console.log(`[e2e-nemail] NEM-07 Gmail yang diharapkan: ${expectedSubject('visit_cancelled', visit.code)} -> ${temp.email}`)
 
@@ -513,6 +513,10 @@ test('@NEM-07 admin membatalkan: vendor dapat visit_cancelled + email, staff nih
 test(
   '@NEM-08 reminder R4 best-effort: visit approved ~15 mnt out dapat visit_reminder bila sweep tiba',
   async ({ h }) => {
+    test.skip(
+      process.env.E2E_REMINDER_SWEEP !== '1',
+      'Tick scheduler R4: aturannya sudah dikunci unit test paket worker; E2E ini opt-in (E2E_REMINDER_SWEEP=1) agar gate tidak menunggu tick 15 menit.',
+    )
     test.setTimeout(9 * 60_000)
     const trackedIds: string[] = []
     let visit: TempVisit | null = null
@@ -534,7 +538,7 @@ test(
         )
         return
       }
-      expect(found.title).toBe('Pengingat kunjungan')
+      expect(found.title).toBe('Pengingat Kunjungan')
       expect(found.message).toContain(visit.code)
       console.log(`[e2e-nemail] NEM-08 Gmail yang diharapkan: ${expectedSubject('visit_reminder', visit.code)} -> ${temp.email}`)
     } finally {

@@ -11,7 +11,12 @@
 import { ApiError, getStoredToken, resolveApiBase } from '@/lib/api/fetcher';
 
 /** Jenis berkas yang didukung endpoint `GET /visits/{id}/file`. */
-export type VisitFileKind = 'assignment_letter' | 'id_card' | 'selfie';
+export type VisitFileKind =
+  | 'assignment_letter'
+  | 'id_card'
+  | 'selfie'
+  | 'work_before'
+  | 'work_after';
 
 const API_BASE = resolveApiBase();
 
@@ -20,6 +25,8 @@ const SUPPORTED_KINDS: ReadonlySet<VisitFileKind> = new Set<VisitFileKind>([
   'assignment_letter',
   'id_card',
   'selfie',
+  'work_before',
+  'work_after',
 ]);
 
 /** Kind per-teknisi yang WAJIB menyertakan `visitor_id`. */
@@ -82,6 +89,8 @@ async function failureMessage(response: Response): Promise<string> {
  * - `assignment_letter` (per-kunjungan): TANPA `visitor_id`.
  * - `id_card` / `selfie` (per-teknisi): `visitor_id` wajib — kosong/tidak ada
  *   → galat validasi berbahasa Indonesia.
+ * - `work_before` / `work_after` (bukti pengerjaan per-kunjungan): TANPA
+ *   `visitor_id` — satu slot per kunjungan, seperti `assignment_letter`.
  * - Kind di luar daftar → galat.
  *
  * @throws {Error} Kind tidak didukung, atau `visitor_id` wajib tapi tidak diisi.

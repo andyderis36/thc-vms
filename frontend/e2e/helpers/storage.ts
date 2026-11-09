@@ -94,6 +94,40 @@ function isNotFound(error: unknown): boolean {
   return code === 'NotFound' || code === 'NoSuchKey'
 }
 
+/**
+ * Galat koneksi SEMENTARA pada socket HTTP (MinIO menutup keep-alive di
+ * tengah beban run) — layak diulang; selain itu langsung melempar.
+ */
+function isTransientNetworkError(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') {
+    return false
+  }
+  const code = (error as { code?: unknown }).code
+  const message = error instanceof Error ? error.message : String(error)
+  return (
+    code === 'ECONNRESET' ||
+    /ECONNRESET|EPIPE|ETIMEDOUT|socket hang up|terminated/i.test(message)
+  )
+}
+
+/**
+ * Ulang maks3 kali dengan backoff untuk galat koneksi sementara saja.
+ * `removeObject` idempoten dan blok "objek masih ada" bukan galat jaringan,
+ * jadi retry tidak pernah menyembunyikan kegagalan pembersihan yang nyata.
+ */
+async function withTransientRetry<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      if (attempt >= 3 || !isTransientNetworkError(error)) {
+        throw error
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt))
+    }
+  }
+}
+
 /** Hapus objek lalu pastikan objek tidak lagi ada; melempar bila masih tersisa. */
 export async function deleteUploadedFiles(fileUrls: readonly string[]): Promise<void> {
   const keys: string[] = []
@@ -106,16 +140,18 @@ export async function deleteUploadedFiles(fileUrls: readonly string[]): Promise<
     keys.push(key)
   }
   for (const key of [...new Set(keys)]) {
-    await storage().removeObject(BUCKET, key)
-    try {
-      await storage().statObject(BUCKET, key)
-    } catch (error) {
-      if (isNotFound(error)) {
-        console.log(`[e2e-storage] objek ${key} terhapus (stat -> NotFound)`)
-        continue
+    await withTransientRetry(async () => {
+      await storage().removeObject(BUCKET, key)
+      try {
+        await storage().statObject(BUCKET, key)
+      } catch (error) {
+        if (isNotFound(error)) {
+          console.log(`[e2e-storage] objek ${key} terhapus (stat -> NotFound)`)
+          return
+        }
+        throw error
       }
-      throw error
-    }
-    throw new Error(`[e2e-storage] objek ${key} masih ada setelah penghapusan`)
+      throw new Error(`[e2e-storage] objek ${key} masih ada setelah penghapusan`)
+    })
   }
 }

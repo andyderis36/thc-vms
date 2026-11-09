@@ -7,7 +7,7 @@
  * boleh mengetik jabatan baru.
  *
  * Konstanta batas diletakkan di `lib/` (bukan `features/`) karena dipakai
- * bersama oleh skema form, input UI, dan autosave roster.
+ * bersama oleh skema form dan input UI.
  */
 
 /** Batas kontrak BE untuk `jabatan` (openapi `VisitorItem.jabatan`, maks 120). */

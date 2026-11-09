@@ -2,6 +2,7 @@ package visit
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"thc-vms/backend/internal/domain"
@@ -30,11 +31,11 @@ func TestListVisits_SuperAdminCanNarrowByLocation(t *testing.T) {
 		t.Fatalf("super_admin narrowing must succeed: %v", err)
 	}
 
-	if repo.lastFilter.LocationID == nil {
-		t.Fatal("the super_admin branch filter never reached the repository: VisitFilter.LocationID is nil")
+	if len(repo.lastFilter.LocationIDs) != 1 || repo.lastFilter.LocationIDs[0] != branch {
+		t.Fatalf("LocationIDs = %v, want the requested branch %q", repo.lastFilter.LocationIDs, branch)
 	}
-	if *repo.lastFilter.LocationID != branch {
-		t.Fatalf("VisitFilter.LocationID = %q, want the requested branch %q", *repo.lastFilter.LocationID, branch)
+	if repo.lastFilter.IsGlobal {
+		t.Fatal("a narrowed super_admin listing must not stay global")
 	}
 	if repo.lastFilter.VendorUserID != nil {
 		t.Fatal("a location filter must never introduce a vendor scope")
@@ -49,14 +50,15 @@ func TestListVisits_SuperAdminWithoutFilterIsGlobal(t *testing.T) {
 		testActor(domain.RoleSuperAdmin, "sa", ""), ListVisitsInput{}); err != nil {
 		t.Fatalf("super_admin global listing must succeed: %v", err)
 	}
-	if repo.lastFilter.LocationID != nil || repo.lastFilter.VendorUserID != nil {
-		t.Fatalf("an unfiltered super_admin listing must carry no scope, got %+v", repo.lastFilter)
+	if !repo.lastFilter.IsGlobal || len(repo.lastFilter.LocationIDs) != 0 || repo.lastFilter.VendorUserID != nil {
+		t.Fatalf("an unfiltered super_admin listing must carry global scope, got %+v", repo.lastFilter)
 	}
 }
 
 // SECURITY-CRITICAL: a branch-locked role that passes another branch's
-// location_id must still be confined to its OWN branch. A query parameter must
-// never widen a caller's visibility.
+// location_id is refused with the 403 FORBIDDEN_BRANCH sentinel and no
+// repository query. A query parameter may narrow inside the caller's scope,
+// never widen it and never pass silently.
 func TestListVisits_AdminCannotWidenScopeWithAForeignLocation(t *testing.T) {
 	ownBranch := domain.UUID("22222222-2222-4222-8222-222222222222")
 	foreignBranch := domain.UUID("33333333-3333-4333-8333-333333333333")
@@ -68,11 +70,11 @@ func TestListVisits_AdminCannotWidenScopeWithAForeignLocation(t *testing.T) {
 			_, _, err := svc.ListVisits(context.Background(),
 				testActor(role, "u1", string(ownBranch)),
 				ListVisitsInput{LocationID: &foreignBranch})
-			if err != nil {
-				t.Fatalf("listing must succeed: %v", err)
+			if !errors.Is(err, domain.ErrForbiddenBranch) {
+				t.Fatalf("err = %v, want the FORBIDDEN_BRANCH 403 sentinel", err)
 			}
-			if repo.lastFilter.LocationID == nil || *repo.lastFilter.LocationID != ownBranch {
-				t.Fatalf("VisitFilter.LocationID = %v, want the actor's OWN branch %q", repo.lastFilter.LocationID, ownBranch)
+			if repo.listCalls != 0 {
+				t.Fatalf("a refused listing must never reach the repository, got %d List calls", repo.listCalls)
 			}
 		})
 	}
@@ -91,8 +93,11 @@ func TestListVisits_VendorCannotEscapeItsOwnVisits(t *testing.T) {
 	if repo.lastFilter.VendorUserID == nil || *repo.lastFilter.VendorUserID != domain.UUID("vendor-1") {
 		t.Fatalf("VisitFilter.VendorUserID = %v, want the actor's own id", repo.lastFilter.VendorUserID)
 	}
-	if repo.lastFilter.LocationID != nil {
-		t.Fatalf("a vendor listing must carry no branch scope, got %q", *repo.lastFilter.LocationID)
+	if len(repo.lastFilter.LocationIDs) != 0 {
+		t.Fatalf("a vendor listing must carry no branch scope, got %v", repo.lastFilter.LocationIDs)
+	}
+	if repo.lastFilter.IsGlobal {
+		t.Fatal("a vendor listing must never be global")
 	}
 }
 

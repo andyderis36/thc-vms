@@ -29,11 +29,12 @@ func NewReaperRepository(pool *pgxpool.Pool) *ReaperRepository {
 }
 
 // ListReferencedURLs returns every non-empty stored file URL the schema can
-// point at, across the five columns the reaper's anti-join watches:
+// point at, across the six columns the reaper's anti-join watches:
 // visit_request.assignment_letter_url, visitor.id_card_photo_url,
-// visitor.photo_url, check_in.photo_url and users.avatar_url. The reaper
-// reverses each URL to an object key through ObjectKeyFromStoredURL, so raw
-// stored values (never presigned links) are exactly what it needs.
+// visitor.photo_url, check_in.photo_url, users.avatar_url and
+// visit_work_photo.url. The reaper reverses each URL to an object key through
+// ObjectKeyFromStoredURL, so raw stored values (never presigned links) are
+// exactly what it needs.
 func (r *ReaperRepository) ListReferencedURLs(ctx context.Context) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT assignment_letter_url FROM visit_request WHERE assignment_letter_url IS NOT NULL AND assignment_letter_url <> ''
@@ -45,6 +46,8 @@ func (r *ReaperRepository) ListReferencedURLs(ctx context.Context) ([]string, er
 		SELECT photo_url            FROM check_in     WHERE photo_url            IS NOT NULL AND photo_url            <> ''
 		UNION ALL
 		SELECT avatar_url           FROM users        WHERE avatar_url           IS NOT NULL AND avatar_url           <> ''
+		UNION ALL
+		SELECT url                  FROM visit_work_photo WHERE url             IS NOT NULL AND url                  <> ''
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("repository: list referenced file URLs: %w", err)

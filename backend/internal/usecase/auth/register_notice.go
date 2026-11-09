@@ -3,9 +3,9 @@ package auth
 import (
 	"context"
 	"fmt"
-	"html"
 	"log/slog"
 	"strings"
+	"time"
 
 	"thc-vms/backend/internal/domain"
 )
@@ -66,13 +66,40 @@ func (s *Service) mailSuperAdmins(ctx context.Context, user domain.User) {
 		return
 	}
 	name := strings.TrimSpace(user.Name)
-	identifier := strings.TrimSpace(user.Email)
-	if name != "" {
-		identifier = name
+	if name == "" {
+		name = strings.TrimSpace(user.Email)
 	}
-	subject := domain.VendorRegistrationSubject(identifier)
-	textBody := fmt.Sprintf("Vendor baru %s (%s) baru saja mendaftar dan menunggu persetujuan akun. Tinjau antrean pendaftaran vendor untuk menyetujui atau menolaknya.", identifier, strings.TrimSpace(user.Email))
-	htmlBody := `<p>` + html.EscapeString(textBody) + `</p>`
+	company := "—"
+	if user.VendorNameOverride != nil && strings.TrimSpace(*user.VendorNameOverride) != "" {
+		company = strings.TrimSpace(*user.VendorNameOverride)
+	}
+	phone := strings.TrimSpace(user.Phone)
+	if phone == "" {
+		phone = "—"
+	}
+	nik := strings.TrimSpace(user.NIK)
+	if nik == "" {
+		nik = "—"
+	}
+	email := strings.TrimSpace(user.Email)
+	registeredAt := user.CreatedAt
+	if registeredAt.IsZero() {
+		registeredAt = time.Now()
+	}
+	ctaLink := "/vendor-registrations"
+	if s.frontendBaseURL != "" {
+		ctaLink = s.frontendBaseURL + ctaLink
+	}
+	details := fmt.Sprintf("Nama: %s\nEmail: %s\nTelepon: %s\nNIK: %s\nPerusahaan: %s\nWaktu pendaftaran: %s",
+		name, email, phone, nik, company, registeredAt.Format("02 Jan 2006 15:04"))
+	subject := domain.VendorRegistrationSubject(name)
+	// The plain-text part carries the CTA URL (no button there); the HTML
+	// part carries the button, so the raw URL must not print twice.
+	textBody := fmt.Sprintf("Vendor baru %s baru saja mendaftar dan menunggu persetujuan akun.\n\n%s\n\nTinjau antrean pendaftaran vendor untuk menyetujui atau menolaknya: %s",
+		name, details, ctaLink)
+	htmlBody := domain.RenderBrandedActionEmail("Pendaftaran Vendor Baru",
+		fmt.Sprintf("Vendor baru %s baru saja mendaftar dan menunggu persetujuan akun.\n\n%s", name, details),
+		"Tinjau Pendaftaran", ctaLink)
 	if err := s.mailer.Send(ctx, recipients, subject, textBody, htmlBody); err != nil {
 		slog.Warn("auth: vendor registration email failed", "user_id", string(user.ID), "error", err)
 	}
@@ -92,7 +119,16 @@ func (s *Service) mailVendorPending(ctx context.Context, user domain.User) {
 		slog.Warn("auth: vendor pending mail skipped", "user_id", string(user.ID), "reason", "blank_address")
 		return
 	}
-	text := "Pendaftaran akun vendor Anda sudah diterima dan sedang diproses. Mohon menunggu verifikasi admin sebelum Anda dapat masuk dan mengajukan kunjungan."
+	name := strings.TrimSpace(user.Name)
+	if name == "" {
+		name = strings.TrimSpace(user.Email)
+	}
+	registeredAt := user.CreatedAt
+	if registeredAt.IsZero() {
+		registeredAt = time.Now()
+	}
+	text := fmt.Sprintf("Pendaftaran akun vendor Anda sudah diterima dan sedang diproses. Mohon menunggu verifikasi admin sebelum Anda dapat masuk dan mengajukan kunjungan.\n\nNama: %s\nEmail: %s\nWaktu pendaftaran: %s",
+		name, to, registeredAt.Format("02 Jan 2006 15:04"))
 	htmlBody := domain.RenderBrandedActionEmail("Pendaftaran Diterima", text, "", "")
 	if err := s.mailer.Send(ctx, []string{to}, "[THC-VMS] Pendaftaran Diterima — Menunggu Verifikasi Admin", text, htmlBody); err != nil {
 		slog.Warn("auth: vendor pending mail failed", "user_id", string(user.ID), "error", err)

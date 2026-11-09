@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import { Building2, Eye, Pencil, Power, Trash2, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
@@ -7,11 +8,14 @@ import { Badge } from '@/components/ui/Badge'
 import type { DetailField } from '@/components/ui/DetailModal'
 import type { SelectOption } from '@/components/ui/Select'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
+import { BranchBadges } from '@/features/users/components/BranchBadges'
 import { ManagedRoleFilterSelect } from '@/features/users/components/ManagedRoleFilterSelect'
 import {
   canShowDeleteUser,
   isProtectedUser,
   userAffiliationLabel,
+  userAffiliationTitle,
+  userBranchNames,
 } from '@/features/users/managed-user-filters'
 import { useUpdateManagedUserStatusMutation } from '@/lib/api/hooks'
 import type { UpdateUserStatusRequest, User } from '@/lib/api/types'
@@ -43,6 +47,8 @@ export interface ManagedUserListProps {
   onView: (user: User) => void
   page?: number
   pageSize?: number
+  /** Katalog cabang untuk label afiliasi union-aware (default `[]`). */
+  locations?: ReadonlyArray<{ id: string; name: string }>
 }
 
 /**
@@ -161,15 +167,30 @@ export function ManagedUserStatusCell({
 /**
  * Baris detail satu akun user. Nilai kosong dibiarkan `null`/kosong agar
  * `DetailModal` yang menampilkannya sebagai strip (bukan sel kosong).
+ *
+ * "CABANG / VENDOR" menampilkan SEMUA cabang cakupan sebagai pil
+ * (`userBranchNames` + `BranchBadges`) — multi-cabang tak pernah hanya
+ * menampilkan cabang pertama. Tanpa cakupan cabang → nama vendor; keduanya
+ * kosong → `null` (strip).
  */
-export function managedUserDetailFields(user: User): DetailField[] {
+export function managedUserDetailFields(
+  user: User,
+  locations: ReadonlyArray<{ id: string; name: string }> = [],
+): DetailField[] {
+  const branchNames = userBranchNames(user, locations)
+  const affiliation: ReactNode =
+    branchNames.length > 0 ? (
+      <BranchBadges names={branchNames} />
+    ) : user.vendor_name !== null && user.vendor_name !== ''
+      ? user.vendor_name
+      : null
   return [
     { label: 'NAMA', value: user.name },
     { label: 'EMAIL', value: user.email },
     { label: 'TELEPON', value: user.phone },
     { label: 'NIK', value: user.nik },
     { label: 'PERAN', value: getRoleLabel(user.role) },
-    { label: 'CABANG / VENDOR', value: userAffiliationLabel(user) },
+    { label: 'CABANG / VENDOR', value: affiliation },
     { label: 'STATUS', value: <ManagedUserStatusCell status={user.status} /> },
     { label: 'TIPE AKUN', value: user.type === 'internal' ? 'Internal' : 'Eksternal' },
   ]
@@ -202,6 +223,7 @@ export function ManagedUserTable({
   onEdit,
   onView,
   roleFilter,
+  locations = [],
   page = 1,
   pageSize,
 }: ManagedUserListProps & { roleFilter?: ManagedUserRoleFilterControl }) {
@@ -275,8 +297,8 @@ export function ManagedUserTable({
                 <td className={TABLE_TD_CLASS}>
                   <Badge tone={managedRoleTone(user.role)}>{getRoleLabel(user.role)}</Badge>
                 </td>
-                <td className={`truncate ${TABLE_TD_CLASS} text-xs sm:text-sm text-ink-secondary`} title={userAffiliationLabel(user)}>
-                  {userAffiliationLabel(user)}
+                <td className={`truncate ${TABLE_TD_CLASS} text-xs sm:text-sm text-ink-secondary`} title={userAffiliationTitle(user, locations)}>
+                  {userAffiliationLabel(user, locations)}
                 </td>
                 <td className={TABLE_TD_CLASS}>
                   <ManagedUserStatusCell status={user.status} />
@@ -308,6 +330,7 @@ export function ManagedUserCards({
   onDelete,
   onEdit,
   onView,
+  locations = [],
 }: ManagedUserListProps) {
   const { toggle, isPending, activeId } = useToggleManagedStatus()
 
@@ -356,8 +379,8 @@ export function ManagedUserCards({
               </p>
               <p className="flex items-start gap-2">
                 <Building2 className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-                <span className="min-w-0 wrap-anywhere" title={userAffiliationLabel(user)}>
-                  {userAffiliationLabel(user)}
+                <span className="min-w-0 wrap-anywhere" title={userAffiliationTitle(user, locations)}>
+                  {userAffiliationLabel(user, locations)}
                 </span>
               </p>
             </div>

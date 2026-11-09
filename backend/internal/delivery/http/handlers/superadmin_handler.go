@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -194,6 +193,9 @@ func managedUserChangedFields(patch domain.ManagedUserPatch) string {
 	if patch.LocationID != nil {
 		fields = append(fields, "location_id")
 	}
+	if patch.LocationIDs != nil {
+		fields = append(fields, "location_ids")
+	}
 	if patch.VendorID != nil {
 		fields = append(fields, "vendor_id")
 	}
@@ -356,6 +358,24 @@ func NewSuperAdminHandler(users domain.ManagedUserRepository, locations domain.L
 	return &SuperAdminHandler{users: users, locations: locations, purposes: purposes, visits: visits, adminRoleID: adminRoleID, vendorRoleID: vendorRoleID}
 }
 
+// requireAdminOrSuperAdmin admits a branch admin and either super_admin flavor,
+// refusing anonymous callers with 401 and every other role with the 403
+// sentinel. It mirrors the router's AdminOnly chain for the handlers that also
+// serve admins (POST /users, GET /users/vendors) while keeping a
+// defence-in-depth gate that direct handler tests can prove.
+func requireAdminOrSuperAdmin(c *gin.Context) (deliveryhttp.Identity, bool) {
+	id, ok := deliveryhttp.IdentityFrom(c)
+	if !ok {
+		response.Fail(c, domain.ErrUnauthorized)
+		return deliveryhttp.Identity{}, false
+	}
+	if !domain.IsSuperAdminRole(id.Role) && id.Role != domain.RoleAdmin {
+		response.Fail(c, domain.ErrForbiddenBranch)
+		return deliveryhttp.Identity{}, false
+	}
+	return id, true
+}
+
 // requireSuperAdmin refuses anonymous callers with 401 and non-super_admin
 // roles with the 403 sentinel, mirroring the router's SuperAdminOnly chain.
 // The hidden dev-superadmin passes like super_admin; it is never exposed
@@ -413,6 +433,7 @@ func (h *SuperAdminHandler) managedToAccount(m domain.ManagedUser) accountDTO {
 		NIK:          nikPtr(m.User.NIK),
 		Role:         string(m.Role),
 		LocationID:   m.User.LocationID,
+		LocationIDs:  echoLocationIDs(m.User),
 		LocationName: m.LocationName,
 		Status:       string(m.User.Status),
 		Type:         string(m.User.Type),
@@ -620,6 +641,66 @@ func (h *SuperAdminHandler) ListUsers(c *gin.Context) {
 	response.OK(c, out)
 }
 
+// vendorAccountDTO is the minimal vendor-account row the visit form's owner
+// picker consumes: the account identity plus its resolved company. Company is
+// nullable so an account carrying neither a catalogue link nor a manual name
+// renders JSON null instead of an empty string.
+type vendorAccountDTO struct {
+	ID      string  `json:"id"`
+	Name    string  `json:"name"`
+	Email   string  `json:"email"`
+	Company *string `json:"company"`
+}
+
+// vendorAccountCompany resolves the display company for the picker: the
+// repository's override-otherwise-catalogue name first, then the manual
+// account override, else nil.
+func vendorAccountCompany(m domain.ManagedUser) *string {
+	for _, candidate := range []*string{m.VendorName, m.User.VendorNameOverride} {
+		if candidate == nil {
+			continue
+		}
+		if trimmed := strings.TrimSpace(*candidate); trimmed != "" {
+			name := trimmed
+			return &name
+		}
+	}
+	return nil
+}
+
+// ListVendorAccounts serves GET /users/vendors with 200: the ACTIVE vendor
+// accounts an admin/super_admin may pick as the owner of a visit they file on
+// a vendor's behalf. ?search= filters by name/email (trimmed); inactive and
+// pending accounts are never offered. The row carries only id, name, email and
+// the resolved company, never the full console projection.
+func (h *SuperAdminHandler) ListVendorAccounts(c *gin.Context) {
+	if _, ok := requireAdminOrSuperAdmin(c); !ok {
+		return
+	}
+	roleVendor := domain.RoleVendor
+	accounts, err := h.users.ListManagedUsers(c.Request.Context(), domain.UserFilter{
+		Role:   &roleVendor,
+		Search: strings.TrimSpace(c.Query("search")),
+	})
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	out := make([]vendorAccountDTO, 0, len(accounts))
+	for _, m := range accounts {
+		if m.User.Status != domain.UserStatusActive {
+			continue
+		}
+		out = append(out, vendorAccountDTO{
+			ID:      string(m.User.ID),
+			Name:    m.User.Name,
+			Email:   m.User.Email,
+			Company: vendorAccountCompany(m),
+		})
+	}
+	response.OK(c, out)
+}
+
 // createManagedUserBody mirrors the POST /users body. role must be admin or
 // vendor; location_id is mandatory for admin and forbidden for vendor; vendor_id
 // is vendor-only. The account type is derived server-side, never from the body.
@@ -631,6 +712,9 @@ type createManagedUserBody struct {
 	NIK        string `json:"nik"`
 	Role       string `json:"role"`
 	LocationID string `json:"location_id"`
+	// LocationIDs is the optional accept-either union: present wins with the
+	// primary forced first, absent means the union is the primary alone.
+	LocationIDs []string `json:"location_ids"`
 	VendorID   string `json:"vendor_id"`
 	// VendorName is the manually typed vendor company (migration 000005),
 	// honoured only when vendor_id is absent; it never enters the vendor
@@ -642,13 +726,8 @@ type createManagedUserBody struct {
 // refused with a message naming the correct endpoint; a duplicate email
 // surfaces the same 23505 -> 409 mapping POST /users/security relies on.
 func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
-	actor, ok := deliveryhttp.IdentityFrom(c)
+	actor, ok := requireAdminOrSuperAdmin(c)
 	if !ok {
-		response.Fail(c, domain.ErrUnauthorized)
-		return
-	}
-	if !domain.IsSuperAdminRole(actor.Role) && actor.Role != domain.RoleAdmin {
-		response.Fail(c, domain.ErrForbiddenBranch)
 		return
 	}
 	var body createManagedUserBody
@@ -674,6 +753,11 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 		}
 		vendorID = &parsed
 	}
+	ids, err := parseLocationIDs(body.LocationIDs)
+	if err != nil {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "location_ids tidak valid.")
+		return
+	}
 	role := domain.RoleName(strings.TrimSpace(body.Role))
 	// Admin cabang hanya boleh mendaftarkan vendor (PRD §4.1: akun vendor
 	// didaftarkan Admin THC); pembuatan admin/security/superadmin tetap
@@ -684,18 +768,27 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 	}
 	vendorName := strings.TrimSpace(body.VendorName)
 	accountType, err := superadmin.ValidateManagedUserCreate(superadmin.ManagedUserInput{
-		Name:       body.Name,
-		Email:      body.Email,
-		Password:   body.Password,
-		Phone:      validation.NormalizePhone(body.Phone),
-		NIK:        strings.TrimSpace(body.NIK),
-		Role:       role,
-		LocationID: locationID,
-		VendorID:   vendorID,
-		VendorName: vendorName,
+		Name:        body.Name,
+		Email:       body.Email,
+		Password:    body.Password,
+		Phone:       validation.NormalizePhone(body.Phone),
+		NIK:         strings.TrimSpace(body.NIK),
+		Role:        role,
+		LocationID:  locationID,
+		LocationIDs: ids,
+		VendorID:    vendorID,
+		VendorName:  vendorName,
 	})
 	if err != nil {
 		response.Fail(c, err)
+		return
+	}
+	effPrimary, union := superadmin.ResolveLocationUnion(locationID, ids)
+	if err := superadmin.CheckBranchScope(actor.Role, actor.LocationID, nil, union); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	if !checkLocationUnion(c, h.locations, union) {
 		return
 	}
 	roleID := h.adminRoleID
@@ -721,7 +814,8 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 		NIK:                strings.TrimSpace(body.NIK),
 		PasswordHash:       string(hash),
 		RoleID:             roleID,
-		LocationID:         locationID,
+		LocationID:         effPrimary,
+		LocationIDs:        union,
 		Type:               accountType,
 		Status:             domain.UserStatusActive,
 		VendorID:           vendorID,
@@ -739,7 +833,7 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 		created, err = h.users.CreateManagedUser(ctx, pending)
 	}
 	if err != nil {
-		response.Fail(c, err)
+		failAccountWrite(c, err)
 		return
 	}
 	if !audited {
@@ -762,6 +856,7 @@ func (h *SuperAdminHandler) CreateUser(c *gin.Context) {
 		NIK:          nikPtr(created.NIK),
 		Role:         string(role),
 		LocationID:   created.LocationID,
+		LocationIDs:  echoLocationIDs(created),
 		LocationName: h.locationName(c, created.LocationID),
 		Status:       string(created.Status),
 		Type:         string(created.Type),
@@ -866,7 +961,11 @@ type updateManagedUserBody struct {
 	Phone      *string `json:"phone"`
 	NIK        *string `json:"nik"`
 	LocationID *string `json:"location_id"`
-	VendorID   *string `json:"vendor_id"`
+	// LocationIDs is the optional accept-either union: absent keeps the stored
+	// branch, present replaces the union with the primary forced first. An
+	// explicitly empty list is 400.
+	LocationIDs  *[]string `json:"location_ids"`
+	VendorID     *string   `json:"vendor_id"`
 	// VendorName is the manual vendor company tri-state (migration 000005):
 	// absent keeps, empty clears to null, filled sets (max 120 runes).
 	VendorName      *string `json:"vendor_name"`
@@ -910,6 +1009,15 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 			locationID = &parsed
 		}
 	}
+	var ids []domain.UUID
+	if body.LocationIDs != nil {
+		parsed, err := parseLocationIDs(*body.LocationIDs)
+		if err != nil {
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "location_ids tidak valid.")
+			return
+		}
+		ids = parsed
+	}
 	if body.VendorID != nil {
 		if raw := strings.TrimSpace(*body.VendorID); raw != "" {
 			parsed, err := domain.ParseUUID(raw)
@@ -935,6 +1043,20 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 		vendorName = &cleared
 	}
 	patch := domain.ManagedUserPatch{LocationID: locationID, VendorID: vendorID, VendorName: vendorName}
+	// A location key (scalar, union, or both) resolves the full union now:
+	// the primary is the sent scalar, else the stored branch, and the union
+	// is the deduped list with that primary first.
+	var echoUnion []domain.UUID
+	if locationID != nil || body.LocationIDs != nil {
+		base := locationID
+		if base == nil {
+			base = target.User.LocationID
+		}
+		effPrimary, union := superadmin.ResolveLocationUnion(base, ids)
+		patch.LocationID = effPrimary
+		patch.LocationIDs = union
+		echoUnion = union
+	}
 	if body.Name != nil {
 		trimmed := strings.TrimSpace(*body.Name)
 		patch.Name = &trimmed
@@ -970,9 +1092,13 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 	}
 	if err := superadmin.ValidateManagedUserUpdate(superadmin.ManagedUserPatchInput{
 		Role: target.Role, Name: patch.Name, Email: patch.Email, Phone: patch.Phone,
-		NIK: patch.NIK, LocationID: patch.LocationID, VendorID: patch.VendorID, VendorName: patch.VendorName, Password: body.Password,
+		NIK: patch.NIK, LocationID: patch.LocationID, LocationIDs: patch.LocationIDs,
+		VendorID: patch.VendorID, VendorName: patch.VendorName, Password: body.Password,
 	}); err != nil {
 		response.Fail(c, err)
+		return
+	}
+	if echoUnion != nil && !checkLocationUnion(c, h.locations, echoUnion) {
 		return
 	}
 	if !h.checkPasswordReset(c, id.UserID, target, body, patch) {
@@ -1004,15 +1130,16 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 	}
 	entry := auditEntry(c, id.UserID, domain.AuditActionUserUpdate,
 		domain.AuditEntityUser, &targetID, meta)
+	var wrote domain.User
 	audited := false
 	if store, ok := h.users.(domain.AuditedUserRepository); ok {
-		_, err = store.UpdateManagedUserAudited(ctx, targetID, patch, entry)
+		wrote, err = store.UpdateManagedUserAudited(ctx, targetID, patch, entry)
 		audited = true
 	} else {
-		_, err = h.users.UpdateManagedUser(ctx, targetID, patch)
+		wrote, err = h.users.UpdateManagedUser(ctx, targetID, patch)
 	}
 	if err != nil {
-		response.Fail(c, err)
+		failAccountWrite(c, err)
 		return
 	}
 	if !audited {
@@ -1032,6 +1159,14 @@ func (h *SuperAdminHandler) UpdateUser(c *gin.Context) {
 	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	// The detail read carries no union: prefer the handler-resolved union,
+	// else the adapter-echoed write result, else the primary fallback in
+	// the projection. Either way the union answered is the one committed.
+	if echoUnion != nil {
+		updated.User.LocationIDs = echoUnion
+	} else if len(wrote.LocationIDs) > 0 {
+		updated.User.LocationIDs = wrote.LocationIDs
 	}
 	response.OK(c, h.managedToAccount(updated))
 }
@@ -1053,8 +1188,12 @@ func (h *SuperAdminHandler) sendVendorApprovedNotice(ctx context.Context, vendor
 	if h.frontendBaseURL != "" {
 		loginLink = h.frontendBaseURL + loginLink
 	}
-	text := "Akun vendor Anda telah terverifikasi. Silakan masuk untuk mengajukan kunjungan."
-	htmlBody := domain.RenderBrandedActionEmail("Akun Vendor Terverifikasi", text, "Masuk", loginLink)
+	// The plain-text part carries the CTA URL (no button there); the HTML
+	// part carries the button, so the raw URL must not print twice.
+	text := "Akun vendor Anda telah terverifikasi. Silakan masuk untuk mengajukan kunjungan: " + loginLink
+	htmlBody := domain.RenderBrandedActionEmail("Akun Vendor Terverifikasi",
+		"Akun vendor Anda telah terverifikasi. Silakan masuk untuk mengajukan kunjungan lewat tombol berikut.",
+		"Masuk", loginLink)
 	if err := h.mailer.Send(ctx, []string{to}, "[THC-VMS] Akun Vendor Terverifikasi", text, htmlBody); err != nil {
 		slog.Warn("superadmin: vendor approved notice failed", "error", err)
 	}
@@ -1070,13 +1209,19 @@ func (h *SuperAdminHandler) sendEmailOverrideNotices(ctx context.Context, oldEma
 		return
 	}
 	oldText := fmt.Sprintf("Email akun THC-VMS Anda baru saja diganti menjadi %s. Jika ini bukan Anda, segera hubungi admin dan ganti kata sandi.", newEmail)
+	oldHTML := domain.RenderBrandedActionEmail("Email Akun Berubah", oldText, "", "")
 	if err := h.mailer.Send(ctx, []string{oldEmail}, "[THC-VMS] Email Akun Berubah",
-		oldText, `<p>`+html.EscapeString(oldText)+`</p>`); err != nil {
+		oldText, oldHTML); err != nil {
 		slog.Warn("superadmin: email-override old-address notice failed", "error", err)
 	}
 	newText := fmt.Sprintf("Email akun THC-VMS Anda telah berhasil diubah menjadi %s. Gunakan alamat ini untuk masuk mulai sekarang.", newEmail)
+	loginLink := "/login"
+	if h.frontendBaseURL != "" {
+		loginLink = h.frontendBaseURL + loginLink
+	}
+	newHTML := domain.RenderBrandedActionEmail("Email Akun Berhasil Diubah", newText, "Masuk", loginLink)
 	if err := h.mailer.Send(ctx, []string{newEmail}, "[THC-VMS] Email Akun Berhasil Diubah",
-		newText, `<p>`+html.EscapeString(newText)+`</p>`); err != nil {
+		newText, newHTML); err != nil {
 		slog.Warn("superadmin: email-override new-address notice failed", "error", err)
 	}
 }

@@ -46,16 +46,24 @@ func gateMaster() *fakeMasterRepo {
 	}}
 }
 
-// A visiting single-GET carries both gate timestamps plus the acting staff id;
-// a requested one carries none.
+// A visiting single-GET carries both gate timestamps, the acting staff ids of
+// BOTH gates, and their display names; a requested one carries none.
 func TestGetVisit_EnrichesGateTimes(t *testing.T) {
 	inAt := time.Date(2026, time.September, 26, 7, 30, 0, 0, time.UTC)
 	outAt := time.Date(2026, time.September, 26, 15, 5, 0, 0, time.UTC)
+	inName := "Bagus Prakoso"
+	outName := "Rina Wati"
 	gates := &fakeCheckInOut{
-		checkIn:  domain.CheckIn{VisitRequestID: domain.UUID("visit-1"), CheckedInAt: inAt, CheckedInBy: domain.UUID("sec-1")},
-		checkOut: domain.CheckOut{VisitRequestID: domain.UUID("visit-1"), CheckedOutAt: outAt, CheckedOutBy: domain.UUID("sec-1")},
-		hasIn:    true,
-		hasOut:   true,
+		checkIn: domain.CheckIn{
+			VisitRequestID: domain.UUID("visit-1"), CheckedInAt: inAt,
+			CheckedInBy: domain.UUID("sec-1"), CheckedInByName: &inName,
+		},
+		checkOut: domain.CheckOut{
+			VisitRequestID: domain.UUID("visit-1"), CheckedOutAt: outAt,
+			CheckedOutBy: domain.UUID("sec-2"), CheckedOutByName: &outName,
+		},
+		hasIn:  true,
+		hasOut: true,
 	}
 
 	repo := newFakeVisitRepo(t)
@@ -77,6 +85,15 @@ func TestGetVisit_EnrichesGateTimes(t *testing.T) {
 	if got.CheckedInBy == nil || *got.CheckedInBy != domain.UUID("sec-1") {
 		t.Errorf("CheckedInBy = %v, want sec-1", got.CheckedInBy)
 	}
+	if got.CheckedOutBy == nil || *got.CheckedOutBy != domain.UUID("sec-2") {
+		t.Errorf("CheckedOutBy = %v, want sec-2", got.CheckedOutBy)
+	}
+	if got.CheckedInByName == nil || *got.CheckedInByName != inName {
+		t.Errorf("CheckedInByName = %v, want %s", got.CheckedInByName, inName)
+	}
+	if got.CheckedOutByName == nil || *got.CheckedOutByName != outName {
+		t.Errorf("CheckedOutByName = %v, want %s", got.CheckedOutByName, outName)
+	}
 }
 
 // Before any gate record exists every enrichment pointer stays nil, and a nil
@@ -95,9 +112,11 @@ func TestGetVisit_NoGateRecordLeavesNilTimes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetVisit returned error: %v", err)
 			}
-			if got.CheckInAt != nil || got.CheckOutAt != nil || got.CheckedInBy != nil {
-				t.Errorf("gate pointers must be nil, got in=%v out=%v by=%v",
-					got.CheckInAt, got.CheckOutAt, got.CheckedInBy)
+			if got.CheckInAt != nil || got.CheckOutAt != nil || got.CheckedInBy != nil ||
+				got.CheckedOutBy != nil || got.CheckedInByName != nil || got.CheckedOutByName != nil {
+				t.Errorf("gate enrichment must be nil, got in=%v out=%v by=%v outBy=%v inName=%v outName=%v",
+					got.CheckInAt, got.CheckOutAt, got.CheckedInBy, got.CheckedOutBy,
+					got.CheckedInByName, got.CheckedOutByName)
 			}
 		})
 	}

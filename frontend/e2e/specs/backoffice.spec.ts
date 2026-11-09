@@ -110,6 +110,50 @@ async function runtimeLocationFor(h: Harness, role: 'admin' | 'admin-sambas'): P
 }
 
 /**
+ * Nama cabang akun admin saat runtime (`GET /auth/me` → `location_name`):
+ * pembanding runtime untuk satu-satunya opsi cabang di modal tambah
+ * (pengganti literal nama seed).
+ */
+async function runtimeLocationNameFor(h: Harness, role: 'admin' | 'admin-sambas'): Promise<string> {
+  const token = await h.tokenAs(role)
+  const result = await apiFetchRaw<ApiEnvelope<{ location_name: string | null }>>(
+    token,
+    'GET',
+    '/auth/me',
+  )
+  if (result.status !== 200 || result.body.success !== true) {
+    throw new Error(
+      `[e2e-t8] GET /auth/me (${role}) -> HTTP ${result.status}: ${JSON.stringify(result.body)}`,
+    )
+  }
+  const locationName = result.body.data.location_name
+  if (locationName === null || locationName === '') {
+    throw new Error(`[e2e-t8] akun ${role} tidak punya location_name saat runtime.`)
+  }
+  return locationName
+}
+
+/**
+ * Cakupan cabang akun saat runtime (`GET /auth/me` → `location_ids`): sumber
+ * kebenaran jumlah opsi di multi-select "Cabang Penugasan". Admin multi-cabang
+ * memegang lebih dari satu id; admin cabang tunggal memegang tepat satu.
+ */
+async function runtimeScopeIds(h: Harness, role: 'admin' | 'admin-sambas'): Promise<string[]> {
+  const token = await h.tokenAs(role)
+  const result = await apiFetchRaw<ApiEnvelope<{ location_ids: string[] }>>(
+    token,
+    'GET',
+    '/auth/me',
+  )
+  if (result.status !== 200 || result.body.success !== true) {
+    throw new Error(
+      `[e2e-t8] GET /auth/me (${role}) -> HTTP ${result.status}: ${JSON.stringify(result.body)}`,
+    )
+  }
+  return result.body.data.location_ids
+}
+
+/**
  * Buka menu aksi baris lalu pilih satu item.
  *
  * Query pencarian yang baru selesai dapat me-render ulang tabel tepat setelah
@@ -326,7 +370,9 @@ test('@NAV-02 admin membuka /security: form tambah + daftar pengawas cabangnya s
   // Daftar pengawas cabang HQ tampil.
   await expect(page.getByText('security1a@transhybrid.net.id', { exact: true })).toBeVisible()
 
-  // Modal tambah: field terlihat, cabang terkunci (admin tak punya select cabang).
+  // Modal tambah: field terlihat + multi-select cabang berisi SELURUH cabang
+  // dalam cakupan admin (cakupan runtime admin; cabang di luar cakupan tetap
+  // tidak pernah menjadi opsi — isolasi §6.1).
   await page.getByRole('button', { name: 'Tambah Pengawas' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
@@ -334,14 +380,36 @@ test('@NAV-02 admin membuka /security: form tambah + daftar pengawas cabangnya s
   await expect(dialog.getByLabel('Email')).toBeVisible()
   await expect(dialog.getByRole('textbox', { name: 'Kata Sandi' })).toBeVisible()
   await expect(dialog.locator('select')).toHaveCount(0)
-  await expect(dialog.getByText('(terkunci)')).toBeVisible()
+
+  // Opsi cabang = cakupan runtime admin. Satu cabang → auto-select opsi
+  // tunggal (pill nama cabang); multi-cabang → belum ada pilihan
+  // ("Pilih cabang / POP") dan wajib dipilih eksplisit.
+  const scopeIds = await runtimeScopeIds(h, 'admin')
+  expect(scopeIds.length, 'cakupan admin runtime minimal satu cabang').toBeGreaterThanOrEqual(1)
+  const primaryBranchName = await runtimeLocationNameFor(h, 'admin')
+  const branchButton = dialog.getByRole('button', { name: /Cabang Penugasan/ })
+  if (scopeIds.length === 1) {
+    await expect(branchButton).toContainText(primaryBranchName)
+  } else {
+    await expect(branchButton).toContainText('Pilih cabang / POP')
+  }
+  await branchButton.click()
+  await expect(dialog.getByRole('checkbox')).toHaveCount(scopeIds.length)
+  if (scopeIds.length === 1) {
+    await expect(dialog.getByRole('checkbox', { name: primaryBranchName })).toBeChecked()
+  } else {
+    await expect(dialog.getByRole('checkbox', { name: primaryBranchName })).not.toBeChecked()
+  }
   await dialog.getByRole('button', { name: 'Batal' }).click()
   await expect(dialog).toHaveCount(0)
 
-  // Isolasi cabang: pengawas Sambas (dibaca via API admin Sambas) tidak tampil.
-  const sambasUsers = await listSecurityUsers(await h.tokenAs('admin-sambas'))
-  expect(sambasUsers.length).toBeGreaterThan(0)
-  for (const user of sambasUsers) {
+  // Isolasi cabang: pengawas di luar cakupan admin tidak tampil.
+  const allGuards = await listSecurityUsers(await h.tokenAs('super'))
+  const outsideScope = allGuards.filter(
+    (user) => user.location_id !== null && !scopeIds.includes(user.location_id),
+  )
+  expect(outsideScope.length).toBeGreaterThan(0)
+  for (const user of outsideScope) {
     await expect(page.getByText(user.email, { exact: true })).toHaveCount(0)
   }
 })
@@ -367,6 +435,15 @@ test('@AUTH-07 admin menambah pengawas baru via UI dan lokasinya = cabang admin'
     await dialog.getByLabel('Nama Lengkap').fill(name)
     await dialog.getByLabel('Email').fill(email)
     await dialog.getByRole('textbox', { name: 'Kata Sandi' }).fill(PASSWORD)
+
+    // Admin multi-cabang: pilih cabang utama secara eksplisit (tidak ada
+    // auto-select saat opsi lebih dari satu).
+    const primaryBranchName = await runtimeLocationNameFor(h, 'admin')
+    const branchButton = dialog.getByRole('button', { name: /Cabang Penugasan/ })
+    await branchButton.click()
+    await dialog.getByRole('checkbox', { name: primaryBranchName }).check()
+    await branchButton.click()
+
     await dialog.getByRole('button', { name: 'Tambah Pengawas' }).click()
 
     await expectToast(page, `Pengawas ${name} berhasil ditambahkan`)
@@ -647,29 +724,35 @@ test('@EDT-03 admin ubah pengawas se-cabang; lintas cabang ditolak (UI & API)', 
 }) => {
   const tracker = makeTracker()
   const hqEmail = uniqueEmail(h, 'security')
-  const sambasEmail = uniqueEmail(h, 'security')
+  const outsideEmail = uniqueEmail(h, 'security')
   tracker.track(hqEmail)
-  tracker.track(sambasEmail)
+  tracker.track(outsideEmail)
   const hqName = `${h.unique('EDT03HQ')} Pengawas`
   const hqUpdatedName = `${hqName} Diubah`
-  const sambasName = `${h.unique('EDT03SAMBAS')} Pengawas`
+  const outsideName = `${h.unique('EDT03OUT')} Pengawas`
 
   try {
     const adminToken = await h.tokenAs('admin')
     const superToken = await h.tokenAs('super')
 
-    // Pengawas cabang sendiri (lokasi runtime akun admin); cabang lain (lokasi
-    // runtime akun admin-sambas) dibuat oleh super.
+    // Pengawas cabang sendiri (lokasi runtime akun admin) + pengawas cabang di
+    // LUAR cakupan admin (dicari dari daftar global, bukan cabang sekunder).
     const adminLocationId = await runtimeLocationFor(h, 'admin')
-    const sambasLocationId = await runtimeLocationFor(h, 'admin-sambas')
+    const adminScope = await runtimeScopeIds(h, 'admin')
+    const outsideLocationId = (await listSecurityUsers(superToken)).find(
+      (user) => user.location_id !== null && !adminScope.includes(user.location_id),
+    )?.location_id
+    if (outsideLocationId === undefined || outsideLocationId === null) {
+      throw new Error('[e2e-t8] tidak ada cabang di luar cakupan admin untuk EDT-03.')
+    }
     const hqUser = await createSecurityUser(adminToken, { name: hqName, email: hqEmail })
     expect(hqUser.location_id).toBe(adminLocationId)
-    const sambasUser = await createSecurityUser(superToken, {
-      name: sambasName,
-      email: sambasEmail,
-      locationId: sambasLocationId,
+    const outsideUser = await createSecurityUser(superToken, {
+      name: outsideName,
+      email: outsideEmail,
+      locationId: outsideLocationId,
     })
-    expect(sambasUser.location_id).toBe(sambasLocationId)
+    expect(outsideUser.location_id).toBe(outsideLocationId)
 
     const page = await h.openAs('admin')
     await gotoApp(page, '/security')
@@ -693,18 +776,18 @@ test('@EDT-03 admin ubah pengawas se-cabang; lintas cabang ditolak (UI & API)', 
     const hqList = await listSecurityUsers(adminToken)
     expect(hqList.find((user) => user.email === hqEmail)?.name).toBe(hqUpdatedName)
 
-    // 2) Pengawas cabang lain tidak muncul di daftar admin (tak bisa diubah).
-    await fillSearch(page, 'Cari pengawas', sambasEmail)
-    await expect(tableRowWith(page, sambasEmail)).toHaveCount(0)
-    await expect(page.getByRole('button', { name: `Aksi untuk ${sambasName}` })).toHaveCount(0)
+    // 2) Pengawas di luar cakupan tidak muncul di daftar admin (tak bisa diubah).
+    await fillSearch(page, 'Cari pengawas', outsideEmail)
+    await expect(tableRowWith(page, outsideEmail)).toHaveCount(0)
+    await expect(page.getByRole('button', { name: `Aksi untuk ${outsideName}` })).toHaveCount(0)
     await expect(page.getByText('Tidak ada pengawas yang cocok')).toBeVisible()
 
     // 3) Perilaku nyata di API: admin lintas cabang ditolak 403.
-    const forbidden = await apiFetchRaw(adminToken, 'PATCH', `/users/security/${sambasUser.id}`, {
-      name: `${sambasName} Diubah`,
+    const forbidden = await apiFetchRaw(adminToken, 'PATCH', `/users/security/${outsideUser.id}`, {
+      name: `${outsideName} Diubah`,
     })
     console.log(
-      `[e2e-t8] admin PATCH pengawas Sambas -> HTTP ${forbidden.status} ${JSON.stringify(forbidden.body)}`,
+      `[e2e-t8] admin PATCH pengawas di luar cakupan -> HTTP ${forbidden.status} ${JSON.stringify(forbidden.body)}`,
     )
     expect(forbidden.status).toBe(403)
 

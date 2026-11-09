@@ -14,10 +14,14 @@ import (
 
 // Actor is the authenticated caller of a gate operation: the staff id, the
 // RBAC role and, for branch-locked roles, the caller's own location.
+// Branches and IsGlobal carry the stashed thc.scope union; an empty union
+// with IsGlobal false falls back to the scalar LocationID rule.
 type Actor struct {
 	ID         domain.UUID
 	Role       domain.RoleName
 	LocationID *domain.UUID
+	Branches   []domain.UUID
+	IsGlobal   bool
 }
 
 // Dependencies wires the gate service to its ports. Clock is mandatory in
@@ -85,11 +89,22 @@ func authorizeGateRole(role domain.RoleName) error {
 }
 
 // authorizeBranch locks admin and security to their own location. super_admin
-// bypasses the filter (approval matrix "Ya (Bypass)"); a branch-locked actor
-// without a location is refused rather than treated as global.
+// bypasses the filter (approval matrix "Ya (Bypass)"); a stashed global
+// passes; a union member passes even when the target differs from the scalar
+// primary; anything else falls back to the scalar rule, so callers without a
+// stash decide exactly as before. A branch-locked actor without a location
+// is refused rather than treated as global.
 func authorizeBranch(actor Actor, visit domain.VisitRequest) error {
 	if domain.IsSuperAdminRole(actor.Role) {
 		return nil
+	}
+	if actor.IsGlobal {
+		return nil
+	}
+	for _, id := range actor.Branches {
+		if id == visit.LocationID {
+			return nil
+		}
 	}
 	if actor.LocationID == nil || *actor.LocationID != visit.LocationID {
 		return domain.ForbiddenBranch()

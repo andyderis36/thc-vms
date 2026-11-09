@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -61,6 +62,26 @@ type NotificationTemplate struct {
 	Audience NotificationAudience
 }
 
+// RoleLabel maps a role row name onto its single Indonesian display label.
+// It is THE one source for every user-facing "name (role)" rendering: the
+// lifecycle emails print it next to the acting person's name, so a role word
+// can never drift between channels. An unknown role yields "" and callers
+// omit the parenthetical instead of inventing one.
+func RoleLabel(roleName string) string {
+	switch roleName {
+	case string(RoleSuperAdmin), string(RoleDevSuperAdmin):
+		return "Superadmin"
+	case string(RoleAdmin):
+		return "Admin Cabang"
+	case string(RoleSecurity):
+		return "Petugas Keamanan"
+	case string(RoleVendor):
+		return "Vendor/Mitra"
+	default:
+		return ""
+	}
+}
+
 // TransitionNotification maps a visit status move onto its notification, or nil
 // when the move produces no notice. system is true when the writer was the
 // automatic worker (status_history.changed_by IS NULL).
@@ -77,28 +98,28 @@ func TransitionNotification(to VisitStatus, system bool, visitCode string) *Noti
 	case VisitStatusRescheduled:
 		return &NotificationTemplate{
 			Type:     NotificationVisitRescheduled,
-			Title:    "Jadwal kunjungan diperbarui",
+			Title:    "Jadwal Diubah",
 			Message:  "Permintaan " + visitCode + " dijadwalkan ulang.",
 			Audience: NotificationAudienceStaff,
 		}
 	case VisitStatusApproved:
 		return &NotificationTemplate{
 			Type:     NotificationVisitApproved,
-			Title:    "Kunjungan disetujui",
+			Title:    "Kunjungan Disetujui",
 			Message:  "Permintaan " + visitCode + " telah disetujui.",
 			Audience: NotificationAudienceVendor,
 		}
 	case VisitStatusRejected:
 		return &NotificationTemplate{
 			Type:     NotificationVisitRejected,
-			Title:    "Kunjungan ditolak",
+			Title:    "Kunjungan Ditolak",
 			Message:  "Permintaan " + visitCode + " ditolak.",
 			Audience: NotificationAudienceVendor,
 		}
 	case VisitStatusVisiting:
 		return &NotificationTemplate{
 			Type:     NotificationVisitCheckIn,
-			Title:    "Check-in tamu",
+			Title:    "Check-in Tercatat",
 			Message:  "Tamu " + visitCode + " telah check-in.",
 			Audience: NotificationAudienceStaff,
 		}
@@ -108,7 +129,7 @@ func TransitionNotification(to VisitStatus, system bool, visitCode string) *Noti
 		}
 		return &NotificationTemplate{
 			Type:     NotificationVisitCheckOut,
-			Title:    "Check-out tamu",
+			Title:    "Check-out Tercatat",
 			Message:  "Tamu " + visitCode + " telah check-out.",
 			Audience: NotificationAudienceStaff,
 		}
@@ -116,7 +137,7 @@ func TransitionNotification(to VisitStatus, system bool, visitCode string) *Noti
 		if system {
 			return &NotificationTemplate{
 				Type:     NotificationVisitAutoCancelled,
-				Title:    "Kunjungan dibatalkan otomatis",
+				Title:    "Kunjungan Dibatalkan Otomatis",
 				Message:  "Permintaan " + visitCode + " batal otomatis: tanpa persetujuan 7 hari.",
 				Audience: NotificationAudienceVendor,
 			}
@@ -125,7 +146,7 @@ func TransitionNotification(to VisitStatus, system bool, visitCode string) *Noti
 	case VisitStatusNotVisit:
 		return &NotificationTemplate{
 			Type:     NotificationVisitAutoCancelled,
-			Title:    "Kunjungan dibatalkan otomatis",
+			Title:    "Kunjungan Dibatalkan Otomatis",
 			Message:  "Permintaan " + visitCode + " batal otomatis: tamu tidak check-in.",
 			Audience: NotificationAudienceVendor,
 		}
@@ -150,8 +171,8 @@ func CreatedNotification(visitCode string) *NotificationTemplate {
 func ReminderNotification(visitCode string) *NotificationTemplate {
 	return &NotificationTemplate{
 		Type:     NotificationVisitReminder,
-		Title:    "Pengingat kunjungan",
-		Message:  "Kunjungan " + visitCode + " akan dimulai sebentar lagi.",
+		Title:    "Pengingat Kunjungan",
+		Message:  "Kunjungan " + visitCode + " akan dimulai dalam sekitar 45 menit.",
 		Audience: NotificationAudienceVendor,
 	}
 }
@@ -159,21 +180,30 @@ func ReminderNotification(visitCode string) *NotificationTemplate {
 // HumanCancelledNotification is the notice for a human-driven cancellation:
 // a vendor cancelling its own visit tells the branch staff (byVendor=true),
 // while an admin/superadmin cancelling a vendor visit tells the vendor
-// (byVendor=false). The automatic worker path never builds this template -
-// it keeps emitting visit_auto_cancelled through TransitionNotification.
-func HumanCancelledNotification(visitCode string, byVendor bool) *NotificationTemplate {
+// (byVendor=false). actor is the resolved display fragment of the person who
+// cancelled, e.g. "Budi Santoso (Admin Cabang)"; an empty actor falls back to
+// the legacy role word so the message never reads as actorless. The automatic
+// worker path never builds this template - it keeps emitting
+// visit_auto_cancelled through TransitionNotification.
+func HumanCancelledNotification(visitCode string, byVendor bool, actor string) *NotificationTemplate {
 	if byVendor {
+		if strings.TrimSpace(actor) == "" {
+			actor = "vendor"
+		}
 		return &NotificationTemplate{
 			Type:     NotificationVisitCancelled,
-			Title:    "Kunjungan dibatalkan vendor",
-			Message:  "Permintaan " + visitCode + " dibatalkan oleh vendor.",
+			Title:    "Kunjungan Dibatalkan Vendor",
+			Message:  "Permintaan " + visitCode + " dibatalkan oleh " + actor + ".",
 			Audience: NotificationAudienceStaff,
 		}
 	}
+	if strings.TrimSpace(actor) == "" {
+		actor = "admin"
+	}
 	return &NotificationTemplate{
 		Type:     NotificationVisitCancelled,
-		Title:    "Kunjungan dibatalkan",
-		Message:  "Permintaan " + visitCode + " dibatalkan oleh admin.",
+		Title:    "Kunjungan Dibatalkan",
+		Message:  "Permintaan " + visitCode + " dibatalkan oleh " + actor + ".",
 		Audience: NotificationAudienceVendor,
 	}
 }

@@ -8,14 +8,22 @@ flowchart TD
 
     subgraph AuthLayer["Auth & Middleware Layer (Go Gin)"]
         MW1["Rate Limiter (Anti-Bruteforce Guard)"]
-        MW2["JWT Authenticator (Claims: sub, role, location_id, location_name)"]
-        MW3["RBAC & Branch Scope Enforcer"]
+        MW2["JWT Authenticator (Claims: sub, role, location_id, location_name) + per-request scope stash (thc.scope)"]
+        MW3["RBAC & Multi-Branch Scope Enforcer"]
         
         subgraph PolicyRules["Scope Isolation Rules"]
-            R1["Superadmin: Bypass Location Filter (Global Control)"]
-            R2["Admin: Scoped to location_id (Approval, Security Mgmt & Check-in)"]
-            R3["Security: Scoped to location_id (Gate Ops & Check-in Only)"]
-            R4["Vendor: Scoped to vendor_user_id == user.id"]
+            R1["Superadmin: Bypass Location Filter (Global Control) — is_global=true (nasional) atau menyempit ke satu cabang"]
+            R2["Admin/Koordinator: Scoped to user_locations union (location_id = ANY(location_ids)) + EXISTS untuk users/notifikasi"]
+            R3["Security: Scoped to user_locations union (Gate Ops & Check-in Only)"]
+            R4["Vendor: Scoped to vendor_user_id == user.id (owner-path, tidak terpengaruh multi-branch)"]
+            R5["Multi-branch guard: resolver AccessibleLocationIDs membaca user_locations per request; union kosong + is_global=false = fail-closed"]
+        end
+        
+        subgraph ScopeResolver["Per-Request Scope Resolver"]
+            SR1["ScopeStore.ListUserLocationIDs (user_locations)"]
+            SR2["AccessibleLocationIDs (super_admin/vendor short-circuit; branch-bound resolve union)"]
+            SR3["WithScope -> thc.scope stash (LocationIDs, IsGlobal)"]
+            SR1 --> SR2 --> SR3
         end
 
         subgraph Adapters["Modular Auth Adapter (KISS & Extensible)"]
@@ -42,7 +50,9 @@ flowchart TD
 
     UI3 -- "HTTPS REST Request (Bearer JWT)" --> MW1
     MW1 --> MW2 --> MW3
+    MW2 -.-> ScopeResolver
     MW3 -.-> PolicyRules
+    MW3 -.-> ScopeResolver
     MW3 --> Adapters
     Adapters --> S1
     MW3 --> S2

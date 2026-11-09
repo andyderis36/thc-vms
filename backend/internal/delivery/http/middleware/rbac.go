@@ -71,6 +71,11 @@ func CheckBranch(id deliveryhttp.Identity, target domain.UUID) error {
 // super_admin may pass nil (every branch) or narrow to ?location_id=, while
 // admin and security are locked to their own branch and vendor is refused.
 // An unparseable filter can never widen the scope, so it fails closed.
+//
+// Listing reads stay scalar in this wave: the stashed thc.scope union widens
+// the write and single-read guards only (CheckBranchFor, requireBranchAccess,
+// authorizeBranch, canReadAvatar). Flipping the listing queries to the union
+// waits for the dual-write that backfills user_locations.
 func EffectiveScope(id deliveryhttp.Identity, queryLocation string) (*domain.UUID, error) {
 	if domain.IsSuperAdminRole(id.Role) {
 		if queryLocation == "" {

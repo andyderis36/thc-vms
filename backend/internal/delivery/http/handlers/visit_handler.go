@@ -29,7 +29,11 @@ type VisitService interface {
 	Cancel(ctx context.Context, actor visit.Actor, visitID domain.UUID, note string) error
 	Reschedule(ctx context.Context, actor visit.Actor, visitID domain.UUID, start, end time.Time, reason string) error
 	UpdateVisitorContact(ctx context.Context, actor visit.Actor, visitID, visitorID domain.UUID, phone, idNumber *string) (domain.Visitor, error)
+	AttachWorkPhoto(ctx context.Context, actor visit.Actor, visitID domain.UUID, kind, url string) (domain.WorkPhoto, bool, error)
 	ListJabatan(ctx context.Context) ([]string, error)
+	ListVendorSuggestions(ctx context.Context, actor visit.Actor, query string) ([]domain.VendorSuggestion, error)
+	ListMemberSuggestions(ctx context.Context, actor visit.Actor, in visit.MemberSuggestionsInput) ([]domain.MemberSuggestion, error)
+	GetMemberSuggestion(ctx context.Context, actor visit.Actor, visitorID domain.UUID) (domain.MemberSuggestionDetail, error)
 }
 
 // Compile-time proof that the production service wires into the handler.
@@ -84,8 +88,8 @@ func (h *VisitHandler) List(c *gin.Context) {
 	// (midnight UTC); a date-only upper bound shifts +24h so the day stays
 	// inclusive under the half-open SQL window. Empty means unfiltered.
 	// A bad value or a reversed window is a 400, never a silent listing.
-	// The pair only NARROWS within the actor's scope (usecase list.go assigns
-	// LocationID/VendorUserID unconditionally): it can never widen visibility,
+	// The pair only NARROWS within the actor's scope (usecase list.go owns the
+	// LocationID/VendorUserID assignment): it can never widen visibility,
 	// including for security whose scope stays the branch equality.
 	from, err := parseVisitDateBound(strings.TrimSpace(c.Query("date_from")), false)
 	if err != nil {
@@ -121,10 +125,11 @@ func (h *VisitHandler) List(c *gin.Context) {
 
 	// location_id is the documented optional branch filter (openapi L264-267,
 	// PRD L109: superadmin may filter by branch). It is passed through as a
-	// NARROWING hint only: the usecase assigns the actor's own scope
-	// unconditionally for admin/security/vendor, so supplying another branch id
-	// here can never widen a caller's visibility. An unparsable value is a
-	// client error rather than a silently dropped filter.
+	// NARROWING hint only: the usecase confines it to the actor's own scope
+	// (super_admin anywhere; admin/security inside their union, a foreign id
+	// being a 403; vendor ignores it), so supplying another branch id here can
+	// never widen a caller's visibility. An unparsable value is a client error
+	// rather than a silently dropped filter.
 	if raw := strings.TrimSpace(c.Query("location_id")); raw != "" {
 		parsed, err := domain.ParseUUID(raw)
 		if err != nil {
@@ -303,6 +308,15 @@ func bindJSON(c *gin.Context, dst any) bool {
 func checkCreateBody(body createVisitBody) string {
 	if strings.TrimSpace(body.LocationID) == "" {
 		return "Lokasi kunjungan wajib diisi."
+	}
+	// A provided account id must at least be a UUID; whether it names an
+	// active vendor account is resolved by the usecase.
+	if body.VendorUserID != nil {
+		if id := strings.TrimSpace(*body.VendorUserID); id != "" {
+			if _, err := domain.ParseUUID(id); err != nil {
+				return "ID akun vendor tidak valid."
+			}
+		}
 	}
 	// Either a catalogue purpose or the free-typed "tujuan lain" satisfies
 	// the visit reason; the usecase repeats the rule for callers that bypass

@@ -53,6 +53,11 @@ type ManagedUserPatch struct {
 	Phone      *string
 	NIK        *string
 	LocationID *UUID
+	// LocationIDs is the full branch-coverage union replacing the coverage
+	// rows: nil keeps the stored branch (derived from the RETURNING primary
+	// by the adapter), a non-nil value is written verbatim after dedupe by
+	// the caller, with LocationID as its first element.
+	LocationIDs []UUID
 	VendorID   *UUID
 	// VendorName carries the manual vendor company tri-state (migration 000005),
 	// mirroring the phone empty-means-null openapi rule: nil keeps the stored

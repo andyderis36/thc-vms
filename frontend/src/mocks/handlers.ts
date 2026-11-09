@@ -61,6 +61,19 @@ function stringField(
   return typeof value === 'string' ? value : undefined;
 }
 
+/**
+ * Kontrak accept-either: `location_ids[]` bila payload memuat array
+ * (entri non-string dibuang), `undefined` bila tidak — pemanggil yang
+ * menjatuhkan fallback ke `location_id` tunggal.
+ */
+function locationIdsArrayField(
+  body: Record<string, unknown>,
+): string[] | undefined {
+  const raw = body['location_ids'];
+  if (!Array.isArray(raw)) return undefined;
+  return (raw as unknown[]).filter((item): item is string => typeof item === 'string');
+}
+
 function ok(data: unknown, status = 200): Response {
   return HttpResponse.json({ success: true, data }, { status });
 }
@@ -318,21 +331,6 @@ function findVisit(id: string): VisitDetail | undefined {
   );
 }
 
-/** Payload QR stabil per kunjungan; sengaja BUKAN visit_id mentah. */
-function qrPayloadFor(visit: VisitDetail): string {
-  const raw = `${visit.id}:${visit.visit_id}:thc-vms-gate`;
-  let hashA = 0x811c9dc5;
-  let hashB = 0x01000193;
-  for (let index = 0; index < raw.length; index += 1) {
-    const charCode = raw.charCodeAt(index);
-    hashA = Math.imul(hashA ^ charCode, 0x01000193) >>> 0;
-    hashB = Math.imul(hashB + charCode, 0x811c9dc5) >>> 0;
-  }
-  const hexA = hashA.toString(16).padStart(8, '0').toUpperCase();
-  const hexB = hashB.toString(16).padStart(8, '0').toUpperCase();
-  return `THC1-${hexA}-${hexB}`;
-}
-
 function generateVisitCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   for (;;) {
@@ -565,6 +563,36 @@ export const handlers: RequestHandler[] = [
     await delay(150);
     const vendors: Vendor[] = db.vendors;
     return ok(vendors);
+  }),
+
+  // Katalog vendor aktif TANPA auth — layar pendaftaran mandiri (browser
+  // tanpa sesi tidak boleh menembak `/vendors` yang terautentikasi).
+  http.get(`${API_BASE}/public/vendors`, async () => {
+    await delay(150);
+    const vendors: Vendor[] = db.vendors;
+    return ok(vendors);
+  }),
+
+  // Akun vendor aktif (admin/super_admin) untuk pemilih pemilik kunjungan.
+  http.get(`${API_BASE}/users/vendors`, async ({ request }) => {
+    const auth = getAuthUser(request);
+    if (auth === null) {
+      return unauthorized();
+    }
+    if (auth.role !== 'admin' && !isSuperAdminRole(auth.role)) {
+      return fail('FORBIDDEN', 'Akses ditolak.', 403);
+    }
+    await delay(150);
+    return ok(
+      db.users
+        .filter((user) => user.role === 'vendor' && user.status === 'active')
+        .map((user) => ({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          company: user.vendor_name,
+        })),
+    );
   }),
 
   // Saran jabatan (distinct, A-Z, maks 50) — mock statis: cukup untuk
@@ -1136,21 +1164,25 @@ export const handlers: RequestHandler[] = [
           400,
         );
       }
-      const phoneRaw = stringField(body, 'phone');
-      const phone = phoneRaw?.trim() ?? '';
-      if (phoneRaw === undefined || phone === '') {
-        return fail(
-          'BAD_REQUEST',
-          'Nomor telepon wajib diisi.',
-          400,
-        );
-      }
-      if (!isValidPhone(phone)) {
-        return fail('BAD_REQUEST', PHONE_DIGIT_MESSAGE, 400);
-      }
-      visitor.phone = phone;
-      visitor.phone_edited = true;
-      return ok(visitor);
+       const phoneRaw = stringField(body, 'phone');
+       const phone = phoneRaw?.trim() ?? '';
+       if (phoneRaw === undefined || phone === '') {
+         return fail(
+           'BAD_REQUEST',
+           'Nomor telepon wajib diisi.',
+           400,
+         );
+       }
+       const normalized = phone.replace(/[^0-9]/g, '').replace(/^62/, '0');
+       const phoneEdited = normalized !== visitor.phone;
+       if (!isValidPhone(phone)) {
+         return fail('BAD_REQUEST', PHONE_DIGIT_MESSAGE, 400);
+       }
+       if (phoneEdited) {
+         visitor.phone = normalized;
+         visitor.phone_edited = true;
+       }
+       return ok(visitor);
     },
   ),
 
@@ -1173,7 +1205,7 @@ export const handlers: RequestHandler[] = [
     }
     const payload: QrPayload = {
       visit_id: visit.visit_id,
-      qr_code_payload: qrPayloadFor(visit),
+      qr_code_payload: visit.visit_id,
     };
     return ok(payload);
   }),
@@ -1672,19 +1704,31 @@ export const handlers: RequestHandler[] = [
       return parsedNik.error;
     }
     let locationId: string | null = null;
+    let locationIds: string[] | null = null;
     let locationName: string | null = null;
     let vendorName: string | null = null;
     if (role === 'admin') {
-      const requested = stringField(body, 'location_id') ?? '';
-      if (requested === '') {
+      const fromArray = locationIdsArrayField(body);
+      const single = stringField(body, 'location_id');
+      const requestedIds =
+        fromArray ?? (single !== undefined && single !== '' ? [single] : []);
+      if (requestedIds.length === 0) {
         return fail('BAD_REQUEST', 'Admin wajib memiliki cabang penugasan.', 400);
       }
-      const location = db.locations.find((loc) => loc.id === requested);
-      if (location === undefined) {
-        return fail('BAD_REQUEST', 'Lokasi tidak valid.', 400);
+      const resolvedIds: string[] = [];
+      let primaryName: string | null = null;
+      for (const requested of requestedIds) {
+        const location = db.locations.find((loc) => loc.id === requested);
+        if (location === undefined) {
+          return fail('BAD_REQUEST', 'Lokasi tidak valid.', 400);
+        }
+        if (resolvedIds.includes(location.id)) continue;
+        if (resolvedIds.length === 0) primaryName = location.name;
+        resolvedIds.push(location.id);
       }
-      locationId = location.id;
-      locationName = location.name;
+      locationId = resolvedIds[0] ?? null;
+      locationIds = resolvedIds;
+      locationName = primaryName;
       const vendorId = stringField(body, 'vendor_id') ?? '';
       const vendorNameManual = stringField(body, 'vendor_name') ?? '';
       if (vendorId !== '' || vendorNameManual !== '') {
@@ -1714,6 +1758,7 @@ export const handlers: RequestHandler[] = [
       nik: parsedNik.nik,
       role: role as User['role'],
       location_id: locationId,
+      ...(locationIds !== null ? { location_ids: locationIds } : {}),
       location_name: locationName,
       status: 'active',
       type: role === 'admin' ? 'internal' : 'external',
@@ -1799,6 +1844,10 @@ export const handlers: RequestHandler[] = [
     const email = stringField(body, 'email');
     const phone = stringField(body, 'phone');
     const locationId = stringField(body, 'location_id');
+    const locationIds = locationIdsArrayField(body);
+    if (locationIds !== undefined && locationIds.length === 0) {
+      return fail('BAD_REQUEST', 'Daftar cabang tidak boleh kosong.', 400);
+    }
     const vendorId = stringField(body, 'vendor_id');
     // vendor_name: string = set manual ('' = bersihkan kolom); absen = biarkan.
     const vendorNameField =
@@ -1811,6 +1860,7 @@ export const handlers: RequestHandler[] = [
       email === undefined &&
       phone === undefined &&
       locationId === undefined &&
+      locationIds === undefined &&
       vendorId === undefined &&
       vendorNameField === undefined &&
       password === undefined &&
@@ -1833,7 +1883,10 @@ export const handlers: RequestHandler[] = [
     ) {
       return fail('BAD_REQUEST', 'vendor_id hanya untuk role vendor.', 400);
     }
-    if (target.role === 'vendor' && locationId !== undefined) {
+    if (
+      target.role === 'vendor' &&
+      (locationId !== undefined || locationIds !== undefined)
+    ) {
       return fail('BAD_REQUEST', 'Role vendor tidak memakai location_id.', 400);
     }
     // NIK cermin BE: ditolak untuk security/super_admin; untuk admin/vendor
@@ -1882,7 +1935,14 @@ export const handlers: RequestHandler[] = [
     if (name !== undefined) target.name = name;
     if (email !== undefined) target.email = email;
     if (phone !== undefined) target.phone = phone;
-    if (locationId !== undefined) target.location_id = locationId;
+    if (locationIds !== undefined) {
+      const primaryLocationId = locationIds[0];
+      target.location_ids = locationIds;
+      if (primaryLocationId !== undefined) target.location_id = primaryLocationId;
+    } else if (locationId !== undefined) {
+      target.location_id = locationId;
+      target.location_ids = [locationId];
+    }
     if (nextNik !== undefined) target.nik = nextNik;
     if (target.role === 'vendor') {
       if (vendorId !== undefined) {

@@ -120,6 +120,7 @@ func (h *UserHandler) userToAccount(u domain.User, locationName *string) account
 		NIK:          nikPtr(u.NIK),
 		Role:         string(domain.RoleSecurity),
 		LocationID:   u.LocationID,
+		LocationIDs:  echoLocationIDs(u),
 		LocationName: locationName,
 		Status:       string(u.Status),
 		Type:         string(u.Type),
@@ -155,20 +156,53 @@ func (h *UserHandler) ListSecurity(c *gin.Context) {
 		response.Fail(c, domain.ErrForbiddenBranch)
 		return
 	}
-	var scope *domain.UUID
+	// Resolve the caller's branch union for the read. super_admin is global
+	// unless it narrows with ?location_id=; admin uses the stashed union with
+	// a fallback to its primary branch.
+	var locationIDs []domain.UUID
+	isGlobal := false
 	if domain.IsSuperAdminRole(id.Role) {
 		if raw := strings.TrimSpace(c.Query("location_id")); raw != "" {
-			locationID := domain.UUID(raw)
-			scope = &locationID
+			locationIDs = []domain.UUID{domain.UUID(raw)}
+			isGlobal = false
+		} else {
+			locationIDs = []domain.UUID{}
+			isGlobal = true
 		}
 	} else {
 		if id.LocationID == nil {
 			response.Fail(c, domain.ErrForbiddenBranch)
 			return
 		}
-		scope = id.LocationID
+		// Build the union from the stash, falling back to the primary branch.
+		scopeIDs := []domain.UUID{}
+		if sc, ok := deliveryhttp.ScopeFrom(c); ok {
+			scopeIDs = sc.LocationIDs
+		}
+		if len(scopeIDs) == 0 {
+			scopeIDs = []domain.UUID{*id.LocationID}
+		}
+		if raw := strings.TrimSpace(c.Query("location_id")); raw != "" {
+			narrow := domain.UUID(raw)
+			inScope := false
+			for _, sid := range scopeIDs {
+				if sid == narrow {
+					inScope = true
+					break
+				}
+			}
+			if !inScope {
+				response.Fail(c, domain.ErrForbiddenBranch)
+				return
+			}
+			locationIDs = []domain.UUID{narrow}
+			isGlobal = false
+		} else {
+			locationIDs = scopeIDs
+			isGlobal = false
+		}
 	}
-	accounts, err := h.users.ListSecurity(c.Request.Context(), scope)
+	accounts, err := h.users.ListSecurity(c.Request.Context(), locationIDs, isGlobal)
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -190,6 +224,9 @@ type createSecurityBody struct {
 	Phone      string  `json:"phone"`
 	Password   string  `json:"password"`
 	LocationID string  `json:"location_id"`
+	// LocationIDs is the optional accept-either union: present wins with the
+	// primary forced first, absent means the union is the primary alone.
+	LocationIDs []string `json:"location_ids"`
 	NIK        *string `json:"nik"`
 }
 
@@ -228,20 +265,76 @@ func (h *UserHandler) CreateSecurity(c *gin.Context) {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "NIK hanya untuk role admin dan vendor.")
 		return
 	}
+	ids, err := parseLocationIDs(body.LocationIDs)
+	if err != nil {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "location_ids tidak valid.")
+		return
+	}
 	var locationID *domain.UUID
+	// Resolve the caller's branch scope (stashed union) for the admin path;
+	// nil when no stash is present (token-free test doubles) so the guard
+	// falls back to the scalar primary.
+	var scopeIDs []domain.UUID
+	if id.Role == domain.RoleAdmin {
+		sc, ok := deliveryhttp.ScopeFrom(c)
+		if ok {
+			scopeIDs = sc.LocationIDs
+		}
+	}
 	if id.Role == domain.RoleAdmin {
 		if id.LocationID == nil {
 			response.Fail(c, domain.ErrForbiddenBranch)
 			return
 		}
-		locationID = id.LocationID
+		// Admin may assign any branch inside its own scope (create path).
+		if raw := strings.TrimSpace(body.LocationID); raw != "" {
+			parsed, err := domain.ParseUUID(raw)
+			if err != nil {
+				response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "location_id tidak valid.")
+				return
+			}
+			locationID = &parsed
+		}
+		if body.LocationIDs != nil {
+			if len(ids) == 0 {
+				response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "location_ids tidak boleh kosong.")
+				return
+			}
+		}
+		// Default to the caller's primary branch when nothing is sent.
+		if locationID == nil && body.LocationIDs == nil {
+			locationID = id.LocationID
+		}
+		effPrimary, union := superadmin.ResolveLocationUnion(locationID, ids)
+		// Validate scope before any write/catalogue read.
+		if err := superadmin.CheckBranchScope(id.Role, id.LocationID, scopeIDs, union); err != nil {
+			response.Fail(c, err)
+			return
+		}
+		// Re-resolve is done again below; keep locationID as parsed for the
+		// shared path. Reset to the resolved primary for consistency.
+		_ = effPrimary
 	} else {
-		if strings.TrimSpace(body.LocationID) == "" {
+		if strings.TrimSpace(body.LocationID) == "" && body.LocationIDs == nil {
 			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "location_id wajib diisi.")
 			return
 		}
-		parsed := domain.UUID(strings.TrimSpace(body.LocationID))
-		locationID = &parsed
+		if raw := strings.TrimSpace(body.LocationID); raw != "" {
+			parsed, err := domain.ParseUUID(raw)
+			if err != nil {
+				response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "location_id tidak valid.")
+				return
+			}
+			locationID = &parsed
+		}
+		if body.LocationIDs != nil && len(ids) == 0 {
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "location_ids tidak boleh kosong.")
+			return
+		}
+	}
+	effPrimary, union := superadmin.ResolveLocationUnion(locationID, ids)
+	if !checkLocationUnion(c, h.locations, union) {
+		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcryptCost)
 	if err != nil {
@@ -254,7 +347,8 @@ func (h *UserHandler) CreateSecurity(c *gin.Context) {
 		Phone:        validation.NormalizePhone(body.Phone),
 		PasswordHash: string(hash),
 		RoleID:       h.securityRoleID,
-		LocationID:   locationID,
+		LocationID:   effPrimary,
+		LocationIDs:  union,
 		Type:         domain.UserTypeInternal,
 		Status:       domain.UserStatusActive,
 	}
@@ -270,7 +364,7 @@ func (h *UserHandler) CreateSecurity(c *gin.Context) {
 		created, err = h.users.Create(ctx, pending)
 	}
 	if err != nil {
-		response.Fail(c, err)
+		failAccountWrite(c, err)
 		return
 	}
 	if !audited {
@@ -330,7 +424,7 @@ func (h *UserHandler) UpdateSecurityStatus(c *gin.Context) {
 		return
 	}
 	if target.LocationID != nil {
-		if err := middleware.CheckBranch(id, *target.LocationID); err != nil {
+		if err := middleware.CheckBranchFor(c, *target.LocationID); err != nil {
 			response.Fail(c, err)
 			return
 		}
@@ -414,7 +508,7 @@ func (h *UserHandler) DeleteSecurity(c *gin.Context) {
 		return
 	}
 	if target.LocationID != nil {
-		if err := middleware.CheckBranch(id, *target.LocationID); err != nil {
+		if err := middleware.CheckBranchFor(c, *target.LocationID); err != nil {
 			response.FailWith(c, http.StatusForbidden, "FORBIDDEN_BRANCH", "Tidak berhak menghapus akun security dari cabang lain.")
 			return
 		}
@@ -479,6 +573,10 @@ type updateSecurityBody struct {
 	Phone      *string `json:"phone"`
 	Password   *string `json:"password"`
 	LocationID *string `json:"location_id"`
+	// LocationIDs is the optional accept-either union: absent keeps the
+	// stored branch, present replaces the union with the primary forced
+	// first. Only super_admin may send it; an explicitly empty list is 400.
+	LocationIDs *[]string `json:"location_ids"`
 	NIK        *string `json:"nik"`
 }
 
@@ -507,10 +605,34 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "NIK hanya untuk role admin dan vendor.")
 		return
 	}
-	locationID, err := superadmin.ValidateSecurityLocationMove(id.Role, body.LocationID)
+	// Resolve the caller's branch scope for the admin move path.
+	var scopeIDs []domain.UUID
+	if id.Role == domain.RoleAdmin {
+		if sc, ok := deliveryhttp.ScopeFrom(c); ok {
+			scopeIDs = sc.LocationIDs
+		}
+	}
+	locationID, err := superadmin.ValidateSecurityLocationMove(id.Role, body.LocationID, id.LocationID, scopeIDs)
 	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	if err := superadmin.ValidateSecurityLocationIDs(id.Role, body.LocationIDs != nil); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	var ids []domain.UUID
+	if body.LocationIDs != nil {
+		parsed, err := parseLocationIDs(*body.LocationIDs)
+		if err != nil {
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "location_ids tidak valid.")
+			return
+		}
+		if len(parsed) == 0 {
+			response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "location_ids tidak boleh kosong.")
+			return
+		}
+		ids = parsed
 	}
 	ctx := c.Request.Context()
 	targetID := domain.UUID(strings.TrimSpace(c.Param("id")))
@@ -528,7 +650,7 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 		return
 	}
 	if target.LocationID != nil {
-		if err := middleware.CheckBranch(id, *target.LocationID); err != nil {
+		if err := middleware.CheckBranchFor(c, *target.LocationID); err != nil {
 			response.FailWith(c, http.StatusForbidden, "FORBIDDEN_BRANCH", "Tidak berhak mengubah akun security dari cabang lain.")
 			return
 		}
@@ -536,15 +658,28 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 		response.FailWith(c, http.StatusForbidden, "FORBIDDEN_BRANCH", "Tidak berhak mengubah akun security dari cabang lain.")
 		return
 	}
-	if locationID != nil {
-		if _, err := h.locations.FindLocationByID(ctx, *locationID); err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				response.Fail(c, domain.NotFoundEntity("Fasilitas"))
-				return
-			}
+	// A location key (scalar, union, or both) resolves the full union now:
+	// the primary is the sent scalar, else the stored branch, and the union
+	// is the deduped list with that primary first. An unknown branch is 400
+	// via the pre-check below, never an FK/500.
+	var echoUnion []domain.UUID
+	var union []domain.UUID
+	if locationID != nil || body.LocationIDs != nil {
+		base := locationID
+		if base == nil {
+			base = target.LocationID
+		}
+		var effPrimary *domain.UUID
+		effPrimary, union = superadmin.ResolveLocationUnion(base, ids)
+		if err := superadmin.CheckBranchScope(id.Role, id.LocationID, scopeIDs, union); err != nil {
 			response.Fail(c, err)
 			return
 		}
+		if !checkLocationUnion(c, h.locations, union) {
+			return
+		}
+		locationID = effPrimary
+		echoUnion = union
 	}
 	patch := domain.ManagedUserPatch{}
 	if body.Name != nil {
@@ -580,12 +715,13 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 		hashed := string(hash)
 		patch.PasswordHash = &hashed
 	}
-	if locationID != nil {
+	if echoUnion != nil {
 		patch.LocationID = locationID
+		patch.LocationIDs = union
 	}
 	if err := superadmin.ValidateManagedUserUpdate(superadmin.ManagedUserPatchInput{
 		Role: domain.RoleSecurity, Name: patch.Name, Email: patch.Email, Phone: patch.Phone,
-		Password: body.Password, LocationID: patch.LocationID,
+		Password: body.Password, LocationID: patch.LocationID, LocationIDs: patch.LocationIDs,
 	}); err != nil {
 		response.Fail(c, err)
 		return
@@ -607,12 +743,15 @@ func (h *UserHandler) UpdateSecurity(c *gin.Context) {
 		updated, err = store.UpdateManagedUser(ctx, targetID, patch)
 	}
 	if err != nil {
-		response.Fail(c, err)
+		failAccountWrite(c, err)
 		return
 	}
 	if !audited {
 		h.appendAuditFallback(ctx, auditEntry(c, id.UserID,
 			domain.AuditActionUserUpdate, domain.AuditEntityUser, &targetID, meta))
+	}
+	if echoUnion != nil {
+		updated.LocationIDs = echoUnion
 	}
 	response.OK(c, h.userToAccount(updated, h.branchName(c, updated.LocationID)))
 }

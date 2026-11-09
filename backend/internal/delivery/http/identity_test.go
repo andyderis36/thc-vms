@@ -57,6 +57,32 @@ func TestIdentity_MissingReturnsFalse(t *testing.T) {
 	}
 }
 
+func TestScope_RoundTripThroughContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	want := deliveryhttp.Scope{
+		LocationIDs: []domain.UUID{"loc-a", "loc-b"},
+		IsGlobal:    false,
+	}
+	deliveryhttp.WithScope(c, want)
+	got, ok := deliveryhttp.ScopeFrom(c)
+	if !ok {
+		t.Fatal("ScopeFrom must report true when a scope was stashed")
+	}
+	if got.IsGlobal != want.IsGlobal || len(got.LocationIDs) != 2 ||
+		got.LocationIDs[0] != "loc-a" || got.LocationIDs[1] != "loc-b" {
+		t.Fatalf("ScopeFrom = %+v, want %+v", got, want)
+	}
+}
+
+func TestScope_MissingReturnsFalse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	if _, ok := deliveryhttp.ScopeFrom(c); ok {
+		t.Fatal("ScopeFrom must report false when no scope was stashed")
+	}
+}
+
 func TestRequireIdentity_RejectsAnonymous(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

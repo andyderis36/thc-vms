@@ -12,13 +12,20 @@ import (
 )
 
 // FileKind selects which stored file slot ResolveFileStream serves: the SPK
-// assignment letter on the visit row, or one visitor's KTP photo / selfie.
+// assignment letter on the visit row, one visitor's KTP photo / selfie, or
+// one before/after work proof from the visit_work_photo table.
 type FileKind string
 
 const (
 	FileKindAssignmentLetter FileKind = "assignment_letter"
 	FileKindIDCard           FileKind = "id_card"
 	FileKindSelfie           FileKind = "selfie"
+	// FileKindWorkBefore serves the "before" work proof: the site condition
+	// the vendor photographed before starting the job.
+	FileKindWorkBefore FileKind = "work_before"
+	// FileKindWorkAfter serves the "after" work proof: the site condition
+	// after the job finished.
+	FileKindWorkAfter FileKind = "work_after"
 )
 
 // ObjectStream is the resolved, ready-to-serve file payload for one slot: the
@@ -51,7 +58,7 @@ func authorizeVisitRead(actor Actor, visit domain.VisitRequest) error {
 	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:
 		return nil
 	case domain.RoleAdmin, domain.RoleSecurity:
-		return actor.requireBranch(visit.LocationID)
+		return actor.requireBranchAccess(visit.LocationID)
 	case domain.RoleVendor:
 		if visit.VendorUserID != actor.ID {
 			return domain.NotFoundEntity("Kunjungan")
@@ -74,26 +81,42 @@ func fileNotFound() error {
 	}
 }
 
-// selectFileSlot resolves the stored URL for one slot without touching
-// storage: the assignment letter lives on the visit row, the KTP photo and
-// selfie live on the matching visitor row. A nil result means "no such slot".
-func selectFileSlot(visit domain.VisitRequest, kind FileKind, visitorID domain.UUID) *string {
+// selectFileSlot resolves the stored URL for one slot: the assignment letter
+// lives on the visit row, the KTP photo and selfie live on the matching
+// visitor row, and the work proofs live in the visit_work_photo table (read
+// raw here so ObjectKeyFromStoredURL can reverse them; the presigned detail
+// member is a separate path). A nil result means "no such slot"; a repository
+// failure propagates as a 500 so a work-photo-table outage is visible
+// instead of masquerading as a missing file.
+func (s *Service) selectFileSlot(ctx context.Context, visit domain.VisitRequest, kind FileKind, visitorID domain.UUID) (*string, error) {
 	switch kind {
 	case FileKindAssignmentLetter:
-		return visit.AssignmentLetterURL
+		return visit.AssignmentLetterURL, nil
 	case FileKindIDCard, FileKindSelfie:
 		for i := range visit.Visitors {
 			if visit.Visitors[i].ID != visitorID {
 				continue
 			}
 			if kind == FileKindIDCard {
-				return visit.Visitors[i].IDCardPhotoURL
+				return visit.Visitors[i].IDCardPhotoURL, nil
 			}
-			return visit.Visitors[i].PhotoURL
+			return visit.Visitors[i].PhotoURL, nil
 		}
-		return nil
+		return nil, nil
+	case FileKindWorkBefore, FileKindWorkAfter:
+		photos, err := s.visits.ListWorkPhotos(ctx, visit.ID)
+		if err != nil {
+			return nil, err
+		}
+		for i := range photos {
+			if kind == FileKindWorkBefore && photos[i].Kind == domain.WorkPhotoBefore ||
+				kind == FileKindWorkAfter && photos[i].Kind == domain.WorkPhotoAfter {
+				return &photos[i].URL, nil
+			}
+		}
+		return nil, nil
 	default:
-		return nil
+		return nil, nil
 	}
 }
 
@@ -121,7 +144,10 @@ func (s *Service) ResolveFileStream(ctx context.Context, actor Actor, visitID do
 	if err := authorizeVisitRead(actor, visit); err != nil {
 		return ObjectStream{}, err
 	}
-	raw := selectFileSlot(visit, kind, visitorID)
+	raw, err := s.selectFileSlot(ctx, visit, kind, visitorID)
+	if err != nil {
+		return ObjectStream{}, err
+	}
 	if raw == nil || strings.TrimSpace(*raw) == "" {
 		return ObjectStream{}, fileNotFound()
 	}

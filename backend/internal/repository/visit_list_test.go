@@ -35,7 +35,7 @@ func TestList_LocationScopeNeverLeaksOtherBranches(t *testing.T) {
 	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000202", VendorUser: vendorA, Location: locA, Start: start, End: end, Status: domain.VisitStatusApproved})
 	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000203", VendorUser: vendorB, Location: locB, Start: start, End: end, Status: domain.VisitStatusRequested})
 
-	visits, total, err := repos.List(ctx, domain.VisitFilter{LocationID: &locA, Page: 1, Limit: 10})
+	visits, total, err := repos.List(ctx, domain.VisitFilter{LocationIDs: []domain.UUID{locA}, Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("List location scope: %v", err)
 	}
@@ -84,9 +84,46 @@ func TestList_VendorScopeNeverLeaksOtherVendors(t *testing.T) {
 	}
 }
 
-// TestList_NilScopeReturnsAllForSuperAdmin proves the unscoped query —
-// reachable ONLY with both filters nil — returns every branch.
-func TestList_NilScopeReturnsAllForSuperAdmin(t *testing.T) {
+// TestList_UnionScopeSeesBothBranchesSeeds three branches and proves the
+// union list contains exactly A-union-B with a matching total: the prior
+// scalar dispatch dropped every branch but the primary.
+func TestList_UnionScopeSeesBothBranches(t *testing.T) {
+	pool := testPool(t)
+	resetTables(t, pool)
+	ctx := testContext(t)
+	repos := NewVisitRepository(pool)
+
+	locA := seedLocation(t, pool, "Cabang Union A", "cabang")
+	locB := seedLocation(t, pool, "Cabang Union B", "pop")
+	locC := seedLocation(t, pool, "Cabang Union C", "cabang")
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Union", Email: "union@vendor.test", Role: "vendor", Type: "external"})
+
+	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	end := start.Add(4 * time.Hour)
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000251", VendorUser: vendor, Location: locA, Start: start, End: end, Status: domain.VisitStatusRequested})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000252", VendorUser: vendor, Location: locB, Start: start, End: end, Status: domain.VisitStatusApproved})
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000253", VendorUser: vendor, Location: locC, Start: start, End: end, Status: domain.VisitStatusRequested})
+
+	visits, total, err := repos.List(ctx, domain.VisitFilter{LocationIDs: []domain.UUID{locA, locB}, Page: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("List union scope: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("total = %d, want 2 (RED: envelope drifted from the page)", total)
+	}
+	if len(visits) != 2 {
+		t.Fatalf("items = %d, want 2", len(visits))
+	}
+	for _, v := range visits {
+		if v.LocationID != locA && v.LocationID != locB {
+			t.Fatalf("leaked visit %s from branch %s into the A-union-B view (RED: cross-branch leak)", v.VisitID, v.LocationID)
+		}
+	}
+}
+
+// TestList_GlobalScopeReturnsAllForSuperAdmin proves the national view —
+// reachable ONLY with the explicit IsGlobal flag — returns every branch.
+func TestList_GlobalScopeReturnsAllForSuperAdmin(t *testing.T) {
 	pool := testPool(t)
 	resetTables(t, pool)
 	ctx := testContext(t)
@@ -102,12 +139,37 @@ func TestList_NilScopeReturnsAllForSuperAdmin(t *testing.T) {
 	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000222", VendorUser: vendor, Location: locB, Start: start, End: end, Status: domain.VisitStatusApproved})
 	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000223", VendorUser: vendor, Location: locB, Start: start, End: end, Status: domain.VisitStatusRejected})
 
-	visits, total, err := repos.List(ctx, domain.VisitFilter{Page: 1, Limit: 10})
+	visits, total, err := repos.List(ctx, domain.VisitFilter{IsGlobal: true, Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("List super_admin scope: %v", err)
 	}
 	if total != 3 || len(visits) != 3 {
 		t.Fatalf("total=%d items=%d, want 3 and 3 (RED: super_admin missed a branch)", total, len(visits))
+	}
+}
+
+// TestList_EmptyUnionFailsClosed proves an uncovered caller sees zero rows,
+// never the whole table: the old nil-scope dispatch fell through to the
+// national query.
+func TestList_EmptyUnionFailsClosed(t *testing.T) {
+	pool := testPool(t)
+	resetTables(t, pool)
+	ctx := testContext(t)
+	repos := NewVisitRepository(pool)
+
+	loc := seedLocation(t, pool, "Cabang Tertutup", "cabang")
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Tutup", Email: "tutup@vendor.test", Role: "vendor", Type: "external"})
+
+	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	end := start.Add(4 * time.Hour)
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000254", VendorUser: vendor, Location: loc, Start: start, End: end, Status: domain.VisitStatusRequested})
+
+	visits, total, err := repos.List(ctx, domain.VisitFilter{Page: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("List empty scope: %v", err)
+	}
+	if total != 0 || len(visits) != 0 {
+		t.Fatalf("total=%d items=%d, want 0 and 0 (RED: fail-open to all branches)", total, len(visits))
 	}
 }
 

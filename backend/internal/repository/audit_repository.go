@@ -163,7 +163,7 @@ func appendInTxFunc(ctx context.Context, pool *pgxpool.Pool, tx pgx.Tx, entry do
 // interpolated SQL text. An empty map is the fast path: no hidden account, no
 // extra work, byte-for-byte the old behaviour.
 func hiddenActorIDs(ctx context.Context, pool *pgxpool.Pool) (map[domain.UUID]struct{}, error) {
-	rows, err := pool.Query(ctx, `SELECT u.id FROM users u JOIN role r ON r.id = u.role_id WHERE r.name = $1 OR lower(u.email) = lower($2)`, string(domain.RoleDevSuperAdmin), domain.DevSuperadminEmail)
+	rows, err := pool.Query(ctx, `SELECT u.id FROM users u JOIN role r ON r.id = u.role_id WHERE r.name = $1 OR (r.name <> $1 AND lower(u.email) = lower($2))`, string(domain.RoleDevSuperAdmin), domain.DevSuperadminEmail)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +295,11 @@ func (r *userRepository) CreateUserAudited(ctx context.Context, user domain.User
 			LocationID:   locationID,
 		})
 		if err != nil {
-			return MapError(err)
+			return mapAccountWriteError(err)
+		}
+		union := createUnion(user)
+		if err := syncUserLocations(ctx, q, row.ID, union); err != nil {
+			return err
 		}
 		created = domain.User{
 			ID:           mustDomainUUID(row.ID),
@@ -305,6 +309,7 @@ func (r *userRepository) CreateUserAudited(ctx context.Context, user domain.User
 			Phone:        textValue(row.Phone),
 			RoleID:       mustDomainUUID(row.RoleID),
 			LocationID:   domainUUIDPtr(row.LocationID),
+			LocationIDs:  toDomainUUIDs(union),
 			Type:         domain.UserType(row.Type),
 			Status:       domain.UserStatus(row.Status),
 			CreatedAt:    row.CreatedAt,
@@ -351,7 +356,11 @@ func (r *userRepository) CreateManagedUserAudited(ctx context.Context, user doma
 			VendorNameOverride: pgText(user.VendorNameOverride),
 		})
 		if err != nil {
-			return MapError(err)
+			return mapAccountWriteError(err)
+		}
+		union := createUnion(user)
+		if err := syncUserLocations(ctx, q, row.ID, union); err != nil {
+			return err
 		}
 		created = domain.User{
 			ID:                 mustDomainUUID(row.ID),
@@ -362,6 +371,7 @@ func (r *userRepository) CreateManagedUserAudited(ctx context.Context, user doma
 			NIK:                textValue(row.Nik),
 			RoleID:             mustDomainUUID(row.RoleID),
 			LocationID:         domainUUIDPtr(row.LocationID),
+			LocationIDs:        toDomainUUIDs(union),
 			Type:               domain.UserType(row.Type),
 			Status:             domain.UserStatus(row.Status),
 			VendorID:           domainUUIDPtr(row.VendorID),
@@ -419,7 +429,11 @@ func (r *userRepository) UpdateManagedUserAudited(ctx context.Context, id domain
 			ID:                    parsed,
 		})
 		if err != nil {
-			return MapError(err)
+			return mapAccountWriteError(err)
+		}
+		union := updateUnion(patch, row.LocationID)
+		if err := syncUserLocations(ctx, q, row.ID, union); err != nil {
+			return err
 		}
 		updated = domain.User{
 			ID:                 mustDomainUUID(row.ID),
@@ -429,6 +443,7 @@ func (r *userRepository) UpdateManagedUserAudited(ctx context.Context, id domain
 			NIK:                textValue(row.Nik),
 			RoleID:             mustDomainUUID(row.RoleID),
 			LocationID:         domainUUIDPtr(row.LocationID),
+			LocationIDs:        toDomainUUIDs(union),
 			Type:               domain.UserType(row.Type),
 			Status:             domain.UserStatus(row.Status),
 			VendorID:           domainUUIDPtr(row.VendorID),

@@ -1,8 +1,7 @@
 /**
  * Prefill SCR-03 dari kunjungan terakhir vendor — modul MURNI (tanpa I/O,
  * tanpa React). Dipanggil HANYA saat tombol "Gunakan data kunjungan
- * terakhir" ditekan, tidak pernah otomatis, agar tidak bertabrakan dengan
- * efek autosave roster / prefill nama vendor akun di `VisitForm`.
+ * terakhir" ditekan, tidak pernah otomatis.
  *
  * Kontrak pemetaan (`VisitDetail` → `TechnicianFormValues[]`) ROSTER SAJA:
  * data anggota stabil antar-pengajuan (kru yang sama), sedangkan fasilitas,
@@ -28,9 +27,10 @@ const FALLBACK_FILE_NAME = 'berkas'
 /**
  * Nama berkas tampilan dari URL: segmen terakhir pathname (query presigned
  * seperti `?X-Amz-…` otomatis gugur) yang di-`decodeURIComponent`.
- * Gagal parse / kosong → `"berkas"`.
+ * Gagal parse / kosong → `"berkas"`. Dipakai juga oleh saran anggota
+ * (`suggestions.ts`) agar aturan turunan nama berkas tetap satu.
  */
-function fileNameFromUrl(url: string): string {
+export function fileNameFromUrl(url: string): string {
   try {
     const segment = new URL(url).pathname.split('/').filter(Boolean).pop() ?? ''
     const decoded = decodeURIComponent(segment)

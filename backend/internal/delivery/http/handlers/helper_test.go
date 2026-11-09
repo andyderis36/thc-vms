@@ -158,6 +158,26 @@ type fakeVisitService struct {
 
 	jabatan    []string
 	jabatanErr error
+
+	vendorSuggestions    []domain.VendorSuggestion
+	vendorSuggestionsErr error
+	lastVendorQuery      string
+
+	memberSuggestions    []domain.MemberSuggestion
+	memberSuggestionsErr error
+	lastMemberIn         visit.MemberSuggestionsInput
+
+	memberDetail      domain.MemberSuggestionDetail
+	memberDetailErr   error
+	lastMemberVisitor domain.UUID
+
+	attachPhoto    domain.WorkPhoto
+	attachCreated  bool
+	attachReplace  bool
+	attachErr      error
+	lastAttachID   domain.UUID
+	lastAttachKind string
+	lastAttachURL  string
 }
 
 func (f *fakeVisitService) ListVisits(_ context.Context, _ visit.Actor, in visit.ListVisitsInput) ([]domain.VisitRequest, int64, error) {
@@ -227,6 +247,53 @@ func (f *fakeVisitService) ListJabatan(_ context.Context) ([]string, error) {
 		return nil, f.jabatanErr
 	}
 	return f.jabatan, nil
+}
+
+func (f *fakeVisitService) ListVendorSuggestions(_ context.Context, _ visit.Actor, query string) ([]domain.VendorSuggestion, error) {
+	f.lastVendorQuery = query
+	if f.vendorSuggestionsErr != nil {
+		return nil, f.vendorSuggestionsErr
+	}
+	return f.vendorSuggestions, nil
+}
+
+func (f *fakeVisitService) ListMemberSuggestions(_ context.Context, _ visit.Actor, in visit.MemberSuggestionsInput) ([]domain.MemberSuggestion, error) {
+	f.lastMemberIn = in
+	if f.memberSuggestionsErr != nil {
+		return nil, f.memberSuggestionsErr
+	}
+	return f.memberSuggestions, nil
+}
+
+func (f *fakeVisitService) GetMemberSuggestion(_ context.Context, _ visit.Actor, visitorID domain.UUID) (domain.MemberSuggestionDetail, error) {
+	f.lastMemberVisitor = visitorID
+	if f.memberDetailErr != nil {
+		return domain.MemberSuggestionDetail{}, f.memberDetailErr
+	}
+	return f.memberDetail, nil
+}
+
+func (f *fakeVisitService) AttachWorkPhoto(_ context.Context, _ visit.Actor, id domain.UUID, kind, url string) (domain.WorkPhoto, bool, error) {
+	f.lastAttachID = id
+	f.lastAttachKind = kind
+	f.lastAttachURL = url
+	if f.attachErr != nil {
+		return domain.WorkPhoto{}, false, f.attachErr
+	}
+	if f.attachPhoto.Kind != "" {
+		return f.attachPhoto, f.attachCreated, nil
+	}
+	photo := domain.WorkPhoto{
+		VisitRequestID: id,
+		URL:            url,
+		UploadedAt:     time.Now().UTC(),
+	}
+	if kind == "before" {
+		photo.Kind = domain.WorkPhotoBefore
+	} else {
+		photo.Kind = domain.WorkPhotoAfter
+	}
+	return photo, !f.attachReplace, nil
 }
 
 func (f *fakeVisitService) UpdateVisitorContact(_ context.Context, _ visit.Actor, visitID, visitorID domain.UUID, phone, idNumber *string) (domain.Visitor, error) {

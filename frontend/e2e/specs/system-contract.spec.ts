@@ -437,21 +437,21 @@ test('@SYS-06 status akun security nonaktif memblokir login, aktif kembali lalu 
 // ---------------------------------------------------------------------------
 // @SYS-07 — admin tidak boleh menyentuh status pengawas cabang lain
 // ---------------------------------------------------------------------------
-test('@SYS-07 admin HQ tidak boleh mengubah status akun security cabang Sambas', async ({ h }) => {
+test('@SYS-07 admin tidak boleh mengubah status akun security di luar cakupannya', async ({ h }) => {
   const token = await superToken()
   const email = `${h.unique('sys07').toLowerCase()}@transhybrid.net.id`
   const created: CreatedAccount[] = []
-  const secondId = (await resolveLiveCatalog(token)).secondId
+  const outsideId = await h.outOfScopeLocation('admin')
 
   try {
-    // Akun sekali-pakai di cabang kedua; akun seed tidak pernah disentuh.
+    // Akun sekali-pakai di cabang di luar cakupan admin; akun seed tidak pernah disentuh.
     const account = await createSecurityAccount(token, {
-      name: `${h.unique('SYS07')} Pengawas Sambas`,
+      name: `${h.unique('SYS07')} Pengawas Luar Cakupan`,
       email,
-      locationId: secondId,
+      locationId: outsideId,
     })
     created.push({ kind: 'security', id: account.id, email })
-    expect(account.location_id).toBe(secondId)
+    expect(account.location_id).toBe(outsideId)
     expect(account.status).toBe('active')
 
     const adminToken = await h.tokenAs('admin')
@@ -461,19 +461,19 @@ test('@SYS-07 admin HQ tidak boleh mengubah status akun security cabang Sambas',
       `/users/security/${account.id}/status`,
       { status: 'inactive' },
     )
-    expect(refused.status, 'admin HQ lintas cabang wajib 403').toBe(403)
-    expect(failureCode(refused, '@SYS-07 admin HQ -> pengawas Sambas')).toBe(
+    expect(refused.status, 'admin lintas cakupan wajib 403').toBe(403)
+    expect(failureCode(refused, '@SYS-07 admin -> pengawas luar cakupan')).toBe(
       'FORBIDDEN_BRANCH',
     )
 
     // Status target tidak berubah.
-    const sambasRows = await fetchList<AccountRow>(
+    const outsideRows = await fetchList<AccountRow>(
       token,
-      `/users/security?location_id=${encodeURIComponent(secondId)}`,
+      `/users/security?location_id=${encodeURIComponent(outsideId)}`,
     )
-    const target = sambasRows.find((row) => row.id === account.id)
-    expect(target, 'akun uji Sambas harus tetap terdaftar').toBeDefined()
-    expect(target?.status, 'status akun Sambas tidak boleh berubah').toBe('active')
+    const target = outsideRows.find((row) => row.id === account.id)
+    expect(target, 'akun uji luar cakupan harus tetap terdaftar').toBeDefined()
+    expect(target?.status, 'status akun luar cakupan tidak boleh berubah').toBe('active')
   } finally {
     await cleanupAccounts(token, created)
   }

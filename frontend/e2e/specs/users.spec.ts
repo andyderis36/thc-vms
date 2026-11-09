@@ -50,7 +50,7 @@ function tableRowWith(page: Page, text: string) {
   return page.locator('tbody tr').filter({ hasText: text })
 }
 
-async function runtimeBranchId(h: Harness): Promise<string> {
+async function runtimeBranch(h: Harness): Promise<{ id: string; name: string }> {
   const token = await h.tokenAs('super')
   const rows = expectData(
     (await apiFetch<ApiEnvelope<Array<{ id: string; name: string }>>>(
@@ -66,7 +66,7 @@ async function runtimeBranchId(h: Harness): Promise<string> {
   if (picked === undefined) {
     throw new Error('[users] katalog lokasi runtime kosong.')
   }
-  return picked.id
+  return picked
 }
 
 function expectData<T>(body: ApiEnvelope<T>, context: string): T {
@@ -161,7 +161,7 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
   const email = uniqueEmail(h, 'usr02')
   const name = `${h.unique('Koordinator')} Uji`
   try {
-    const branchId = await runtimeBranchId(h)
+    const branch = await runtimeBranch(h)
     const page = await h.openAs('super')
     await gotoApp(page, '/coordinators')
     await expect(
@@ -180,7 +180,9 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
     await dialog.getByLabel('Email').fill(email)
     await dialog.getByRole('textbox', { name: 'Kata Sandi' }).fill(PASSWORD)
     await dialog.getByLabel('NIK').fill(uniqueNik())
-    await dialog.getByLabel('Cabang Penugasan').selectOption(branchId)
+    // Cabang Penugasan kini dropdown multi-select: buka panel lalu centang baris cabang.
+    await dialog.getByRole('button', { name: /Cabang Penugasan/ }).click()
+    await dialog.getByRole('checkbox', { name: branch.name }).check()
     await dialog
       .getByRole('button', { name: 'Tambah Koordinator Wilayah', exact: true })
       .click()
@@ -200,7 +202,7 @@ test('@USR-02 superadmin membuat koordinator lewat UI lalu API menghapusnya dan 
       throw new Error(`[USR-02] user ${email} tidak ditemukan lewat API setelah dibuat via UI.`)
     }
     expect(created.role).toBe('admin')
-    expect(created.location_id).toBe(branchId)
+    expect(created.location_id).toBe(branch.id)
 
     const firstDelete = await apiFetchRaw(token, 'DELETE', `/users/${created.id}`)
     expect(firstDelete.status).toBe(204)

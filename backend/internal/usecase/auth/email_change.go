@@ -203,8 +203,12 @@ func (s *Service) sendEmailChangedNotices(ctx context.Context, oldEmail, newEmai
 		slog.Warn("auth: email-change old-address notice failed", "error", err)
 	}
 	newText := fmt.Sprintf("Email akun THC-VMS Anda telah berhasil diubah menjadi %s. Gunakan alamat ini untuk masuk mulai sekarang.", newEmail)
+	loginLink := "/login"
+	if s.frontendBaseURL != "" {
+		loginLink = s.frontendBaseURL + loginLink
+	}
 	if err := s.mailer.Send(ctx, []string{newEmail}, "[THC-VMS] Email Akun Berhasil Diubah",
-		newText, domain.RenderBrandedActionEmail("Email Akun Berhasil Diubah", newText, "", "")); err != nil {
+		newText, domain.RenderBrandedActionEmail("Email Akun Berhasil Diubah", newText, "Masuk", loginLink)); err != nil {
 		slog.Warn("auth: email-change new-address notice failed", "error", err)
 	}
 }

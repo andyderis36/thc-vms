@@ -208,7 +208,7 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 // yields no error, because a re-applied file raises only "already there"
 // SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL} {
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL, migrationUserLocationsSQL, migrationCreatedBySQL} {
 		if err := applyOne(ctx, pool, sql); err != nil {
 			return err
 		}
@@ -308,6 +308,37 @@ var migrationVisitorContactEditedSQL = func() string {
 // COLUMN is idempotent), so applyOne covers it with no once-gate.
 var migrationVisitorEmailSQL = func() string {
 	path := filepath.Join("..", "..", "migrations", "000022_visitor_email.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationUserLocationsSQL is the user_locations join table (migration
+// 000023), loaded the same way so the scratch schema tracks the coverage
+// rows the account writes maintain. It is re-runnable (duplicate CREATE
+// TABLE/INDEX raises the tolerated SQLSTATEs; the backfill INSERT carries ON
+// CONFLICT DO NOTHING), so applyOne covers it with no once-gate.
+var migrationUserLocationsSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000023_user_locations.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationCreatedBySQL is the visit_request.created_by column plus the
+// visit_work_photo table (migration 000024), loaded the same way so the
+// scratch schema tracks the creator column the visit write/read paths use.
+// It is re-runnable: a duplicate ADD COLUMN / CREATE TABLE / CREATE INDEX
+// raises the SQLSTATEs applyOne already tolerates, and the backfill UPDATE is
+// idempotent.
+var migrationCreatedBySQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000024_created_by_and_work_photo.up.sql")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
@@ -722,6 +753,9 @@ type seedVisitParams struct {
 	End        time.Time
 	Status     domain.VisitStatus
 	CreatedAt  *time.Time
+	// CreatedBy stages the migration-000024 requester column; empty means
+	// SQL NULL (the pre-backfill shape).
+	CreatedBy domain.UUID
 }
 
 // seedVisit inserts one visit_request row; tests that need a status other
@@ -737,10 +771,10 @@ func seedVisit(t *testing.T, pool *pgxpool.Pool, p seedVisitParams) domain.UUID 
 	}
 	err := pool.QueryRow(testContext(t),
 		`INSERT INTO visit_request
-			(visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, status, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+			(visit_id, vendor_user_id, vendor_id, location_id, start_date, end_date, status, created_at, created_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
 		p.Code, uuidArg(p.VendorUser), uuidArg(p.Vendor), uuidArg(p.Location),
-		p.Start.UTC(), p.End.UTC(), string(p.Status), created).Scan(&id)
+		p.Start.UTC(), p.End.UTC(), string(p.Status), created, uuidArg(p.CreatedBy)).Scan(&id)
 	if err != nil {
 		t.Fatalf("seed visit %s: %v", p.Code, err)
 	}

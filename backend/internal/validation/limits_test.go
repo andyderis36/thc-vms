@@ -26,6 +26,7 @@ func TestLimitsValues(t *testing.T) {
 		{"BadgeCodeMaxLength", BadgeCodeMaxLength, 64},
 		{"CheckinNotesMaxLength", CheckinNotesMaxLength, 500},
 		{"SearchQueryMaxLength", SearchQueryMaxLength, 100},
+	{"SuggestionQueryMaxLength", SuggestionQueryMaxLength, 80},
 		{"VendorNameMaxLength", VendorNameMaxLength, 120},
 		{"JabatanMaxLength", JabatanMaxLength, 120},
 		{"PurposeNoteMaxLength", PurposeNoteMaxLength, 200},

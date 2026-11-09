@@ -207,10 +207,16 @@ type GetUserByEmailForLoginRow struct {
 //
 // SCOPE INVARIANT (PRD L110 / L112, AGENTS.md rule 6.1)
 //
-//	Every query that exposes user rows takes its location scope as a BOUND
-//	PARAMETER. `sqlc.narg('location_id')` is NULL only for super_admin, which is
-//	the single case where no branch filter is correct. There is no query in this
-//	file that interpolates a role name or a location id into SQL text.
+//	Every query that exposes user rows takes its location scope as BOUND
+//	PARAMETERS in scope-union shape: `location_ids` (the branch union) plus
+//	`is_global` (the national bypass). is_global is true only for super_admin
+//	(nil filter: every branch); admin/security callers pass is_global false
+//	with their union as location_ids. A row matches when its primary is in the
+//	union OR any of its user_locations coverage rows is, so a B-primary
+//	account covering A is managed by the admin of A, while branch C stays
+//	invisible. Legacy rows without coverage fall back to the primary check.
+//	There is no query in this file that interpolates a role name or a location
+//	id into SQL text.
 //
 // =============================================================================
 // Login lookup (POST /auth/login). Returns the projection the openapi `User`
@@ -474,14 +480,17 @@ WHERE ($1::text IS NULL OR r.name = $1::text)
   AND ($2::text IS NULL
        OR u.name ILIKE '%' || $2::text || '%'
        OR u.email ILIKE '%' || $2::text || '%')
-  AND ($3::uuid IS NULL OR u.location_id = $3::uuid)
+  AND ($3::boolean
+       OR u.location_id = ANY($4::uuid[])
+       OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = u.id AND ul.location_id = ANY($4::uuid[])))
 ORDER BY u.created_at DESC, u.id DESC
 `
 
 type ListManagedUsersParams struct {
-	Role       pgtype.Text `json:"role"`
-	Search     pgtype.Text `json:"search"`
-	LocationID pgtype.UUID `json:"location_id"`
+	Role        pgtype.Text `json:"role"`
+	Search      pgtype.Text `json:"search"`
+	IsGlobal    bool        `json:"is_global"`
+	LocationIds []uuid.UUID `json:"location_ids"`
 }
 
 type ListManagedUsersRow struct {
@@ -509,11 +518,17 @@ type ListManagedUsersRow struct {
 // =============================================================================
 // GET /users (super_admin only). role narrows to one of admin|vendor|security
 // (validated in Go before this runs); search matches nama atau email
-// case-insensitively; location_id narrows to one branch. All three filters
-// are optional, so an empty filter lists every account with no pagination,
-// consistent with ListSecurityUsers. ORDER BY keeps the listing stable.
+// case-insensitively; the scope-union pair (is_global + location_ids) narrows
+// to the caller union the same way ListSecurityUsers does. All filters are
+// optional: an empty filter lists every account with no pagination. ORDER BY
+// keeps the listing stable.
 func (q *Queries) ListManagedUsers(ctx context.Context, arg ListManagedUsersParams) ([]ListManagedUsersRow, error) {
-	rows, err := q.db.Query(ctx, listManagedUsers, arg.Role, arg.Search, arg.LocationID)
+	rows, err := q.db.Query(ctx, listManagedUsers,
+		arg.Role,
+		arg.Search,
+		arg.IsGlobal,
+		arg.LocationIds,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -569,12 +584,15 @@ JOIN role r ON r.id = u.role_id
 LEFT JOIN location l ON l.id = u.location_id
 LEFT JOIN vendor v ON v.id = u.vendor_id
 WHERE r.name = 'security'
-  AND ($1::uuid IS NULL OR u.location_id = $1::uuid)
+  AND ($1::boolean
+       OR u.location_id = ANY($2::uuid[])
+       OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = u.id AND ul.location_id = ANY($2::uuid[])))
 ORDER BY u.created_at DESC, u.id DESC
 `
 
 type ListSecurityUsersParams struct {
-	LocationID pgtype.UUID `json:"location_id"`
+	IsGlobal    bool        `json:"is_global"`
+	LocationIds []uuid.UUID `json:"location_ids"`
 }
 
 type ListSecurityUsersRow struct {
@@ -594,12 +612,14 @@ type ListSecurityUsersRow struct {
 	CreatedAt    time.Time   `json:"created_at"`
 }
 
-// GET /users/security (openapi L119-138). `sqlc.narg('location_id')` is the whole
-// scoping mechanism: an admin/security caller passes its own location (PRD L110),
-// a super_admin passes NULL to see every branch or a location to filter (PRD L109).
-// ORDER BY created_at DESC keeps pagination stable for the account modal.
+// GET /users/security (openapi L119-138). Scope-union scoping: a super_admin
+// passes is_global true (every branch, location_ids empty); an admin passes
+// is_global false with its branch union. A row matches on its primary OR on
+// any user_locations coverage row, so an admin of A manages the B-primary
+// officer covering A. ORDER BY created_at DESC keeps pagination stable for
+// the account modal.
 func (q *Queries) ListSecurityUsers(ctx context.Context, arg ListSecurityUsersParams) ([]ListSecurityUsersRow, error) {
-	rows, err := q.db.Query(ctx, listSecurityUsers, arg.LocationID)
+	rows, err := q.db.Query(ctx, listSecurityUsers, arg.IsGlobal, arg.LocationIds)
 	if err != nil {
 		return nil, err
 	}

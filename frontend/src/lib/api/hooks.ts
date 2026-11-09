@@ -12,6 +12,7 @@
  * jadi tidak ada plumbing token di lapisan ini.
  */
 
+import { useEffect, useState } from 'react'
 import {
   type QueryClient,
   queryOptions,
@@ -35,17 +36,22 @@ import {
   deleteSecurityUser,
   deleteVisit,
   getMe,
+  getMemberSuggestion,
   getVisit,
   getVisitQr,
   listAuditLogs,
   listJabatan,
   listLocations,
   listManagedUsers,
+  listMemberSuggestions,
   listNotifications,
   listPendingRegistrations,
+  listPublicVendors,
   listPurposes,
   listSecurityUsers,
+  listVendorAccounts,
   listVendors,
+  listVendorSuggestions,
   listVisits,
   markAllNotificationsRead,
   markNotificationRead,
@@ -66,6 +72,7 @@ import { queryKeys } from '@/lib/api/query-keys'
 import { isSuperAdminRole } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 import { selectActiveQrVisit } from '@/lib/visits/active-qr-ticket'
+import { clampSuggestionQuery } from '@/lib/visits/suggestions'
 import type {
   ApproveRequest,
   AuditLogListParams,
@@ -334,6 +341,31 @@ export const vendorsQueryOptions = queryOptions({
 })
 
 /**
+ * Katalog vendor publik (`GET /public/vendors`, tanpa auth) — layar
+ * pendaftaran mandiri. Master data global dengan diet yang sama.
+ */
+export const publicVendorsQueryOptions = queryOptions({
+  queryKey: queryKeys.publicVendors(),
+  queryFn: () => listPublicVendors(),
+  staleTime: MASTER_STALE_TIME,
+  gcTime: MASTER_GC_TIME,
+  retry: shouldRetry,
+})
+
+/**
+ * Akun vendor aktif (`GET /users/vendors`) — master data global untuk pemilih
+ * pemilik kunjungan (admin/super_admin). 403 untuk peran lain ditahan
+ * pemanggil lewat `enabled`.
+ */
+export const vendorAccountsQueryOptions = queryOptions({
+  queryKey: queryKeys.vendorAccounts(),
+  queryFn: () => listVendorAccounts(),
+  staleTime: MASTER_STALE_TIME,
+  gcTime: MASTER_GC_TIME,
+  retry: shouldRetry,
+})
+
+/**
  * Saran jabatan: nilai yang pernah tersimpan pada baris visitor — berubah
  * jarang dan dipakai bersama semua pengajuan, jadi diet data yang sama
  * dengan master data lain.
@@ -345,6 +377,74 @@ export const jabatanQueryOptions = queryOptions({
   gcTime: MASTER_GC_TIME,
   retry: shouldRetry,
 })
+
+// ---------------------------------------------------------------------------
+// Saran isian (T9 vendor identity + T11 member reuse)
+// ---------------------------------------------------------------------------
+
+/** Jeda debounce ketikan → request saran (kontrak T9/T11: 250-300 ms). */
+const SUGGESTION_DEBOUNCE_MS = 300
+
+/**
+ * Nilai setelah debounce — pola `searchInput`/`search` halaman gerbang &
+ * dashboard: hanya nilai AKHIR ketikan yang menjadi query key, sehingga
+ * respons request sebelumnya tidak pernah ter-render (kunci = nilai kirim).
+ */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs)
+    return () => clearTimeout(timer)
+  }, [value, delayMs])
+  return debounced
+}
+
+/** Feed vendor hanya untuk admin/super_admin — vendor/security dijaga 403 backend. */
+function canSuggestVendors(user: User | null): boolean {
+  return user !== null && (user.role === 'admin' || isSuperAdminRole(user.role))
+}
+
+/** Feed anggota untuk super_admin/admin/vendor — security dijaga 403 backend. */
+function canSuggestMembers(user: User | null): boolean {
+  return (
+    user !== null &&
+    (user.role === 'vendor' || user.role === 'admin' || isSuperAdminRole(user.role))
+  )
+}
+
+/** `GET /vendors/suggestions` — per `q` hasil debounce + clamp klien. */
+export const vendorSuggestionsQueryOptions = (q: string) =>
+  queryOptions({
+    queryKey: queryKeys.vendorSuggestions(q),
+    queryFn: () => listVendorSuggestions(q),
+    staleTime: VISIT_STALE_TIME,
+    retry: shouldRetry,
+  })
+
+/**
+ * `GET /visits/member-suggestions` — kunci memuat `q` + `vendor` yang sudah
+ * dinormalisasi; peran vendor mengabaikan `vendor` di backend, jadi nilai itu
+ * tetap aman dikirim (field Vendor Pengaju tidak ada pada peran itu).
+ */
+export const memberSuggestionsQueryOptions = (params: { q: string; vendor: string }) =>
+  queryOptions({
+    queryKey: queryKeys.memberSuggestions(params),
+    queryFn: () => listMemberSuggestions(params),
+    staleTime: VISIT_STALE_TIME,
+    retry: shouldRetry,
+  })
+
+/**
+ * `GET /visits/member-suggestions/{visitorId}` — detail satu pilihan anggota
+ * (foto presigned). 404 id luar cakupan tidak di-retry (`shouldRetry`).
+ */
+export const memberSuggestionQueryOptions = (visitorId: string) =>
+  queryOptions({
+    queryKey: queryKeys.memberSuggestion(visitorId),
+    queryFn: () => getMemberSuggestion(visitorId),
+    staleTime: VISIT_STALE_TIME,
+    retry: shouldRetry,
+  })
 
 export function visitsQueryOptions(
   params: VisitListParams,
@@ -489,8 +589,65 @@ export function useVendorsQuery(enabled = true) {
   return useQuery({ ...vendorsQueryOptions, enabled })
 }
 
+/** Katalog vendor publik (tanpa auth) — layar pendaftaran mandiri. */
+export function usePublicVendorsQuery(enabled = true) {
+  return useQuery({ ...publicVendorsQueryOptions, enabled })
+}
+
+/** Akun vendor aktif untuk pemilih pemilik kunjungan (admin/super_admin). */
+export function useVendorAccountsQuery(enabled = true) {
+  return useQuery({ ...vendorAccountsQueryOptions, enabled })
+}
+
 export function useJabatanQuery(enabled = true) {
   return useQuery({ ...jabatanQueryOptions, enabled })
+}
+
+/**
+ * Saran nama vendor (`GET /vendors/suggestions`). `rawQuery` di-debounce 300 ms
+ * lalu di-clamp ke 80 karakter rune sebelum menjadi kunci query; gerbang peran
+ * (admin/super_admin) di sini agar peran lain tidak pernah menembak 403.
+ */
+export function useVendorSuggestionsQuery(rawQuery = '', enabled = true) {
+  const { user } = useSession()
+  const q = clampSuggestionQuery(useDebouncedValue(rawQuery, SUGGESTION_DEBOUNCE_MS))
+  return useQuery({
+    ...vendorSuggestionsQueryOptions(q),
+    enabled: enabled && canSuggestVendors(user),
+  })
+}
+
+/**
+ * Saran anggota (`GET /visits/member-suggestions`). `q` dan `vendor` sama-sama
+ * di-debounce 300 ms; `q` di-clamp ke 80 karakter (81 = 400 backend), `vendor`
+ * cukup di-trim (input sudah berbatas 120). Sengaja TANPA `placeholderData`:
+ * saat kunci berganti (vendor berubah), opsi lama tidak boleh sempat tampil
+ * seolah hasil kunci baru.
+ */
+export function useMemberSuggestionsQuery(
+  params: { q?: string; vendor?: string } = {},
+  enabled = true,
+) {
+  const { user } = useSession()
+  const q = clampSuggestionQuery(useDebouncedValue(params.q ?? '', SUGGESTION_DEBOUNCE_MS))
+  const vendor = useDebouncedValue(params.vendor ?? '', SUGGESTION_DEBOUNCE_MS).trim()
+  return useQuery({
+    ...memberSuggestionsQueryOptions({ q, vendor }),
+    enabled: enabled && canSuggestMembers(user),
+  })
+}
+
+/**
+ * Detail satu anggota pilihan (`GET /visits/member-suggestions/{visitorId}`)
+ * beserta foto presigned untuk autofill. `visitorId` null = nonaktif (sebelum
+ * pilihan terpilih / kunjungan sumber belum terbaca).
+ */
+export function useMemberSuggestionQuery(visitorId: string | null, enabled = true) {
+  const { user } = useSession()
+  return useQuery({
+    ...memberSuggestionQueryOptions(visitorId ?? ''),
+    enabled: enabled && visitorId !== null && canSuggestMembers(user),
+  })
 }
 
 export function useVisitsQuery(
@@ -501,10 +658,17 @@ export function useVisitsQuery(
   return useQuery({ ...visitsQueryOptions(params, refetchInterval), enabled })
 }
 
-/** Total antrean approval (requested + rescheduled) untuk badge shell — server-total, scope cabang/peran ikut backend. */
-export function usePendingApprovalCount(enabled = true) {
-  const requested = useVisitsQuery({ status: 'requested', limit: 1 }, enabled)
-  const rescheduled = useVisitsQuery({ status: 'rescheduled', limit: 1 }, enabled)
+/** Total antrean approval (requested + rescheduled) untuk badge shell — server-total, scope cabang/peran ikut backend. `locationId` meneruskan filter cabang halaman ('all' = tanpa filter). */
+export function usePendingApprovalCount(enabled = true, locationId = 'all') {
+  const locationFilter = locationId !== 'all' ? { location_id: locationId } : {}
+  const requested = useVisitsQuery(
+    { status: 'requested', limit: 1, ...locationFilter },
+    enabled,
+  )
+  const rescheduled = useVisitsQuery(
+    { status: 'rescheduled', limit: 1, ...locationFilter },
+    enabled,
+  )
   return {
     pendingCount: (requested.data?.total ?? 0) + (rescheduled.data?.total ?? 0),
     isPending: requested.isPending || rescheduled.isPending,

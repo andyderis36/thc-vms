@@ -20,21 +20,12 @@ func forbiddenBranch(message string) *domain.AppError {
 //
 //   - member yang ABSEN (atau null) berarti "biarkan cabang saat ini" —
 //     hasilnya nil, jadi penulisan tak pernah menyentuh kolom lokasi;
-//   - HANYA super_admin boleh menunjuk cabang lain. Admin cabang ditolak
-//     403 walau menunjuk cabangnya sendiri: cabang penugasan satpam adalah
-//     keputusan kantor pusat, dan field ini tak boleh jadi jalan memindahkan
-//     orang antar cabang;
+//   - super_admin bebas menunjuk cabang mana pun; admin cabang boleh
+//     menunjuk cabang di dalam cakupannya (scope ∪ primary), selain itu 403;
 //   - nilai yang terisi harus UUID kanonik, selain itu 400 VALIDATION_ERROR.
-//
-// Nilai balik adalah cabang yang harus ditulis (nil = pertahankan cabang
-// tersimpan). Keberadaan baris kanalognya dicek di lapisan delivery (port
-// master data), bukan di sini: aturan ini murni nilai, tanpa database.
-func ValidateSecurityLocationMove(actorRole domain.RoleName, raw *string) (*domain.UUID, error) {
+func ValidateSecurityLocationMove(actorRole domain.RoleName, raw *string, actorLocation *domain.UUID, scope []domain.UUID) (*domain.UUID, error) {
 	if raw == nil {
 		return nil, nil
-	}
-	if !domain.IsSuperAdminRole(actorRole) {
-		return nil, forbiddenBranch("Hanya Superadmin yang dapat memindahkan akun security ke cabang lain.")
 	}
 	trimmed := strings.TrimSpace(*raw)
 	if trimmed == "" {
@@ -43,6 +34,28 @@ func ValidateSecurityLocationMove(actorRole domain.RoleName, raw *string) (*doma
 	parsed, err := domain.ParseUUID(trimmed)
 	if err != nil {
 		return nil, badRequest("location_id tidak valid.")
+	}
+	if domain.IsSuperAdminRole(actorRole) {
+		return &parsed, nil
+	}
+	if actorRole != domain.RoleAdmin {
+		return nil, forbiddenBranch("Hanya Superadmin yang dapat memindahkan akun security ke cabang lain.")
+	}
+	allowed := make(map[domain.UUID]struct{})
+	if scope == nil {
+		if actorLocation != nil {
+			allowed[*actorLocation] = struct{}{}
+		}
+	} else {
+		for _, id := range scope {
+			allowed[id] = struct{}{}
+		}
+		if actorLocation != nil {
+			allowed[*actorLocation] = struct{}{}
+		}
+	}
+	if _, ok := allowed[parsed]; !ok {
+		return nil, forbiddenBranch("Tidak berhak memindahkan akun security ke cabang lain.")
 	}
 	return &parsed, nil
 }

@@ -35,6 +35,22 @@ func fromDomainUUID(id domain.UUID) (uuid.UUID, error) {
 	return parsed, nil
 }
 
+// toRepoUUIDs parses a domain branch union back to driver ids for the
+// ANY($1) scope predicate. Each element validates exactly like the scalar
+// fromDomainUUID path, so a malformed id fails the listing instead of
+// widening it; an empty union stays empty (fail-closed, zero rows).
+func toRepoUUIDs(ids []domain.UUID) ([]uuid.UUID, error) {
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		parsed, err := fromDomainUUID(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, parsed)
+	}
+	return out, nil
+}
+
 // mustDomainUUID is the non-failing variant for values the database just
 // returned: they are well-formed by construction, so a parse failure would be
 // a driver bug, and surfacing the zero value keeps the scan path total.

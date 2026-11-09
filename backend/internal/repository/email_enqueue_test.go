@@ -100,12 +100,13 @@ func seedUserWithStatus(t *testing.T, pool *pgxpool.Pool, p seedUserParams, stat
 	return toDomainUUID(id)
 }
 
-// seedEmailVisit stages one requested visit owned by the fixture vendor.
+// seedEmailVisit stages one requested visit owned by the fixture vendor and
+// filed by that same vendor (created_by = vendor user, the backfilled shape).
 func seedEmailVisit(t *testing.T, pool *pgxpool.Pool, code string, fx emailStaffFixture) domain.UUID {
 	t.Helper()
 	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	return seedVisit(t, pool, seedVisitParams{
-		Code: code, VendorUser: fx.vendor, Location: fx.loc,
+		Code: code, VendorUser: fx.vendor, Location: fx.loc, CreatedBy: fx.vendor,
 		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusRequested,
 	})
 }
@@ -167,8 +168,25 @@ func TestEmailEnqueue_ApproveSendsOneVendorEmail(t *testing.T) {
 	if !strings.Contains(call.Subject, "VST-0000000301") {
 		t.Fatalf("subject = %q, want the visit code", call.Subject)
 	}
+	if !strings.Contains(call.Subject, "Kunjungan Disetujui") {
+		t.Fatalf("subject = %q, want the canonical approval title", call.Subject)
+	}
 	if !strings.Contains(call.TextBody, "VST-0000000301") {
 		t.Fatalf("text body = %q, want the in_app message with the visit code", call.TextBody)
+	}
+	// Actor rows: who filed the request and who approved it, plus the QR
+	// link that only the approval mail may carry. The text body joins label
+	// and value; the HTML body renders them as separate table cells.
+	if !strings.Contains(call.TextBody, "Disetujui oleh: Admin Surel (Admin Cabang)") {
+		t.Fatalf("approve text body missing the actor row:\n%s", call.TextBody)
+	}
+	if !strings.Contains(call.TextBody, "Diajukan oleh: Vendor Surel (Vendor/Mitra)") {
+		t.Fatalf("approve text body missing the requester row:\n%s", call.TextBody)
+	}
+	for _, frag := range []string{"Disetujui oleh", "Admin Surel (Admin Cabang)", "Diajukan oleh", "Vendor Surel (Vendor/Mitra)", "Tautan QR"} {
+		if !strings.Contains(call.HTMLBody, frag) {
+			t.Fatalf("approve HTML body missing %q", frag)
+		}
 	}
 }
 
@@ -189,6 +207,12 @@ func TestEmailEnqueue_RejectSendsOneVendorEmail(t *testing.T) {
 	call := assertToSet(t, fake, []string{fx.vendorEmail})
 	if !strings.Contains(call.Subject, "VST-0000000302") {
 		t.Fatalf("subject = %q, want the visit code", call.Subject)
+	}
+	if !strings.Contains(call.TextBody, "Ditolak oleh: Admin Surel (Admin Cabang)") {
+		t.Fatalf("reject text body missing the actor row:\n%s", call.TextBody)
+	}
+	if strings.Contains(call.TextBody, "Tautan QR") || strings.Contains(call.HTMLBody, "Tautan QR") {
+		t.Fatalf("reject mail leaks the Tautan QR link:\n%s", call.TextBody)
 	}
 }
 
@@ -212,6 +236,12 @@ func TestEmailEnqueue_HumanCancelByVendorSendsOneStaffEmail(t *testing.T) {
 	if !strings.Contains(call.Subject, "VST-0000000303") {
 		t.Fatalf("subject = %q, want the visit code", call.Subject)
 	}
+	if !strings.Contains(call.TextBody, "dibatalkan oleh Vendor Surel (Vendor/Mitra).") {
+		t.Fatalf("vendor-cancel text body must name the person:\n%s", call.TextBody)
+	}
+	if !strings.Contains(call.TextBody, "Dibatalkan oleh: Vendor Surel (Vendor/Mitra)") {
+		t.Fatalf("vendor-cancel text body missing the actor row:\n%s", call.TextBody)
+	}
 	for _, addr := range call.To {
 		if addr == fx.vendorEmail {
 			t.Fatalf("recipients = %v, vendor must not be emailed on its own cancel", call.To)
@@ -233,7 +263,13 @@ func TestEmailEnqueue_HumanCancelByAdminSendsOneVendorEmail(t *testing.T) {
 	if err := repos.UpdateStatus(ctx, visitID, domain.VisitStatusCancelled, fx.admin, "batal admin"); err != nil {
 		t.Fatalf("admin cancel UpdateStatus: %v", err)
 	}
-	assertToSet(t, fake, []string{fx.vendorEmail})
+	call := assertToSet(t, fake, []string{fx.vendorEmail})
+	if !strings.Contains(call.TextBody, "dibatalkan oleh Admin Surel (Admin Cabang).") {
+		t.Fatalf("admin-cancel text body must name the person:\n%s", call.TextBody)
+	}
+	if !strings.Contains(call.TextBody, "Dibatalkan oleh: Admin Surel (Admin Cabang)") {
+		t.Fatalf("admin-cancel text body missing the actor row:\n%s", call.TextBody)
+	}
 }
 
 // TestEmailEnqueue_RescheduleSendsStaffPlusVendorEmails proves the dual in_app emit
@@ -287,8 +323,17 @@ func TestEmailEnqueue_RescheduleSendsStaffPlusVendorEmails(t *testing.T) {
 		if !strings.Contains(call.Subject, "VST-0000000305") {
 			t.Fatalf("subject = %q, want the visit code", call.Subject)
 		}
+		if !strings.Contains(call.Subject, "Jadwal Diubah") {
+			t.Fatalf("subject = %q, want the canonical reschedule title", call.Subject)
+		}
+		if !strings.Contains(call.TextBody, "Diubah oleh: Admin Surel (Admin Cabang)") {
+			t.Fatalf("reschedule text body missing the actor row:\n%s", call.TextBody)
+		}
 		if len(call.QRPNG) != 0 || call.QRCID != "" {
 			t.Fatalf("reschedule mail carries a team QR, want none outside approvals")
+		}
+		if strings.Contains(call.TextBody, "Tautan QR") {
+			t.Fatalf("reschedule mail leaks the Tautan QR link:\n%s", call.TextBody)
 		}
 	}
 }
@@ -319,6 +364,9 @@ func TestEmailEnqueue_GateTransitionsFlowThroughUpdateStatus(t *testing.T) {
 	if !strings.Contains(call.Subject, "VST-0000000306") {
 		t.Fatalf("check-in subject = %q, want the visit code", call.Subject)
 	}
+	if !strings.Contains(call.TextBody, "Petugas check-in: Security Surel (Petugas Keamanan)") {
+		t.Fatalf("check-in text body missing the officer row:\n%s", call.TextBody)
+	}
 	// What gate.CheckOut executes after its guards pass.
 	if err := repos.UpdateStatus(ctx, visitID, domain.VisitStatusCompleted, fx.security, ""); err != nil {
 		t.Fatalf("check-out UpdateStatus: %v", err)
@@ -335,6 +383,9 @@ func TestEmailEnqueue_GateTransitionsFlowThroughUpdateStatus(t *testing.T) {
 		if !seen[addr] {
 			t.Fatalf("check-out recipients = %v, want the staff set %v", out.To, fx.staffEmails)
 		}
+	}
+	if !strings.Contains(out.TextBody, "Petugas check-out: Security Surel (Petugas Keamanan)") {
+		t.Fatalf("check-out text body missing the officer row:\n%s", out.TextBody)
 	}
 }
 

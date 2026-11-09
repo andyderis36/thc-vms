@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const existsCheckOut = `-- name: ExistsCheckOut :one
@@ -28,21 +29,36 @@ func (q *Queries) ExistsCheckOut(ctx context.Context, arg ExistsCheckOutParams) 
 }
 
 const getCheckOutByVisitRequest = `-- name: GetCheckOutByVisitRequest :one
-SELECT id, visit_request_id, checked_out_at, checked_out_by FROM check_out WHERE visit_request_id = $1
+SELECT co.id, co.visit_request_id, co.checked_out_at, co.checked_out_by, u.name AS checked_out_by_name
+FROM check_out co
+LEFT JOIN users u ON u.id = co.checked_out_by
+WHERE co.visit_request_id = $1
 `
 
 type GetCheckOutByVisitRequestParams struct {
 	VisitRequestID uuid.UUID `json:"visit_request_id"`
 }
 
-func (q *Queries) GetCheckOutByVisitRequest(ctx context.Context, arg GetCheckOutByVisitRequestParams) (CheckOut, error) {
+type GetCheckOutByVisitRequestRow struct {
+	ID               uuid.UUID   `json:"id"`
+	VisitRequestID   uuid.UUID   `json:"visit_request_id"`
+	CheckedOutAt     time.Time   `json:"checked_out_at"`
+	CheckedOutBy     uuid.UUID   `json:"checked_out_by"`
+	CheckedOutByName pgtype.Text `json:"checked_out_by_name"`
+}
+
+// Same shape as GetCheckInByVisitRequest: the users LEFT JOIN rides the
+// display name of the acting staff for the GET /visits/{id} "Check-out oleh"
+// row (the read path used to drop the actor entirely).
+func (q *Queries) GetCheckOutByVisitRequest(ctx context.Context, arg GetCheckOutByVisitRequestParams) (GetCheckOutByVisitRequestRow, error) {
 	row := q.db.QueryRow(ctx, getCheckOutByVisitRequest, arg.VisitRequestID)
-	var i CheckOut
+	var i GetCheckOutByVisitRequestRow
 	err := row.Scan(
 		&i.ID,
 		&i.VisitRequestID,
 		&i.CheckedOutAt,
 		&i.CheckedOutBy,
+		&i.CheckedOutByName,
 	)
 	return i, err
 }

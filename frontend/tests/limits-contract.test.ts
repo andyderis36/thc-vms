@@ -24,6 +24,7 @@ import {
   PURPOSE_NOTE_MAX_LENGTH,
   REJECT_REASON_MIN_LENGTH,
   SEARCH_QUERY_MAX_LENGTH,
+  SUGGESTION_QUERY_MAX_LENGTH,
   TECHNICIANS_MAX,
   TEXT_MAX_LENGTH,
   UPLOAD_INGEST_MAX_BYTES,
@@ -142,6 +143,11 @@ const numberContracts: ReadonlyArray<{
     key: 'search_query_max_length',
   },
   {
+    constant: 'SUGGESTION_QUERY_MAX_LENGTH',
+    actual: SUGGESTION_QUERY_MAX_LENGTH,
+    key: 'suggestion_query_max_length',
+  },
+  {
     constant: 'VENDOR_NAME_MAX_LENGTH',
     actual: VENDOR_NAME_MAX_LENGTH,
     key: 'vendor_name_max_length',
@@ -197,7 +203,7 @@ describe('limits-contract — lib/limits.ts vs docs/4. openapi.yaml', () => {
   })
 
   it('jumlah kunci x-limits sama dengan jumlah kontrak', () => {
-    expect(limits.size).toBe(27)
+    expect(limits.size).toBe(28)
     expect(limits.size).toBe(numberContracts.length + 2)
   })
 

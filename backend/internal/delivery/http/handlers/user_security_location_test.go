@@ -73,19 +73,32 @@ func TestUpdateSecurity_SuperAdminMovesAccountOutOfForeignBranch(t *testing.T) {
 	}
 }
 
-// TestUpdateSecurity_BranchAdminCannotSetLocation is the isolation guard: a
-// branch admin is refused with 403 when it sends location_id — even when it
-// names its own branch — and the row is never touched.
-func TestUpdateSecurity_BranchAdminCannotSetLocation(t *testing.T) {
-	for _, target := range []string{branchAUUID, branchBUUID} {
+// TestUpdateSecurity_BranchAdminCanMoveInScope allows an admin to reassign a
+// satpam within its own branch (in-scope) and refuses out-of-scope branches
+// with 403 without touching the row.
+func TestUpdateSecurity_BranchAdminCanMoveInScope(t *testing.T) {
+	// In-scope (own branch): allowed, row moves, response carries new branch.
+	{
 		store := newStubSecurityDeleteStore(securityUser("sec-1", "s1@thc.local", branchAUUID))
 		engine := newSecurityLocationEngine(store, branchCatalogue(), domain.RoleAdmin, branchAUUID)
 
-		rec := serveJSON(engine, "PATCH", "/users/security/sec-1", `{"location_id":"`+target+`"}`)
+		rec := serveJSON(engine, "PATCH", "/users/security/sec-1", `{"location_id":"`+branchAUUID+`"}`)
+		mustStatus(t, rec, http.StatusOK)
+		moved := store.users["sec-1"]
+		if moved.LocationID == nil || *moved.LocationID != domain.UUID(branchAUUID) {
+			t.Fatalf("in-scope move must land on the branch, got %v", moved.LocationID)
+		}
+	}
+	// Out-of-scope: refused 403, row untouched.
+	{
+		store := newStubSecurityDeleteStore(securityUser("sec-1", "s1@thc.local", branchAUUID))
+		engine := newSecurityLocationEngine(store, branchCatalogue(), domain.RoleAdmin, branchAUUID)
+
+		rec := serveJSON(engine, "PATCH", "/users/security/sec-1", `{"location_id":"`+branchBUUID+`"}`)
 		mustStatus(t, rec, http.StatusForbidden)
 		env := decodeEnvelope(t, rec)
-		if env.Error == nil || env.Error.Code != "FORBIDDEN_BRANCH" || env.Error.Message == "" {
-			t.Fatalf("admin refusal must be 403 FORBIDDEN_BRANCH with a message, got %q", rec.Body.String())
+		if env.Error == nil || env.Error.Code != "FORBIDDEN_BRANCH" {
+			t.Fatalf("out-of-scope move must be 403 FORBIDDEN_BRANCH, got %q", rec.Body.String())
 		}
 		kept := store.users["sec-1"]
 		if kept.LocationID == nil || *kept.LocationID != domain.UUID(branchAUUID) {
@@ -112,17 +125,18 @@ func TestUpdateSecurity_MalformedLocationIDIs400(t *testing.T) {
 	}
 }
 
-// TestUpdateSecurity_UnknownLocationIs404 pins the "branch tujuan tak
-// ada" case: a well-formed but unknown branch id is a clean 404, never a 500.
-func TestUpdateSecurity_UnknownLocationIs404(t *testing.T) {
+// TestUpdateSecurity_UnknownLocationIs400 pins the "branch tujuan tak
+// ada" case: a well-formed but unknown branch id is a clean 400
+// VALIDATION_ERROR via the catalogue pre-check, never an FK/500.
+func TestUpdateSecurity_UnknownLocationIs400(t *testing.T) {
 	store := newStubSecurityDeleteStore(securityUser("sec-1", "s1@thc.local", branchAUUID))
 	engine := newSecurityLocationEngine(store, branchCatalogue(), domain.RoleSuperAdmin, "")
 
 	rec := serveJSON(engine, "PATCH", "/users/security/sec-1", `{"location_id":"`+branchCUUID+`"}`)
-	mustStatus(t, rec, http.StatusNotFound)
+	mustStatus(t, rec, http.StatusBadRequest)
 	env := decodeEnvelope(t, rec)
-	if env.Error == nil || env.Error.Code != "NOT_FOUND" {
-		t.Fatalf("unknown branch must be 404 NOT_FOUND, got %q", rec.Body.String())
+	if env.Error == nil || env.Error.Code != "VALIDATION_ERROR" {
+		t.Fatalf("unknown branch must be 400 VALIDATION_ERROR, got %q", rec.Body.String())
 	}
 	kept := store.users["sec-1"]
 	if kept.LocationID == nil || *kept.LocationID != domain.UUID(branchAUUID) {

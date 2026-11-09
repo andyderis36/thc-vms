@@ -54,7 +54,7 @@ func (s *stubVisitRepos) FindByVisitCode(_ context.Context, _ string) (domain.Vi
 	return domain.VisitRequest{}, domain.ErrNotFound
 }
 
-func (s *stubVisitRepos) GetLatestStatusNote(_ context.Context, _ domain.UUID) (*string, error) {
+func (s *stubVisitRepos) ListStatusHistory(_ context.Context, _ domain.UUID) ([]domain.StatusEvent, error) {
 	return nil, nil
 }
 
@@ -88,6 +88,14 @@ func (s *stubVisitRepos) DeleteVisit(_ context.Context, id domain.UUID) error {
 	s.deleted = append(s.deleted, id)
 	delete(s.existing, id)
 	return nil
+}
+
+func (s *stubVisitRepos) AttachWorkPhoto(_ context.Context, _ domain.UUID, _ domain.WorkPhotoKind, _ string, _ domain.UUID) (domain.WorkPhoto, bool, error) {
+	return domain.WorkPhoto{}, false, domain.ErrNotFound
+}
+
+func (s *stubVisitRepos) ListWorkPhotos(_ context.Context, _ domain.UUID) ([]domain.WorkPhoto, error) {
+	return nil, nil
 }
 
 // newDeleteEngine wires the three DELETE routes with injectable fakes so the

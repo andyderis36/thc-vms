@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"thc-vms/backend/internal/repository/db"
 )
 
 // TestVisitFieldsToDomain_MapsVendorUserNameAndEmail pins the vendor enrichment: the
@@ -43,5 +45,37 @@ func TestVisitFieldsToDomain_MapsVendorUserNameAndEmail(t *testing.T) {
 	}
 	if got.VendorUserVendorName != "PT Akun Vendor" {
 		t.Fatalf("VendorUserVendorName = %q, want PT Akun Vendor", got.VendorUserVendorName)
+	}
+}
+
+// TestVisitRowToDomain_MapsCreatedBy pins the migration 000024 column on the
+// create echo: a stored creator rides into the domain, SQL NULL stays absent.
+func TestVisitRowToDomain_MapsCreatedBy(t *testing.T) {
+	id := uuid.New()
+	creator := uuid.New()
+	row := db.VisitRequest{
+		ID:           id,
+		VisitID:      "VST-0000000001",
+		VendorUserID: uuid.New(),
+		LocationID:   uuid.New(),
+		Status:       "requested",
+		CreatedBy:    pgtype.UUID{Bytes: creator, Valid: true},
+	}
+
+	got, err := visitRowToDomain(row)
+	if err != nil {
+		t.Fatalf("visitRowToDomain: %v", err)
+	}
+	if got.CreatedBy == nil || string(*got.CreatedBy) != creator.String() {
+		t.Fatalf("CreatedBy = %v, want %s", got.CreatedBy, creator)
+	}
+
+	row.CreatedBy = pgtype.UUID{Valid: false}
+	got, err = visitRowToDomain(row)
+	if err != nil {
+		t.Fatalf("visitRowToDomain (NULL creator): %v", err)
+	}
+	if got.CreatedBy != nil {
+		t.Fatalf("CreatedBy = %q, want absent (nil)", *got.CreatedBy)
 	}
 }

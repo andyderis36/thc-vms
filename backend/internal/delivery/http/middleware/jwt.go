@@ -36,10 +36,17 @@ type ProfileLoader interface {
 const bearerPrefix = "Bearer "
 
 // JWT is MW2: it parses the bearer token, re-loads the account through the
-// auth service (revocation check), and stores the fresh identity for the
-// handlers. Missing, malformed and expired tokens - and tokens whose account
-// vanished or was deactivated - all become the 401 envelope.
-func JWT(parser TokenParser, loader ProfileLoader) gin.HandlerFunc {
+// auth service (revocation check), stores the fresh identity for the
+// handlers, and resolves the caller's branch-coverage union once through the
+// scope store, stashing it beside the identity for the request-aware guards.
+// Missing, malformed and expired tokens - and tokens whose account vanished
+// or was deactivated - all become the 401 envelope, as does an unresolvable
+// branch union for a branch-bound caller (fail closed: never admit without a
+// scope). A nil store skips the resolution (token-free test doubles); the
+// guards then fall back to the scalar identity rules. The JWT location_id
+// claim itself is display-only and never feeds the stash: the union always
+// comes from the database.
+func JWT(parser TokenParser, loader ProfileLoader, scopes ScopeStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if !strings.HasPrefix(header, bearerPrefix) {
@@ -69,11 +76,20 @@ func JWT(parser TokenParser, loader ProfileLoader) gin.HandlerFunc {
 			unauthorized(c, "jwt: account is not active")
 			return
 		}
-		deliveryhttp.WithIdentity(c, deliveryhttp.Identity{
+		identity := deliveryhttp.Identity{
 			UserID:     profile.ID,
 			Role:       profile.Role,
 			LocationID: profile.LocationID,
-		})
+		}
+		deliveryhttp.WithIdentity(c, identity)
+		if scopes != nil {
+			ids, isGlobal, err := AccessibleLocationIDs(c.Request.Context(), identity, scopes)
+			if err != nil {
+				unauthorized(c, "jwt: scope lookup failed")
+				return
+			}
+			deliveryhttp.WithScope(c, deliveryhttp.Scope{LocationIDs: ids, IsGlobal: isGlobal})
+		}
 		c.Next()
 	}
 }

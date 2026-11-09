@@ -49,6 +49,7 @@ type SuperAdminRoutes struct {
 	UpdatePurpose    gin.HandlerFunc
 	DeletePurpose    gin.HandlerFunc
 	ListUsers        gin.HandlerFunc
+	ListVendorAccounts gin.HandlerFunc
 	CreateUser       gin.HandlerFunc
 	UpdateUserStatus gin.HandlerFunc
 	UpdateUser       gin.HandlerFunc
@@ -61,6 +62,9 @@ type MasterRoutes struct {
 	Locations gin.HandlerFunc
 	Purposes  gin.HandlerFunc
 	Vendors   gin.HandlerFunc
+	// PublicVendors serves the same active company catalogue without a token
+	// (the public /register page's company suggestions).
+	PublicVendors gin.HandlerFunc
 }
 
 // VisitRoutes carries the bound visit-lifecycle handler methods.
@@ -76,7 +80,16 @@ type VisitRoutes struct {
 	// UpdateVisitorContact serves the creator-only roster-member correction
 	// (migration 000021): PATCH /visits/:id/visitors/:visitorId.
 	UpdateVisitorContact gin.HandlerFunc
-	Jabatan    gin.HandlerFunc
+	// AttachWorkPhoto serves the before/after work-proof attach
+	// (migration 000024): POST /visits/:id/work-photos.
+	AttachWorkPhoto gin.HandlerFunc
+	Jabatan         gin.HandlerFunc
+	// VendorSuggestions/MemberSuggestions/MemberSuggestion serve the two
+	// read-only suggestion feeds (T8 vendor identity, T10 member reuse). All
+	// three are branch/owner scoped inside the usecase.
+	VendorSuggestions gin.HandlerFunc
+	MemberSuggestions gin.HandlerFunc
+	MemberSuggestion  gin.HandlerFunc
 }
 
 // GateRoutes carries the bound gate handler methods.
@@ -111,25 +124,25 @@ type AuditRoutes struct {
 // vendor-registration queue is the exception: it is super_admin only and
 // therefore mounts behind SuperAdminOnly, never in the NotifyOnly group.
 type NotificationRoutes struct {
-	List                gin.HandlerFunc
-	MarkRead            gin.HandlerFunc
-	MarkAllRead         gin.HandlerFunc
+	List                 gin.HandlerFunc
+	MarkRead             gin.HandlerFunc
+	MarkAllRead          gin.HandlerFunc
 	PendingRegistrations gin.HandlerFunc
 }
 
 // Chain is the pre-built middleware for each route group.
 type Chain struct {
-	Recovery       gin.HandlerFunc
-	CORS           gin.HandlerFunc
-	BodyLimit      gin.HandlerFunc
-	LoginLimiter   gin.HandlerFunc
+	Recovery        gin.HandlerFunc
+	CORS            gin.HandlerFunc
+	BodyLimit       gin.HandlerFunc
+	LoginLimiter    gin.HandlerFunc
 	RegisterLimiter gin.HandlerFunc
-	Authenticate   gin.HandlerFunc
-	AdminOnly      gin.HandlerFunc
-	ApproveOnly    gin.HandlerFunc
-	GateOnly       gin.HandlerFunc
-	SuperAdminOnly gin.HandlerFunc
-	NotifyOnly     gin.HandlerFunc
+	Authenticate    gin.HandlerFunc
+	AdminOnly       gin.HandlerFunc
+	ApproveOnly     gin.HandlerFunc
+	GateOnly        gin.HandlerFunc
+	SuperAdminOnly  gin.HandlerFunc
+	NotifyOnly      gin.HandlerFunc
 }
 
 // HealthProbes carries the bound probe methods.
@@ -214,6 +227,10 @@ func New(d Deps) *gin.Engine {
 	v1.POST("/auth/register", withFallback(d.Chain.RegisterLimiter), withFallback(d.Auth.Register))
 	v1.GET("/health", withFallback(d.Health.Health))
 	v1.GET("/ready", withFallback(d.Health.Ready))
+	// The public /register page needs the vendor-company suggestions BEFORE a
+	// session exists, so this one catalogue read mounts on the anonymous group
+	// and carries company identity only (never account data).
+	v1.GET("/public/vendors", withFallback(d.Master.PublicVendors))
 
 	authed := v1.Group("")
 	authed.Use(withFallback(d.Chain.Authenticate))
@@ -226,6 +243,9 @@ func New(d Deps) *gin.Engine {
 	admins := authed.Group("")
 	admins.Use(withFallback(d.Chain.AdminOnly))
 	admins.GET("/users/security", withFallback(d.Users.List))
+	// Vendor-account directory for the visit form's owner picker: admins and
+	// super_admins only, active rows only, minimal id/name/email/company rows.
+	admins.GET("/users/vendors", withFallback(d.SuperAdmin.ListVendorAccounts))
 	admins.POST("/users/security", withFallback(d.Users.Create))
 	admins.PATCH("/users/security/:id/status", withFallback(d.Users.UpdateStatus))
 	admins.PATCH("/users/security/:id", withFallback(d.Users.Update))
@@ -262,15 +282,27 @@ func New(d Deps) *gin.Engine {
 	authed.GET("/locations", withFallback(d.Master.Locations))
 	authed.GET("/purposes", withFallback(d.Master.Purposes))
 	authed.GET("/vendors", withFallback(d.Master.Vendors))
+	// Deduped vendor-identity suggestions (master > account > history). The
+	// usecase owns the role gate (super_admin/admin) and branch scope; the
+	// endpoint is read-only and never writes master data.
+	authed.GET("/vendors/suggestions", withFallback(d.Visits.VendorSuggestions))
 	// Suggestion list for the roster "Jabatan" combobox: every authenticated
 	// role may read it because it carries only free-text position labels.
 	authed.GET("/jabatan", withFallback(d.Visits.Jabatan))
 
 	authed.GET("/visits", withFallback(d.Visits.List))
 	authed.POST("/visits", withFallback(d.Visits.Create))
+	// Member reuse suggestions mount BEFORE the :id route so the static
+	// prefix always wins; the usecase pins vendor ownership, admin branch
+	// scope and super_admin global, and never accepts a vendor_user_id filter.
+	authed.GET("/visits/member-suggestions", withFallback(d.Visits.MemberSuggestions))
+	authed.GET("/visits/member-suggestions/:visitorId", withFallback(d.Visits.MemberSuggestion))
 	authed.GET("/visits/:id", withFallback(d.Visits.Get))
 	authed.GET("/visits/:id/file", withFallback(d.File.File))
-	// Avatar reads stream the stored profile photo through the API host (the
+	// The work-proof attach stays on the authenticated group without a role
+	// gate: the usecase owns the scope (owning vendor, branch admin/security,
+	// super_admin), and a middleware gate here could only be coarser.
+	authed.POST("/visits/:id/work-photos", withFallback(d.Visits.AttachWorkPhoto)) // Avatar reads stream the stored profile photo through the API host (the
 	// usecase scopes the caller and answers 404 otherwise), so no presigned
 	// storage URL is ever exposed.
 	authed.GET("/avatars/:id", withFallback(d.Avatar.Avatar))

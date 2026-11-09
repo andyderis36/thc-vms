@@ -30,19 +30,35 @@ func (q *Queries) ExistsCheckIn(ctx context.Context, arg ExistsCheckInParams) (b
 }
 
 const getCheckInByVisitRequest = `-- name: GetCheckInByVisitRequest :one
-SELECT id, visit_request_id, checked_in_at, checked_in_by, photo_url, badge_code FROM check_in WHERE visit_request_id = $1
+SELECT ci.id, ci.visit_request_id, ci.checked_in_at, ci.checked_in_by, ci.photo_url, ci.badge_code, u.name AS checked_in_by_name
+FROM check_in ci
+LEFT JOIN users u ON u.id = ci.checked_in_by
+WHERE ci.visit_request_id = $1
 `
 
 type GetCheckInByVisitRequestParams struct {
 	VisitRequestID uuid.UUID `json:"visit_request_id"`
 }
 
+type GetCheckInByVisitRequestRow struct {
+	ID              uuid.UUID   `json:"id"`
+	VisitRequestID  uuid.UUID   `json:"visit_request_id"`
+	CheckedInAt     time.Time   `json:"checked_in_at"`
+	CheckedInBy     uuid.UUID   `json:"checked_in_by"`
+	PhotoUrl        pgtype.Text `json:"photo_url"`
+	BadgeCode       pgtype.Text `json:"badge_code"`
+	CheckedInByName pgtype.Text `json:"checked_in_by_name"`
+}
+
 // Existence + fact read used by the auto-rule worker (SweepNoShowVisits)
 // and by SCR-05 to render the "Sedang di Lokasi" badge. pgx reports a missing
-// row as pgx.ErrNoRows, which is the existence check.
-func (q *Queries) GetCheckInByVisitRequest(ctx context.Context, arg GetCheckInByVisitRequestParams) (CheckIn, error) {
+// row as pgx.ErrNoRows, which is the existence check. The users LEFT JOIN
+// rides the display name of the acting staff for the GET /visits/{id}
+// "Check-in oleh" row; the FK is NOT NULL but the LEFT JOIN keeps the column
+// NULL-safe for a removed account.
+func (q *Queries) GetCheckInByVisitRequest(ctx context.Context, arg GetCheckInByVisitRequestParams) (GetCheckInByVisitRequestRow, error) {
 	row := q.db.QueryRow(ctx, getCheckInByVisitRequest, arg.VisitRequestID)
-	var i CheckIn
+	var i GetCheckInByVisitRequestRow
 	err := row.Scan(
 		&i.ID,
 		&i.VisitRequestID,
@@ -50,6 +66,7 @@ func (q *Queries) GetCheckInByVisitRequest(ctx context.Context, arg GetCheckInBy
 		&i.CheckedInBy,
 		&i.PhotoUrl,
 		&i.BadgeCode,
+		&i.CheckedInByName,
 	)
 	return i, err
 }

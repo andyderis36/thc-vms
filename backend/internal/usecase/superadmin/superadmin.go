@@ -237,6 +237,10 @@ type ManagedUserInput struct {
 	NIK        string
 	Role       domain.RoleName
 	LocationID *domain.UUID
+	// LocationIDs is the optional accept-either union: nil means the key was
+	// absent (the union is the primary alone), a non-nil value replaces the
+	// union with the primary forced first. An explicitly empty list is 400.
+	LocationIDs []domain.UUID
 	VendorID   *domain.UUID
 	VendorName string
 }
@@ -271,9 +275,12 @@ func ValidateManagedUserCreate(in ManagedUserInput) (domain.UserType, error) {
 	if err := validateManualVendorName(in.VendorName); err != nil {
 		return "", err
 	}
+	if in.LocationIDs != nil && len(in.LocationIDs) == 0 {
+		return "", badRequest("location_ids tidak boleh kosong.")
+	}
 	switch in.Role {
 	case domain.RoleAdmin:
-		if in.LocationID == nil {
+		if in.LocationID == nil && len(in.LocationIDs) == 0 {
 			return "", badRequest("location_id wajib diisi untuk role admin.")
 		}
 		if in.VendorID != nil {
@@ -284,7 +291,7 @@ func ValidateManagedUserCreate(in ManagedUserInput) (domain.UserType, error) {
 		}
 		return domain.UserTypeInternal, nil
 	case domain.RoleVendor:
-		if in.LocationID != nil {
+		if in.LocationID != nil || in.LocationIDs != nil {
 			return "", badRequest("Role vendor tidak memakai location_id.")
 		}
 		return domain.UserTypeExternal, nil
@@ -310,6 +317,9 @@ type ManagedUserPatchInput struct {
 	Phone      *string
 	NIK        *string
 	LocationID *domain.UUID
+	// LocationIDs carries the PATCH accept-either union (nil keeps the stored
+	// branch, non-nil replaces the union). An explicitly empty list is 400.
+	LocationIDs []domain.UUID
 	VendorID   *domain.UUID
 	// VendorName carries the manual vendor company tri-state (migration 000005):
 	// nil keeps the stored override, a blank value clears it, a filled value
@@ -326,8 +336,11 @@ type ManagedUserPatchInput struct {
 // belongs to vendor rows only. Unknown roles are refused so a corrupt row can
 // never be edited into a worse state.
 func ValidateManagedUserUpdate(in ManagedUserPatchInput) error {
-	if in.Name == nil && in.Email == nil && in.Phone == nil && in.NIK == nil && in.LocationID == nil && in.VendorID == nil && in.VendorName == nil && in.Password == nil {
+	if in.Name == nil && in.Email == nil && in.Phone == nil && in.NIK == nil && in.LocationID == nil && in.LocationIDs == nil && in.VendorID == nil && in.VendorName == nil && in.Password == nil {
 		return badRequest("Tidak ada perubahan yang diberikan.")
+	}
+	if in.LocationIDs != nil && len(in.LocationIDs) == 0 {
+		return badRequest("location_ids tidak boleh kosong.")
 	}
 	if in.VendorName != nil {
 		if err := validateManualVendorName(*in.VendorName); err != nil {
@@ -381,7 +394,7 @@ func ValidateManagedUserUpdate(in ManagedUserPatchInput) error {
 		}
 		return nil
 	case domain.RoleVendor:
-		if in.LocationID != nil {
+		if in.LocationID != nil || in.LocationIDs != nil {
 			return badRequest("Role vendor tidak memakai location_id.")
 		}
 		return nil
@@ -394,7 +407,7 @@ func ValidateManagedUserUpdate(in ManagedUserPatchInput) error {
 		}
 		return nil
 	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:
-		if in.LocationID != nil {
+		if in.LocationID != nil || in.LocationIDs != nil {
 			return badRequest("Role super_admin tidak memakai location_id.")
 		}
 		if in.VendorID != nil {

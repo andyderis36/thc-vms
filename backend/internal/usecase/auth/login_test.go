@@ -71,7 +71,7 @@ func (f *fakeUsers) UpdateLastLogin(_ context.Context, id domain.UUID, at time.T
 	return nil
 }
 
-func (f *fakeUsers) ListSecurity(_ context.Context, _ *domain.UUID) ([]domain.User, error) {
+func (f *fakeUsers) ListSecurity(_ context.Context, _ []domain.UUID, _ bool) ([]domain.User, error) {
 	return nil, nil
 }
 

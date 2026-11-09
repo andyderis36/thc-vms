@@ -30,7 +30,13 @@ vi.mock('@/lib/auth/session', () => ({
 }))
 
 vi.mock('@/lib/api/hooks', () => ({
-  useLocationsQuery: () => ({ data: [] }),
+  useLocationsQuery: () => ({
+    data: [
+      { id: 'loc-1', name: 'POP Jakarta', city: 'Jakarta' },
+      { id: 'loc-2', name: 'POP Bandung', city: 'Bandung' },
+      { id: 'loc-3', name: 'POP Surabaya', city: 'Surabaya' },
+    ],
+  }),
   usePendingApprovalCount: () => ({ pendingCount: 0 }),
   useVisitsQuery: () => ({
     data: { items: [], total: 0 },
@@ -56,7 +62,7 @@ vi.mock('@/components/layouts/VendorMobileShell', () => ({
     createElement('div', { 'data-testid': 'vendor-shell' }, children),
 }))
 
-function makeUser(role: Role): User {
+function makeUser(role: Role, locationIds?: string[]): User {
   return {
     id: `u-${role}`,
     name: 'Budi Santoso',
@@ -65,6 +71,7 @@ function makeUser(role: Role): User {
     nik: null,
     role,
     location_id: 'loc-1',
+    ...(locationIds !== undefined ? { location_ids: locationIds } : {}),
     location_name: 'POP Jakarta',
     status: 'active',
     type: 'internal',
@@ -102,15 +109,30 @@ describe('/dashboard — shell superadmin untuk dev-superadmin', () => {
     expect(screen.getByRole('option', { name: 'Semua Cabang / POP' })).toBeInTheDocument()
   })
 
-  it('admin cabang tetap terkunci: select "Fasilitas" nonaktif dan mengunci cabangnya', () => {
-    session.user = makeUser('admin')
+  it('admin multi-cabang: select "Fasilitas" aktif dengan opsi terbatas cakupan', () => {
+    session.user = makeUser('admin', ['loc-1', 'loc-2'])
 
     render(<DashboardPage />)
 
     expect(screen.getByTestId('admin-shell')).toBeInTheDocument()
     const facilitySelect = screen.getByLabelText('Fasilitas')
-    expect(facilitySelect).toBeDisabled()
-    expect(facilitySelect).toHaveValue('loc-1')
+    expect(facilitySelect).toBeEnabled()
+    expect(facilitySelect).toHaveValue('all')
+    expect(screen.getByRole('option', { name: 'Semua Cabang Saya' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'POP Jakarta' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'POP Bandung' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'POP Surabaya' })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'Semua Cabang / POP' })).not.toBeInTheDocument()
+  })
+
+  it('admin tanpa cakupan ter-resolve: kontrol tersisa sentinel dan terkunci', () => {
+    session.user = { ...makeUser('admin'), location_id: null, location_ids: [] }
+
+    render(<DashboardPage />)
+
+    const facilitySelect = screen.getByLabelText('Fasilitas')
+    expect(facilitySelect).toBeDisabled()
+    expect(screen.getByRole('option', { name: 'Semua Cabang Saya' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'POP Jakarta' })).not.toBeInTheDocument()
   })
 })

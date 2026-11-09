@@ -2,10 +2,16 @@
 -- users.sql - Authentication, profile projection and branch security accounts.
 --
 -- SCOPE INVARIANT (PRD L110 / L112, AGENTS.md rule 6.1)
---   Every query that exposes user rows takes its location scope as a BOUND
---   PARAMETER. `sqlc.narg('location_id')` is NULL only for super_admin, which is
---   the single case where no branch filter is correct. There is no query in this
---   file that interpolates a role name or a location id into SQL text.
+--   Every query that exposes user rows takes its location scope as BOUND
+--   PARAMETERS in scope-union shape: `location_ids` (the branch union) plus
+--   `is_global` (the national bypass). is_global is true only for super_admin
+--   (nil filter: every branch); admin/security callers pass is_global false
+--   with their union as location_ids. A row matches when its primary is in the
+--   union OR any of its user_locations coverage rows is, so a B-primary
+--   account covering A is managed by the admin of A, while branch C stays
+--   invisible. Legacy rows without coverage fall back to the primary check.
+--   There is no query in this file that interpolates a role name or a location
+--   id into SQL text.
 -- =============================================================================
 
 -- Login lookup (POST /auth/login). Returns the projection the openapi `User`
@@ -132,10 +138,12 @@ INSERT INTO users (name, email, password_hash, phone, role_id, location_id, type
 VALUES ($1, $2, $3, $4, $5, $6, 'internal', 'active')
 RETURNING id, name, email, phone, nik, role_id, location_id, type, status, created_at, updated_at;
 
--- GET /users/security (openapi L119-138). `sqlc.narg('location_id')` is the whole
--- scoping mechanism: an admin/security caller passes its own location (PRD L110),
--- a super_admin passes NULL to see every branch or a location to filter (PRD L109).
--- ORDER BY created_at DESC keeps pagination stable for the account modal.
+-- GET /users/security (openapi L119-138). Scope-union scoping: a super_admin
+-- passes is_global true (every branch, location_ids empty); an admin passes
+-- is_global false with its branch union. A row matches on its primary OR on
+-- any user_locations coverage row, so an admin of A manages the B-primary
+-- officer covering A. ORDER BY created_at DESC keeps pagination stable for
+-- the account modal.
 -- name: ListSecurityUsers :many
 SELECT
     u.id,
@@ -157,7 +165,9 @@ JOIN role r ON r.id = u.role_id
 LEFT JOIN location l ON l.id = u.location_id
 LEFT JOIN vendor v ON v.id = u.vendor_id
 WHERE r.name = 'security'
-  AND (sqlc.narg('location_id')::uuid IS NULL OR u.location_id = sqlc.narg('location_id')::uuid)
+  AND (sqlc.arg('is_global')::boolean
+       OR u.location_id = ANY(sqlc.arg('location_ids')::uuid[])
+       OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = u.id AND ul.location_id = ANY(sqlc.arg('location_ids')::uuid[])))
 ORDER BY u.created_at DESC, u.id DESC;
 
 -- PATCH /users/security/{id}/status (openapi L161-188). Accepts only
@@ -180,9 +190,10 @@ RETURNING id, name, email, phone, nik, role_id, location_id, type, status, creat
 
 -- GET /users (super_admin only). role narrows to one of admin|vendor|security
 -- (validated in Go before this runs); search matches nama atau email
--- case-insensitively; location_id narrows to one branch. All three filters
--- are optional, so an empty filter lists every account with no pagination,
--- consistent with ListSecurityUsers. ORDER BY keeps the listing stable.
+-- case-insensitively; the scope-union pair (is_global + location_ids) narrows
+-- to the caller union the same way ListSecurityUsers does. All filters are
+-- optional: an empty filter lists every account with no pagination. ORDER BY
+-- keeps the listing stable.
 -- name: ListManagedUsers :many
 SELECT
     u.id,
@@ -208,7 +219,9 @@ WHERE (sqlc.narg('role')::text IS NULL OR r.name = sqlc.narg('role')::text)
   AND (sqlc.narg('search')::text IS NULL
        OR u.name ILIKE '%' || sqlc.narg('search')::text || '%'
        OR u.email ILIKE '%' || sqlc.narg('search')::text || '%')
-  AND (sqlc.narg('location_id')::uuid IS NULL OR u.location_id = sqlc.narg('location_id')::uuid)
+  AND (sqlc.arg('is_global')::boolean
+       OR u.location_id = ANY(sqlc.arg('location_ids')::uuid[])
+       OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = u.id AND ul.location_id = ANY(sqlc.arg('location_ids')::uuid[])))
 ORDER BY u.created_at DESC, u.id DESC;
 
 -- POST /users (super_admin only). Unlike InsertSecurityUser this insert takes

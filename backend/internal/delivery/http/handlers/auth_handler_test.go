@@ -159,7 +159,7 @@ func TestMe_RequiresBearerToken(t *testing.T) {
 	engine := gin.New()
 	h := handlers.NewAuthHandler(svc)
 	engine.GET("/auth/me",
-		middleware.JWT(testParser("secret-a"), svc),
+		middleware.JWT(testParser("secret-a"), svc, nil),
 		h.Me,
 	)
 
@@ -183,7 +183,7 @@ func TestMe_RejectsTamperedToken(t *testing.T) {
 	engine := gin.New()
 	h := handlers.NewAuthHandler(svc)
 	engine.GET("/auth/me",
-		middleware.JWT(testParser("secret-b"), svc),
+		middleware.JWT(testParser("secret-b"), svc, nil),
 		h.Me,
 	)
 

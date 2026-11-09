@@ -104,9 +104,37 @@ type visitDetailDTO struct {
 	StatusNote *string      `json:"status_note"`
 	Visitors    []visitorDTO `json:"visitors"`
 	CreatedAt   string       `json:"created_at"`
+	// WorkPhotos mirrors VisitDetail.work_photos: both evidence slots, each
+	// null until its proof is attached. It is set ONLY on the single-GET
+	// path (the usecase leaves it nil on list items and the create echo),
+	// so the key stays absent there instead of rendering empty slots.
+	WorkPhotos  *workPhotosDTO `json:"work_photos,omitempty"`
 	CheckInAt   *string      `json:"check_in_at,omitempty"`
 	CheckOutAt  *string      `json:"check_out_at,omitempty"`
 	CheckedInBy *string      `json:"checked_in_by,omitempty"`
+	// Actor display data for the "Diajukan oleh" / "Check-in oleh" /
+	// "Check-out oleh" info rows: filled ONLY by the single-GET enrichment
+	// (usecase withGateTimes + the read joins), omitted when unknown so the
+	// client drops the row instead of printing a bare UUID.
+	CreatedByName      *string `json:"created_by_name,omitempty"`
+	CreatedByRoleLabel *string `json:"created_by_role_label,omitempty"`
+	CheckedInByName    *string `json:"checked_in_by_name,omitempty"`
+	CheckedOutByName   *string `json:"checked_out_by_name,omitempty"`
+	// History mirrors VisitDetail.history: the actor-resolved status trail
+	// oldest -> newest, loaded ONLY on the single-GET path (the list path and
+	// the create echo leave it nil, so the key stays absent there).
+	History []statusEventDTO `json:"history,omitempty"`
+}
+
+// statusEventDTO mirrors VisitHistoryEntry: one status_history row with its
+// actor resolved. actor_name / actor_role_label render JSON null (never
+// omitted) for a system transition (changed_by IS NULL), so the client can
+// distinguish "no actor" from a missing member.
+type statusEventDTO struct {
+	Status         string  `json:"status"`
+	At             string  `json:"at"`
+	ActorName      *string `json:"actor_name"`
+	ActorRoleLabel *string `json:"actor_role_label"`
 }
 
 // visitListDTO mirrors the VisitListResponse data object: {items, total,
@@ -140,6 +168,11 @@ type uploadDTO struct {
 // upload category.
 type createVisitBody struct {
 	LocationID string   `json:"location_id"`
+	// VendorUserID names the vendor ACCOUNT owning the visit (migration
+	// 000024). It is honoured for admin/superadmin/dev-superadmin; a vendor
+	// caller may only name itself (a foreign id is refused 403, never silently
+	// rewritten). Absent keeps the historical actor-owns-it behaviour.
+	VendorUserID *string `json:"vendor_user_id"`
 	// VendorName is the manually typed visit-level company (migration 000017),
 	// honoured for admin/superadmin-created visits; it never enters the
 	// vendor catalogue.
@@ -178,6 +211,57 @@ type createVisitBody struct {
 	} `json:"visitors"`
 }
 
+// workPhotoDTO mirrors WorkPhoto: one before/after evidence slot. kind is
+// present on the POST /visits/{id}/work-photos 201/200 body and omitted on
+// the detail slots (the slot position already names it). url is the stored
+// URL on the attach echo and the presigned link on the detail member, null
+// when no link is available. uploaded_by is null when the attaching account
+// has since been removed; uploaded_by_name rides along for display and is
+// omitted when unknown.
+type workPhotoDTO struct {
+	Kind           *string `json:"kind,omitempty"`
+	URL            *string `json:"url"`
+	UploadedBy     *string `json:"uploaded_by,omitempty"`
+	UploadedByName *string `json:"uploaded_by_name,omitempty"`
+	UploadedAt     string  `json:"uploaded_at"`
+}
+
+// workPhotosDTO mirrors the VisitDetail work_photos member: both evidence
+// slots, each null until its proof is attached.
+type workPhotosDTO struct {
+	Before *workPhotoDTO `json:"before"`
+	After  *workPhotoDTO `json:"after"`
+}
+
+// toWorkPhotoSlot maps one stored proof onto a detail slot (no kind member).
+func toWorkPhotoSlot(p *domain.WorkPhoto) *workPhotoDTO {
+	if p == nil {
+		return nil
+	}
+	dto := &workPhotoDTO{UploadedAt: p.UploadedAt.Format(time.RFC3339)}
+	if strings.TrimSpace(p.URL) != "" {
+		url := p.URL
+		dto.URL = &url
+	}
+	if p.UploadedBy != nil {
+		by := string(*p.UploadedBy)
+		dto.UploadedBy = &by
+	}
+	if strings.TrimSpace(p.UploadedByName) != "" {
+		name := strings.TrimSpace(p.UploadedByName)
+		dto.UploadedByName = &name
+	}
+	return dto
+}
+
+// toAttachedWorkPhoto maps the just-stored proof onto the attach response
+// body, naming the slot it landed in.
+func toAttachedWorkPhoto(p domain.WorkPhoto) workPhotoDTO {
+	dto := toWorkPhotoSlot(&p)
+	kind := string(p.Kind)
+	out := workPhotoDTO{Kind: &kind, UploadedAt: dto.UploadedAt, URL: dto.URL, UploadedBy: dto.UploadedBy, UploadedByName: dto.UploadedByName}
+	return out
+}
 // toVisitorDTO maps one domain roster entry onto the openapi VisitorItem
 // shape. It is shared by the visit detail roster and the single-member
 // PATCH /visits/{id}/visitors/{visitorId} response so both render the same
@@ -279,6 +363,14 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 	// catalogue win can never leak the discarded manual text.
 	detail.PurposeNote = v.PurposeNote
 	detail.StatusNote = v.StatusNote
+	// The work proofs travel only when the usecase loaded them (single GET):
+	// both slots always render together, each null until attached.
+	if v.WorkPhotos != nil {
+		detail.WorkPhotos = &workPhotosDTO{
+			Before: toWorkPhotoSlot(v.WorkPhotos.Before),
+			After:  toWorkPhotoSlot(v.WorkPhotos.After),
+		}
+	}
 	// Gate times come from the usecase enrichment, never invented here: nil
 	// pointers stay absent (omitempty) for requested/approved visits and for
 	// every list item, while visiting/completed single-GETs render RFC3339.
@@ -293,6 +385,28 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 	if v.CheckedInBy != nil {
 		by := string(*v.CheckedInBy)
 		detail.CheckedInBy = &by
+	}
+	// Actor display data travels straight from the domain enrichment: nil
+	// pointers stay absent (omitempty) for list items, for pre-gate visits
+	// and for an unresolved account row.
+	detail.CreatedByName = v.CreatedByName
+	detail.CreatedByRoleLabel = v.CreatedByRoleLabel
+	detail.CheckedInByName = v.CheckedInByName
+	detail.CheckedOutByName = v.CheckedOutByName
+	// The history trail is loaded only on the single-GET path; nil stays
+	// absent while a loaded trail renders oldest -> newest, each system row
+	// carrying null actor members.
+	if v.History != nil {
+		history := make([]statusEventDTO, 0, len(v.History))
+		for _, event := range v.History {
+			history = append(history, statusEventDTO{
+				Status:         string(event.Status),
+				At:             event.At.Format(time.RFC3339),
+				ActorName:      event.ActorName,
+				ActorRoleLabel: event.ActorRoleLabel,
+			})
+		}
+		detail.History = history
 	}
 	return detail
 }
@@ -309,6 +423,12 @@ func toCreateInput(body createVisitBody, start, end time.Time) visit.CreateVisit
 		PurposeNote:   body.PurposeNote,
 		VendorName:    body.VendorName,
 		IsNDAAccepted: body.IsNDAAccepted != nil && *body.IsNDAAccepted,
+	}
+	if body.VendorUserID != nil {
+		if id := strings.TrimSpace(*body.VendorUserID); id != "" {
+			vendorUserID := domain.UUID(id)
+			in.VendorUserID = &vendorUserID
+		}
 	}
 	if body.AssignmentLetterURL != nil {
 		url := *body.AssignmentLetterURL

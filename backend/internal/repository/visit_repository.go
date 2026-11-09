@@ -27,6 +27,10 @@ type visitRepository struct {
 	// disables email fan-out, it never fails a write. The SMTP transport
 	// stays in infrastructure; the adapter is only ever Send-queued.
 	mailer domain.Mailer
+	// frontendBaseURL is the public web origin used to render absolute deep
+	// links in lifecycle emails (WithFrontendBaseURL, mirroring WithMailer).
+	// Empty keeps the legacy relative links.
+	frontendBaseURL string
 }
 
 // Compile-time proof that the adapter satisfies its port.
@@ -44,6 +48,14 @@ func NewVisitRepository(pool *pgxpool.Pool) *visitRepository {
 // only disables email fan-out, it never fails a write.
 func (r *visitRepository) WithMailer(mailer domain.Mailer) *visitRepository {
 	r.mailer = mailer
+	return r
+}
+
+// WithFrontendBaseURL wires the public web origin used for absolute deep links
+// in lifecycle emails and returns the repository for chaining at the composition
+// root, mirroring WithMailer. An empty value keeps the legacy relative links.
+func (r *visitRepository) WithFrontendBaseURL(base string) *visitRepository {
+	r.frontendBaseURL = strings.TrimSpace(base)
 	return r
 }
 
@@ -71,6 +83,10 @@ func (r *visitRepository) Create(
 		return domain.VisitRequest{}, err
 	}
 	vendorID, err := pgNullUUID(visit.VendorID)
+	if err != nil {
+		return domain.VisitRequest{}, err
+	}
+	createdBy, err := pgNullUUIDPtr(visit.CreatedBy)
 	if err != nil {
 		return domain.VisitRequest{}, err
 	}
@@ -105,6 +121,7 @@ func (r *visitRepository) Create(
 				Notes:               pgText(visit.Notes),
 				PurposeNote:         pgText(visit.PurposeNote),
 				VendorNameOverride:  pgText(visit.VendorNameOverride),
+				CreatedBy:           createdBy,
 			})
 			if err != nil {
 				return MapError(err)
@@ -170,10 +187,16 @@ func (r *visitRepository) FindByID(ctx context.Context, id domain.UUID) (domain.
 	return r.withVisitors(ctx, visit)
 }
 
-// GetLatestStatusNote returns the note of the most recent status_history row
-// for the visit, or nil when there is none. A missing history row is not an
-// error: a freshly created visit may have no history row yet.
-func (r *visitRepository) GetLatestStatusNote(ctx context.Context, id domain.UUID) (*string, error) {
+// ListStatusHistory returns the actor-resolved status trail of one visit,
+// oldest -> newest (the SQL window keeps only the 50 newest rows, so an
+// ancient visit cannot grow an unbounded payload). The actor display data
+// comes from the query's users/role LEFT JOINs: a NULL changed_by (the
+// background auto-rule worker) yields nil actor pointers, an unknown or
+// missing role maps through domain.RoleLabel to "" and is dropped so the
+// wire renders null instead of an empty label, and a NULL/blank note maps to
+// nil. An empty slice means "no history rows yet" and is not an error: a
+// freshly created visit may have none.
+func (r *visitRepository) ListStatusHistory(ctx context.Context, id domain.UUID) ([]domain.StatusEvent, error) {
 	parsed, err := fromDomainUUID(id)
 	if err != nil {
 		return nil, err
@@ -182,18 +205,24 @@ func (r *visitRepository) GetLatestStatusNote(ctx context.Context, id domain.UUI
 	if err != nil {
 		return nil, MapError(err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
+	events := make([]domain.StatusEvent, 0, len(rows))
+	for _, row := range rows {
+		event := domain.StatusEvent{
+			Status: domain.VisitStatus(row.Status),
+			At:     row.ChangedAt,
+		}
+		if name := strings.TrimSpace(row.ChangedByName.String); row.ChangedByName.Valid && name != "" {
+			event.ActorName = &name
+		}
+		if role := domain.RoleLabel(strings.TrimSpace(row.ChangedByRole.String)); row.ChangedByRole.Valid && role != "" {
+			event.ActorRoleLabel = &role
+		}
+		if note := strings.TrimSpace(row.Notes.String); row.Notes.Valid && note != "" {
+			event.Notes = &note
+		}
+		events = append(events, event)
 	}
-	last := rows[len(rows)-1]
-	if !last.Notes.Valid {
-		return nil, nil
-	}
-	note := strings.TrimSpace(last.Notes.String)
-	if note == "" {
-		return nil, nil
-	}
-	return &note, nil
+	return events, nil
 }
 
 // FindByVisitCode resolves one visit by its printed VST-XXXXXXXXXX code: the

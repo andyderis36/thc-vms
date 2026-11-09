@@ -14,7 +14,13 @@ VALUES ($1, $2, $3)
 RETURNING *;
 
 -- name: GetCheckOutByVisitRequest :one
-SELECT * FROM check_out WHERE visit_request_id = $1;
+-- Same shape as GetCheckInByVisitRequest: the users LEFT JOIN rides the
+-- display name of the acting staff for the GET /visits/{id} "Check-out oleh"
+-- row (the read path used to drop the actor entirely).
+SELECT co.*, u.name AS checked_out_by_name
+FROM check_out co
+LEFT JOIN users u ON u.id = co.checked_out_by
+WHERE co.visit_request_id = $1;
 
 -- name: ExistsCheckOut :one
 SELECT EXISTS (SELECT 1 FROM check_out WHERE visit_request_id = $1)::bool AS exists;

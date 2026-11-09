@@ -45,6 +45,7 @@ import {
   type ManagedStatusFilter,
   type UserFilterSnapshot,
   userAffiliationLabel,
+  userAffiliationTitle,
 } from '@/features/users/managed-user-filters'
 import {
   useDeleteManagedUserMutation,
@@ -328,8 +329,8 @@ export function ManagedUsersScreen({
                       {target.email}
                       {target.nik !== null ? ` · NIK ${target.nik}` : null}
                     </p>
-                    <p className="truncate text-xs text-ink-muted" title={userAffiliationLabel(target)}>
-                      {userAffiliationLabel(target)}
+                    <p className="truncate text-xs text-ink-muted" title={userAffiliationTitle(target, locations)}>
+                      {userAffiliationLabel(target, locations)}
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-2">
@@ -460,6 +461,7 @@ export function ManagedUsersScreen({
               users={pageRows}
               currentUserId={currentUserId}
               viewerRole={viewerRole}
+              locations={locations}
               onDelete={setDeleting}
               onEdit={setEditing}
               onView={setDetail}
@@ -479,6 +481,7 @@ export function ManagedUsersScreen({
               users={pageRows}
               currentUserId={currentUserId}
               viewerRole={viewerRole}
+              locations={locations}
               onDelete={setDeleting}
               onEdit={setEditing}
               onView={setDetail}
@@ -534,7 +537,7 @@ export function ManagedUsersScreen({
           title="Detail User"
           subtitle={detail.name}
           avatar={<UserAvatar name={detail.name} avatarUrl={detail.avatar_url} size="lg" />}
-          fields={managedUserDetailFields(detail)}
+          fields={managedUserDetailFields(detail, locations)}
           onClose={() => setDetail(null)}
         />
       ) : null}

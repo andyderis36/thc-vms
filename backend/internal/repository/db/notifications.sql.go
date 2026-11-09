@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countNotificationsForUser = `-- name: CountNotificationsForUser :one
@@ -18,18 +17,21 @@ SELECT count(*)::bigint AS count
 FROM notification n
 JOIN visit_request vr ON vr.id = n.visit_request_id
 WHERE n.user_id = $1::uuid
-  AND ($2::uuid IS NULL OR vr.location_id = $2::uuid)
+  AND ($2::boolean
+       OR vr.location_id = ANY($3::uuid[])
+       OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = n.user_id AND ul.location_id = vr.location_id))
 `
 
 type CountNotificationsForUserParams struct {
-	UserID     uuid.UUID   `json:"user_id"`
-	LocationID pgtype.UUID `json:"location_id"`
+	UserID      uuid.UUID   `json:"user_id"`
+	IsGlobal    bool        `json:"is_global"`
+	LocationIds []uuid.UUID `json:"location_ids"`
 }
 
 // Companion count; predicate is byte-for-byte the ListNotificationsForUser one
 // so {items,total} cannot drift from the page it counts.
 func (q *Queries) CountNotificationsForUser(ctx context.Context, arg CountNotificationsForUserParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countNotificationsForUser, arg.UserID, arg.LocationID)
+	row := q.db.QueryRow(ctx, countNotificationsForUser, arg.UserID, arg.IsGlobal, arg.LocationIds)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -69,7 +71,9 @@ JOIN role r ON r.id = u.role_id
 WHERE u.status = 'active'
   AND (
         r.name IN ('super_admin', 'dev-superadmin')
-        OR (r.name IN ('admin', 'security') AND u.location_id = $6::uuid)
+        OR (r.name IN ('admin', 'security')
+            AND (u.location_id = $6::uuid
+                 OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = u.id AND ul.location_id = $6::uuid)))
       )
 ON CONFLICT (user_id, type, visit_request_id) DO UPDATE SET
   message = EXCLUDED.message,
@@ -99,9 +103,11 @@ type InsertStaffNotificationsParams struct {
 //	internal/repository/notification_emit.go), so a notice can never exist
 //	without its triggering transition. Recipients are resolved by SQL fan-out:
 //	  staff  = every ACTIVE national super_admin plus the ACTIVE admin/security
-//	           stationed at the visit's branch (users.location_id).
+//	           whose primary OR user_locations coverage holds the visit's
+//	           branch (the union, never the scalar primary alone).
 //	  vendor = the visit's vendor_user_id, but ONLY when that account holds the
-//	           'vendor' role (company-wide fan-out is deliberately rejected).
+//	           'vendor' role (company-wide fan-out is deliberately rejected:
+//	           the r.name guard owns that, never the union).
 //
 // IDEMPOTENCY
 //
@@ -122,14 +128,21 @@ type InsertStaffNotificationsParams struct {
 //
 // READ PATH
 //
-//	Reads are user-scoped (WHERE user_id = caller). The optional location_id
-//	narrows a super_admin's national feed by branch; it never widens a scoped
-//	caller because the user_id predicate is always present.
+//	Reads are user-scoped (WHERE user_id = caller) with the scope-union pair
+//	(is_global + location_ids): super_admin passes is_global true for the
+//	national feed (or is_global false with one branch to narrow it), vendor
+//	passes is_global true (its own rows at any branch), and admin/security
+//	pass is_global false with their scalar branch — the EXISTS leg below then
+//	widens the match to every branch of the caller's own user_locations
+//	union, so A-union-B callers see A-union-B notices while C stays out.
 //
 // =============================================================================
 // Fan-out to the visit's staff audience: every active super_admin (national,
 // including the hidden dev-superadmin which passes every super_admin gate)
-// plus the active admin/security at the visit's location. ON CONFLICT keeps the
+// plus the active admin/security whose primary OR coverage union holds the
+// visit's branch. The vendor role never matches: the r.name guard owns that,
+// so a vendor account holding a coverage row still receives nothing here.
+// ON CONFLICT keeps the
 // write idempotent per (recipient, type, visit): other types are a no-op on
 // conflict, while a repeat visit_rescheduled REFRESHES message + created_at
 // to the latest emission (WHERE guard on the upsert below).
@@ -314,16 +327,19 @@ FROM notification n
 JOIN visit_request vr ON vr.id = n.visit_request_id
 JOIN location l ON l.id = vr.location_id
 WHERE n.user_id = $1::uuid
-  AND ($2::uuid IS NULL OR vr.location_id = $2::uuid)
+  AND ($2::boolean
+       OR vr.location_id = ANY($3::uuid[])
+       OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = n.user_id AND ul.location_id = vr.location_id))
 ORDER BY n.created_at DESC, n.id DESC
-LIMIT $4 OFFSET $3
+LIMIT $5 OFFSET $4
 `
 
 type ListNotificationsForUserParams struct {
-	UserID     uuid.UUID   `json:"user_id"`
-	LocationID pgtype.UUID `json:"location_id"`
-	Offset     int32       `json:"offset"`
-	Limit      int32       `json:"limit"`
+	UserID      uuid.UUID   `json:"user_id"`
+	IsGlobal    bool        `json:"is_global"`
+	LocationIds []uuid.UUID `json:"location_ids"`
+	Offset      int32       `json:"offset"`
+	Limit       int32       `json:"limit"`
 }
 
 type ListNotificationsForUserRow struct {
@@ -341,10 +357,15 @@ type ListNotificationsForUserRow struct {
 
 // One page of the caller's own notifications, newest first, joined to the visit
 // and its location for the visit_id/location_name the wire shape needs.
+// Scope-union scoping: is_global bypasses the branch match (super_admin
+// national feed, vendor own-rows feed); otherwise the visit branch matches the
+// passed union OR any branch of the caller's own user_locations coverage, so
+// an A-union-B caller narrowing by A still sees B while C stays out.
 func (q *Queries) ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]ListNotificationsForUserRow, error) {
 	rows, err := q.db.Query(ctx, listNotificationsForUser,
 		arg.UserID,
-		arg.LocationID,
+		arg.IsGlobal,
+		arg.LocationIds,
 		arg.Offset,
 		arg.Limit,
 	)
@@ -384,7 +405,9 @@ JOIN role r ON r.id = u.role_id
 WHERE u.status = 'active'
   AND (
         r.name IN ('super_admin', 'dev-superadmin')
-        OR (r.name IN ('admin', 'security') AND u.location_id = $1::uuid)
+        OR (r.name IN ('admin', 'security')
+            AND (u.location_id = $1::uuid
+                 OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = u.id AND ul.location_id = $1::uuid)))
       )
 ORDER BY u.email ASC
 `
@@ -395,9 +418,10 @@ type ListStaffEmailRecipientsParams struct {
 
 // Active-only email mirror of InsertStaffNotifications: every ACTIVE national
 // super_admin (including the hidden dev-superadmin, which passes every
-// super_admin gate) plus the ACTIVE admin/security stationed at the visit's
-// branch. The predicate is the fan-out one plus the email projection, so the
-// two can never address different sets. Blank addresses are returned as-is:
+// super_admin gate) plus the ACTIVE admin/security whose primary OR coverage
+// union holds the visit's branch. The predicate is the fan-out one plus the
+// email projection, so the two can never address different sets. Blank
+// addresses are returned as-is:
 // the Go caller skips (and logs) them so the skip stays observable.
 func (q *Queries) ListStaffEmailRecipients(ctx context.Context, arg ListStaffEmailRecipientsParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listStaffEmailRecipients, arg.LocationID)

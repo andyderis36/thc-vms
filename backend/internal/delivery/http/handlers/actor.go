@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	deliveryhttp "thc-vms/backend/internal/delivery/http"
 	"thc-vms/backend/internal/domain"
 	"thc-vms/backend/internal/usecase/avatar"
 	"thc-vms/backend/internal/usecase/gate"
@@ -86,29 +87,51 @@ func identityFromContext(c *gin.Context) (actorIdentity, error) {
 	return identity, nil
 }
 
-// visitActor converts the context identity to the visit usecase Actor.
+// visitActor converts the context identity to the visit usecase Actor,
+// carrying the stashed branch union alongside the scalar primary.
 func visitActor(c *gin.Context) (visit.Actor, error) {
 	identity, err := identityFromContext(c)
 	if err != nil {
 		return visit.Actor{}, err
 	}
-	return visit.Actor{ID: identity.id, Role: identity.role, LocationID: identity.locationID}, nil
+	actor := visit.Actor{ID: identity.id, Role: identity.role, LocationID: identity.locationID}
+	applyScope(&actor.Branches, &actor.IsGlobal, c)
+	return actor, nil
 }
 
-// gateActor converts the context identity to the gate usecase Actor.
+// gateActor converts the context identity to the gate usecase Actor,
+// carrying the stashed branch union alongside the scalar primary.
 func gateActor(c *gin.Context) (gate.Actor, error) {
 	identity, err := identityFromContext(c)
 	if err != nil {
 		return gate.Actor{}, err
 	}
-	return gate.Actor{ID: identity.id, Role: identity.role, LocationID: identity.locationID}, nil
+	actor := gate.Actor{ID: identity.id, Role: identity.role, LocationID: identity.locationID}
+	applyScope(&actor.Branches, &actor.IsGlobal, c)
+	return actor, nil
 }
 
-// avatarActor converts the context identity to the avatar usecase Actor.
+// avatarActor converts the context identity to the avatar usecase Actor,
+// carrying the stashed branch union alongside the scalar primary.
 func avatarActor(c *gin.Context) (avatar.Actor, error) {
 	identity, err := identityFromContext(c)
 	if err != nil {
 		return avatar.Actor{}, err
 	}
-	return avatar.Actor{ID: identity.id, Role: identity.role, LocationID: identity.locationID}, nil
+	actor := avatar.Actor{ID: identity.id, Role: identity.role, LocationID: identity.locationID}
+	applyScope(&actor.Branches, &actor.IsGlobal, c)
+	return actor, nil
+}
+
+// applyScope copies the stashed thc.scope union onto the actor under
+// construction. Without a stash (unwired store, token-free test doubles) the
+// actor keeps its zero scope and the usecase guards fall back to the scalar
+// rule, so reads and writes decide exactly as before.
+func applyScope(branches *[]domain.UUID, isGlobal *bool, c *gin.Context) {
+	scope, ok := deliveryhttp.ScopeFrom(c)
+	if !ok {
+		return
+	}
+	*branches = scope.LocationIDs
+	*isGlobal = scope.IsGlobal
 }

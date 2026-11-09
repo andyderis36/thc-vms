@@ -168,15 +168,59 @@ func multipartUploadOfSize(t *testing.T, size int) ([]byte, string) {
 }
 
 func TestUpload_RejectsUnknownCategory(t *testing.T) {
+	for _, category := range []string{"selfie", "work_photo", "work_photos/pending"} {
+		t.Run(category, func(t *testing.T) {
+			storage := &fakeStorage{}
+			engine := newUploadEngine(storage, 5*1024*1024)
+
+			body, ctype := multipartUpload(t, "x.jpg", "image/jpeg", []byte("hello"),
+				map[string]string{"category": category, "owner_id": "visit-1"})
+			rec := serve(engine, "POST", "/uploads", body, ctype)
+			mustStatus(t, rec, 400)
+			if storage.uploadCalls != 0 {
+				t.Fatalf("unknown category %q reached storage", category)
+			}
+		})
+	}
+}
+
+// TestUpload_WorkPhotosStoresUnderWorkPhotosDirectory pins the new category:
+// the hint reaches storage as work_photos/<owner>, which the adapter expands
+// into work_photos/<ownerID>/<file>.
+func TestUpload_WorkPhotosStoresUnderWorkPhotosDirectory(t *testing.T) {
+	storage := &fakeStorage{result: domain.UploadResult{
+		FileURL:  "http://localhost:9000/thc-vms-bucket/work_photos/pending-actor-1/before.jpg",
+		FileName: "before.jpg",
+		FileSize: 5,
+		MimeType: "image/jpeg",
+	}}
+	engine := newUploadEngine(storage, 5*1024*1024)
+
+	body, ctype := multipartUpload(t, "before.jpg", "image/jpeg", []byte("hello"),
+		map[string]string{"category": "work_photos"})
+	rec := serve(engine, "POST", "/uploads", body, ctype)
+	mustStatus(t, rec, 201)
+
+	if storage.uploadCalls != 1 {
+		t.Fatalf("upload calls = %d, want 1", storage.uploadCalls)
+	}
+	if storage.lastReq.ObjectKey != "work_photos/pending-actor-1" {
+		t.Fatalf("ObjectKey = %q, want hint %q", storage.lastReq.ObjectKey, "work_photos/pending-actor-1")
+	}
+}
+
+// TestUpload_WorkPhotosRejectsPDF keeps work-photo evidence image-only: PDF is
+// allowed for visit documents but is never a valid condition photo.
+func TestUpload_WorkPhotosRejectsPDF(t *testing.T) {
 	storage := &fakeStorage{}
 	engine := newUploadEngine(storage, 5*1024*1024)
 
-	body, ctype := multipartUpload(t, "x.jpg", "image/jpeg", []byte("hello"),
-		map[string]string{"category": "selfie", "owner_id": "visit-1"})
+	body, ctype := multipartUpload(t, "before.pdf", "application/pdf", []byte("hello"),
+		map[string]string{"category": "work_photos"})
 	rec := serve(engine, "POST", "/uploads", body, ctype)
 	mustStatus(t, rec, 400)
 	if storage.uploadCalls != 0 {
-		t.Fatalf("unknown category reached storage")
+		t.Fatalf("a PDF work photo reached storage")
 	}
 }
 

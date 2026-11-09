@@ -67,6 +67,11 @@ func (r *visitRepository) UpdateStatus(
 			return MapError(err)
 		}
 		locationID, vendorUserID = locked.LocationID, locked.VendorUserID
+		// Resolve the email actor rows inside the tx: who filed the request
+		// (created_by) and, for a human transition, who performs it. A
+		// system transition resolves no actor and the email omits the row.
+		changer, _ := fromDomainUUID(changedBy)
+		actors := resolveEmailActors(ctx, tx, locked, changer)
 		first := domain.TransitionNotification(status, !actor.Valid, locked.VisitID)
 		if err := emit(ctx, q, first, locked.ID, locked.LocationID, locked.VendorUserID, time.Now()); err != nil {
 			return err
@@ -77,27 +82,46 @@ func (r *visitRepository) UpdateStatus(
 		// SQL NULL) keeps its visit_auto_cancelled row from the emit above.
 		// byVendor compares the actor against the visit's vendor user: only
 		// the owning vendor may cancel via the usecase guard, so equality
-		// means a vendor-side cancel.
+		// means a vendor-side cancel. The message names the person (name +
+		// Indonesian role label), falling back to the role word only when
+		// the user row could not be resolved.
 		if status == domain.VisitStatusCancelled && actor.Valid {
-			byVendor := false
-			if changer, err := fromDomainUUID(changedBy); err == nil && changer == locked.VendorUserID {
-				byVendor = true
-			}
-			human := domain.HumanCancelledNotification(locked.VisitID, byVendor)
+			changer, _ := fromDomainUUID(changedBy)
+			byVendor := changer == locked.VendorUserID
+			human := domain.HumanCancelledNotification(locked.VisitID, byVendor, domain.ActorLine(actors.actorName, actors.actorRole))
 			if err := emit(ctx, q, human, locked.ID, locked.LocationID, locked.VendorUserID, time.Now()); err != nil {
 				return err
 			}
-			pending = &pendingEmail{visit: emailVisit(locked, locked.StartDate, locked.EndDate, notes), tpl: human, audiences: []domain.NotificationAudience{human.Audience}}
+			pending = &pendingEmail{visit: actors.apply(emailVisit(locked, locked.StartDate, locked.EndDate, notes)), tpl: human, audiences: []domain.NotificationAudience{human.Audience}}
 		}
 		if first != nil {
-			pending = &pendingEmail{visit: emailVisit(locked, locked.StartDate, locked.EndDate, notes), tpl: first, audiences: []domain.NotificationAudience{first.Audience}}
+			v := actors.apply(emailVisit(locked, locked.StartDate, locked.EndDate, notes))
+			if status == domain.VisitStatusVisiting {
+				now := time.Now()
+				v.CheckInAt = &now
+				if actor.Valid {
+					cb := changedBy
+					v.CheckedInBy = &cb
+				}
+			}
+			if status == domain.VisitStatusCompleted {
+				now := time.Now()
+				v.CheckOutAt = &now
+				if actor.Valid {
+					cb := changedBy
+					v.CheckedOutBy = &cb
+				}
+			}
+			pending = &pendingEmail{visit: v, tpl: first, audiences: []domain.NotificationAudience{first.Audience}}
 		}
-		// A pending vendor leg needs the roster for the member fan-out: load
-		// it inside the same transaction so the email sees the snapshot the
-		// in_app rows were written from. Staff-only moves (gate check-in/out)
-		// skip the extra lookup.
-		if pending != nil && hasVendorAudience(pending.audiences) {
+		// Load the roster for every pending email so check-in/out (and other)
+		// notices can carry the visitor/team names. A roster read failure
+		// fails the write like any other in-transaction storage error.
+		if pending != nil {
 			if err := attachMembers(ctx, q, parsed, pending); err != nil {
+				return err
+			}
+			if err := attachPurposes(ctx, q, parsed, pending); err != nil {
 				return err
 			}
 		}
@@ -109,7 +133,7 @@ func (r *visitRepository) UpdateStatus(
 	// rolled-back transaction returns above with no pending email, so it
 	// enqueues zero. enqueueEmail itself never fails the caller.
 	if pending != nil {
-		enqueueEmail(ctx, r.mailer, db.New(r.pool), pending.visit, pending.tpl, locationID, vendorUserID, pending.audiences...)
+		enqueueEmail(ctx, r.mailer, db.New(r.pool), pending.visit, pending.tpl, locationID, vendorUserID, r.frontendBaseURL, pending.audiences...)
 	}
 	return nil
 }
@@ -159,6 +183,8 @@ func (r *visitRepository) Reschedule(
 			return MapError(err)
 		}
 		locationID, vendorUserID = locked.LocationID, locked.VendorUserID
+		rescheduleChanger, _ := fromDomainUUID(changedBy)
+		actors := resolveEmailActors(ctx, tx, locked, rescheduleChanger)
 		staffTpl := domain.TransitionNotification(domain.VisitStatusRescheduled, false, locked.VisitID)
 		if err := emit(ctx, q, staffTpl, locked.ID, locked.LocationID, locked.VendorUserID, time.Now()); err != nil {
 			return err
@@ -176,11 +202,14 @@ func (r *visitRepository) Reschedule(
 		// audiences: the two templates carry the same type and copy, so one
 		// BuildEmail renders both.
 		pending = &pendingEmail{
-			visit:     emailVisit(locked, start, end, reason),
+			visit:     actors.apply(emailVisit(locked, start, end, reason)),
 			tpl:       staffTpl,
 			audiences: []domain.NotificationAudience{staffTpl.Audience, vendorTpl.Audience},
 		}
 		if err := attachMembers(ctx, q, parsed, pending); err != nil {
+			return err
+		}
+		if err := attachPurposes(ctx, q, parsed, pending); err != nil {
 			return err
 		}
 		return nil
@@ -188,25 +217,117 @@ func (r *visitRepository) Reschedule(
 		return err
 	}
 	if pending != nil {
-		enqueueEmail(ctx, r.mailer, db.New(r.pool), pending.visit, pending.tpl, locationID, vendorUserID, pending.audiences...)
+		enqueueEmail(ctx, r.mailer, db.New(r.pool), pending.visit, pending.tpl, locationID, vendorUserID, r.frontendBaseURL, pending.audiences...)
 	}
 	return nil
 }
 
 // emailVisit projects the locked row onto the BuildEmail context: the visit
-// code, the location, the schedule the notice is about, and the actor's note
-// as the reason row (omitted when blank).
+// code, the location, the schedule the notice is about, the company/purpose/
+// notes context rows, and the actor's note as the reason row (omitted when
+// blank).
 func emailVisit(locked db.GetVisitByIDForUpdateRow, start, end time.Time, note string) domain.VisitRequest {
 	visit := domain.VisitRequest{
 		VisitID:      locked.VisitID,
 		LocationName: locked.LocationName,
 		StartDate:    start,
 		EndDate:      end,
+		VendorName:   emailCompany(locked),
+		Notes:        textPtr(locked.Notes),
+		PurposeNote:  textPtr(locked.PurposeNote),
 	}
 	if strings.TrimSpace(note) != "" {
 		visit.StatusNote = notePtr(note)
 	}
 	return visit
+}
+
+// emailCompany resolves the Vendor/Perusahaan row: the visit-level manual
+// override first, then the requesting account's own company, then the visit's
+// catalogue vendor; "" when none is set so the row is omitted.
+func emailCompany(locked db.GetVisitByIDForUpdateRow) string {
+	override, catalogue := textPtr(locked.VendorNameOverride), textPtr(locked.VendorName)
+	for _, candidate := range []*string{override, &locked.VendorUserVendorName, catalogue} {
+		if candidate == nil {
+			continue
+		}
+		if trimmed := strings.TrimSpace(*candidate); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+// emailActors carries the display data resolved for the email actor rows:
+// the created_by requester and the acting user of a human transition. Empty
+// strings mean "unresolved" and render as an omitted row, never a bare UUID.
+type emailActors struct {
+	createdName, createdRole string
+	actorName, actorRole     string
+}
+
+// apply pins the resolved actor rows onto the email context.
+func (a emailActors) apply(v domain.VisitRequest) domain.VisitRequest {
+	if a.createdName != "" {
+		n := a.createdName
+		v.CreatedByName = &n
+	}
+	if a.createdRole != "" {
+		r := a.createdRole
+		v.CreatedByRoleLabel = &r
+	}
+	if a.actorName != "" {
+		n := a.actorName
+		v.ActorName = &n
+	}
+	if a.actorRole != "" {
+		r := a.actorRole
+		v.ActorRoleLabel = &r
+	}
+	return v
+}
+
+// resolveEmailActors resolves the actor-row display data inside the open
+// status-write transaction: the created_by requester always, plus the acting
+// user when changer is a real user (uuid.Nil means a system transition). A
+// missing user row yields empty strings so the email omits the row instead
+// of printing a bare UUID.
+func resolveEmailActors(ctx context.Context, tx pgx.Tx, locked db.GetVisitByIDForUpdateRow, changer uuid.UUID) emailActors {
+	var a emailActors
+	if locked.CreatedBy.Valid {
+		a.createdName, a.createdRole = resolveUserDisplay(ctx, tx, uuid.UUID(locked.CreatedBy.Bytes))
+	}
+	if changer != uuid.Nil {
+		a.actorName, a.actorRole = resolveUserDisplay(ctx, tx, changer)
+	}
+	return a
+}
+
+// resolveUserDisplay looks up one user's display name and Indonesian role
+// label in one query. A missing row or any error yields two empty strings so
+// callers omit the actor row instead of printing a bare UUID.
+func resolveUserDisplay(ctx context.Context, tx pgx.Tx, id uuid.UUID) (string, string) {
+	var name, role string
+	if err := tx.QueryRow(ctx,
+		`SELECT u.name, r.name FROM users u JOIN role r ON r.id = u.role_id WHERE u.id = $1`, id,
+	).Scan(&name, &role); err != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(name), domain.RoleLabel(role)
+}
+
+// resolveUserName looks up the display name for an actor UUID. A missing row
+// or any query error yields "" so callers fall back to the UUID string.
+func resolveUserName(ctx context.Context, q *db.Queries, id domain.UUID) (string, error) {
+	parsed, err := fromDomainUUID(id)
+	if err != nil {
+		return "", err
+	}
+	row, err := q.GetUserByID(ctx, db.GetUserByIDParams{ID: parsed})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(row.Name), nil
 }
 
 // notePtr maps an empty note to NULL so history rows carry a note only when

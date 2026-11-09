@@ -44,19 +44,20 @@ func NewAuthHandler(svc AuthService) *AuthHandler {
 // null nik; an account without a profile photo carries a null avatar_url); the
 // password hash is never a member.
 type accountDTO struct {
-	ID             string       `json:"id"`
-	Name           string       `json:"name"`
-	Email          string       `json:"email"`
-	Phone          string       `json:"phone"`
-	NIK            *string      `json:"nik"`
-	Role           string       `json:"role"`
-	LocationID     *domain.UUID `json:"location_id"`
-	LocationName   *string      `json:"location_name"`
-	Status         string       `json:"status"`
-	Type           string       `json:"type"`
-	VendorName     *string      `json:"vendor_name"`
-	AvatarURL      *string      `json:"avatar_url"`
-	EditableFields []string     `json:"editable_fields,omitempty"`
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	Email          string         `json:"email"`
+	Phone          string         `json:"phone"`
+	NIK            *string        `json:"nik"`
+	Role           string         `json:"role"`
+	LocationID     *domain.UUID   `json:"location_id"`
+	LocationIDs    []domain.UUID `json:"location_ids"`
+	LocationName   *string        `json:"location_name"`
+	Status         string         `json:"status"`
+	Type           string         `json:"type"`
+	VendorName     *string        `json:"vendor_name"`
+	AvatarURL      *string        `json:"avatar_url"`
+	EditableFields []string       `json:"editable_fields,omitempty"`
 }
 
 // nikPtr maps a stored NIK onto the wire shape: "" renders as JSON null,
@@ -88,6 +89,7 @@ func profileToAccount(p auth.Profile) accountDTO {
 		NIK:            nikPtr(p.NIK),
 		Role:           string(p.Role),
 		LocationID:     p.LocationID,
+		LocationIDs:    echoLocationIDs(domain.User{LocationID: p.LocationID, LocationIDs: p.LocationIDs}),
 		LocationName:   p.LocationName,
 		Status:         string(p.Status),
 		Type:           string(p.Type),
@@ -95,6 +97,72 @@ func profileToAccount(p auth.Profile) accountDTO {
 		AvatarURL:      avatarURLPtr(p.AvatarURL),
 		EditableFields: p.EditableFields,
 	}
+}
+
+// parseLocationIDs converts the raw location_ids body member into typed ids.
+// A nil slice means the key was absent (keep/primary-only); each element must
+// be a canonical UUID. An explicitly empty list survives parsing so the
+// usecase can refuse it with 400.
+func parseLocationIDs(raw []string) ([]domain.UUID, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	out := make([]domain.UUID, 0, len(raw))
+	for _, s := range raw {
+		parsed, err := domain.ParseUUID(strings.TrimSpace(s))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, parsed)
+	}
+	return out, nil
+}
+
+// echoLocationIDs renders the account union for the wire: the stored union
+// when the write carried one, otherwise the primary alone, otherwise an
+// empty (non-nil) array so the key always matches its openapi array shape.
+func echoLocationIDs(u domain.User) []domain.UUID {
+	if len(u.LocationIDs) > 0 {
+		return u.LocationIDs
+	}
+	if u.LocationID != nil {
+		return []domain.UUID{*u.LocationID}
+	}
+	return []domain.UUID{}
+}
+
+// locationFinder is the catalogue read behind the union pre-check, satisfied
+// by both the managed-account port and the master-data port.
+type locationFinder interface {
+	FindLocationByID(ctx context.Context, id domain.UUID) (domain.Location, error)
+}
+
+// checkLocationUnion pre-checks every union id against the catalogue before
+// any write: an unknown branch is 400 VALIDATION_ERROR (never an FK/500),
+// so only a branch deleted mid-transaction can still reach the store.
+func checkLocationUnion(c *gin.Context, finder locationFinder, union []domain.UUID) bool {
+	for _, id := range union {
+		if _, err := finder.FindLocationByID(c.Request.Context(), id); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Fasilitas tidak ditemukan.")
+			} else {
+				response.Fail(c, err)
+			}
+			return false
+		}
+	}
+	return true
+}
+
+// failAccountWrite funnels an account-write store failure: a validation wrap
+// (the raced FK delete of a just-checked branch) is 400 like the pre-check,
+// every other failure keeps the global mapping (duplicate email stays 409).
+func failAccountWrite(c *gin.Context, err error) {
+	if errors.Is(err, domain.ErrValidation) {
+		response.FailWith(c, http.StatusBadRequest, "VALIDATION_ERROR", "Fasilitas tidak ditemukan.")
+		return
+	}
+	response.Fail(c, err)
 }
 
 // loginBody mirrors LoginRequest: exactly email and password.

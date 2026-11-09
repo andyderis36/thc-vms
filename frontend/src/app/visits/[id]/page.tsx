@@ -36,6 +36,7 @@ import { RescheduleModal } from '@/features/visits/detail/RescheduleModal'
 import { Timeline, formatTanggalWaktu } from '@/features/visits/detail/Timeline'
 import { VisitorPhoto } from '@/features/visits/detail/VisitorPhoto'
 import { VisitFilePhoto } from '@/features/visits/detail/VisitFilePhoto'
+import { WorkPhotoCard } from '@/features/visits/detail/WorkPhotoCard'
 import { ApiError } from '@/lib/api/fetcher'
 import {
   useDeleteVisitMutation,
@@ -644,6 +645,7 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                   checkInAt={visit.check_in_at ?? null}
                   checkOutAt={visit.check_out_at ?? null}
                   statusNote={visit.status_note ?? null}
+                  history={visit.history ?? null}
                 />
               </div>
             </CardBody>
@@ -681,6 +683,26 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                     </span>
                   }
                 />
+                {/* Baris pelaku hanya bila backend mengirim namanya; kunjungan
+                    tanpa enrichmen (mis. pratinjau daftar) menghilangkan baris,
+                    bukan menampilkan UUID telanjang. */}
+                {visit.created_by_name != null && visit.created_by_name !== '' ? (
+                  <InfoRow
+                    label="Diajukan oleh"
+                    value={
+                      visit.created_by_role_label != null &&
+                      visit.created_by_role_label !== ''
+                        ? `${visit.created_by_name} (${visit.created_by_role_label})`
+                        : visit.created_by_name
+                    }
+                  />
+                ) : null}
+                {visit.checked_in_by_name != null && visit.checked_in_by_name !== '' ? (
+                  <InfoRow label="Check-in oleh" value={visit.checked_in_by_name} />
+                ) : null}
+                {visit.checked_out_by_name != null && visit.checked_out_by_name !== '' ? (
+                  <InfoRow label="Check-out oleh" value={visit.checked_out_by_name} />
+                ) : null}
                 <InfoRow
                   label="Catatan"
                   value={
@@ -718,6 +740,16 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
               )}
             </CardBody>
           </Card>
+
+          {/* Bukti Kerja — dua slot kondisi (sebelum/sesudah). Unggah hanya
+              saat `visiting`; kartu tetap menampilkan foto lama sesudah terkunci. */}
+          <WorkPhotoCard
+            visitId={visit.id}
+            status={visit.status}
+            before={visit.work_photos?.before ?? null}
+            after={visit.work_photos?.after ?? null}
+            canEdit={visit.status === 'visiting' && (isCreator || role !== 'vendor')}
+          />
 
           {/* Daftar Anggota — permukaan ber-tint lembut (bukan kotak
               berborder) supaya deretan anggota terbaca sebagai kartu data,

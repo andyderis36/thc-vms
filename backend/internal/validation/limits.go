@@ -50,6 +50,9 @@ const (
 	CheckinNotesMaxLength = 500
 	// SearchQueryMaxLength caps a free-text search query.
 	SearchQueryMaxLength = 100
+	// SuggestionQueryMaxLength caps the ?q= filter on the vendor/member
+	// suggestion endpoints; a longer value is refused, never truncated.
+	SuggestionQueryMaxLength = 80
 	// VendorNameMaxLength caps a vendor/company name.
 	VendorNameMaxLength = 120
 	// JabatanMaxLength caps a roster position label.

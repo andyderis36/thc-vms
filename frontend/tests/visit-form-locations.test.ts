@@ -1,17 +1,19 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Location, User } from '@/lib/api/types'
-import { scopeLocationOptions } from '@/lib/visits/location-scope'
+import { scopeLocationOptions, scopeLocations, isLocationScopeUnresolved } from '@/lib/visits/location-scope'
 
 /*
  * Spec HOLE-1 — isolasi dropdown "Fasilitas Tujuan" (SCR-03).
  *
- * Arah keputusan: filter di frontend memakai `user.location_id` (lihat
- * `DECISION-hole-1-location-scope.md`). Helper pemurni opsi lokasi:
+ * Arah keputusan: filter di frontend memakai cakupan sesi
+ * `location_ids ?? [location_id]` (model hibrida multi-cabang; lihat
+ * `DECISION-hole-1-location-scope.md`). Helper pemurni:
  *
- *     scopeLocationOptions(locations: Location[], user: Pick<User, 'role' | 'location_id'>): SelectOption[]
+ *     scopeLocationOptions(locations, user): SelectOption[]
+ *     scopeLocations(locations, user): Location[]
  *
- * Kontrak: `admin`/`security` -> hanya lokasi yang `id === user.location_id`;
+ * Kontrak: `admin`/`security` -> hanya lokasi dalam cakupan sesi;
  * `super_admin` -> seluruh lokasi (daftar nasional); `vendor` -> tidak diubah.
  */
 
@@ -116,6 +118,61 @@ describe('scopeLocationOptions — isolasi dropdown Fasilitas Tujuan', () => {
     expect(scopeLocationOptions(LOCATIONS, unresolvedAdmin)).toEqual([])
     const unresolvedSecurity = userStub({ role: 'security', location_id: null })
     expect(scopeLocationOptions(LOCATIONS, unresolvedSecurity)).toEqual([])
+  })
+})
+
+// --- Cakupan multi-cabang: location_ids[] -------------------------------
+
+/** Admin dengan cakupan DUA cabang (model hibrida: primary + union). */
+const adminMultiBranch = userStub({
+  role: 'admin',
+  location_id: LOC_A_ID,
+  location_ids: [LOC_A_ID, LOC_B_ID],
+  location_name: 'Kantor Cabang A',
+})
+
+describe('scopeLocations — cakupan sesi location_ids ?? [location_id]', () => {
+  it('admin multi-cabang -> hanya entri cakupan (A+B), C tak pernah bocor', () => {
+    const visible = scopeLocations(LOCATIONS, adminMultiBranch)
+    expect(visible.map((location) => location.id)).toEqual([LOC_A_ID, LOC_B_ID])
+    expect(visible.some((location) => location.id === LOC_C_ID)).toBe(false)
+  })
+
+  it('admin tanpa location_ids -> fallback [location_id] (satu cabang)', () => {
+    const visible = scopeLocations(LOCATIONS, adminAtLocA)
+    expect(visible.map((location) => location.id)).toEqual([LOC_A_ID])
+  })
+
+  it('admin multi-cabang dengan location_id null -> tetap ter-scope oleh location_ids', () => {
+    const odd = userStub({
+      role: 'admin',
+      location_id: null,
+      location_ids: [LOC_B_ID, LOC_C_ID],
+    })
+    expect(scopeLocations(LOCATIONS, odd).map((location) => location.id)).toEqual([
+      LOC_B_ID,
+      LOC_C_ID,
+    ])
+    expect(isLocationScopeUnresolved(odd)).toBe(false)
+  })
+
+  it('super_admin & vendor -> katalog utuh (tak tersentuh scoping)', () => {
+    expect(scopeLocations(LOCATIONS, superAdmin)).toHaveLength(3)
+    const vendorUser = userStub({ role: 'vendor', location_id: null })
+    expect(scopeLocations(LOCATIONS, vendorUser)).toHaveLength(3)
+  })
+
+  it('scopeLocationOptions multi-cabang -> opsi hanya A+B (dengan label kota)', () => {
+    const options = scopeLocationOptions(LOCATIONS, adminMultiBranch)
+    expect(options.map((option) => option.value)).toEqual([LOC_A_ID, LOC_B_ID])
+    expect(options.some((option) => option.value === LOC_C_ID)).toBe(false)
+    expect(options[0]?.label).toContain('Kantor Cabang A')
+  })
+
+  it('cakupan kosong -> isLocationScopeUnresolved true (input terkunci)', () => {
+    expect(isLocationScopeUnresolved(userStub({ role: 'admin', location_id: null }))).toBe(true)
+    expect(isLocationScopeUnresolved(adminMultiBranch)).toBe(false)
+    expect(isLocationScopeUnresolved(superAdmin)).toBe(false)
   })
 })
 

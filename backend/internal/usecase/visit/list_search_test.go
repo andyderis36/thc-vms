@@ -49,7 +49,7 @@ func TestListVisits_SearchKeepsScope(t *testing.T) {
 	if repo.lastFilter.Search != "VST-1" {
 		t.Fatalf("admin Search=%q, want %q", repo.lastFilter.Search, "VST-1")
 	}
-	if repo.lastFilter.LocationID == nil || *repo.lastFilter.LocationID != loc {
+	if len(repo.lastFilter.LocationIDs) != 1 || repo.lastFilter.LocationIDs[0] != loc {
 		t.Fatalf("admin scope leaked while searching: %+v", repo.lastFilter)
 	}
 

@@ -179,6 +179,8 @@ function buildSeed(): MockDb {
           nik: demoNik(index + 1, 1, index + 1),
           role: 'admin',
           location_id: locationId,
+          // admin1 (Agus Setiawan) multi-branch: Pontianak (LOC_SBY) + Sambas (LOC_MLG).
+          location_ids: index === 0 ? [LOC_SBY, LOC_MLG] : [locationId],
           location_name: locationNameById(locationId),
           status: 'active',
           type: 'internal',
@@ -211,6 +213,7 @@ function buildSeed(): MockDb {
         nik: null,
         role: 'security',
         location_id: locationId,
+        location_ids: [locationId],
         location_name: locationNameById(locationId),
         status: 'active',
         type: 'internal',

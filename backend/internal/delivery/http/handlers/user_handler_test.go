@@ -18,7 +18,8 @@ import (
 type stubUserStore struct {
 	users     map[domain.UUID]domain.User
 	created   []domain.User
-	lastScope *domain.UUID
+	lastLocationIDs []domain.UUID
+	lastIsGlobal    bool
 	findErr   error
 	createErr error
 	updateErr error
@@ -84,12 +85,20 @@ func (s *stubUserStore) UpdateLastLogin(_ context.Context, _ domain.UUID, _ time
 	return nil
 }
 
-func (s *stubUserStore) ListSecurity(_ context.Context, locationID *domain.UUID) ([]domain.User, error) {
-	s.lastScope = locationID
+func (s *stubUserStore) ListSecurity(_ context.Context, locationIDs []domain.UUID, isGlobal bool) ([]domain.User, error) {
+	s.lastLocationIDs = locationIDs
+	s.lastIsGlobal = isGlobal
 	out := []domain.User{}
 	for _, u := range s.users {
-		if locationID == nil || (u.LocationID != nil && *u.LocationID == *locationID) {
+		if isGlobal {
 			out = append(out, u)
+			continue
+		}
+		for _, lid := range locationIDs {
+			if u.LocationID != nil && *u.LocationID == lid {
+				out = append(out, u)
+				break
+			}
 		}
 	}
 	return out, nil
@@ -163,8 +172,11 @@ func TestListSecurity_AdminSeesOnlyOwnBranch(t *testing.T) {
 		t.Fatalf("admin leaked a foreign branch: %v", items[0])
 	}
 	assertSubset(t, "User", items[0])
-	if users.lastScope == nil || *users.lastScope != "loc-own" {
-		t.Fatalf("repository scope must be the admin branch, got %v", users.lastScope)
+	if users.lastIsGlobal {
+		t.Fatalf("admin must not be global")
+	}
+	if len(users.lastLocationIDs) != 1 || users.lastLocationIDs[0] != "loc-own" {
+		t.Fatalf("repository scope must be the admin branch, got %v", users.lastLocationIDs)
 	}
 }
 
@@ -181,31 +193,45 @@ func TestListSecurity_SuperAdminSeesAll(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("super_admin must see 2 accounts, saw %d", len(items))
 	}
-	if users.lastScope != nil {
-		t.Fatalf("super_admin scope must be nil (every branch), got %v", *users.lastScope)
+	if !users.lastIsGlobal {
+		t.Fatalf("super_admin scope must be global, got isGlobal=%v", users.lastIsGlobal)
+	}
+	if len(users.lastLocationIDs) != 0 {
+		t.Fatalf("super_admin locationIDs must be empty, got %v", users.lastLocationIDs)
 	}
 }
 
-func TestCreateSecurity_AdminLocationIsForcedToOwnBranch(t *testing.T) {
+func TestCreateSecurity_AdminOutOfScopeIs403(t *testing.T) {
 	users := newStubUserStore()
-	master := &stubMasterStore{locations: []domain.Location{{ID: "loc-own", Name: "Cabang Sendiri"}}}
-	engine := newUserEngine(users, master, domain.RoleAdmin, "loc-own")
+	master := &stubMasterStore{locations: []domain.Location{{ID: domain.UUID(branchAUUID), Name: "Cabang Sendiri"}, {ID: domain.UUID(branchBUUID), Name: "Cabang Lain"}}}
+	engine := newUserEngine(users, master, domain.RoleAdmin, branchAUUID)
 
-	body := `{"name":"Pengawas Baru","email":"baru@thc.local","password":"Secret123!","location_id":"loc-foreign"}`
+	body := `{"name":"Pengawas Baru","email":"baru@thc.local","password":"Secret123!","location_id":"` + branchBUUID + `"}`
+	rec := serveJSON(engine, "POST", "/users/security", body)
+	mustStatus(t, rec, http.StatusForbidden)
+	if env := decodeEnvelope(t, rec); env.Error == nil || env.Error.Code != "FORBIDDEN_BRANCH" {
+		t.Fatalf("out-of-scope create must be 403 FORBIDDEN_BRANCH, got %q", rec.Body.String())
+	}
+	if len(users.created) != 0 {
+		t.Fatal("refused create must not touch the store")
+	}
+}
+
+func TestCreateSecurity_AdminInScopeIsAllowed(t *testing.T) {
+	users := newStubUserStore()
+	master := &stubMasterStore{locations: []domain.Location{{ID: domain.UUID(branchAUUID), Name: "Cabang Sendiri"}}}
+	engine := newUserEngine(users, master, domain.RoleAdmin, branchAUUID)
+
+	body := `{"name":"Pengawas Baru","email":"baru@thc.local","password":"Secret123!","location_id":"` + branchAUUID + `"}`
 	rec := serveJSON(engine, "POST", "/users/security", body)
 	mustStatus(t, rec, http.StatusCreated)
 	if len(users.created) != 1 {
 		t.Fatalf("expected 1 created account, got %d", len(users.created))
 	}
 	got := users.created[0]
-	if got.LocationID == nil || *got.LocationID != "loc-own" {
-		t.Fatalf("admin create must force its own branch, got %v", got.LocationID)
+	if got.LocationID == nil || *got.LocationID != domain.UUID(branchAUUID) {
+		t.Fatalf("admin create must keep its branch, got %v", got.LocationID)
 	}
-	data := decodeData[map[string]any](t, mustSuccess(t, rec))
-	if data["location_id"] != "loc-own" {
-		t.Fatalf("response must carry the forced branch: %v", data)
-	}
-	assertSubset(t, "User", data)
 }
 
 func TestCreateSecurity_PasswordIsHashedNotStored(t *testing.T) {

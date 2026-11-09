@@ -8,7 +8,11 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { DetailModal, type DetailField } from '@/components/ui/DetailModal'
+import { useQueries } from '@tanstack/react-query'
+import { BranchBadges } from '@/features/users/components/BranchBadges'
+import { BranchMultiSelect } from '@/features/users/components/BranchMultiSelect'
 import { EditUserModal } from '@/features/users/components/EditUserModal'
+import { mergeUsersById, userBranchNames, userLocationIds } from '@/features/users/managed-user-filters'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterResetButton } from '@/components/ui/FilterResetButton'
 import { Input } from '@/components/ui/Input'
@@ -20,10 +24,10 @@ import { Select, type SelectOption } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { UserAvatar } from '@/components/ui/UserAvatar'
 import {
+  securityUsersQueryOptions,
   useCreateSecurityUserMutation,
   useDeleteSecurityUserMutation,
   useLocationsQuery,
-  useSecurityUsersQuery,
   useUpdateSecurityUserMutation,
   useUpdateSecurityUserStatusMutation,
 } from '@/lib/api/hooks'
@@ -31,7 +35,7 @@ import { DEFAULT_PAGE_SIZE, paginate } from '@/lib/pagination'
 import { TABLE_CLASS, TABLE_WRAPPER_CLASS } from '@/lib/table-styles'
 import { useSession } from '@/lib/auth/session'
 import { can, getRoleLabel, isSuperAdminRole } from '@/lib/auth/capabilities'
-import type { Role, UpdateUserStatusRequest, User } from '@/lib/api/types'
+import type { CreateSecurityUserRequest, Role, UpdateSecurityUserRequest, UpdateUserStatusRequest, User } from '@/lib/api/types'
 import {
   EMAIL_MAX_LENGTH,
   NAME_MAX_LENGTH,
@@ -62,32 +66,126 @@ export function deleteSecurityUserConfirmMessage(target: User): string {
 /**
  * Tombol hapus tampil iff peran boleh hapus (`deleteSecurity`) DAN baris
  * satu cabang dengan admin. `super_admin` bebas lintas cabang; `admin`
- * terkunci ke `location_id` miliknya (pertahanan kedua — server garis utama).
+ * terkunci ke cakupan miliknya — union `location_ids ?? [location_id]`
+ * (irisan non-kosong, bukan `===` primer). Argumen ketiga menerima id
+ * tunggal (kompatibilitas lama), larik cakupan, atau null.
  */
 export function canShowDeleteSecurityUser(
   role: Role,
   target: User,
-  ownLocationId: string | null,
+  ownScope: string | readonly string[] | null,
 ): boolean {
   if (!can(role, 'deleteSecurity')) return false
   if (isSuperAdminRole(role)) return true
-  return ownLocationId !== null && target.location_id === ownLocationId
+  const ownIds = Array.isArray(ownScope) ? [...ownScope] : ownScope !== null ? [ownScope] : []
+  if (ownIds.length === 0) return false
+  return userLocationIds(target).some((id) => ownIds.includes(id))
 }
 
-/** Kolom Cabang tabel: nama cabang penugasan, atau strip bila tak ada. */
-function securityUserLocationLabel(user: User): string {
-  const location = user.location_name
-  return location !== null && location !== '' ? location : '—'
+/** Gabung hasil per-cabang pengawas dengan dedupe per id SIS. */
+export function mergeSecurityUsers(lists: ReadonlyArray<ReadonlyArray<User>>): User[] {
+  return mergeUsersById(lists)
+}
+
+/** True bila satu cabang termasuk cakupan union user. */
+export function securityUserInBranch(user: User, branchId: string): boolean {
+  return userLocationIds(user).includes(branchId)
 }
 
 /**
- * Label ringkas kartu: `email · cabang`. Satu sumber komposisi — tabel
- * memecahnya menjadi kolom Email + Cabang lewat `securityUserLocationLabel`.
+ * Daftar id query daftar pengawas: super_admin -> satu query tanpa filter;
+ * admin -> tiap id cakupan sesi (gabung via `mergeSecurityUsers`); cakupan
+ * kosong -> satu query tanpa filter (perilaku lama).
  */
-function securityUserDetailLabel(user: User): string {
-  return user.location_name !== null
-    ? `${user.email} · ${user.location_name}`
-    : user.email
+export function securityUserQueryLocationIds(
+  sessionUser: Pick<User, 'role' | 'location_id' | 'location_ids'> | null,
+): Array<string | undefined> {
+  if (sessionUser === null) return [undefined]
+  if (isSuperAdminRole(sessionUser.role)) return [undefined]
+  const scope = userLocationIds(sessionUser)
+  if (scope.length === 0) return [undefined]
+  return [...scope]
+}
+
+/**
+ * Payload create/edit pengawas dengan mirror accept-either `location_ids[]`
+ * mengikuti pola managed-user (`location_id` tetap primer/elemen pertama).
+ * Schema openapi endpoint pengawas belum memuat array — field opsional ini
+ * dikirim kompatibel mundur: server lama/BE mengabaikan kunci tak dikenal.
+ */
+type CreateSecurityUserPayload = CreateSecurityUserRequest & {
+  location_ids?: string[]
+}
+type UpdateSecurityUserPayload = UpdateSecurityUserRequest & {
+  location_ids?: string[]
+}
+
+/**
+ * Filter opsi cabang ke cakupan SESI: super_admin (dan dev-superadmin) bebas
+ * melihat semua; admin hanya `location_ids ?? [location_id]` miliknya, sehingga
+ * cabang lain tak pernah menjadi opsi (isolasi multi-cabang §6.1). Sesi kosong
+ * = gagal-tertutup (tanpa opsi). Diekspor untuk unit test — pola sama dengan
+ * `canShowDeleteSecurityUser`.
+ */
+export function sessionScopedLocations(
+  locations: Array<{ id: string; name: string }>,
+  sessionUser: Pick<User, 'role' | 'location_id' | 'location_ids'> | null,
+): Array<{ id: string; name: string }> {
+  if (sessionUser === null) return []
+  if (isSuperAdminRole(sessionUser.role)) return locations
+  const scope = userLocationIds(sessionUser)
+  if (scope.length === 0) return []
+  return locations.filter((location) => scope.includes(location.id))
+}
+
+/** Kolom Cabang tabel union-aware: "N cabang", nama cabang, atau strip. */
+export function securityUserLocationLabel(
+  user: User,
+  locations: ReadonlyArray<{ id: string; name: string }> = [],
+): string {
+  const names = userBranchNames(user, locations)
+  if (names.length > 1) return `${names.length} cabang`
+  if (names.length === 1) {
+    const only = names[0]
+    const isUnresolvedId = only !== undefined
+      && userLocationIds(user).includes(only)
+      && only === user.location_id
+      && (user.location_name === null || user.location_name === '')
+      && !locations.some((loc) => loc.id === only && loc.name !== '')
+    return isUnresolvedId ? '—' : (only ?? '—')
+  }
+  return '—'
+}
+
+/** Judul tooltip cabang union: nama SELURUH cabang digabung, atau strip. */
+export function securityUserLocationTitle(
+  user: User,
+  locations: ReadonlyArray<{ id: string; name: string }> = [],
+): string {
+  const names = userBranchNames(user, locations)
+  if (names.length === 1) {
+    const only = names[0]
+    const isUnresolvedId = only !== undefined
+      && userLocationIds(user).includes(only)
+      && only === user.location_id
+      && (user.location_name === null || user.location_name === '')
+      && !locations.some((loc) => loc.id === only && loc.name !== '')
+    return isUnresolvedId ? '—' : (only ?? '—')
+  }
+  return names.length > 0 ? names.join(', ') : '—'
+}
+
+/**
+ * Label ringkas kartu: `email · cabang` union-aware. Satu sumber komposisi —
+ * tabel memecahnya menjadi kolom Email + Cabang lewat
+ * `securityUserLocationLabel`.
+ */
+export function securityUserDetailLabel(
+  user: User,
+  locations: ReadonlyArray<{ id: string; name: string }> = [],
+): string {
+  const location = securityUserLocationLabel(user, locations)
+  return location !== '—' ? `${user.email} · ${location}` : user.email
 }
 
 /** Badge status pengawas — satu resep untuk tabel & kartu (visual identik). */
@@ -145,8 +243,10 @@ export interface SecurityUserPanelProps {
  * di file ini masih diekspor untuk PRD SCR-02 ("modal pengawas") tetapi belum
  * dipasang di mana pun — dan itulah alasan `variant` ada: begitu panel
  * dipasang di dalam modal, ia WAJIB memakai `variant="modal"` (kartu saja)
- * agar tabel 5 kolom tidak meluber di modal 512px. Logika peran tetap sama di
- * kedua permukaan: super_admin memilih cabang, admin terkunci ke cabangnya.
+ * agar tabel 5 kolom tidak meluber di modal 512px. Logika peran: saat EDIT
+ * super_admin memilih cabang dan admin terkunci ke cabangnya; saat TAMBAH
+ * dropdown menawarkan cabang dalam cakupan sesi (`sessionScopedLocations`) —
+ * super_admin melihat semua.
  * Guard `manageSecurity` di sini adalah lapisan kedua setelah guard rute.
  * Tanpa field NIK (BE menolak NIK untuk security — cermin `rejectSecurityNik`
  * di mock/BE).
@@ -155,6 +255,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
   const { user } = useSession()
   const role: Role | null = user !== null ? user.role : null
   const ownLocationId = user !== null ? user.location_id : null
+  const ownLocationScope = useMemo(() => (user !== null ? userLocationIds(user) : []), [user])
 
   const [createOpenInternal, setCreateOpenInternal] = useState(false)
   const createOpen = controlledOpen ?? createOpenInternal
@@ -192,19 +293,33 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
   const [detail, setDetail] = useState<User | null>(null)
   const updateSecurity = useUpdateSecurityUserMutation()
 
-  // Lokasi cabang penugasan: super_admin memilih; admin terkunci ke cabangnya.
-  const effectiveLocationId = role !== null && isSuperAdminRole(role) ? '' : (ownLocationId ?? '')
-  const usersQuery = useSecurityUsersQuery(effectiveLocationId !== '' ? effectiveLocationId : undefined, enabled)
+  // Daftar pengawas per-cabang: admin multi-cabang memeriksa tiap cabang
+  // dalam cakapannya (`location_ids ?? [location_id]`) lalu digabung via
+  // `mergeSecurityUsers`; super_admin satu query tanpa filter.
+  const queryLocationIds = useMemo(() => securityUserQueryLocationIds(user), [user])
+  const branchQueries = useQueries({
+    queries: queryLocationIds.map((locationId) => ({
+      ...securityUsersQueryOptions(locationId),
+      enabled,
+    })),
+  })
+  const queriesData = branchQueries.map((q) => q.data ?? [])
+  const users = useMemo(() => mergeSecurityUsers(queriesData), [queriesData])
+
+  const usersQuery = {
+    data: users,
+    isPending: branchQueries.some((q) => q.isPending),
+    isError: branchQueries.some((q) => q.isError),
+    error: branchQueries.find((q) => q.isError)?.error ?? null,
+    refetch: () => Promise.all(branchQueries.map((q) => q.refetch())),
+  }
 
   // Filter daftar di sisi klien: kontrak GET /users/security hanya punya
   // location_id (tak ada param search/status), jadi pencarian disaring di sini.
-  // `?? []` di luar useMemo memunculkan larik BARU tiap render, sehingga
-  // `filteredUsers` di bawahnya tak pernah benar-benar di-memoize.
-  const users = useMemo(() => usersQuery.data ?? [], [usersQuery.data])
   const filteredUsers = useMemo(() => {
     const query = search.toLowerCase()
     return users.filter((member) => {
-      if (branchFilter !== 'all' && member.location_id !== branchFilter) return false
+      if (branchFilter !== 'all' && !securityUserInBranch(member, branchFilter)) return false
       if (statusFilter !== 'all' && member.status !== statusFilter) return false
       if (query === '') return true
       return (
@@ -225,6 +340,10 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
 
   if (role === null || !can(role, 'manageSecurity')) return null
 
+  // Opsi cabang di panel SELALU dibatasi cakupan sesi (super_admin = semua):
+  // dipakai filter cabang, form tambah, dan `locations` modal ubah.
+  const scopedLocations = sessionScopedLocations(locationsQuery.data ?? [], user)
+
   const handleToggle = (userId: string, userName: string, next: UpdateUserStatusRequest['status']): void => {
     toggleStatus.mutate(
       { userId, body: { status: next } },
@@ -243,11 +362,17 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
     handleToggle(member.id, member.name, member.status === 'active' ? 'inactive' : 'active')
   }
 
-  const locationOptions = (locationsQuery.data ?? []).map((location) => ({
+  const locationOptions = scopedLocations.map((location) => ({
     value: location.id,
     label: location.name,
   }))
-  const canPickLocation = role !== null && isSuperAdminRole(role)
+  // Edit/pindah cabang: super_admin bebas; admin dengan cakupan >=1 cabang
+  // mendapat dropdown (dalam cakupan sesi) — kontrak PATCH pengawas kini
+  // mengizinkan admin memindahkan lokasi dalam cakupannya.
+  const canPickLocation = role !== null && (isSuperAdminRole(role) || scopedLocations.length > 0)
+  // Buat pengawas: dropdown multi-cabang dalam cakupan SESI admin
+  // (sessionScopedLocations); label terkunci hanya fallback bila tak ada opsi.
+  const canPickCreateLocation = scopedLocations.length > 0
 
   // Reset SEMUA filter bar ke default: pencarian (state mentah + state debounced),
   // status, dan cabang. Pagination di sini SERBA KLIEN: panel memuat seluruh anggota
@@ -319,10 +444,14 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
       <CreateSecurityModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        canPickLocation={canPickLocation}
-        locationOptions={locationOptions}
+        canPickLocation={canPickCreateLocation}
+        locations={scopedLocations}
         lockedLocationId={ownLocationId ?? ''}
-        lockedLocationLabel={user !== null ? (user.location_name ?? 'Cabang') : 'Cabang'}
+        lockedLocationLabel={
+          user !== null
+            ? (userBranchNames(user, locationsQuery.data ?? []).join(', ') || 'Cabang')
+            : 'Cabang'
+        }
         onCreated={() => {
           setCreateOpen(false)
           onCreated?.()
@@ -375,7 +504,8 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
               <SecurityUserTable
                 users={pageUsers}
                 role={role}
-                ownLocationId={ownLocationId}
+                ownLocationScope={ownLocationScope}
+                locations={locationsQuery.data ?? []}
                 togglePending={toggleStatus.isPending}
                 toggleUserId={toggleStatus.variables?.userId}
                 onEdit={setEditing}
@@ -391,7 +521,8 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
             <SecurityUserCards
               users={pageUsers}
               role={role}
-              ownLocationId={ownLocationId}
+              ownLocationScope={ownLocationScope}
+              locations={locationsQuery.data ?? []}
               togglePending={toggleStatus.isPending}
               toggleUserId={toggleStatus.variables?.userId}
               onEdit={setEditing}
@@ -441,22 +572,24 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
       {editing !== null ? (
         <EditUserModal
           user={editing}
-          locations={locationsQuery.data ?? []}
+          locations={scopedLocations}
           saving={updateSecurity.isPending}
           locationMode={canPickLocation ? 'select' : 'locked'}
           isSelf={false}
           onClose={() => setEditing(null)}
           onSubmit={(body) => {
+            const patch: UpdateSecurityUserPayload = {
+              name: body.name,
+              email: body.email,
+              phone: body.phone,
+              ...(body.password !== undefined ? { password: body.password } : {}),
+              ...(body.location_id !== undefined ? { location_id: body.location_id } : {}),
+              ...(body.location_ids !== undefined ? { location_ids: body.location_ids } : {}),
+            }
             updateSecurity.mutate(
               {
                 userId: editing.id,
-                body: {
-                  name: body.name,
-                  email: body.email,
-                  phone: body.phone,
-                  ...(body.password !== undefined ? { password: body.password } : {}),
-                  ...(body.location_id !== undefined ? { location_id: body.location_id } : {}),
-                },
+                body: patch,
               },
               {
                 onSuccess: () => {
@@ -477,7 +610,7 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
           title="Detail Pengawas"
           subtitle={detail.name}
           avatar={<UserAvatar name={detail.name} avatarUrl={detail.avatar_url} size="lg" />}
-          fields={securityUserDetailFields(detail)}
+          fields={securityUserDetailFields(detail, locationsQuery.data ?? [])}
           onClose={() => setDetail(null)}
         />
       ) : null}
@@ -488,7 +621,8 @@ export function SecurityUserPanel({ enabled, onCreated, variant = 'modal', onCou
 interface SecurityListProps {
   users: User[]
   role: Role
-  ownLocationId: string | null
+  ownLocationScope: string[]
+  locations: ReadonlyArray<{ id: string; name: string }>
   togglePending: boolean
   toggleUserId?: string
   onEdit: (member: User) => void
@@ -503,13 +637,26 @@ interface SecurityListProps {
  * Baris detail satu pengawas — dibaca dari record yang sudah dimuat di
  * daftar (tanpa fetch tambahan). Nilai kosong dibiarkan apa adanya agar
  * `DetailModal` menampilkannya sebagai strip.
+ *
+ * "CABANG" menampilkan SEMUA cabang cakupan pengawas sebagai pil
+ * (`userBranchNames` + `BranchBadges`) — multi-cabang tak pernah hanya
+ * menampilkan cabang pertama; tanpa cakupan → `location_name` (strip bila
+ * null). Diekspor untuk unit test — pola sama dengan `managedUserDetailFields`.
  */
-function securityUserDetailFields(member: User): DetailField[] {
+export function securityUserDetailFields(
+  member: User,
+  locations: ReadonlyArray<{ id: string; name: string }> = [],
+): DetailField[] {
+  const branchNames = userBranchNames(member, locations)
   return [
     { label: 'NAMA', value: member.name },
     { label: 'EMAIL', value: member.email },
     { label: 'TELEPON', value: member.phone },
-    { label: 'CABANG', value: member.location_name },
+    {
+      label: 'CABANG',
+      value:
+        branchNames.length > 0 ? <BranchBadges names={branchNames} /> : member.location_name,
+    },
     { label: 'STATUS', value: <SecurityStatusBadge status={member.status} /> },
   ]
 }
@@ -524,7 +671,7 @@ function securityUserDetailFields(member: User): DetailField[] {
 function buildSecurityActionItems(
   member: User,
   role: Role,
-  ownLocationId: string | null,
+  ownLocationScope: string[],
   onEdit: (member: User) => void,
   onToggle: (member: User) => void,
   onDelete: (member: User) => void,
@@ -553,7 +700,7 @@ function buildSecurityActionItems(
       onSelect: () => onToggle(member),
     })
   }
-  if (canShowDeleteSecurityUser(role, member, ownLocationId)) {
+  if (canShowDeleteSecurityUser(role, member, ownLocationScope)) {
     items.push({
       id: 'delete',
       label: 'Hapus',
@@ -568,7 +715,7 @@ function buildSecurityActionItems(
 function SecurityUserActionMenu({
   member,
   role,
-  ownLocationId,
+  ownLocationScope,
   togglePending,
   toggleUserId,
   onEdit,
@@ -578,7 +725,7 @@ function SecurityUserActionMenu({
 }: {
   member: User
   role: Role
-  ownLocationId: string | null
+  ownLocationScope: string[]
   togglePending: boolean
   toggleUserId?: string
   onEdit: (member: User) => void
@@ -589,13 +736,13 @@ function SecurityUserActionMenu({
   return (
     <ActionMenu
       label={`Aksi untuk ${member.name}`}
-      items={buildSecurityActionItems(member, role, ownLocationId, onEdit, onToggle, onDelete, onView)}
+      items={buildSecurityActionItems(member, role, ownLocationScope, onEdit, onToggle, onDelete, onView)}
       busy={togglePending && toggleUserId === member.id}
     />
   )
 }
 
-function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUserId, onEdit, onDelete, onToggle, onView, page = 1, pageSize }: SecurityListProps) {
+function SecurityUserTable({ users, role, ownLocationScope, locations, togglePending, toggleUserId, onEdit, onDelete, onToggle, onView, page = 1, pageSize }: SecurityListProps) {
   const effectivePageSize = pageSize ?? users.length
   return (
     <div className={TABLE_WRAPPER_CLASS}>
@@ -640,9 +787,9 @@ function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUs
               </td>
               <td
                 className="truncate px-3 py-3 text-sm text-ink-secondary lg:px-6"
-                title={securityUserLocationLabel(member)}
+                title={securityUserLocationTitle(member, locations)}
               >
-                {securityUserLocationLabel(member)}
+                {securityUserLocationLabel(member, locations)}
               </td>
               <td className="px-3 py-3 lg:px-6">
                 <SecurityStatusBadge status={member.status} />
@@ -651,7 +798,7 @@ function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUs
                 <SecurityUserActionMenu
                   member={member}
                   role={role}
-                  ownLocationId={ownLocationId}
+                  ownLocationScope={ownLocationScope}
                   togglePending={togglePending}
                   toggleUserId={toggleUserId}
                   onEdit={onEdit}
@@ -668,11 +815,11 @@ function SecurityUserTable({ users, role, ownLocationId, togglePending, toggleUs
   )
 }
 
-function SecurityUserCards({ users, role, ownLocationId, togglePending, toggleUserId, onEdit, onDelete, onToggle, onView, className }: SecurityListProps & { className?: string }) {
+function SecurityUserCards({ users, role, ownLocationScope, locations, togglePending, toggleUserId, onEdit, onDelete, onToggle, onView, className }: SecurityListProps & { className?: string }) {
   return (
     <ul className={`grid grid-cols-1 gap-2 md:grid-cols-2 ${className ?? ''}`}>
       {users.map((member) => {
-        const detailLabel = securityUserDetailLabel(member)
+        const detailLabel = securityUserDetailLabel(member, locations)
         return (
           <li
             key={member.id}
@@ -693,7 +840,7 @@ function SecurityUserCards({ users, role, ownLocationId, togglePending, toggleUs
               <SecurityUserActionMenu
                 member={member}
                 role={role}
-                ownLocationId={ownLocationId}
+                ownLocationScope={ownLocationScope}
                 togglePending={togglePending}
                 toggleUserId={toggleUserId}
                 onEdit={onEdit}
@@ -712,9 +859,12 @@ function SecurityUserCards({ users, role, ownLocationId, togglePending, toggleUs
 interface CreateSecurityModalProps {
   open: boolean
   onClose: () => void
-  /** super_admin memilih cabang; admin memakai cabang terkunci. */
+  /**
+   * true = dropdown multi-cabang (dalam cakupan sesi pemanggil); false =
+   * label cabang terkunci (fallback bila cakupan/daftar cabang kosong).
+   */
   canPickLocation: boolean
-  locationOptions: Array<{ value: string; label: string }>
+  locations: Array<{ id: string; name: string }>
   lockedLocationId: string
   lockedLocationLabel: string
   /** Dipanggil setelah pengawas berhasil ditambahkan (panel: tutup + teruskan). */
@@ -730,7 +880,7 @@ function CreateSecurityModal({
   open,
   onClose,
   canPickLocation,
-  locationOptions,
+  locations,
   lockedLocationId,
   lockedLocationLabel,
   onCreated,
@@ -739,7 +889,10 @@ function CreateSecurityModal({
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
-  const [locationId, setLocationId] = useState('')
+  // Multi-cabang: urut klik; ELEMEN PERTAMA = lokasi utama (dual-write
+  // location_id + location_ids[] sama seperti modal user terkelola).
+  const [locationIds, setLocationIds] = useState<string[]>([])
+  const [locationError, setLocationError] = useState<string | undefined>(undefined)
   const [emailError, setEmailError] = useState<string | undefined>(undefined)
   const [phoneError, setPhoneError] = useState<string | undefined>(undefined)
   const [passwordError, setPasswordError] = useState<string | undefined>(undefined)
@@ -754,20 +907,36 @@ function CreateSecurityModal({
       setEmail('')
       setPhone('')
       setPassword('')
-      setLocationId('')
+      setLocationIds([])
+      setLocationError(undefined)
       setEmailError(undefined)
       setPhoneError(undefined)
       setPasswordError(undefined)
     }
   }, [open])
 
-  // Lokasi cabang penugasan: super_admin memilih; admin terkunci ke cabangnya.
-  const effectiveLocationId = canPickLocation ? locationId : lockedLocationId
+  // Lokasi cabang penugasan: dropdown dalam cakupan sesi; label terkunci bila
+  // cakupan kosong (nilai terkunci = cabang utama sesi).
+  const effectiveLocationId = canPickLocation
+    ? (locationIds[0] ?? '')
+    : lockedLocationId
+
+  const handleLocationChange = (next: string[]): void => {
+    setLocationIds(next)
+    if (locationError !== undefined) setLocationError(undefined)
+  }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
     if (name.trim() === '' || email.trim() === '' || password === '') return
-    if (effectiveLocationId === '') return
+    if (canPickLocation) {
+      if (locationIds.length === 0) {
+        setLocationError('Pilih minimal satu cabang / POP.')
+        return
+      }
+    } else if (effectiveLocationId === '') {
+      return
+    }
 
     const nextEmailError = isValidEmail(email) ? undefined : 'Format email tidak valid.'
     setEmailError(nextEmailError)
@@ -796,15 +965,17 @@ function CreateSecurityModal({
     setPasswordError(nextPasswordError)
     if (nextPasswordError !== undefined) return
 
+    const body: CreateSecurityUserPayload = {
+      name: name.trim(),
+      email: email.trim(),
+      password,
+      ...(phone.trim() !== '' ? { phone: phone.trim() } : {}),
+      location_id: effectiveLocationId,
+      ...(canPickLocation ? { location_ids: locationIds } : {}),
+    }
     createUser.mutate(
       {
-        body: {
-          name: name.trim(),
-          email: email.trim(),
-          password,
-          ...(phone.trim() !== '' ? { phone: phone.trim() } : {}),
-          location_id: effectiveLocationId,
-        },
+        body,
       },
       {
         onSuccess: () => {
@@ -896,13 +1067,15 @@ function CreateSecurityModal({
         </div>
 
         {canPickLocation ? (
-          <Select
+          <BranchMultiSelect
             label="Cabang Penugasan"
-            placeholder="Pilih cabang / POP"
-            options={locationOptions}
-            value={locationId}
-            onChange={(event) => setLocationId(event.target.value)}
             required
+            options={locations}
+            value={locationIds}
+            onChange={handleLocationChange}
+            error={locationError}
+            hint="Pilih satu atau beberapa cabang / POP. Pilihan pertama menjadi cabang utama."
+            autoSelectSingle
           />
         ) : (
           <div className="flex flex-col gap-2">

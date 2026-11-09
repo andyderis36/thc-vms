@@ -148,6 +148,9 @@ func (s *stubManagedUsers) UpdateManagedUser(_ context.Context, id domain.UUID, 
 	if patch.LocationID != nil {
 		m.User.LocationID = patch.LocationID
 	}
+	if patch.LocationIDs != nil {
+		m.User.LocationIDs = append([]domain.UUID{}, patch.LocationIDs...)
+	}
 	if patch.VendorID != nil {
 		m.User.VendorID = patch.VendorID
 	}

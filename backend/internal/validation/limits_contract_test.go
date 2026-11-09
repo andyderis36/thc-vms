@@ -52,6 +52,7 @@ func TestLimitsMatchOpenAPI(t *testing.T) {
 		{"badge_code_max_length", strconv.Itoa(BadgeCodeMaxLength)},
 		{"checkin_notes_max_length", strconv.Itoa(CheckinNotesMaxLength)},
 		{"search_query_max_length", strconv.Itoa(SearchQueryMaxLength)},
+		{"suggestion_query_max_length", strconv.Itoa(SuggestionQueryMaxLength)},
 		{"vendor_name_max_length", strconv.Itoa(VendorNameMaxLength)},
 		{"jabatan_max_length", strconv.Itoa(JabatanMaxLength)},
 		{"purpose_note_max_length", strconv.Itoa(PurposeNoteMaxLength)},
