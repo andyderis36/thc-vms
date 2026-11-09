@@ -50,6 +50,12 @@ export interface User {
   nik: string | null;
   role: Role;
   location_id: string | null;
+  /**
+   * Daftar cabang/POP penugasan (1-to-many branch scoping, model hibrida,
+   * accept-either/return-both dengan `location_id`); `location_id` tetap
+   * primer selamanya sebagai display-default/elemen pertama.
+   */
+  location_ids?: string[];
   location_name: string | null;
   status: 'active' | 'inactive' | 'pending' | 'blacklisted';
   type: 'internal' | 'external';
@@ -126,6 +132,11 @@ export interface CreateManagedUserRequest {
   nik?: string;
   role: ManagedUserRole;
   location_id?: string;
+  /**
+   * Daftar cabang/POP penugasan (accept-either dengan `location_id`);
+   * `location_id` tetap primer sebagai display-default/elemen pertama.
+   */
+  location_ids?: string[];
   vendor_id?: string;
   /**
    * Nama vendor manual (≤120) — dikirim bila nama tidak berasal dari katalog.
@@ -151,6 +162,12 @@ export interface UpdateManagedUserRequest {
    */
   nik?: string | null;
   location_id?: string | null;
+  /**
+   * Daftar cabang/POP penugasan (accept-either dengan `location_id`,
+   * absen = biarkan); `location_id` tetap primer sebagai
+   * display-default/elemen pertama.
+   */
+  location_ids?: string[];
   vendor_id?: string | null;
   /**
    * Nama vendor manual (≤120). String kosong = bersihkan vendor;
@@ -177,11 +194,79 @@ export interface Vendor {
 }
 
 /**
+ * Akun vendor aktif pada `GET /users/vendors` — dipakai pemilih pemilik
+ * kunjungan (admin/super_admin) pada SCR-03. `company` = nama perusahaan
+ * akun (null bila belum diisi).
+ */
+export interface VendorAccount {
+  id: string;
+  name: string;
+  email: string;
+  company: string | null;
+}
+
+/**
  * `GET /jabatan` → daftar nilai `jabatan` yang PERNAH tersimpan pada baris
  * visitor (distinct, urut A-Z, maksimal 50 entri; bisa kosong `[]`).
  * HANYA saran untuk `<datalist>` — pengguna tetap bebas mengetik jabatan baru.
  */
 export type JabatanList = string[];
+
+/** Sumber nama pada saran identitas vendor; prioritas master > account > history. */
+export type VendorSuggestionSource = 'master' | 'account' | 'history';
+
+/**
+ * `GET /vendors/suggestions` → satu nama vendor terdedupe.
+ * `name` memakai casing sumber pemenang; `source` menandai asal nama itu.
+ * Endpoint read-only: mengetik nama baru tidak pernah menulis data master.
+ */
+export interface VendorSuggestion {
+  name: string;
+  source: VendorSuggestionSource;
+}
+
+/**
+ * `GET /visits/member-suggestions` → anggota roster lama untuk dipakai ulang,
+ * distinct per (nama case-insensitive, telepon) dengan kunjungan terbaru
+ * menang, maksimal 20 entri. SENGAJA tanpa URL foto; tautan foto hanya ada
+ * pada `MemberSuggestionDetail`.
+ */
+export interface MemberSuggestion {
+  /**
+   * ID baris visitor pemenang dedupe — langsung dipakai untuk
+   * `GET /visits/member-suggestions/{visitorId}` tanpa resolusi kunjungan.
+   */
+  visitor_id: string;
+  name: string;
+  id_number: string;
+  phone: string;
+  email: string | null;
+  jabatan: string | null;
+  /** RFC3339 - waktu mulai kunjungan terbaru anggota ini. */
+  last_visit_at: string;
+  source_visit_id: string;
+}
+
+/**
+ * `GET /visits/member-suggestions/{visitorId}` → satu anggota pilihan dengan
+ * tautan foto presigned berumur pendek untuk autofill. Visitor tidak dikenal
+ * atau di luar cakupan dijawab 404.
+ */
+export interface MemberSuggestionDetail {
+  name: string;
+  id_number: string;
+  phone: string;
+  email: string | null;
+  jabatan: string | null;
+  /**
+   * Perusahaan milik anggota sendiri (override > katalog), BUKAN Vendor
+   * Pengaju kunjungan. Null/kosong = baris formulir tidak diubah.
+   */
+  vendor_name: string | null;
+  id_card_photo_url: string | null;
+  photo_url: string | null;
+  source_visit_id: string;
+}
 
 export interface VisitorItem {
   /**
@@ -274,6 +359,79 @@ export interface VisitDetail {
   check_in_at?: string | null;
   check_out_at?: string | null;
   checked_in_by?: string | null;
+  /**
+   * Nama tampilan pengaju kunjungan (`visit_request.created_by` JOIN users)
+   * — baris "Diajukan oleh". Absen bila akun pengaju tidak dikenal atau
+   * kunjungan ditulis sebelum kolom created_by ada.
+   */
+  created_by_name?: string | null;
+  /** Label peran Bahasa Indonesia pengaju — hanya bersama `created_by_name`. */
+  created_by_role_label?: string | null;
+  /** Nama petugas pelaksana check-in (JOIN users); absen sebelum check-in. */
+  checked_in_by_name?: string | null;
+  /** Nama petugas pelaksana check-out (JOIN users); absen sebelum check-out. */
+  checked_out_by_name?: string | null;
+  /**
+   * Jejak perubahan status dengan pelaku, urut tertua -> terbaru (maksimal
+   * 50 baris terbaru) — kontrak `VisitDetail.history` pada
+   * `docs/4. openapi.yaml`. Diisi HANYA oleh `GET /visits/{id}`; absen pada
+   * item daftar, di mana timeline memakai langkah turunan sebagai fallback.
+   */
+  history?: VisitHistoryEntry[];
+  /**
+   * Bukti pengerjaan sebelum/sesudah (`visit_work_photo`) — kontrak
+   * `VisitDetail.work_photos` pada `docs/4. openapi.yaml`. Diisi HANYA oleh
+   * `GET /visits/{id}`; tiap slot `null` hingga dilampirkan via
+   * `POST /visits/{id}/work-photos`. Absen pada item daftar dan echo create.
+   */
+  work_photos?: {
+    before: WorkPhoto | null;
+    after: WorkPhoto | null;
+  };
+}
+
+/**
+ * Satu baris `VisitDetail.history` — status_history dengan pelaku sudah
+ * dinamai. `actor_name` / `actor_role_label` null untuk transisi sistem
+ * (aturan otomatis worker), sehingga timeline menghilangkan klause "oleh".
+ */
+export interface VisitHistoryEntry {
+  status: VisitStatus;
+  /** RFC3339 waktu transisi (`status_history.changed_at`). */
+  at: string;
+  actor_name: string | null;
+  actor_role_label: string | null;
+}
+
+/**
+ * Satu slot bukti pengerjaan kunjungan (`before` = kondisi sebelum mulai,
+ * `after` = kondisi sesudah selesai) — kontrak `WorkPhoto` pada
+ * `docs/4. openapi.yaml`.
+ */
+export interface WorkPhoto {
+  /** Slot bukti; hanya pada respons `POST /visits/{id}/work-photos`. */
+  kind?: 'before' | 'after';
+  /**
+   * URL presigned berumur pendek (detail) atau URL tersimpan (echo lampir).
+   * `null` bila tautan tidak tersedia — jangan disimpan di luar cache respons.
+   */
+  url: string | null;
+  /** ID akun pengunggah; `null` bila akun sudah dihapus. */
+  uploaded_by?: string | null;
+  /** Nama tampilan pengunggah; `null` bila tidak dikenal. */
+  uploaded_by_name?: string | null;
+  /** RFC3339 waktu lampiran tersimpan (diperbarui setiap penggantian). */
+  uploaded_at: string;
+}
+
+/**
+ * `POST /visits/{id}/work-photos` — lampirkan satu bukti pengerjaan.
+ * Lampiran pertama menjawab 201, lampiran ulang pada slot yang sama
+ * MENGGANTIKAN baris (menjawab 200).
+ */
+export interface AttachWorkPhotoRequest {
+  kind: 'before' | 'after';
+  url: string;
 }
 
 export interface VisitListResult {
@@ -427,6 +585,12 @@ export interface EmailChangeConfirmRequest {
 export interface CreateVisitRequest {
   location_id: string;
   /**
+   * ID akun vendor PEMILIK kunjungan (opsional). Hanya dihormati untuk
+   * admin/superadmin; vendor hanya boleh mengirim akunnya sendiri (ID lain
+   * ditolak 403). Akun target wajib vendor aktif. Absen = akun pemanggil.
+   */
+  vendor_user_id?: string;
+  /**
    * Nama vendor/mitra per kunjungan yang diketik manual (≤120, maks trim).
    * Hanya bermakna untuk pengajuan admin/superadmin; vendor tetap memakai
    * nama perusahaan per anggota. Absen/kosong = tanpa perusahaan kunjungan.
@@ -451,7 +615,7 @@ export interface UploadFileResult {
   mime_type: string;
 }
 
-export type UploadCategory = 'assignment_letter' | 'id_card' | 'checkin_photo' | 'profile_photo';
+export type UploadCategory = 'assignment_letter' | 'id_card' | 'checkin_photo' | 'profile_photo' | 'work_photos';
 
 export interface QrPayload {
   visit_id: string;

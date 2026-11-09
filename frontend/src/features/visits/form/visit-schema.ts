@@ -158,6 +158,9 @@ export const assignmentLetterSchema = z.object({
 export const visitFormSchema = z
   .object({
     location_id: z.string().min(1, 'Fasilitas tujuan wajib dipilih.'),
+    // Akun vendor PEMILIK kunjungan (opsional, admin/superadmin saja).
+    // Kosong = pengajuan atas nama akun pemanggil sendiri.
+    vendor_user_id: z.string().trim().optional(),
     // Nama vendor/mitra per kunjungan (admin/superadmin): teks bebas +
     // saran `<datalist>` katalog; kosong = tanpa perusahaan kunjungan.
     vendor_name: z

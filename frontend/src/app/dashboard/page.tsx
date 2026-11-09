@@ -36,6 +36,7 @@ import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
 import { SEARCH_QUERY_MAX_LENGTH } from '@/lib/limits'
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination'
+import { branchFilterOptions } from '@/lib/visits/location-scope'
 import { VISIT_STATUS_META } from '@/lib/visits/status-badge'
 import { mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
 
@@ -149,10 +150,7 @@ function DashboardScreen() {
   // awal), handleResetFilters, DAN isFiltered, sehingga ketiganya mustahil
   // menyimpang satu sama lain. (RequireAuth hanya me-mount layar ini saat sesi
   // sudah ter-autentikasi, jadi `user` sudah terisi pada render pertama.)
-  const defaultFacilityFilter =
-    user !== null && !isSuperAdminRole(user.role) && user.role !== 'vendor'
-      ? (user.location_id ?? 'all')
-      : 'all'
+  const defaultFacilityFilter = 'all'
   const [facilityFilter, setFacilityFilter] = useState<string>(defaultFacilityFilter)
   // Satu state status dipakai BERSAMAAN oleh Tabs dan Select status.
   const [statusFilter, setStatusFilter] = useState<VisitStatus | undefined>(undefined)
@@ -281,7 +279,7 @@ function DashboardScreen() {
   // sumbernya total server (usePendingApprovalCount), konsisten dengan badge
   // di halaman lain. (Harus dipanggil sebelum early-return `user === null`
   // agar urutan hook stabil.)
-  const { pendingCount } = usePendingApprovalCount()
+  const { pendingCount } = usePendingApprovalCount(true, facilityFilter)
   // Galat HANYA dari query utama: kegagalan query rescheduled menghasilkan
   // items `[]` sehingga daftar requested yang valid tidak pernah dikosongkan.
   const rows: VisitDetail[] = useMemo(() => {
@@ -340,21 +338,11 @@ function DashboardScreen() {
     ...Object.entries(VISIT_STATUS_META).map(([value, meta]) => ({ value, label: meta.label })),
   ]
 
-  const facilityOptions: SelectOption[] =
-    isSuperAdminRole(role)
-      ? [
-          { value: 'all', label: 'Semua Cabang / POP' },
-          ...(locationsQuery.data ?? []).map((location) => ({
-            value: location.id,
-            label: location.name,
-          })),
-        ]
-      : [
-          {
-            value: user.location_id ?? 'all',
-            label: user.location_name ?? 'Cabang (terkunci)',
-          },
-        ]
+  const facilityOptions: SelectOption[] = branchFilterOptions(
+    locationsQuery.data ?? [],
+    user,
+    isSuperAdminRole(role) ? 'Semua Cabang / POP' : 'Semua Cabang Saya',
+  )
 
   const metrics: Array<{ label: string; value: number; icon: ReactNode; chip: string }> = [
     {
@@ -451,7 +439,9 @@ function DashboardScreen() {
         ))}
       </div>
 
-      {/* Filter bar: Fasilitas (super_admin aktif, admin terkunci, Vendor/Mitra sembunyi). */}
+      {/* Filter bar: Fasilitas aktif untuk peran lintas cabang MAUPUN peran
+          ter-scope (opsinya dibatasi cakupan sesi; cakupan kosong = terkunci).
+          Vendor/Mitra sembunyi. */}
       <div className="card mt-5 flex flex-wrap items-end gap-3 border-brand/20 bg-brand-soft/40 p-4">
         {role !== 'vendor' ? (
           <div className="min-w-40 flex-1 sm:w-56 sm:flex-none">
@@ -459,7 +449,7 @@ function DashboardScreen() {
               label="Fasilitas"
               options={facilityOptions}
               value={facilityFilter}
-              disabled={!isSuperAdminRole(role)}
+              disabled={facilityOptions.length <= 1}
               onChange={(event) => setFacilityFilter(event.target.value)}
             />
           </div>

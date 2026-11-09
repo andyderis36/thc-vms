@@ -24,6 +24,8 @@ import type {
   LoginRequest,
   LoginResult,
   ManagedUserListParams,
+  MemberSuggestion,
+  MemberSuggestionDetail,
   NotificationListParams,
   NotificationListResult,
   PendingRegistrationListParams,
@@ -41,6 +43,8 @@ import type {
   UpdateVisitorContactRequest,
   User,
   Vendor,
+  VendorAccount,
+  VendorSuggestion,
   VisitDetail,
   VisitListParams,
   VisitListResult,
@@ -142,12 +146,78 @@ export function listVendors(): Promise<Vendor[]> {
 }
 
 /**
+ * `GET /public/vendors` → katalog vendor aktif TANPA auth — dipakai layar
+ * pendaftaran mandiri (tanpa sesi, jadi `/vendors` akan 401).
+ */
+export function listPublicVendors(): Promise<Vendor[]> {
+  return apiFetch<Vendor[]>('/public/vendors');
+}
+
+/**
+ * `GET /users/vendors` → akun vendor AKTIF `{id, name, email, company}`
+ * (admin/super_admin saja) untuk pemilih pemilik kunjungan.
+ */
+export function listVendorAccounts(): Promise<VendorAccount[]> {
+  return apiFetch<VendorAccount[]>('/users/vendors');
+}
+
+/**
  * `GET /jabatan` → `["Mandor", "Teknisi"]` — nilai jabatan yang pernah
  * tersimpan pada baris visitor (distinct, A-Z, maks 50; bisa kosong `[]`).
  * HANYA saran isian: pengguna tetap bebas mengetik jabatan baru.
  */
 export function listJabatan(): Promise<JabatanList> {
   return apiFetch<JabatanList>('/jabatan');
+}
+
+// ---------------------------------------------------------------------------
+// Saran isian (feed read-only untuk <datalist> SCR-03)
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET /vendors/suggestions` → nama vendor terdedupe (master > account >
+ * history, maks 50). `q` = filter prefix ≤80 karakter (dikirim apa adanya;
+ * memanggil yang menclamp bertanggung jawab atas batas itu — lihat
+ * `clampSuggestionQuery`). `q` kosong = seluruh feed. Role gate + scope cabang
+ * hidup di backend (403 untuk vendor/security).
+ */
+export function listVendorSuggestions(q = ''): Promise<VendorSuggestion[]> {
+  const query = new URLSearchParams();
+  if (q !== '') query.set('q', q);
+  const search = query.toString();
+  return apiFetch<VendorSuggestion[]>(
+    search === '' ? '/vendors/suggestions' : `/vendors/suggestions?${search}`,
+  );
+}
+
+/**
+ * `GET /visits/member-suggestions` → roster anggota lama untuk dipakai ulang
+ * (maks 20, TANPA URL foto). `q` = filter nama ≤80 karakter; `vendor` = nama
+ * tampilan untuk menyempitkan hasil (admin/super_admin; diabaikan backend
+ * untuk peran vendor). Keduanya dikirim hanya bila terisi.
+ */
+export function listMemberSuggestions(
+  params: { q?: string; vendor?: string } = {},
+): Promise<MemberSuggestion[]> {
+  const query = new URLSearchParams();
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.vendor !== undefined && params.vendor !== '')
+    query.set('vendor', params.vendor);
+  const search = query.toString();
+  return apiFetch<MemberSuggestion[]>(
+    search === '' ? '/visits/member-suggestions' : `/visits/member-suggestions?${search}`,
+  );
+}
+
+/**
+ * `GET /visits/member-suggestions/{visitorId}` → satu anggota pilihan dengan
+ * tautan foto presigned (404 untuk id tak dikenal/luar cakupan — tidak
+ * pernah diretry oleh lapisan hook).
+ */
+export function getMemberSuggestion(visitorId: string): Promise<MemberSuggestionDetail> {
+  return apiFetch<MemberSuggestionDetail>(
+    `/visits/member-suggestions/${encodeURIComponent(visitorId)}`,
+  );
 }
 
 // ---------------------------------------------------------------------------

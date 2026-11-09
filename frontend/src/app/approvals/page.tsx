@@ -24,6 +24,7 @@ import { isSuperAdminRole } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 import { SEARCH_QUERY_MAX_LENGTH } from '@/lib/limits'
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination'
+import { branchFilterOptions } from '@/lib/visits/location-scope'
 import { mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
 
 /** Kombinasi filter antrean approval yang dipetakan ke query params `GET /visits`. */
@@ -159,7 +160,7 @@ function ApprovalsScreen() {
   // Badge antrean shell + subtitle: total requested + rescheduled TANPA filter
   // pencarian (server-total, limit 1 — hanya total yang dipakai), persis pola
   // halaman users — lihat usePendingApprovalCount.
-  const { pendingCount } = usePendingApprovalCount()
+  const { pendingCount } = usePendingApprovalCount(true, locationId)
 
   // `q` & `location_id` adalah query param kontrak GET /visits
   // (openapi §/visits) — tersambung langsung ke server, bukan filter mati.
@@ -167,7 +168,7 @@ function ApprovalsScreen() {
   // cabang berlaku identik pada sisi `requested` dan `rescheduled`.
   const filter: ApprovalListFilter = {
     q: search,
-    locationId: isSuperAdmin ? locationId : 'all',
+    locationId,
     dateFrom,
     dateTo,
     page,
@@ -193,11 +194,15 @@ function ApprovalsScreen() {
 
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data])
   const locationOptions: SelectOption[] = useMemo(
-    () => [
-      { value: 'all', label: 'Semua Cabang / POP' },
-      ...locations.map((location) => ({ value: location.id, label: location.name })),
-    ],
-    [locations],
+    () =>
+      user !== null
+        ? branchFilterOptions(
+            locations,
+            user,
+            isSuperAdmin ? 'Semua Cabang / POP' : 'Semua Cabang Saya',
+          )
+        : [],
+    [locations, user, isSuperAdmin],
   )
 
   if (role === null) {
@@ -228,16 +233,15 @@ function ApprovalsScreen() {
       {/* Toolbar filter irisan SCR-02 — pola users benchmark: select berlabel
           + search ber-aria-label, wrap rapi di 375/768/1280 tanpa scroll. */}
       <div className="card flex flex-wrap items-end gap-3 border-brand/20 bg-brand-soft/40 p-4">
-        {isSuperAdmin ? (
-          <div className="min-w-40 flex-1 sm:w-56 sm:flex-none">
-            <Select
-              label="Cabang"
-              options={locationOptions}
-              value={locationId}
-              onChange={(event) => setLocationId(event.target.value)}
-            />
-          </div>
-        ) : null}
+        <div className="min-w-40 flex-1 sm:w-56 sm:flex-none">
+          <Select
+            label="Cabang"
+            options={locationOptions}
+            value={locationId}
+            disabled={locationOptions.length <= 1}
+            onChange={(event) => setLocationId(event.target.value)}
+          />
+        </div>
         <div className="min-w-48 flex-1">
           <span aria-hidden="true" className="mb-2 block text-label font-semibold text-ink">
             Pencarian

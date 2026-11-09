@@ -3,7 +3,7 @@
  * `docs/4. openapi.yaml` (SSOT) dan `backend/internal/validation/limits.go`.
  *
  * Modul ini murni (tanpa React, tanpa impor `features/`) sehingga boleh dipakai
- * skema form, input UI, autosave, dan pengujian. Setiap perubahan nilai WAJIB
+ * skema form, input UI, dan pengujian. Setiap perubahan nilai WAJIB
  * dilakukan serentak di ketiga tempat; `tests/limits-contract.test.ts` membaca
  * YAML OpenAPI langsung dan gagal bila ada selisih.
  *
@@ -93,6 +93,9 @@ export const JSON_BODY_MAX_BYTES = 1_048_576
 
 /** Panjang nama vendor manual (120) — didefinisikan di `lib/visits/vendor-input.ts`. */
 export { VENDOR_NAME_MAX_LENGTH } from '@/lib/visits/vendor-input'
+
+/** Batas ?q= saran isian (80) — didefinisikan di `lib/visits/suggestions.ts`. */
+export { SUGGESTION_QUERY_MAX_LENGTH } from '@/lib/visits/suggestions'
 
 /** Panjang jabatan (120) — didefinisikan di `lib/visits/jabatan-input.ts`. */
 export { JABATAN_MAX_LENGTH } from '@/lib/visits/jabatan-input'

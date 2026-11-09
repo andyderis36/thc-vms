@@ -17,7 +17,7 @@ import { SessionNetworkError, useSession } from '@/lib/auth/session'
 import { registerVendor } from '@/lib/api/client'
 import { ApiError } from '@/lib/api/fetcher'
 import type { RegisterVendorRequest } from '@/lib/api/types'
-import { useVendorsQuery } from '@/lib/api/hooks'
+import { usePublicVendorsQuery } from '@/lib/api/hooks'
 import {
   EMAIL_MAX_LENGTH,
   isValidEmail,
@@ -100,7 +100,9 @@ function RegisterScreen() {
   const router = useRouter()
   const { user, status } = useSession()
   const [done, setDone] = useState(false)
-  const vendorsQuery = useVendorsQuery(true)
+  // Tanpa sesi: katalog vendor WAJIB dari endpoint publik (`/public/vendors`);
+  // `/vendors` terautentikasi akan 401 di layar ini.
+  const vendorsQuery = usePublicVendorsQuery()
 
   const {
     register,

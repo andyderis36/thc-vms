@@ -56,6 +56,7 @@ vi.mock('@/lib/auth/session', () => ({
 }))
 
 vi.mock('@/lib/api/hooks', () => ({
+  securityUsersQueryOptions: () => ({ queryKey: ['securityUsers'], queryFn: async () => securityMembers }),
   useCreateSecurityUserMutation: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteSecurityUserMutation: () => ({ mutate: vi.fn(), isPending: false }),
   useLocationsQuery: () => ({ data: [] }),
@@ -79,7 +80,28 @@ vi.mock('@/lib/api/hooks', () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useVendorSuggestionsQuery: () => ({
+    data: [],
+    isPending: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }))
+
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>()
+  return {
+    ...actual,
+    useQueries: () => [{
+      data: securityMembers,
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    }],
+  }
+})
 
 let fetchMock: Mock<typeof fetch>
 

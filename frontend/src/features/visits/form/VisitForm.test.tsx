@@ -63,6 +63,11 @@ vi.mock('@/lib/api/hooks', () => ({
     isError: false,
   }),
   useVendorsQuery: () => ({ data: [], isPending: false, isError: false }),
+  useVendorAccountsQuery: () => ({ data: [], isPending: false, isError: false }),
+  useVendorSuggestionsQuery: () => ({ data: [], isPending: false, isError: false }),
+  useMemberSuggestionsQuery: () => ({ data: [], isPending: false, isError: false }),
+  useMemberSuggestionQuery: () => ({ data: undefined, isPending: false, isError: false }),
+  useVisitQuery: () => ({ data: undefined, isPending: false, isError: false }),
   useJabatanQuery: () => ({
     data: ['Mandor', 'Teknisi'],
     isPending: false,

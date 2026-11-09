@@ -29,12 +29,24 @@ vi.mock('@/lib/api/client', () => ({
   registerVendor: (...args: unknown[]) => registerVendorMock(...args),
 }))
 
-vi.mock('@/lib/api/hooks', () => ({
-  useVendorsQuery: () => ({
+const { publicVendorsMock, authenticatedVendorsMock } = vi.hoisted(() => ({
+  publicVendorsMock: vi.fn(() => ({
     data: [{ id: 'vendor-1', name: 'PT Lintas Fiber' }],
     isPending: false,
     isError: false,
-  }),
+  })),
+  // `/vendors` terautentikasi akan 401 tanpa sesi — layar ini tak boleh
+  // menyentuhnya; spy menangkap pemakaian yang tak diinginkan.
+  authenticatedVendorsMock: vi.fn(() => ({
+    data: [],
+    isPending: false,
+    isError: false,
+  })),
+}))
+
+vi.mock('@/lib/api/hooks', () => ({
+  usePublicVendorsQuery: () => publicVendorsMock(),
+  useVendorsQuery: () => authenticatedVendorsMock(),
 }))
 
 function fillValidForm(): void {
@@ -59,6 +71,8 @@ describe('RegisterPage', () => {
   afterEach(() => {
     cleanup()
     registerVendorMock.mockReset()
+    publicVendorsMock.mockClear()
+    authenticatedVendorsMock.mockClear()
     replaceMock.mockReset()
     window.localStorage.clear()
   })
@@ -75,6 +89,17 @@ describe('RegisterPage', () => {
       'href',
       '/login',
     )
+  })
+
+  it('memakai katalog vendor publik, bukan katalog terautentikasi', () => {
+    const { container } = render(createElement(RegisterPage))
+
+    expect(publicVendorsMock).toHaveBeenCalled()
+    expect(authenticatedVendorsMock).not.toHaveBeenCalled()
+    const options = Array.from(
+      container.querySelectorAll('#register-vendor-datalist option'),
+    ).map((option) => option.getAttribute('value'))
+    expect(options).toEqual(['PT Lintas Fiber'])
   })
 
   it('shows validation errors for empty submit (Indonesian messages)', async () => {

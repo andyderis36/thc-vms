@@ -35,9 +35,9 @@ export const VENDOR_NAME_MAX_LENGTH = 120
  * Batas anggota tim per kunjungan — openapi `visitors.maxItems` = 10.
  *
  * Konstanta domain diletakkan di sini (bukan di `visit-schema.ts`) agar
- * modul `lib/` — termasuk `technician-autosave.ts` — tidak perlu mengimpor
- * dari `features/` (edge arsitektur lib→features dilarang). `visit-schema.ts`
- * me-re-export nilai ini sehingga importir lama tetap berfungsi tanpa ubahan.
+ * modul `lib/` tidak perlu mengimpor dari `features/` (edge arsitektur
+ * lib→features dilarang). `visit-schema.ts` me-re-export nilai ini sehingga
+ * importir lama tetap berfungsi tanpa ubahan.
  */
 export const MAX_TECHNICIANS = 10
 

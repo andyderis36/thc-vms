@@ -49,7 +49,10 @@ export function VisitCards({ visits, role, onApprove, onReject }: VisitCardsProp
     <ul className={TABLE_CARD_LIST_CLASS}>
       {visits.map((visit) => {
         const schedule = visitSchedule(visit)
-        const purposes = visit.purposes.map((purpose) => purpose.name).join(', ')
+        const purposeText =
+          visit.purposes.length > 0
+            ? visit.purposes.map((purpose) => purpose.name).join(', ')
+            : (visit.purpose_note ?? '').trim()
         const vendorDisplay = primaryVendorDisplay(visit.visitors)
         const hasVendor = vendorDisplay !== '—'
         const vendorUser = visitVendorUser(visit)
@@ -97,7 +100,9 @@ export function VisitCards({ visits, role, onApprove, onReject }: VisitCardsProp
               </p>
               <p className="flex items-start gap-2">
                 <Wrench className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-                <span className="min-w-0 wrap-anywhere">{purposes}</span>
+                <span className="min-w-0 truncate" title={purposeText}>
+                  {purposeText}
+                </span>
               </p>
               <p className="flex items-start gap-2">
                 <Users className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />

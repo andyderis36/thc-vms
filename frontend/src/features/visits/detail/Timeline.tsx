@@ -1,6 +1,7 @@
 import { Check, X } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/Badge'
-import type { VisitStatus } from '@/lib/api/types'
+import type { VisitHistoryEntry, VisitStatus } from '@/lib/api/types'
+import { VISIT_STATUS_META } from '@/lib/visits/status-badge'
 
 /**
  * Format timestamp ISO 8601 menjadi tampilan ringkas Bahasa Indonesia.
@@ -80,6 +81,30 @@ export interface TimelineProps {
   checkOutAt?: string | null
   /** Alasan status akhir (`status_note`); hanya tampil pada status terminal. */
   statusNote?: string | null
+  /**
+   * Jejak status berpelaku dari `VisitDetail.history` (urut tertua ->
+   * terbaru). Bila berisi, panel merender baris riwayat ini; kosong/absen
+   * (item daftar, kunjungan tanpa riwayat) = fallback ke langkah turunan.
+   */
+  history?: VisitHistoryEntry[] | null
+}
+
+/**
+ * Satu baris teks riwayat: `oleh <nama> (<peran>) · <stempel>` untuk
+ * transisi berpelaku, dan hanya stempelnya untuk transisi sistem
+ * (`actor_name` null) sehingga klause "oleh" tidak pernah mengarang aktor.
+ * Murni (pure) agar terkunci oleh unit test.
+ */
+export function historyDetail(entry: VisitHistoryEntry): string {
+  const stamp = formatTanggalWaktu(entry.at)
+  if (entry.actor_name === null || entry.actor_name === '') {
+    return stamp
+  }
+  const by =
+    entry.actor_role_label !== null && entry.actor_role_label !== ''
+      ? `oleh ${entry.actor_name} (${entry.actor_role_label})`
+      : `oleh ${entry.actor_name}`
+  return `${by} · ${stamp}`
 }
 
 /**
@@ -115,9 +140,11 @@ export function Timeline({
   checkInAt,
   checkOutAt,
   statusNote,
+  history,
 }: TimelineProps) {
   const activeIndex = ACTIVE_INDEX_BY_STATUS[status]
   const terminal = TERMINAL_STATUSES.has(status)
+  const entries = history ?? []
 
   const steps: TimelineStep[] = [
     { id: 'requested', label: 'Pengajuan', detail: `Diajukan ${formatTanggalWaktu(createdAt)}` },
@@ -143,33 +170,54 @@ export function Timeline({
 
   return (
     <ol className="relative ml-3 flex flex-col gap-6 border-l-2 border-border-light pl-6">
-      {visibleSteps.map((step, index) => {
-        const state: StepState = terminal
-          ? 'done'
-          : index < activeIndex
-            ? 'done'
-            : index === activeIndex
-              ? 'current'
-              : 'future'
-        const text = TEXT_CLASS[state]
+      {entries.length > 0
+        ? entries.map((entry, index) => {
+            const label = VISIT_STATUS_META[entry.status].label
+            return (
+              <li
+                key={`${entry.status}-${entry.at}-${index}`}
+                className="relative min-w-0"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full ${DOT_CLASS.done}`}
+                >
+                  <Check aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />
+                </span>
+                <p className="text-sm font-semibold text-ink">{label}</p>
+                <p className="mt-0.5 text-label text-ink-secondary">{historyDetail(entry)}</p>
+              </li>
+            )
+          })
+        : visibleSteps.map((step, index) => {
+            const state: StepState = terminal
+              ? 'done'
+              : index < activeIndex
+                ? 'done'
+                : index === activeIndex
+                  ? 'current'
+                  : 'future'
+            const text = TEXT_CLASS[state]
 
-        return (
-          <li
-            key={step.id}
-            aria-current={state === 'current' ? 'step' : undefined}
-            className="relative min-w-0"
-          >
-            <span
-              aria-hidden="true"
-              className={`absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full ${DOT_CLASS[state]}`}
-            >
-              {state === 'done' && <Check aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />}
-            </span>
-            <p className={`text-sm ${text.label}`}>{step.label}</p>
-            <p className={`mt-0.5 text-label ${text.detail}`}>{step.detail}</p>
-          </li>
-        )
-      })}
+            return (
+              <li
+                key={step.id}
+                aria-current={state === 'current' ? 'step' : undefined}
+                className="relative min-w-0"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full ${DOT_CLASS[state]}`}
+                >
+                  {state === 'done' && (
+                    <Check aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />
+                  )}
+                </span>
+                <p className={`text-sm ${text.label}`}>{step.label}</p>
+                <p className={`mt-0.5 text-label ${text.detail}`}>{step.detail}</p>
+              </li>
+            )
+          })}
 
       {terminal && (
         <li className="relative min-w-0">

@@ -214,6 +214,16 @@ describe('VisitCards — kontrak baris "Lihat SPK" (mobile)', () => {
     }
   })
 
+  it('tujuan lain: purposes kosong menampilkan purpose_note dengan ellipsis + title penuh', () => {
+    const note = 'Perbaikan kabel drop core di shelter belakang kantor cabang Sambas'
+    renderVisitCards({ visits: [buildVisit({ purposes: [], purpose_note: note })] })
+
+    const text = screen.getByText(note)
+    expect(text).toHaveClass('truncate')
+    expect(text).toHaveAttribute('title', note)
+    expect(rowOf(text)).toHaveClass('items-start')
+  })
+
   it('assignment_letter_url null: tanpa link, fallback "—" text-ink-muted, baris tetap kontrak alignment', () => {
     renderVisitCards({ visits: [buildVisit({ assignment_letter_url: null })] })
 

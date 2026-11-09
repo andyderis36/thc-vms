@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { Select, type SelectOption } from '@/components/ui/Select'
-import { useVendorsQuery } from '@/lib/api/hooks'
+import { BranchMultiSelect } from '@/features/users/components/BranchMultiSelect'
+import { userBranchNames } from '@/features/users/managed-user-filters'
+import { useVendorNameOptions } from '@/features/users/hooks/useVendorNameOptions'
 import type { UpdateManagedUserRequest, User } from '@/lib/api/types'
 import {
   VENDOR_NAME_MAX_LENGTH,
@@ -69,7 +70,13 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
   const [emailError, setEmailError] = useState<string | undefined>(undefined)
   const [phoneError, setPhoneError] = useState<string | undefined>(undefined)
   const [passwordError, setPasswordError] = useState<string | undefined>(undefined)
-  const [locationId, setLocationId] = useState(user.location_id ?? '')
+  // Prefill multi-cabang: `location_ids` bila tersedia, fallback ke
+  // `[location_id]` (model hibrida accept-either). Urutan prefill dipertahankan;
+  // ELEMEN PERTAMA tetap lokasi utama hingga pengguna mengubah pilihan.
+  const [locationIds, setLocationIds] = useState<string[]>(() =>
+    user.location_ids ?? (user.location_id !== null ? [user.location_id] : []),
+  )
+  const [locationError, setLocationError] = useState<string | undefined>(undefined)
   // Prefill teks vendor apa adanya dari baris. Tanpa perubahan = field absen
   // dari payload; dikosongkan = kirim `vendor_name: ''` (bersihkan kolom).
   const initialVendorName = (user.vendor_name ?? '').trim()
@@ -79,21 +86,23 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
 
   const showNik = user.role === 'admin' || user.role === 'vendor'
   const showVendor = user.role === 'vendor'
-  // Katalog vendor hanya untuk Vendor/Mitra; dimuat hanya saat dibutuhkan.
-  const vendorsQuery = useVendorsQuery(showVendor)
-  const locationOptions: SelectOption[] = locations.map((location) => ({
-    value: location.id,
-    label: location.name,
-  }))
-  const lockedLocationName =
-    locations.find((location) => location.id === user.location_id)?.name ??
-    user.location_name ??
-    '—'
+  // Katalog vendor + saran feed hanya untuk Vendor/Mitra; dimuat saat dibutuhkan.
+  const vendorOptions = useVendorNameOptions(showVendor)
+  const lockedLocationName = userBranchNames(user, locations).join(', ') || '—'
+
+  const handleLocationChange = (next: string[]): void => {
+    setLocationIds(next)
+    if (locationError !== undefined) setLocationError(undefined)
+  }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
     if (name.trim() === '' || email.trim() === '') return
-    if (locationMode === 'select' && locationId === '') return
+    const primaryLocationId = locationIds[0]
+    if (locationMode === 'select' && primaryLocationId === undefined) {
+      setLocationError('Pilih minimal satu cabang / POP.')
+      return
+    }
 
     const nextEmailError = isValidEmail(email) ? undefined : 'Format email tidak valid.'
     setEmailError(nextEmailError)
@@ -141,7 +150,7 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
         vendorFields =
           next === ''
             ? { vendor_name: '' }
-            : resolveVendorInput(next, vendorsQuery.data ?? [])
+            : resolveVendorInput(next, vendorOptions.vendors)
       }
     }
 
@@ -150,7 +159,9 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
       email: email.trim(),
       phone: phone.trim(),
       ...(showNik ? { nik: nik.trim() } : {}),
-      ...(locationMode === 'select' ? { location_id: locationId } : {}),
+      ...(locationMode === 'select'
+        ? { location_id: primaryLocationId, location_ids: locationIds }
+        : {}),
       ...vendorFields,
       ...(password !== '' ? { password } : {}),
       // Bukti anti-pengambilalihan: reset password akun sendiri wajib
@@ -267,13 +278,14 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
           />
         ) : null}
         {locationMode === 'select' ? (
-          <Select
+          <BranchMultiSelect
             label="Cabang Penugasan"
-            placeholder="Pilih cabang / POP"
-            options={locationOptions}
-            value={locationId}
-            onChange={(event) => setLocationId(event.target.value)}
             required
+            options={locations}
+            value={locationIds}
+            onChange={handleLocationChange}
+            error={locationError}
+            hint="Pilih satu atau beberapa cabang / POP. Pilihan pertama menjadi cabang utama."
           />
         ) : null}
         {locationMode === 'locked' ? (
@@ -293,7 +305,7 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
             <Input
               label="Vendor"
               placeholder={
-                vendorsQuery.isPending
+                vendorOptions.isPending
                   ? 'Memuat vendor…'
                   : 'Pilih dari daftar atau ketik nama vendor'
               }
@@ -305,8 +317,8 @@ export function EditUserModal({ user, locations, saving, locationMode, isSelf, o
               maxLength={VENDOR_NAME_MAX_LENGTH}
             />
             <datalist id="edit-user-vendor-datalist">
-              {(vendorsQuery.data ?? []).map((vendor) => (
-                <option key={vendor.id} value={vendor.name} />
+              {vendorOptions.names.map((name) => (
+                <option key={name} value={name} />
               ))}
             </datalist>
           </>

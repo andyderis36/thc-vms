@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import {
   useFieldArray,
   useWatch,
@@ -15,7 +16,13 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { UploadBox } from './UploadBox'
 import { technicianAnchorId } from './invalid-fields'
-import { useJabatanQuery, useVendorsQuery } from '@/lib/api/hooks'
+import {
+  useJabatanQuery,
+  useMemberSuggestionQuery,
+  useMemberSuggestionsQuery,
+  useVendorSuggestionsQuery,
+  useVendorsQuery,
+} from '@/lib/api/hooks'
 import {
   EMAIL_MAX_LENGTH,
   ID_NUMBER_MAX_LENGTH,
@@ -24,6 +31,12 @@ import {
   sanitizePhoneInput,
 } from '@/lib/limits'
 import { JABATAN_MAX_LENGTH } from '@/lib/visits/jabatan-input'
+import {
+  mergeSuggestionNames,
+  toMemberSuggestionOptions,
+  toMemberSuggestionPatch,
+  type SuggestionPick,
+} from '@/lib/visits/suggestions'
 import { VENDOR_NAME_MAX_LENGTH } from '@/lib/visits/vendor-input'
 import {
   MAX_TECHNICIANS,
@@ -31,7 +44,7 @@ import {
   type VisitFormValues,
 } from './visit-schema'
 
-/** id <datalist> bersama — hanya berisi nama vendor TERDAFTAR dari katalog. */
+/** id <datalist> bersama — nama saran vendor + pelengkap katalog terdaftar. */
 const VENDOR_DATALIST_ID = 'visit-vendor-datalist'
 
 /** id <datalist> bersama — jabatan yang PERNAH terdaftar (bukan katalog). */
@@ -50,8 +63,6 @@ export interface TechnicianListProps {
   register: UseFormRegister<VisitFormValues>
   setValue: UseFormSetValue<VisitFormValues>
   errors: FieldErrors<VisitFormValues>
-  /** Teks vendor milik pengguna yang sedang masuk — isian awal tiap baris baru. */
-  defaultVendorName?: string
 }
 
 interface TechnicianRowProps {
@@ -68,7 +79,7 @@ interface TechnicianRowProps {
   jabatanError: boolean
 }
 
-function emptyTechnician(defaultVendorName?: string): TechnicianFormValues {
+function emptyTechnician(): TechnicianFormValues {
   return {
     name: '',
     id_number: '',
@@ -77,7 +88,7 @@ function emptyTechnician(defaultVendorName?: string): TechnicianFormValues {
     id_card_photo: { url: '', name: '' },
     selfie: { url: '', name: '' },
     jabatan: '',
-    vendor_name: defaultVendorName ?? '',
+    vendor_name: '',
     email: '',
   }
 }
@@ -95,17 +106,127 @@ function TechnicianRow({
   jabatanPending,
   jabatanError,
 }: TechnicianRowProps) {
-  const photo = useWatch({
-    control,
-    name: `technicians.${index}.id_card_photo`,
-  })
-  const selfie = useWatch({
-    control,
-    name: `technicians.${index}.selfie`,
-  })
+  const rowValues = useWatch({ control, name: `technicians.${index}` })
+  const photo = rowValues.id_card_photo
+  const selfie = rowValues.selfie
   const rowError = errors.technicians?.[index]
   const removeLabel = `Hapus anggota ${index + 1}`
   const phoneField = register(`technicians.${index}.phone`)
+  const nameField = register(`technicians.${index}.name`)
+  const nameDatalistId = `${technicianAnchorId(index, 'name')}-datalist`
+  const visitVendorName = useWatch({ control, name: 'vendor_name' }) ?? ''
+
+  const memberSuggestionsQuery = useMemberSuggestionsQuery({
+    q: rowValues.name,
+    vendor: visitVendorName,
+  })
+
+  /*
+   * Pilihan saran anggota: daftar sudah membawa `visitor_id` baris visitor,
+   * jadi pilihan langsung memanggil detail (foto presigned) tanpa perantara
+   * kunjungan sumber. Query berbasis kunci: pilihan baru mengganti kunci,
+   * respons basi tidak pernah terlihat; `appliedPickRef` menahan penerapan
+   * ulang yang akan menimpa ketikan pengguna setelah autofill. Tanpa
+   * kecocokan (nama ketikan manual) tidak ada pilihan dan tidak ada patch.
+   */
+  const [pick, setPick] = useState<SuggestionPick | null>(null)
+  const memberDetailQuery = useMemberSuggestionQuery(pick?.visitorId ?? null)
+  const appliedPickRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const detail = memberDetailQuery.data
+    if (pick === null || detail === undefined) return
+    if (appliedPickRef.current === pick.visitorId) return
+    appliedPickRef.current = pick.visitorId
+    setValue(
+      `technicians.${index}`,
+      { ...rowValues, ...toMemberSuggestionPatch(detail) },
+      { shouldDirty: true, shouldValidate: true },
+    )
+  }, [memberDetailQuery.data, pick, index, rowValues, setValue])
+
+  /*
+   * Detail gagal dimuat (404/jaringan): pulihkan nama kanonis dan tandai
+   * pilihan sudah dipakai, sehingga nilai berakhiran "(nomor HP)" tidak
+   * pernah terkirim dan respons sukses yang datang belakangan tidak
+   * menimpa ketikan pengguna.
+   */
+  useEffect(() => {
+    if (pick === null || !memberDetailQuery.isError) return
+    if (appliedPickRef.current === pick.visitorId) return
+    appliedPickRef.current = pick.visitorId
+    setValue(`technicians.${index}.name`, pick.name, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+  }, [memberDetailQuery.isError, pick, index, setValue])
+
+  const typedNameRef = useRef('')
+
+  function findPickOption(value: string): SuggestionPick | null {
+    if (value === '') return null
+    const datalist = document.getElementById(nameDatalistId)
+    if (datalist === null) return null
+    const option = Array.from(datalist.querySelectorAll('option')).find(
+      (item) => item.value === value,
+    )
+    const visitorId = option?.dataset.visitorId
+    const name = option?.dataset.name
+    if (
+      option === undefined ||
+      visitorId === undefined ||
+      visitorId === '' ||
+      name === undefined
+    ) {
+      return null
+    }
+    return { visitorId, name }
+  }
+
+  function applyPickFromValue(value: string): void {
+    appliedPickRef.current = null
+    setPick(findPickOption(value))
+  }
+
+  /*
+   * Deteksi pemilihan datalist: sinyal `inputType` berbeda antar peramban —
+   * Firefox mengirim `"insertReplacementText"`, Chrome/Edge mengirim
+   * `null`/string kosong saat opsi dipilih, bukan `"insertText"`. Keduanya
+   * diterima, TETAPI hanya bila nilainya PERSIS salah satu opsi datalist:
+   * ketikan, tempel, dan hapus (`insertText`, `insertFromPaste`,
+   * `deleteContent…`) tidak pernah memicu autofill dan justru me-reset
+   * pilihan lama agar tidak pernah ditimpa ulang tanpa maksud pengguna.
+   */
+  function handleNameInput(event: FormEvent<HTMLInputElement>): void {
+    const value = event.currentTarget.value
+    const native = event.nativeEvent
+    const inputType = native instanceof InputEvent ? native.inputType : null
+    const isPickSignal =
+      inputType === null ||
+      inputType === '' ||
+      inputType === 'insertReplacementText'
+    if (isPickSignal && findPickOption(value) !== null) {
+      typedNameRef.current = value
+      applyPickFromValue(value)
+      return
+    }
+    typedNameRef.current = value
+    setPick(null)
+    appliedPickRef.current = null
+  }
+
+  /*
+   * Jaring pengaman `change`: peramban yang tidak mengirim `input` saat opsi
+   * datalist dipilih tetap terdeteksi dari nilai yang berubah tanpa ketikan
+   * (nilai ketikan selalu sinkron di `typedNameRef`).
+   */
+  function handleNameChange(event: ChangeEvent<HTMLInputElement>): void {
+    nameField.onChange(event)
+    const value = event.target.value
+    if (value === typedNameRef.current) return
+    typedNameRef.current = value
+    applyPickFromValue(value)
+  }
 
   return (
     <div className="card p-4">
@@ -146,8 +267,27 @@ function TechnicianRow({
           placeholder="Sesuai KTP/SIM"
           error={rowError?.name?.message}
           id={technicianAnchorId(index, 'name')}
-          {...register(`technicians.${index}.name`)}
+          list={nameDatalistId}
+          {...nameField}
+          onChange={handleNameChange}
+          onInput={handleNameInput}
         />
+        {/* Saran anggota (roster lama) — opsional: memilih satu mengisi ulang
+            baris (termasuk foto + perusahaan anggota), mengetik bebas tetap
+            tanpa saran. */}
+        <datalist id={nameDatalistId}>
+          {toMemberSuggestionOptions(memberSuggestionsQuery.data).map(
+            (option) => (
+              <option
+                key={option.visitorId}
+                value={option.value}
+                label={option.label}
+                data-name={option.name}
+                data-visitor-id={option.visitorId}
+              />
+            ),
+          )}
+        </datalist>
         <Input
           label="Nomor KTP / SIM"
           required
@@ -246,7 +386,7 @@ function TechnicianRow({
               )
           }
         />
-        {/* Input bebas-teks + <datalist>: saran HANYA dari katalog vendor
+        {/* Input bebas-teks + <datalist>: saran dari feed vendor + katalog
             terdaftar; teks ketikan manual tidak pernah menjadi opsi. */}
         <Input
           label="Perusahaan Vendor"
@@ -297,7 +437,6 @@ export function TechnicianList({
   register,
   setValue,
   errors,
-  defaultVendorName,
 }: TechnicianListProps) {
   const { fields, append, remove } = useFieldArray({
     control,
@@ -305,6 +444,12 @@ export function TechnicianList({
   })
   const vendorsQuery = useVendorsQuery()
   const vendors = vendorsQuery.data ?? []
+  // Saran "Perusahaan Vendor" per baris: feed `GET /vendors/suggestions`
+  // (gerbang peran di dalam hook) + pelengkap katalog `GET /vendors` supaya
+  // nama terdaftar yang dulu tampil tidak pernah hilang. Feed tanpa q (daftar
+  // bersama); peramban menyaring saat ketik.
+  const vendorSuggestionsQuery = useVendorSuggestionsQuery('')
+  const vendorOptionNames = mergeSuggestionNames(vendorSuggestionsQuery.data, vendors)
   const jabatanQuery = useJabatanQuery()
   const jabatan = jabatanQuery.data ?? []
   const atLimit = fields.length >= MAX_TECHNICIANS
@@ -333,11 +478,11 @@ export function TechnicianList({
           </p>
         ) : null}
 
-        {/* Katalog saran vendor — HANYA nama terdaftar (master data
-            Superadmin); teks ketikan manual tidak pernah ditambahkan. */}
+        {/* Katalog saran vendor — feed saran + nama terdaftar; teks ketikan
+            manual tidak pernah ditambahkan. */}
         <datalist id={VENDOR_DATALIST_ID}>
-          {vendors.map((vendor) => (
-            <option key={vendor.id} value={vendor.name} />
+          {vendorOptionNames.map((name) => (
+            <option key={name} value={name} />
           ))}
         </datalist>
 
@@ -375,7 +520,7 @@ export function TechnicianList({
             fullWidth
             className="min-h-touch-lg"
             disabled={atLimit}
-            onClick={() => append(emptyTechnician(defaultVendorName))}
+            onClick={() => append(emptyTechnician())}
           >
             <Plus aria-hidden="true" className="size-4 shrink-0" />
             Tambah Anggota
