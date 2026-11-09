@@ -208,15 +208,27 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 // yields no error, because a re-applied file raises only "already there"
 // SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL, migrationUserLocationsSQL, migrationCreatedBySQL} {
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL, migrationUserLocationsSQL} {
 		if err := applyOne(ctx, pool, sql); err != nil {
 			return err
 		}
 	}
+	// Migration 000024 backfills created_by from visit_request.vendor_user_id,
+	// so the 000009 pic_user_id -> vendor_user_id rename must already have run.
+	// On an incremental local database the rename is usually a no-op because
+	// vendor_user_id already exists; on a fresh CI database the column is still
+	// named pic_user_id until this call, and running 000024 first fails with
+	// 42703 column "vendor_user_id" does not exist.
+	if err := applyVendorUserRename(ctx, pool); err != nil {
+		return err
+	}
+	if err := applyOne(ctx, pool, migrationCreatedBySQL); err != nil {
+		return err
+	}
 	if err := applyPendingStatus(ctx, pool); err != nil {
 		return err
 	}
-	return applyVendorUserRename(ctx, pool)
+	return nil
 }
 
 // applyVendorUserRename applies migration 000009 (visit_request.pic_user_id ->
