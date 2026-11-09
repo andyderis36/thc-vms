@@ -57,6 +57,11 @@ export interface CreateVisitOptions {
   role?: Role
   locationId?: string
   purposeIds?: string[]
+  /**
+   * Tujuan bebas-teks (`purpose_note`) TANPA `purpose_ids` — jalur "Tujuan
+   * lain" pada form. Bila diisi, katalog tidak dipakai untuk pengajuan ini.
+   */
+  purposeNote?: string
   /** Menit relatif terhadap sekarang; default -30 (jadwal sudah mulai). */
   startOffsetMinutes?: number
   /** Menit relatif terhadap sekarang; default 180. */
@@ -79,6 +84,8 @@ export interface Harness {
   tokenAs(role: Role): Promise<string>
   apiAs(role: Role): Promise<APIRequestContext>
   openAs(role: Role, options?: OpenAsOptions): Promise<Page>
+  /** Satu lokasi yang TIDAK termasuk cakupan `location_ids` peran tsb. */
+  outOfScopeLocation(role: Role): Promise<string>
   createVisit(
     label: string,
     opts?: CreateVisitOptions,
@@ -167,6 +174,29 @@ export const test = base.extend<{ h: Harness }>({
         return context.newPage()
       },
 
+      async outOfScopeLocation(role: Role): Promise<string> {
+        const token = await tokenAs(role)
+        const me = await apiFetchRaw<{
+          success: boolean
+          data: { location_id: string | null; location_ids?: string[] }
+        }>(token, 'GET', '/auth/me')
+        const ids = me.body.success ? me.body.data.location_ids : undefined
+        const primary = me.body.success ? me.body.data.location_id : null
+        const scope = ids !== undefined && ids.length > 0 ? ids : primary !== null ? [primary] : []
+        const locations = await apiFetchRaw<{ success: boolean; data: Array<{ id: string }> }>(
+          token,
+          'GET',
+          '/locations',
+        )
+        const outside = locations.body.success
+          ? locations.body.data.find((location) => !scope.includes(location.id))
+          : undefined
+        if (outside === undefined) {
+          throw new Error(`[e2e] tidak ada cabang di luar cakupan ${role}.`)
+        }
+        return outside.id
+      },
+
       async createVisit(label, opts = {}) {
         const role = opts.role ?? 'vendor'
         const marker = harness.unique(label)
@@ -178,7 +208,9 @@ export const test = base.extend<{ h: Harness }>({
         const memberCount = Math.min(10, Math.max(1, Math.trunc(opts.memberCount ?? 1)))
         let purposeIds: string[] | undefined
         let purposeNote: string | undefined
-        if (opts.purposeIds !== undefined) {
+        if (opts.purposeNote !== undefined) {
+          purposeNote = opts.purposeNote.trim().slice(0, 200)
+        } else if (opts.purposeIds !== undefined) {
           purposeIds = opts.purposeIds
         } else if (catalog.purposeId !== null) {
           purposeIds = [catalog.purposeId]

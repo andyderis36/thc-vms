@@ -23,7 +23,7 @@
 
 import type { Page } from '@playwright/test'
 import { expect, test } from '../fixtures'
-import { getVisitViaApi, LOCATIONS } from '../helpers/api'
+import { apiFetchRaw, getVisitViaApi, type ApiEnvelope } from '../helpers/api'
 import { gotoApp } from '../helpers/nav'
 
 /** `datetime-local` memakai waktu lokal tanpa zona: `YYYY-MM-DDTHH:mm`. */
@@ -83,10 +83,37 @@ async function rescheduleViaUi(page: Page, start: Date, end: Date): Promise<void
 test('@NAV-01 antrean menampilkan kunjungan requested cabang admin dan menyembunyikan cabang lain', async ({
   h,
 }) => {
+  const adminToken = await h.tokenAs('admin')
+  const me = await apiFetchRaw<
+    ApiEnvelope<{ location_id: string | null; location_ids?: string[] }>
+  >(adminToken, 'GET', '/auth/me')
+  expect(me.status, 'GET /auth/me admin harus 200').toBe(200)
+  if (!me.body.success) {
+    throw new Error(`GET /auth/me admin gagal: ${me.body.error.code}`)
+  }
+  const scopeIds =
+    me.body.data.location_ids ??
+    (me.body.data.location_id !== null ? [me.body.data.location_id] : [])
+
+  const catalog = await apiFetchRaw<ApiEnvelope<Array<{ id: string; name: string }>>>(
+    adminToken,
+    'GET',
+    '/locations',
+  )
+  expect(catalog.status, 'GET /locations admin harus 200').toBe(200)
+  if (!catalog.body.success) {
+    throw new Error(`GET /locations admin gagal: ${catalog.body.error.code}`)
+  }
+  const scopeBranches = catalog.body.data.filter((location) => scopeIds.includes(location.id))
+  const outsideBranch = catalog.body.data.find((location) => !scopeIds.includes(location.id))
+  expect(scopeBranches.length, 'cakupan admin runtime minimal satu cabang').toBeGreaterThanOrEqual(1)
+  expect(outsideBranch, 'butuh cabang di luar cakupan admin').toBeDefined()
+  if (outsideBranch === undefined) throw new Error('[e2e] cabang luar cakupan tidak ada.')
+
   const hqVisit = await h.createVisit('nav01', { approve: false })
-  const sambasVisit = await h.createVisit('nav01-sbs', {
+  const outsideVisit = await h.createVisit('nav01-out', {
     approve: false,
-    locationId: LOCATIONS.sambas,
+    locationId: outsideBranch.id,
   })
 
   const page = await h.openAs('admin')
@@ -98,11 +125,24 @@ test('@NAV-01 antrean menampilkan kunjungan requested cabang admin dan menyembun
   await expect(approveButton(page, hqVisit.code)).toBeVisible()
   await expect(rejectButton(page, hqVisit.code)).toBeVisible()
 
-  // Isolasi cabang: kunjungan Sambas tidak pernah dirender untuk admin HQ.
-  await expect(approveButton(page, sambasVisit.code)).toHaveCount(0)
-  await expect(rejectButton(page, sambasVisit.code)).toHaveCount(0)
+  // Isolasi cabang: kunjungan di luar cakupan tidak pernah dirender untuk admin.
+  await expect(approveButton(page, outsideVisit.code)).toHaveCount(0)
+  await expect(rejectButton(page, outsideVisit.code)).toHaveCount(0)
   await expect(
-    page.getByRole('link', { name: `Lihat detail kunjungan ${sambasVisit.code}`, exact: true }),
+    page.getByRole('link', { name: `Lihat detail kunjungan ${outsideVisit.code}`, exact: true }),
+  ).toHaveCount(0)
+
+  // Filter "Cabang" kini tersedia untuk admin dengan opsi terbatas cakupan.
+  const branchFilter = page.getByLabel('Cabang', { exact: true })
+  await expect(branchFilter).toBeEnabled()
+  await expect(branchFilter).toHaveValue('all')
+  for (const branch of scopeBranches) {
+    await expect(
+      branchFilter.getByRole('option', { name: branch.name, exact: true }),
+    ).toHaveCount(1)
+  }
+  await expect(
+    branchFilter.getByRole('option', { name: outsideBranch.name, exact: true }),
   ).toHaveCount(0)
 })
 

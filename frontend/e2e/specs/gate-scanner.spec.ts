@@ -3,7 +3,8 @@
  *
  * Cakupan: input Visit ID manual, unggah gambar QR (jalur
  * `html5-qrcode.scanFile`), check-in/check-out, toleransi jendela backend
- * (GATE-04/05), isolasi cabang (GATE-08), dual-role admin (GATE-02),
+ * (GATE-04/05), isolasi cabang (GATE-08), pengawas multi-cabang di cabang
+ * sekunder (GATE-13), dual-role admin (GATE-02),
  * lintas cabang super_admin (GATE-10), klik kartu antrean (GATE-11),
  * kartu `rescheduled` (GATE-12), dan smoke kamera headless (GATE-01).
  *
@@ -23,6 +24,7 @@ import {
   FRONTEND_BASE,
   getVisitViaApi,
   LOCATIONS,
+  loginViaApi,
   rescheduleVisitViaApi,
   TOKEN_STORAGE_KEY,
 } from '../helpers/api'
@@ -454,4 +456,98 @@ test('@GATE-01 kamera tidak tersedia (getUserMedia ditolak) tanpa merusak halama
   )
   console.log(`[GATE-01] console errors: ${JSON.stringify(consoleErrors)}`)
   expect(unexpectedConsoleErrors).toEqual([])
+})
+
+test('@GATE-13 pengawas multi-cabang check-in/out di cabang sekunder, 403 di luar cakupan', async ({
+  h,
+  browser,
+}) => {
+  const superToken = await h.tokenAs('super')
+  const email = `${h.unique('gatesec').toLowerCase()}@transhybrid.net.id`
+  let guardId = ''
+  try {
+    // Petugas temp dengan coverage HQ + Sambas.
+    const created = await apiFetchRaw<{ success: boolean; data: { id: string } }>(
+      superToken,
+      'POST',
+      '/users/security',
+      {
+        name: `E2E Gate Guard ${h.unique('name')}`,
+        email,
+        password: 'Password123!',
+        phone: '081200000013',
+        location_id: LOCATIONS.hq,
+        location_ids: [LOCATIONS.hq, LOCATIONS.sambas],
+      },
+    )
+    expect(created.status, 'pembuatan pengawas temp harus 201').toBe(201)
+    guardId = (created.body as { data: { id: string } }).data.id
+
+    const guardToken = (await loginViaApi(email, 'Password123!')).token
+
+    const sambasVisit = await h.createVisit('gate13-sbs', {
+      locationId: LOCATIONS.sambas,
+      approve: true,
+      withFiles: false,
+    })
+    expect(sambasVisit.status).toBe('approved')
+    const outsideVisit = await h.createVisit('gate13-out', {
+      locationId: LOCATIONS.mempawah,
+      approve: true,
+      withFiles: false,
+    })
+
+    // UI: gerbang menerima tiket cabang sekunder (Sambas) — check-in lalu check-out.
+    const guardContext = await browser.newContext({
+      baseURL: FRONTEND_BASE,
+      storageState: {
+        cookies: [],
+        origins: [
+          {
+            origin: FRONTEND_BASE,
+            localStorage: [{ name: TOKEN_STORAGE_KEY, value: guardToken }],
+          },
+        ],
+      },
+    })
+    try {
+      const page = await guardContext.newPage()
+      await openGate(page)
+
+      const inDialog = await scanManual(page, sambasVisit.code)
+      const checkInButton = inDialog.getByRole('button', { name: 'Check-in Masuk', exact: true })
+      await expect(checkInButton).toBeVisible()
+      await checkInButton.click()
+      await expect(inDialog).toBeHidden()
+      await expect(page.getByText(`${sambasVisit.code} berhasil Check-in MASUK.`)).toBeVisible()
+      await expect
+        .poll(async () => (await getVisitViaApi(superToken, sambasVisit.id)).status)
+        .toBe('visiting')
+
+      const outDialog = await scanManual(page, sambasVisit.code)
+      const checkOutButton = outDialog.getByRole('button', { name: 'Check-out Keluar', exact: true })
+      await expect(checkOutButton).toBeVisible()
+      await checkOutButton.click()
+      await expect(outDialog).toBeHidden()
+      await expect(page.getByText(`${sambasVisit.code} berhasil Check-out KELUAR.`)).toBeVisible()
+      await expect
+        .poll(async () => (await getVisitViaApi(superToken, sambasVisit.id)).status)
+        .toBe('completed')
+    } finally {
+      await guardContext.close()
+    }
+
+    // API: cabang di luar cakupan (Mempawah) tetap 403 dan status tak berubah.
+    const rejection = await checkInViaApi(guardToken, outsideVisit.id).then(
+      () => null,
+      (error: unknown) => error,
+    )
+    expect(rejection).toBeInstanceOf(Error)
+    expect((rejection as Error).message).toContain('Tidak berhak mengelola kunjungan cabang lain')
+    expect((await getVisitViaApi(superToken, outsideVisit.id)).status).toBe('approved')
+  } finally {
+    if (guardId !== '') {
+      await apiFetchRaw(superToken, 'DELETE', `/users/security/${guardId}`)
+    }
+  }
 })

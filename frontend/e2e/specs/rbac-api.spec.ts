@@ -19,10 +19,13 @@ import {
   DEFAULT_PASSWORD,
   LOCATIONS,
   apiFetchRaw,
+  createVisitViaApi,
+  deleteVisitViaApi,
   getVisitViaApi,
   isLiveRun,
   loginViaApi,
   resolveLiveCatalog,
+  uploadFileViaApi,
   type ApiEnvelope,
   type ApiFailure,
   type ApiResult,
@@ -30,6 +33,7 @@ import {
   type User,
   type VisitRecord,
 } from '../helpers/api'
+import { pdfBuffer } from '../helpers/assets'
 
 const ROLES: readonly Role[] = [
   'super',
@@ -110,33 +114,189 @@ async function listManagedUsers(token: string, query: string): Promise<User[]> {
   return readSuccess(result, `GET /users?${query}`)
 }
 
+function makeNik(): string {
+  const time = String(Date.now()).slice(-9).padStart(9, "0")
+  const rand = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0")
+  return `9${time}${rand}`
+}
+
 // ---------------------------------------------------------------------------
-// @AUTH-03 — isolasi daftar kunjungan admin cabang
+// @AUTH-03 - isolasi daftar kunjungan admin cabang
 // ---------------------------------------------------------------------------
-test('@AUTH-03 isolasi admin: GET /visits hanya memuat kunjungan cabang HQ', async ({ h }) => {
+test('@AUTH-03 isolasi admin: GET /visits memuat seluruh cabang dalam cakupannya', async ({ h }) => {
   test.skip(
     isLiveRun(),
-    'live: asumsi "minimal satu kunjungan seed" tidak ada di prod (riwayat seed-only).',
+    'live: akun admin temp + kunjungan temp; asumsi seed lintas-cabang tidak ada di prod.',
   )
-  const data = await listVisits(await h.tokenAs('admin'))
+  const trackedVisitIds: string[] = []
+  const email = `${h.unique('auth03admin').toLowerCase()}@transhybrid.net.id`
+  let userId = ''
+  try {
+    const superToken = await h.tokenAs('super')
 
-  expect(data.items.length, 'admin HQ harus melihat minimal satu kunjungan seed').toBeGreaterThan(0)
+    // Admin temp dengan cakupan [HQ, Sambas]; pola POST /users dari MBR-01.
+    const created = await apiFetchRaw<ApiEnvelope<{ id: string }>>(superToken, 'POST', '/users', {
+      name: `E2E AUTH03 Admin ${h.unique('name')}`,
+      email,
+      password: 'Password123!',
+      phone: `0812${String(Date.now()).slice(-8)}`,
+      nik: makeNik(),
+      role: 'admin',
+      location_id: LOCATIONS.hq,
+      location_ids: [LOCATIONS.hq, LOCATIONS.sambas],
+    })
+    expect(created.status, 'POST /users admin temp harus 201').toBe(201)
+    userId = (created.body as { data: { id: string } }).data.id
 
-  const missingLocation = data.items.filter((item) => typeof item.location?.id !== 'string')
-  expect(missingLocation, 'setiap item list wajib membawa location.id').toEqual([])
+    const { token: adminToken } = await loginViaApi(email, 'Password123!')
 
-  const foreign: VisitListItem[] = data.items.filter(
-    (item) => item.location?.id !== LOCATIONS.hq,
-  )
-  console.log(
-    `[@AUTH-03] total=${data.total} item=${data.items.length} lokasi=${[
-      ...new Set(data.items.map((item) => item.location?.id)),
-    ].join(',')}`,
-  )
-  expect(
-    foreign.map((item) => ({ id: item.id, location: item.location?.id })),
-    'admin HQ tidak boleh melihat kunjungan cabang lain',
-  ).toEqual([])
+    // Cakupan runtime dari GET /auth/me: union location_ids, fallback [primary].
+    const me = await apiFetchRaw<
+      ApiEnvelope<{ location_id: string | null; location_ids?: string[] }>
+    >(adminToken, 'GET', '/auth/me')
+    expect(me.status, 'GET /auth/me admin temp harus 200').toBe(200)
+    if (!me.body.success) {
+      throw new Error(`GET /auth/me admin temp gagal: ${me.body.error.code}`)
+    }
+    const primaryId = me.body.data.location_id
+    const scope: string[] =
+      me.body.data.location_ids !== undefined && me.body.data.location_ids.length > 0
+        ? me.body.data.location_ids
+        : primaryId !== null
+          ? [primaryId]
+          : []
+    expect(scope, 'cakupan runtime admin temp harus memuat HQ').toContain(LOCATIONS.hq)
+    expect(scope, 'cakupan runtime admin temp harus memuat Sambas').toContain(LOCATIONS.sambas)
+
+    // Satu cabang di luar cakupan via helper; bila helper mengembalikan cabang
+    // yang justru di dalam cakupan temp (seed admin single-branch melaporkan
+    // Sambas sebagai luar), cari cabang luar yang sebenarnya via /locations.
+    let outsideId = await h.outOfScopeLocation('admin')
+    if (scope.includes(outsideId)) {
+      const catalog = await apiFetchRaw<ApiEnvelope<Array<{ id: string }>>>(
+        adminToken,
+        'GET',
+        '/locations',
+      )
+      expect(catalog.status, 'GET /locations harus 200').toBe(200)
+      if (!catalog.body.success) {
+        throw new Error(`GET /locations gagal: ${catalog.body.error.code}`)
+      }
+      const fallback = catalog.body.data.find((location) => !scope.includes(location.id))
+      expect(fallback, 'butuh cabang di luar cakupan admin temp').toBeDefined()
+      if (fallback === undefined) throw new Error('[e2e] cabang luar cakupan tidak ada.')
+      outsideId = fallback.id
+    }
+    expect(scope, 'cabang luar tidak boleh masuk cakupan').not.toContain(outsideId)
+
+    // Kunjungan di KEDUA cabang dalam cakupan + satu di luar sebagai pembanding.
+    const vendorToken = await h.tokenAs('vendor')
+    const liveCatalog = await resolveLiveCatalog(vendorToken)
+
+    async function makeVisit(locationId: string, approverToken: string): Promise<string> {
+      const marker = h.unique('auth03visit')
+      const spk = await uploadFileViaApi(vendorToken, 'assignment_letter', {
+        name: `spk-auth03-${locationId}.pdf`,
+        mimeType: 'application/pdf',
+        buffer: pdfBuffer(8),
+      })
+      const now = Date.now()
+      const payload: Record<string, unknown> = {
+        location_id: locationId,
+        start_date: new Date(now - 30 * 60_000).toISOString(),
+        end_date: new Date(now + 180 * 60_000).toISOString(),
+        is_nda_accepted: true,
+        assignment_letter_url: spk.fileUrl,
+        notes: `AUTH03 ${locationId} ${marker}`,
+        visitors: [
+          {
+            name: 'AUTH03 Anggota',
+            id_number: `${String(now).slice(-13)}001`,
+            phone: `0812${String(now).slice(-8)}`,
+          },
+        ],
+      }
+      if (liveCatalog.purposeId !== null) {
+        payload.purpose_ids = [liveCatalog.purposeId]
+      } else {
+        payload.purpose_note = 'E2E AUTH03 purpose'
+      }
+      const visit = await createVisitViaApi(vendorToken, payload)
+      trackedVisitIds.push(visit.id)
+      const approve = await apiFetchRaw(
+        approverToken,
+        'POST',
+        `/visits/${encodeURIComponent(visit.id)}/approve`,
+        { notes: 'Disetujui harness E2E @AUTH-03.' },
+      )
+      expect(approve.status, `approve ${locationId} harus sukses`).toBeLessThan(300)
+      return visit.id
+    }
+
+    const idA = await makeVisit(LOCATIONS.hq, adminToken)
+    const idB = await makeVisit(LOCATIONS.sambas, adminToken)
+    const idOutside = await makeVisit(outsideId, superToken)
+
+    const data = await listVisits(adminToken, 'limit=200')
+    const ids = new Set(data.items.map((item) => item.id))
+    console.log(
+      `[@AUTH-03] total=${data.total} item=${data.items.length} lokasi=${[
+        ...new Set(data.items.map((item) => item.location?.id)),
+      ].join(',')}`,
+    )
+    expect(ids, 'admin temp harus melihat kunjungan HQ').toContain(idA)
+    expect(ids, 'admin temp harus melihat kunjungan Sambas').toContain(idB)
+    expect(ids.has(idOutside), 'kunjungan luar cakupan tidak boleh terlihat').toBe(false)
+
+    const hqOnly = await listVisits(adminToken, `location_id=${LOCATIONS.hq}&limit=100`)
+    expect(
+      hqOnly.items.map((item) => item.id),
+      'filter HQ harus memuat kunjungan HQ',
+    ).toContain(idA)
+    const sbsOnly = await listVisits(adminToken, `location_id=${LOCATIONS.sambas}&limit=100`)
+    expect(
+      sbsOnly.items.map((item) => item.id),
+      'filter Sambas harus memuat kunjungan Sambas',
+    ).toContain(idB)
+
+    const missingLocation = data.items.filter((item) => typeof item.location?.id !== 'string')
+    expect(missingLocation, 'setiap item list wajib membawa location.id').toEqual([])
+
+    const foreign: VisitListItem[] = data.items.filter(
+      (item) => !scope.includes(item.location?.id ?? ''),
+    )
+    expect(
+      foreign.map((item) => ({ id: item.id, location: item.location?.id })),
+      'admin hanya melihat kunjungan cabang dalam cakupannya',
+    ).toEqual([])
+
+    const seen = new Set(data.items.map((item) => item.location?.id))
+    expect(seen.has(LOCATIONS.hq), 'daftar harus memuat minimal satu item HQ').toBe(true)
+    expect(seen.has(LOCATIONS.sambas), 'daftar harus memuat minimal satu item Sambas').toBe(true)
+  } finally {
+    if (trackedVisitIds.length > 0) {
+      try {
+        const superToken = await h.tokenAs('super')
+        for (const vid of trackedVisitIds) {
+          try {
+            await deleteVisitViaApi(superToken, vid)
+          } catch (e) {
+            console.log(`[e2e-cleanup] delete visit ${vid}: ${String(e)}`)
+          }
+        }
+      } catch (e) {
+        console.log(`[e2e-cleanup] ${String(e)}`)
+      }
+    }
+    if (userId !== '') {
+      try {
+        const superToken = await h.tokenAs('super')
+        await apiFetchRaw(superToken, 'DELETE', `/users/${userId}`)
+      } catch (e) {
+        console.log(`[e2e-cleanup] delete user ${userId}: ${String(e)}`)
+      }
+    }
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -318,30 +478,33 @@ test('@DEL-06 super_admin tidak bisa menghapus akun sendiri', async ({ h }) => {
 // ---------------------------------------------------------------------------
 // @EDT-04 — admin cabang tidak bisa PATCH pengawas cabang lain
 // ---------------------------------------------------------------------------
-test('@EDT-04 admin cabang tidak bisa mengubah pengawas security cabang lain', async ({
+test('@EDT-04 admin cabang tidak bisa mengubah pengawas security di luar cakupannya', async ({
   h,
 }) => {
   test.skip(
     isLiveRun(),
-    'live: PATCH (upaya rename) akun pengawas prod dilarang; riwayat seed Sambas tidak ada di prod.',
+    'live: PATCH (upaya rename) akun pengawas prod dilarang; riwayat seed luar-cakupan tidak ada di prod.',
   )
   const superToken = await h.tokenAs('super')
   const securityUsers = await listSecurityUsers(superToken)
-  const sambasSecurity = securityUsers.find((user) => user.location_id === LOCATIONS.sambas)
-  expect(sambasSecurity, 'seed security Sambas harus ada').toBeDefined()
-  if (sambasSecurity === undefined) return
+  const outsideId = await h.outOfScopeLocation('admin')
+  const outsideSecurity = securityUsers.find((user) => user.location_id === outsideId)
+  expect(outsideSecurity, 'seed security di luar cakupan admin harus ada').toBeDefined()
+  if (outsideSecurity === undefined) return
 
   const result = await request(
     await h.tokenAs('admin'),
     'PATCH',
-    `/users/security/${encodeURIComponent(sambasSecurity.id)}`,
+    `/users/security/${encodeURIComponent(outsideSecurity.id)}`,
     { name: 'E2E @EDT-04 perubahan tidak sah' },
   )
   expectFailure(result, [403], '@EDT-04')
 
   const after = await listSecurityUsers(superToken)
-  const unchanged = after.find((user) => user.id === sambasSecurity.id)
-  expect(unchanged?.name, 'nama pengawas Sambas tidak boleh berubah').toBe(sambasSecurity.name)
+  const unchanged = after.find((user) => user.id === outsideSecurity.id)
+  expect(unchanged?.name, 'nama pengawas di luar cakupan tidak boleh berubah').toBe(
+    outsideSecurity.name,
+  )
 })
 
 // ---------------------------------------------------------------------------

@@ -306,3 +306,29 @@ describe('visitFormSchema — batas catatan dan tujuan lain', () => {
     expect(result.success).toBe(true)
   })
 })
+
+describe('visitFormSchema — akun vendor pemilik kunjungan (opsional)', () => {
+  it('menerima payload tanpa vendor_user_id', () => {
+    const withoutAccount = { ...baseForm(), vendor_user_id: undefined }
+
+    const result = visitFormSchema.safeParse(withoutAccount)
+
+    expect(result.success).toBe(true)
+  })
+
+  it('menerima vendor_user_id dan memangkas spasi tepi', () => {
+    const result = visitFormSchema.safeParse(
+      baseForm({ vendor_user_id: '  vendor-user-1  ' }),
+    )
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.vendor_user_id).toBe('vendor-user-1')
+  })
+
+  it('string kosong tetap sah (dianggap tanpa akun vendor)', () => {
+    const result = visitFormSchema.safeParse(baseForm({ vendor_user_id: '' }))
+
+    expect(result.success).toBe(true)
+  })
+})

@@ -27,7 +27,6 @@ import { expect, test } from '../fixtures'
 import {
   API_BASE,
   DEFAULT_PASSWORD,
-  LOCATIONS,
   apiFetchRaw,
   getVisitViaApi,
   loginViaApi,
@@ -303,13 +302,13 @@ test('@FILE-05 tanpa token dan token rusak ditolak 401 dengan amplop gagal', asy
 test('@FILE-06 admin lintas cabang 403, vendor lain 404', async ({ h }) => {
   const created = await h.createVisit('file06', {
     withFiles: true,
-    locationId: LOCATIONS.sambas,
+    locationId: await h.outOfScopeLocation('admin'),
   })
   const path = visitFilePath(created.id, 'assignment_letter')
 
   const adminHqToken = await h.tokenAs('admin')
   const crossBranch = await apiFetchRaw<ApiEnvelope<unknown>>(adminHqToken, 'GET', path)
-  const crossBody = expectFailure(crossBranch, 403, '@FILE-06 admin HQ ke Sambas')
+  const crossBody = expectFailure(crossBranch, 403, '@FILE-06 admin ke luar cakupan')
   expect(crossBody.error.code).toBe('FORBIDDEN_BRANCH')
   expect(crossBody.error.message).toBe('Tidak berhak mengelola kunjungan cabang lain')
 

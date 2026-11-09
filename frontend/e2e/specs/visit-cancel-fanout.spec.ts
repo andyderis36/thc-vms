@@ -124,7 +124,7 @@ test('@CFAN-01 vendor membatalkan: staff (admin) dapat visit_cancelled, vendor s
   await cancelVisitViaApi(await h.tokenAs('vendor'), visit.id, h.unique('vendor membatalkan'))
 
   const staffRow = await expectFanOut(await h.tokenAs('admin'), visit.id, 'visit_cancelled')
-  expect(staffRow.title).toBe('Kunjungan dibatalkan vendor')
+  expect(staffRow.title).toBe('Kunjungan Dibatalkan Vendor')
   expect(staffRow.message).toContain(visit.code)
 
   const vendorFeed = await listNotifications(await h.tokenAs('vendor'))
@@ -143,7 +143,7 @@ test('@CFAN-02 admin membatalkan: vendor dapat visit_cancelled, staff (admin) ti
   await cancelVisitViaApi(await h.tokenAs('admin'), visit.id, h.unique('admin membatalkan'))
 
   const vendorRow = await expectFanOut(await h.tokenAs('vendor'), visit.id, 'visit_cancelled')
-  expect(vendorRow.title).toBe('Kunjungan dibatalkan')
+  expect(vendorRow.title).toBe('Kunjungan Dibatalkan')
   expect(vendorRow.message).toContain(visit.code)
 
   const adminFeed = await listNotifications(await h.tokenAs('admin'))

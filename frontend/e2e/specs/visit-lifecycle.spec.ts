@@ -39,7 +39,6 @@
 import type { Page } from '@playwright/test'
 import { expect, test } from '../fixtures'
 import {
-  LOCATIONS,
   apiFetchRaw,
   approveVisitViaApi,
   checkInViaApi,
@@ -211,8 +210,8 @@ test('@CANCEL-03 peran bukan pemilik tidak bisa membatalkan: UI absen + API meno
   h,
 }) => {
   const hqVisit = await h.createVisit('cancel03-hq', { withFiles: false })
-  const sambasVisit = await h.createVisit('cancel03-sbs', {
-    locationId: LOCATIONS.sambas,
+  const outsideVisit = await h.createVisit('cancel03-outside', {
+    locationId: await h.outOfScopeLocation('admin'),
     withFiles: false,
   })
   // Kunjungan milik admin (bukan vendor) untuk membuktikan aturan ownership.
@@ -242,7 +241,7 @@ test('@CANCEL-03 peran bukan pemilik tidak bisa membatalkan: UI absen + API meno
   await expect(cancelButton(sambasAdminPage)).toHaveCount(0)
 
   const adminPage = await h.openAs('admin')
-  await adminPage.goto(`/visits/${sambasVisit.id}`)
+  await adminPage.goto(`/visits/${outsideVisit.id}`)
   await expect(adminPage.getByText('Akses ditolak', { exact: true })).toBeVisible()
   await expect(cancelButton(adminPage)).toHaveCount(0)
 
@@ -253,9 +252,9 @@ test('@CANCEL-03 peran bukan pemilik tidak bisa membatalkan: UI absen + API meno
   await expect(cancelButton(superPage)).toBeVisible()
 
   // --- Permukaan API -----------------------------------------------------
-  // admin HQ pada kunjungan Sambas -> 403 FORBIDDEN_BRANCH (bukan 404).
+  // admin (HQ+coverage) pada kunjungan di luar cakupannya -> 403 FORBIDDEN_BRANCH.
   const adminRefusal = readRefusal(
-    await apiFetchRaw(adminToken, 'POST', `/visits/${sambasVisit.id}/cancel`, {}),
+    await apiFetchRaw(adminToken, 'POST', `/visits/${outsideVisit.id}/cancel`, {}),
     403,
   )
   expect(adminRefusal.code).toBe('FORBIDDEN_BRANCH')
@@ -285,11 +284,11 @@ test('@CANCEL-03 peran bukan pemilik tidak bisa membatalkan: UI absen + API meno
   const superAllowed = await apiFetchRaw(
     superToken,
     'POST',
-    `/visits/${sambasVisit.id}/cancel`,
+    `/visits/${outsideVisit.id}/cancel`,
     { reason: 'E2E superadmin lintas cabang' },
   )
   expect(superAllowed.status).toBe(200)
-  expect((await getVisitViaApi(superToken, sambasVisit.id)).status).toBe('cancelled')
+  expect((await getVisitViaApi(superToken, outsideVisit.id)).status).toBe('cancelled')
 
   // Penolakan tidak mengubah status kunjungan HQ.
   expect((await getVisitViaApi(superToken, hqVisit.id)).status).toBe('approved')

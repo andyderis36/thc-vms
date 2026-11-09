@@ -7,9 +7,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   formatTanggalWaktu,
   gateDetail,
+  historyDetail,
   Timeline,
 } from '@/features/visits/detail/Timeline'
-import type { VisitStatus } from '@/lib/api/types'
+import type { VisitHistoryEntry, VisitStatus } from '@/lib/api/types'
 
 const START = '2026-09-26T09:00:00+07:00'
 const END = '2026-09-26T17:00:00+07:00'
@@ -59,7 +60,11 @@ function stateOf(dot: Element): RenderedState {
 
 const REASON = 'Vendor tidak membawa surat tugas yang sah untuk kunjungan ini.'
 
-function renderTimeline(status: VisitStatus, statusNote?: string | null) {
+function renderTimeline(
+  status: VisitStatus,
+  statusNote?: string | null,
+  history?: VisitHistoryEntry[],
+) {
   return render(
     createElement(Timeline, {
       status,
@@ -69,6 +74,7 @@ function renderTimeline(status: VisitStatus, statusNote?: string | null) {
       checkInAt: CHECK_IN,
       checkOutAt: CHECK_OUT,
       statusNote,
+      history,
     }),
   )
 }
@@ -182,4 +188,113 @@ describe('Timeline node status', () => {
       expect(nodes.map((node) => stateOf(dotOf(node)))).toEqual(PATTERNS[status])
     },
   )
+})
+
+const APPROVED_AT = '2026-09-21T09:30:00+07:00'
+
+const TRAIL: VisitHistoryEntry[] = [
+  { status: 'requested', at: CREATED, actor_name: 'Wulan Sari', actor_role_label: 'Vendor/Mitra' },
+  {
+    status: 'approved',
+    at: APPROVED_AT,
+    actor_name: 'Siti Rahayu',
+    actor_role_label: 'Admin Cabang',
+  },
+  { status: 'visiting', at: CHECK_IN, actor_name: 'Bagus Prakoso', actor_role_label: 'Petugas Keamanan' },
+  // Transisi sistem (changed_by NULL): pelaku wajib null.
+  { status: 'completed', at: CHECK_OUT, actor_name: null, actor_role_label: null },
+]
+
+describe('historyDetail', () => {
+  it('baris berpelaku: "oleh <nama> (<peran>) · <stempel>"', () => {
+    expect(historyDetail(TRAIL[1]!)).toBe(
+      `oleh Siti Rahayu (Admin Cabang) · ${formatTanggalWaktu(APPROVED_AT)}`,
+    )
+  })
+
+  it('tanpa label peran: klause oleh tetap tanpa tanda kurung', () => {
+    const entry: VisitHistoryEntry = {
+      status: 'approved',
+      at: APPROVED_AT,
+      actor_name: 'Siti Rahayu',
+      actor_role_label: null,
+    }
+    expect(historyDetail(entry)).toBe(`oleh Siti Rahayu · ${formatTanggalWaktu(APPROVED_AT)}`)
+  })
+
+  it('transisi sistem: hanya stempel, tanpa klause "oleh"', () => {
+    expect(historyDetail(TRAIL[3]!)).toBe(formatTanggalWaktu(CHECK_OUT))
+    expect(historyDetail(TRAIL[3]!)).not.toContain('oleh')
+  })
+})
+
+describe('Timeline jejak status (history)', () => {
+  afterEach(cleanup)
+
+  it('merender baris riwayat tertua -> terbaru dengan pelaku, bukan langkah turunan', () => {
+    const { container } = renderTimeline('completed', undefined, TRAIL)
+
+    const nodes = stepNodes(container)
+    expect(nodes).toHaveLength(4)
+    expect(nodes.map((node) => stateOf(dotOf(node)))).toEqual([
+      'done',
+      'done',
+      'done',
+      'done',
+    ])
+
+    expect(nodes[0]!.textContent).toContain('Diminta')
+    expect(nodes[0]!.textContent).toContain(
+      `oleh Wulan Sari (Vendor/Mitra) · ${formatTanggalWaktu(CREATED)}`,
+    )
+    expect(nodes[1]!.textContent).toContain('Disetujui')
+    expect(nodes[1]!.textContent).toContain(
+      `oleh Siti Rahayu (Admin Cabang) · ${formatTanggalWaktu(APPROVED_AT)}`,
+    )
+    expect(nodes[3]!.textContent).toContain('Selesai')
+
+    // Transisi sistem: baris = label + stempel SAJA (textContent tanpa "oleh").
+    expect(nodes[3]!.textContent).toBe(`Selesai${formatTanggalWaktu(CHECK_OUT)}`)
+    expect(screen.getByText(formatTanggalWaktu(CHECK_OUT))).toBeInTheDocument()
+
+    expect(screen.queryByText('Persetujuan')).not.toBeInTheDocument()
+    expect(screen.queryByText('Kedatangan di Lokasi')).not.toBeInTheDocument()
+    expect(screen.queryByText('Disetujui oleh admin')).not.toBeInTheDocument()
+    expect(screen.queryByText(`Masuk ${formatTanggalWaktu(CHECK_IN)}`)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Diajukan 20 Sep/)).not.toBeInTheDocument()
+    expect(container.querySelector('[aria-current="step"]')).toBeNull()
+  })
+
+  it('history kosong ([]) tetap memakai langkah turunan', () => {
+    const { container } = renderTimeline('completed', undefined, [])
+
+    const nodes = stepNodes(container)
+    expect(nodes).toHaveLength(4)
+    expect(screen.getByText('Persetujuan')).toBeInTheDocument()
+    expect(screen.getByText(`Diajukan ${formatTanggalWaktu(CREATED)}`)).toBeInTheDocument()
+    expect(screen.getByText(`Masuk ${formatTanggalWaktu(CHECK_IN)}`)).toBeInTheDocument()
+    expect(screen.queryByText(/oleh Siti Rahayu/)).not.toBeInTheDocument()
+  })
+
+  it('status terminal + history: baris riwayat dirender DAN footer alasan tetap ada', () => {
+    const { container } = renderTimeline('rejected', REASON, [
+      {
+        status: 'rejected',
+        at: APPROVED_AT,
+        actor_name: 'Siti Rahayu',
+        actor_role_label: 'Admin Cabang',
+      },
+    ])
+
+    expect(screen.getByText('Status akhir')).toBeInTheDocument()
+    expect(within(screen.getByText('Status akhir').closest('li')!).getByText(REASON)).toBeInTheDocument()
+    expect(container.querySelectorAll('ol > li')).toHaveLength(2)
+
+    const nodes = stepNodes(container)
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]!.textContent).toContain('Ditolak')
+    expect(nodes[0]!.textContent).toContain(
+      `oleh Siti Rahayu (Admin Cabang) · ${formatTanggalWaktu(APPROVED_AT)}`,
+    )
+  })
 })

@@ -85,29 +85,63 @@ test('@DASH-01 dashboard superadmin menampilkan empat KPI, empat tab, dan filter
   ).toHaveAttribute('aria-selected', 'true')
 })
 
-test('@DASH-02 dashboard admin menampilkan KPI/tab dengan Fasilitas terkunci ke cabangnya', async ({
+test('@DASH-02 dashboard admin menampilkan KPI/tab dengan filter Fasilitas ber-scope', async ({
   h,
 }) => {
+  const token = await h.tokenAs('admin')
+  const me = await apiFetchRaw<
+    ApiEnvelope<{ location_id: string | null; location_ids?: string[] }>
+  >(token, 'GET', '/auth/me')
+  expect(me.status, 'GET /auth/me admin harus 200').toBe(200)
+  if (!me.body.success) {
+    throw new Error(`GET /auth/me admin gagal: ${me.body.error.code}`)
+  }
+  const primaryId = me.body.data.location_id
+  const scopeIds =
+    me.body.data.location_ids ?? (primaryId !== null ? [primaryId] : [])
+  expect(scopeIds.length, 'cakupan admin runtime minimal satu cabang').toBeGreaterThanOrEqual(1)
+
+  const locationsResult = await apiFetchRaw<
+    ApiEnvelope<Array<{ id: string; name: string }>>
+  >(token, 'GET', '/locations')
+  expect(locationsResult.status, 'GET /locations admin harus 200').toBe(200)
+  if (!locationsResult.body.success) {
+    throw new Error(`GET /locations admin gagal: ${locationsResult.body.error.code}`)
+  }
+  const catalog = locationsResult.body.data
+  const scopeBranches = catalog.filter((location) => scopeIds.includes(location.id))
+  const outsideBranches = catalog.filter((location) => !scopeIds.includes(location.id))
+  expect(scopeBranches.length, 'cakupan admin runtime minimal satu cabang').toBeGreaterThanOrEqual(1)
+
   const page = await h.openAs('admin')
   await gotoApp(page, '/dashboard')
 
   await expectDashboardChrome(page)
   const facility = page.getByLabel('Fasilitas')
-  await expect(facility).toBeDisabled()
-  const me = await apiFetchRaw<ApiEnvelope<{ location_id: string | null }>>(
-    await h.tokenAs('admin'),
-    'GET',
-    '/auth/me',
-  )
-  expect(me.status, 'GET /auth/me admin harus 200').toBe(200)
-  if (!me.body.success) {
-    throw new Error(`GET /auth/me admin gagal: ${me.body.error.code}`)
+  await expect(facility).toBeEnabled()
+  await expect(facility).toHaveValue('all')
+  await expect(facility.getByRole('option', { name: 'Semua Cabang Saya', exact: true })).toHaveCount(1)
+  await expect(
+    facility.getByRole('option', { name: 'Semua Cabang / POP', exact: true }),
+  ).toHaveCount(0)
+  for (const branch of scopeBranches) {
+    await expect(facility.getByRole('option', { name: branch.name, exact: true })).toHaveCount(1)
   }
-  expect(
-    me.body.data.location_id,
-    'fasilitas terkunci = lokasi runtime akun admin sendiri',
-  ).not.toBeNull()
-  await expect(facility).toHaveValue(me.body.data.location_id ?? '')
+  for (const branch of outsideBranches) {
+    await expect(facility.getByRole('option', { name: branch.name, exact: true })).toHaveCount(0)
+  }
+
+  const narrow = scopeBranches.find((branch) => branch.id !== primaryId) ?? scopeBranches[0]
+  if (narrow === undefined) throw new Error('[e2e] tidak ada cabang scope untuk diuji.')
+  const narrowedRequest = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return (
+      url.pathname.endsWith('/visits') && url.searchParams.get('location_id') === narrow.id
+    )
+  })
+  await facility.selectOption(narrow.id)
+  await narrowedRequest
+  await expect(facility).toHaveValue(narrow.id)
 })
 
 test('@DASH-03 tab Sedang di Lokasi memuat kunjungan check-in dan baris membuka detail', async ({
@@ -287,4 +321,37 @@ test('@DASH-05 baris SPK kartu kunjungan mobile sejajar vertikal dengan ikonnya'
         `h=${measured.linkBox.height.toFixed(2)}) delta center-Y=${measured.centerDelta.toFixed(2)}px`,
     )
   }
+})
+
+test('@DASH-06 kartu kunjungan mobile menampilkan tujuan lain (purpose_note)', async ({
+  h,
+}) => {
+  const note = `Perbaikan kabel drop core ${h.unique('dash06')}`
+  const visit = await h.createVisit('dash06', { withFiles: false, purposeNote: note })
+
+  const page = await h.openAs('admin')
+  await page.setViewportSize({ width: 375, height: 800 })
+  await gotoApp(page, '/dashboard')
+
+  const detailLink = page.getByRole('link', {
+    name: `Lihat detail kunjungan ${visit.code}`,
+    exact: true,
+  })
+  await expect(detailLink).toBeVisible({ timeout: 20_000 })
+
+  const card = detailLink.locator('xpath=ancestor::li[1]')
+  const purpose = card.getByText(note, { exact: true })
+  await expect(purpose).toBeVisible()
+  await expect(purpose).toHaveAttribute('title', note)
+  await expect(purpose).toHaveClass(/truncate/)
+
+  const cardBox = await card.boundingBox()
+  const purposeBox = await purpose.boundingBox()
+  if (cardBox === null || purposeBox === null) {
+    throw new Error('[@DASH-06] boundingBox kartu/tujuan null pada viewport 375px.')
+  }
+  expect(purposeBox.width).toBeLessThanOrEqual(cardBox.width)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
 })
