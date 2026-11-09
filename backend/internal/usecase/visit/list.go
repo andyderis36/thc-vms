@@ -15,11 +15,13 @@ const (
 
 // ListVisitsInput carries the caller-supplied listing knobs.
 //
-// LocationID is NOT a scope override: it is the optional NARROWING filter that
-// only super_admin may use, because openapi documents `?location_id=` for the
-// central-office view and PRD L109 grants superadmin the ability to filter by
-// branch. For every other role the actor's own scope is authoritative and this
-// value is ignored, so a caller can never widen their visibility.
+// LocationID is NOT a scope override: it is the optional NARROWING filter.
+// super_admin may narrow to any branch (openapi documents `?location_id=` for
+// the central-office view and PRD L109 grants superadmin the ability to filter
+// by branch); admin and security may narrow only to a branch inside their own
+// coverage union, and a foreign id is refused with 403 FORBIDDEN_BRANCH. A
+// caller can therefore never widen their visibility, and no out-of-scope
+// filter passes silently.
 type ListVisitsInput struct {
 	Status *domain.VisitStatus
 	// Search is the optional free-text filter (?q=); empty means unfiltered.
@@ -28,8 +30,9 @@ type ListVisitsInput struct {
 	To     *time.Time
 	Page   int
 	Limit  int
-	// LocationID narrows the result to one branch. Honoured only for
-	// super_admin; ignored for admin, security and vendor.
+	// LocationID narrows the result to one branch. Honoured for super_admin
+	// (any branch) and for admin/security (only inside their union, else 403);
+	// ignored for vendor, whose owner scope is authoritative.
 	LocationID *domain.UUID
 	// SortBy/Order select the ORDER BY column and direction (?sort_by=,
 	// ?order=). Empty means the legacy default (created_at desc); unknown
@@ -39,8 +42,11 @@ type ListVisitsInput struct {
 }
 
 // ListVisits builds the domain.VisitFilter from the actor. This mapping IS the
-// multi-branch isolation core and it is total: admin and security see only
-// their own branch, vendor sees only its own visits, super_admin sees everything
+// multi-branch isolation core and it is total: admin and security see exactly
+// their stashed user_locations union (scalar primary only as the fallback when
+// no stash was resolved, empty union when neither exists so the listing fails
+// closed) and may narrow it to one union member via ?location_id=, a foreign
+// id being a 403; vendor sees only its own visits, super_admin sees everything
 // unless it narrows by branch, and any unknown role is refused.
 func (s *Service) ListVisits(ctx context.Context, actor Actor, in ListVisitsInput) ([]domain.VisitRequest, int64, error) {
 	filter := domain.VisitFilter{
@@ -55,18 +61,35 @@ func (s *Service) ListVisits(ctx context.Context, actor Actor, in ListVisitsInpu
 	}
 	switch actor.Role {
 	case domain.RoleAdmin, domain.RoleSecurity:
-		// The actor's branch is assigned unconditionally, overwriting any
-		// caller-supplied LocationID: isolation must not be negotiable by query
-		// parameter.
-		filter.LocationID = actor.LocationID
+		// The actor's union is the ceiling: a caller-supplied branch inside it
+		// narrows the filter to exactly that id, a foreign id is refused with
+		// 403 before any query, and no parameter can widen the union.
+		narrowed, inScope := narrowByRequestedBranch(branchUnion(actor), in.LocationID)
+		if !inScope {
+			if actor.IsGlobal && in.LocationID != nil {
+				// A stashed-global branch actor may narrow to any branch,
+				// mirroring the super_admin rule.
+				narrowed = []domain.UUID{*in.LocationID}
+			} else {
+				return nil, 0, domain.ForbiddenBranch()
+			}
+		}
+		filter.LocationIDs = narrowed
+		filter.IsGlobal = actor.IsGlobal && in.LocationID == nil
 		filter.VendorUserID = nil
 	case domain.RoleVendor:
 		vendorUserID := actor.ID
 		filter.VendorUserID = &vendorUserID
-		filter.LocationID = nil
+		filter.LocationIDs = nil
 	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:
-		// Global scope; the optional branch filter is the only narrowing allowed.
-		filter.LocationID = in.LocationID
+		// Global scope by role (the resolver always reports super_admin as
+		// global, stash or not); the optional branch filter is the only
+		// narrowing allowed.
+		filter.IsGlobal = true
+		if in.LocationID != nil {
+			filter.LocationIDs = []domain.UUID{*in.LocationID}
+			filter.IsGlobal = false
+		}
 	default:
 		return nil, 0, domain.ForbiddenBranch()
 	}

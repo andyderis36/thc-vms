@@ -77,7 +77,7 @@ func TestUserRepository_Lifecycle(t *testing.T) {
 
 	other := seedUser(t, pool, seedUserParams{Name: "Pengawas B", Email: "b@thc.test", Role: "security", Location: locB, Type: "internal"})
 	_ = other
-	branch, err := users.ListSecurity(ctx, &locA)
+	branch, err := users.ListSecurity(ctx, []domain.UUID{locA}, false)
 	if err != nil {
 		t.Fatalf("ListSecurity branch: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestUserRepository_Lifecycle(t *testing.T) {
 			t.Fatalf("ListSecurity leaked %+v into branch %s", u.Email, locA)
 		}
 	}
-	all, err := users.ListSecurity(ctx, nil)
+	all, err := users.ListSecurity(ctx, nil, true)
 	if err != nil {
 		t.Fatalf("ListSecurity all: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestUserRepository_ListingsCarryAvatarURL(t *testing.T) {
 		}
 	}
 
-	securityRows, err := NewUserRepository(pool).ListSecurity(ctx, &loc)
+	securityRows, err := NewUserRepository(pool).ListSecurity(ctx, []domain.UUID{loc}, false)
 	if err != nil {
 		t.Fatalf("ListSecurity: %v", err)
 	}

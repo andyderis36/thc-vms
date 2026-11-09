@@ -13,10 +13,17 @@ import (
 // Actor is the authenticated caller behind a usecase invocation: its user id,
 // its RBAC role and, for branch-bound roles, its location. No sibling usecase
 // package publishes a compatible type, so it lives here.
+//
+// Branches and IsGlobal carry the stashed thc.scope union resolved once per
+// request from user_locations (migration 000023). They widen the branch
+// guard, never the listing queries: an empty union with IsGlobal false falls
+// back to the scalar LocationID rule exactly as before.
 type Actor struct {
 	ID         domain.UUID
 	Role       domain.RoleName
 	LocationID *domain.UUID
+	Branches   []domain.UUID
+	IsGlobal   bool
 }
 
 // IsSecurity reports whether the actor is gate staff.
@@ -47,17 +54,61 @@ func (a Actor) requireRole(allowed ...domain.RoleName) error {
 	return domain.ForbiddenBranch()
 }
 
-// requireBranch enforces multi-branch isolation: super_admin passes everywhere,
-// while every other role must carry the branch of the visit it touches. The
-// message comes from the sentinel and is never retyped.
-func (a Actor) requireBranch(locationID domain.UUID) error {
+// requireBranchAccess enforces multi-branch isolation: super_admin passes
+// everywhere, a stashed global passes, and a union member passes even when
+// the target differs from the scalar primary. Anything else falls back to
+// the scalar LocationID rule, so callers without a stash (and accounts whose
+// coverage rows are not yet written) decide exactly as before. The message
+// comes from the sentinel and is never retyped.
+func (a Actor) requireBranchAccess(locationID domain.UUID) error {
 	if domain.IsSuperAdminRole(a.Role) {
 		return nil
+	}
+	if a.IsGlobal {
+		return nil
+	}
+	for _, id := range a.Branches {
+		if id == locationID {
+			return nil
+		}
 	}
 	if a.LocationID == nil || *a.LocationID != locationID {
 		return domain.ForbiddenBranch()
 	}
 	return nil
+}
+
+// branchUnion resolves the listing scope of a branch-locked actor: the stashed
+// user_locations union when present, else the scalar primary alone, else empty
+// (fail-closed: the query matches no branch, never all of them). The result is
+// a copy so callers cannot mutate the actor's stash through the filter.
+func branchUnion(a Actor) []domain.UUID {
+	if len(a.Branches) > 0 {
+		out := make([]domain.UUID, len(a.Branches))
+		copy(out, a.Branches)
+		return out
+	}
+	if a.LocationID != nil {
+		return []domain.UUID{*a.LocationID}
+	}
+	return nil
+}
+
+// narrowByRequestedBranch applies the caller-supplied ?location_id= narrowing
+// to a scoped actor's union: nil keeps the whole union, a member id narrows the
+// filter to exactly that one id, and a foreign id reports false so the caller
+// refuses with 403 FORBIDDEN_BRANCH instead of silently ignoring the parameter.
+// Admin and security share this rule; the union stays the ceiling either way.
+func narrowByRequestedBranch(union []domain.UUID, requested *domain.UUID) ([]domain.UUID, bool) {
+	if requested == nil {
+		return union, true
+	}
+	for _, id := range union {
+		if id == *requested {
+			return []domain.UUID{*requested}, true
+		}
+	}
+	return nil, false
 }
 
 // Service is the visit lifecycle usecase. Every port arrives via constructor
@@ -68,6 +119,12 @@ type Service struct {
 	vendors  domain.VendorRepository
 	clock    domain.Clock
 	checkIns domain.CheckInOutRepository
+	// accounts resolves the ROLE and status of a chosen vendor account on the
+	// create path. It is wired after construction via WithAccountLookup so
+	// existing NewService callers keep compiling; a nil lookup fails an
+	// EXPLICIT vendor_user_id closed, while an absent id (the historical
+	// actor-owns-it rule) keeps working without any lookup at all.
+	accounts domain.UserAccountLookup
 	// storage mints the short-lived file URLs served on reads. It is wired
 	// after construction via WithFileLinks so existing NewService callers
 	// (tests, workers) keep compiling; a nil storage fails reads closed
@@ -93,6 +150,19 @@ type Service struct {
 	// The service holds only this domain port; the SMTP transport stays in
 	// infrastructure.
 	mailer domain.Mailer
+	// suggestions is the read-only vendor/member suggestion port, wired after
+	// construction via WithSuggestions so existing NewService callers keep
+	// compiling. It is OPTIONAL: a nil port fails the suggestion endpoints
+	// closed with a storage error instead of inventing an empty dataset.
+	suggestions domain.SuggestionRepository
+}
+
+// WithAccountLookup wires the account directory used to validate an explicitly
+// chosen vendor_user_id and returns the service for chaining at the
+// composition root, mirroring WithMailer.
+func (s *Service) WithAccountLookup(lookup domain.UserAccountLookup) *Service {
+	s.accounts = lookup
+	return s
 }
 
 // WithTrustedFileOrigins records the deployment's own object-storage hosts so

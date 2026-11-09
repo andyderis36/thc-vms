@@ -63,7 +63,7 @@ func (f *fakeVisitRepo) FindByID(_ context.Context, id domain.UUID) (domain.Visi
 	return v, nil
 }
 
-func (f *fakeVisitRepo) GetLatestStatusNote(_ context.Context, _ domain.UUID) (*string, error) {
+func (f *fakeVisitRepo) ListStatusHistory(_ context.Context, _ domain.UUID) ([]domain.StatusEvent, error) {
 	return nil, nil
 }
 
@@ -118,6 +118,16 @@ func (f *fakeVisitRepo) DeleteVisit(_ context.Context, id domain.UUID) error {
 	}
 	delete(f.visits, id)
 	return nil
+}
+
+// AttachWorkPhoto satisfies domain.VisitRepository; the gate path never uses it.
+func (f *fakeVisitRepo) AttachWorkPhoto(_ context.Context, _ domain.UUID, _ domain.WorkPhotoKind, _ string, _ domain.UUID) (domain.WorkPhoto, bool, error) {
+	return domain.WorkPhoto{}, false, fmt.Errorf("fakeVisitRepo: unimplemented: %w", domain.ErrNotFound)
+}
+
+// ListWorkPhotos satisfies domain.VisitRepository; the gate path never uses it.
+func (f *fakeVisitRepo) ListWorkPhotos(_ context.Context, _ domain.UUID) ([]domain.WorkPhoto, error) {
+	return nil, nil
 }
 
 type fakeCheckInOutRepo struct {

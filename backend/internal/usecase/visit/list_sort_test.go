@@ -91,7 +91,7 @@ func TestListVisits_SortKeepsScope(t *testing.T) {
 		}); err != nil {
 		t.Fatalf("ListVisits returned error: %v", err)
 	}
-	if repo.lastFilter.LocationID == nil || *repo.lastFilter.LocationID != loc {
+	if len(repo.lastFilter.LocationIDs) != 1 || repo.lastFilter.LocationIDs[0] != loc {
 		t.Fatalf("admin scope leaked while sorting: %+v", repo.lastFilter)
 	}
 	if repo.lastFilter.SortBy != domain.VisitSortStartDate || repo.lastFilter.Order != domain.VisitSortAsc {

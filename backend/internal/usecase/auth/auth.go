@@ -53,6 +53,7 @@ type Profile struct {
 	NIK            string
 	Role           domain.RoleName
 	LocationID     *domain.UUID
+	LocationIDs    []domain.UUID
 	LocationName   *string
 	Status         domain.UserStatus
 	Type           domain.UserType
@@ -188,6 +189,8 @@ func (s *Service) profile(ctx context.Context, user domain.User) (Profile, error
 		Phone:          user.Phone,
 		NIK:            user.NIK,
 		Role:           role,
+		LocationID:     user.LocationID,
+		LocationIDs:    user.LocationIDs,
 		Status:         user.Status,
 		Type:           user.Type,
 		EditableFields: EditableFields(role),

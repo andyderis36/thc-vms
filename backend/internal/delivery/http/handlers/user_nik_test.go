@@ -209,3 +209,64 @@ func TestListVendors(t *testing.T) {
 		mustStatus(t, serve(bare, "GET", "/vendors", nil, ""), http.StatusInternalServerError)
 	})
 }
+
+// TestPublicVendors pins GET /public/vendors: the SAME active [{id, name}]
+// catalogue as GET /vendors but reachable without a token, while the
+// authenticated endpoint keeps its identity gate.
+func TestPublicVendors(t *testing.T) {
+	master := &vendorCatalogueStore{
+		vendors: []domain.Vendor{
+			{ID: "ven-1", Name: "PT Daya Power Mandiri"},
+			{ID: "ven-2", Name: "PT Lintas Fiber"},
+		},
+	}
+
+	t.Run("anonymous caller receives the id/name catalogue", func(t *testing.T) {
+		bare := gin.New()
+		h := handlers.NewMasterHandler(master)
+		bare.GET("/public/vendors", h.PublicVendors)
+
+		rec := serve(bare, "GET", "/public/vendors", nil, "")
+		mustStatus(t, rec, http.StatusOK)
+		items := decodeData[[]map[string]any](t, mustSuccess(t, rec))
+		if len(items) != 2 {
+			t.Fatalf("expected 2 vendors, got %d", len(items))
+		}
+		for _, item := range items {
+			if len(item) != 2 || item["id"] == nil || item["name"] == nil {
+				t.Fatalf("public vendor row must be exactly {id, name}, got %v", item)
+			}
+		}
+	})
+
+	t.Run("same catalogue as the authenticated endpoint", func(t *testing.T) {
+		publicEngine := gin.New()
+		h := handlers.NewMasterHandler(master)
+		publicEngine.GET("/public/vendors", h.PublicVendors)
+		publicItems := decodeData[[]map[string]any](t, mustSuccess(t, serve(publicEngine, "GET", "/public/vendors", nil, "")))
+
+		authedItems := decodeData[[]map[string]any](t, mustSuccess(t, serve(newVendorEngine(master, domain.RoleVendor), "GET", "/vendors", nil, "")))
+		if len(publicItems) != len(authedItems) {
+			t.Fatalf("public rows = %d, authenticated rows = %d", len(publicItems), len(authedItems))
+		}
+		for i := range publicItems {
+			if publicItems[i]["id"] != authedItems[i]["id"] || publicItems[i]["name"] != authedItems[i]["name"] {
+				t.Fatalf("row %d differs: public=%v authenticated=%v", i, publicItems[i], authedItems[i])
+			}
+		}
+	})
+
+	t.Run("the authenticated endpoint keeps its 401 gate", func(t *testing.T) {
+		bare := gin.New()
+		h := handlers.NewMasterHandler(master)
+		bare.GET("/vendors", h.ListVendors)
+		mustStatus(t, serve(bare, "GET", "/vendors", nil, ""), http.StatusUnauthorized)
+	})
+
+	t.Run("narrow store fails closed without panicking", func(t *testing.T) {
+		bare := gin.New()
+		h := handlers.NewMasterHandler(&stubMasterStore{})
+		bare.GET("/public/vendors", h.PublicVendors)
+		mustStatus(t, serve(bare, "GET", "/public/vendors", nil, ""), http.StatusInternalServerError)
+	})
+}

@@ -56,7 +56,7 @@ func (f *fakeUsers) UpdateLastLogin(context.Context, domain.UUID, time.Time) err
 	panic("fakeUsers.UpdateLastLogin must not be called")
 }
 
-func (f *fakeUsers) ListSecurity(context.Context, *domain.UUID) ([]domain.User, error) {
+func (f *fakeUsers) ListSecurity(context.Context, []domain.UUID, bool) ([]domain.User, error) {
 	panic("fakeUsers.ListSecurity must not be called")
 }
 

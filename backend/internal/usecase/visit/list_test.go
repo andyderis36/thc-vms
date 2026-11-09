@@ -14,13 +14,14 @@ func TestListVisits_BuildsTheCorrectScopePerRole(t *testing.T) {
 	cases := []struct {
 		name         string
 		actor        Actor
-		wantLocation *domain.UUID
+		wantIDs      []domain.UUID
+		wantGlobal   bool
 		wantVendor   *domain.UUID
 	}{
-		{"super_admin sees all", testActor(domain.RoleSuperAdmin, "super-1", ""), nil, nil},
-		{"admin locked to branch", testActor(domain.RoleAdmin, "admin-1", "loc-A"), &locA, nil},
-		{"security locked to branch", testActor(domain.RoleSecurity, "sec-1", "loc-A"), &locA, nil},
-		{"vendor locked to own visits", testActor(domain.RoleVendor, "vendor-1", ""), nil, &vendorID},
+		{"super_admin sees all", testActor(domain.RoleSuperAdmin, "super-1", ""), nil, true, nil},
+		{"admin locked to branch", testActor(domain.RoleAdmin, "admin-1", "loc-A"), []domain.UUID{locA}, false, nil},
+		{"security locked to branch", testActor(domain.RoleSecurity, "sec-1", "loc-A"), []domain.UUID{locA}, false, nil},
+		{"vendor locked to own visits", testActor(domain.RoleVendor, "vendor-1", ""), nil, false, &vendorID},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -32,17 +33,18 @@ func TestListVisits_BuildsTheCorrectScopePerRole(t *testing.T) {
 				t.Fatalf("ListVisits returned error: %v", err)
 			}
 			got := repo.lastFilter
-			if tc.wantLocation == nil {
-				if got.LocationID != nil {
-					t.Errorf("LocationID = %q, want nil", *got.LocationID)
-				}
+			if len(got.LocationIDs) != len(tc.wantIDs) {
+				t.Errorf("LocationIDs = %v, want %v", got.LocationIDs, tc.wantIDs)
 			} else {
-				if got.LocationID == nil {
-					t.Fatalf("LocationID = nil, want %q", *tc.wantLocation)
+				for i := range tc.wantIDs {
+					if got.LocationIDs[i] != tc.wantIDs[i] {
+						t.Errorf("LocationIDs = %v, want %v", got.LocationIDs, tc.wantIDs)
+						break
+					}
 				}
-				if *got.LocationID != *tc.wantLocation {
-					t.Errorf("LocationID = %q, want %q", *got.LocationID, *tc.wantLocation)
-				}
+			}
+			if got.IsGlobal != tc.wantGlobal {
+				t.Errorf("IsGlobal = %v, want %v", got.IsGlobal, tc.wantGlobal)
 			}
 			if tc.wantVendor == nil {
 				if got.VendorUserID != nil {

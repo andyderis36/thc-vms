@@ -36,7 +36,7 @@ func (s *Service) Reschedule(ctx context.Context, actor Actor, visitID domain.UU
 			return domain.NotFoundEntity("Kunjungan")
 		}
 	case domain.RoleAdmin:
-		if err := actor.requireBranch(visit.LocationID); err != nil {
+		if err := actor.requireBranchAccess(visit.LocationID); err != nil {
 			return err
 		}
 	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:

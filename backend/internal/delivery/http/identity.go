@@ -40,6 +40,43 @@ const (
 // identityStructKey is the private fast-path key holding the whole Identity.
 const identityStructKey = "thc.identity"
 
+// scopeKey is the private key holding the per-request branch-coverage Scope
+// stashed by the JWT middleware. It sits adjacent to thc.identity and is
+// written exactly once per request, never once per row.
+const scopeKey = "thc.scope"
+
+// Scope is the branch coverage resolved for one request: the user_locations
+// union of the caller. IsGlobal marks the national bypass (super_admin and
+// the hidden dev-superadmin); vendor and uncovered callers carry IsGlobal
+// false with an empty union, which downstream guards must refuse rather than
+// treat as global.
+type Scope struct {
+	LocationIDs []domain.UUID
+	IsGlobal    bool
+}
+
+// WithScope stashes the resolved branch coverage on the gin context. The JWT
+// middleware calls this once per request right after WithIdentity.
+func WithScope(c *gin.Context, scope Scope) {
+	c.Set(scopeKey, scope)
+}
+
+// ScopeFrom returns the branch coverage stashed by WithScope. The second
+// result is false when the middleware chain resolved no scope (unwired store
+// or token-free test doubles), in which case callers fall back to the scalar
+// Identity rules.
+func ScopeFrom(c *gin.Context) (Scope, bool) {
+	value, ok := c.Get(scopeKey)
+	if !ok {
+		return Scope{}, false
+	}
+	scope, ok := value.(Scope)
+	if !ok {
+		return Scope{}, false
+	}
+	return scope, true
+}
+
 // Identity is the authenticated caller behind one request: its user id, its
 // RBAC role and, for branch-bound roles, its location. super_admin and vendor
 // carry a nil LocationID; admin and security must carry their branch.

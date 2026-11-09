@@ -24,11 +24,15 @@ import (
 )
 
 // Actor is the authenticated caller of an avatar read. LocationID is nil for
-// super_admin and vendor accounts.
+// super_admin and vendor accounts. Branches and IsGlobal carry the stashed
+// thc.scope union; an empty union with IsGlobal false falls back to the
+// scalar LocationID rule.
 type Actor struct {
 	ID         domain.UUID
 	Role       domain.RoleName
 	LocationID *domain.UUID
+	Branches   []domain.UUID
+	IsGlobal   bool
 }
 
 // Stream is the resolved, ready-to-serve avatar payload: the open bucket body
@@ -135,7 +139,9 @@ func (s *Service) ResolveAvatarStream(ctx context.Context, actor Actor, targetID
 }
 
 // canReadAvatar applies the fail-closed read scope: the caller's own avatar,
-// any avatar for super_admin, or an avatar of the same branch. Vendor accounts
+// any avatar for super_admin or a stashed global, or an avatar of a branch in
+// the stashed union. Anything else falls back to the scalar same-branch
+// rule, so callers without a stash decide exactly as before. Vendor accounts
 // carry no location, so a vendor only ever sees itself.
 func canReadAvatar(actor Actor, target domain.User) bool {
 	if actor.ID == target.ID {
@@ -144,7 +150,18 @@ func canReadAvatar(actor Actor, target domain.User) bool {
 	if domain.IsSuperAdminRole(actor.Role) {
 		return true
 	}
-	return actor.LocationID != nil && target.LocationID != nil && *actor.LocationID == *target.LocationID
+	if actor.IsGlobal {
+		return true
+	}
+	if target.LocationID == nil {
+		return false
+	}
+	for _, id := range actor.Branches {
+		if id == *target.LocationID {
+			return true
+		}
+	}
+	return actor.LocationID != nil && *actor.LocationID == *target.LocationID
 }
 
 // normalizeContentType strips any parameters and case so the allowlist compare

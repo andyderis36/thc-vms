@@ -83,7 +83,7 @@ func okHandler(c *gin.Context) {
 func TestJWT_MissingTokenIs401(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/me", middleware.JWT(validParser(), &fakeLoader{profile: activeProfile()}), okHandler)
+	r.GET("/me", middleware.JWT(validParser(), &fakeLoader{profile: activeProfile()}, nil), okHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/me", nil)
 	rec := httptest.NewRecorder()
@@ -98,7 +98,7 @@ func TestJWT_MalformedTokenIs401(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	parser := &fakeParser{err: context.DeadlineExceeded}
-	r.GET("/me", middleware.JWT(parser, &fakeLoader{profile: activeProfile()}), okHandler)
+	r.GET("/me", middleware.JWT(parser, &fakeLoader{profile: activeProfile()}, nil), okHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/me", nil)
 	req.Header.Set("Authorization", "Bearer not.a.token")
@@ -114,7 +114,7 @@ func TestJWT_DeactivatedAccountCannotReuseToken(t *testing.T) {
 	dead := activeProfile()
 	dead.Status = domain.UserStatusInactive
 	r := gin.New()
-	r.GET("/me", middleware.JWT(validParser(), &fakeLoader{profile: dead}), okHandler)
+	r.GET("/me", middleware.JWT(validParser(), &fakeLoader{profile: dead}, nil), okHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/me", nil)
 	req.Header.Set("Authorization", "Bearer valid.token.here")
@@ -129,7 +129,7 @@ func TestJWT_ValidTokenStoresIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/me",
-		middleware.JWT(validParser(), &fakeLoader{profile: activeProfile()}),
+		middleware.JWT(validParser(), &fakeLoader{profile: activeProfile()}, nil),
 		func(c *gin.Context) {
 			id, ok := deliveryhttp.IdentityFrom(c)
 			if !ok || id.UserID != "user-1" || id.Role != domain.RoleAdmin {

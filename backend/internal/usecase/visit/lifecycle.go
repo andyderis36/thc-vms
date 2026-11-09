@@ -18,7 +18,7 @@ func (s *Service) Approve(ctx context.Context, actor Actor, visitID domain.UUID,
 	if err := actor.requireRole(domain.RoleAdmin, domain.RoleSuperAdmin); err != nil {
 		return err
 	}
-	if err := actor.requireBranch(visit.LocationID); err != nil {
+	if err := actor.requireBranchAccess(visit.LocationID); err != nil {
 		return err
 	}
 	return s.transition(ctx, visit, actor, domain.VisitStatusApproved, note)
@@ -43,7 +43,7 @@ func (s *Service) Reject(ctx context.Context, actor Actor, visitID domain.UUID, 
 	if err := actor.requireRole(domain.RoleAdmin, domain.RoleSuperAdmin); err != nil {
 		return err
 	}
-	if err := actor.requireBranch(visit.LocationID); err != nil {
+	if err := actor.requireBranchAccess(visit.LocationID); err != nil {
 		return err
 	}
 	return s.transition(ctx, visit, actor, domain.VisitStatusRejected, trimmed)
@@ -66,7 +66,7 @@ func (s *Service) Cancel(ctx context.Context, actor Actor, visitID domain.UUID, 
 			return domain.NotFoundEntity("Kunjungan")
 		}
 	case domain.RoleAdmin:
-		if err := actor.requireBranch(visit.LocationID); err != nil {
+		if err := actor.requireBranchAccess(visit.LocationID); err != nil {
 			return err
 		}
 	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:

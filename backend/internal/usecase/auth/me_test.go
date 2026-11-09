@@ -35,6 +35,23 @@ func TestMe_ReturnsProfile(t *testing.T) {
 	}
 }
 
+func TestMe_LocationIDsCopiesUserUnion(t *testing.T) {
+	users := &fakeUsers{byEmail: map[string]domain.User{}, byID: map[domain.UUID]domain.User{}}
+	admin := activeAdmin(hashPassword(t, "Password123!"))
+	loc2 := domain.UUID("loc-jakarta")
+	admin.LocationIDs = []domain.UUID{"loc-bandung", loc2}
+	users.byID[admin.ID] = admin
+	svc := NewService(loginDeps(users))
+
+	got, err := svc.Me(context.Background(), "user-admin-1")
+	if err != nil {
+		t.Fatalf("Me: %v", err)
+	}
+	if len(got.LocationIDs) != 2 || got.LocationIDs[0] != "loc-bandung" || got.LocationIDs[1] != loc2 {
+		t.Fatalf("location_ids = %v, want [loc-bandung loc-jakarta]", got.LocationIDs)
+	}
+}
+
 func TestMe_UserNotFound(t *testing.T) {
 	users := &fakeUsers{byEmail: map[string]domain.User{}, byID: map[domain.UUID]domain.User{}}
 	svc := NewService(loginDeps(users))
