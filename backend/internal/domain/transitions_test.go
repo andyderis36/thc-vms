@@ -159,7 +159,7 @@ func TestNoShow_ClosesEveryPreArrivalStatus(t *testing.T) {
 // auto-cancelled notice, which is what a rescheduled no-show produces.
 func TestTransitionNotification_NotVisitIsAVendorNotice(t *testing.T) {
 	// Given/When: a system-driven move to not_visit.
-	tpl := domain.TransitionNotification(domain.VisitStatusNotVisit, true, "VST-0000000001")
+	tpl := domain.TransitionNotification(domain.VisitStatusNotVisit, true, "VST-0000000001", "")
 	// Then: it is a vendor-facing auto-cancelled notice, non-nil.
 	if tpl == nil {
 		t.Fatal("TransitionNotification(not_visit, system) = nil, want a vendor notice")

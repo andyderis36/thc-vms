@@ -128,8 +128,7 @@ async function withTransientRetry<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Hapus objek lalu pastikan objek tidak lagi ada; melempar bila masih tersisa. */
-export async function deleteUploadedFiles(fileUrls: readonly string[]): Promise<void> {
+/** Hapus objek lalu pastikan objek tidak lagi ada; melempar bila masih tersisa. */export async function deleteUploadedFiles(fileUrls: readonly string[]): Promise<void> {
   const keys: string[] = []
   for (const fileUrl of fileUrls) {
     const key = objectKeyFromUrl(fileUrl)
@@ -153,5 +152,26 @@ export async function deleteUploadedFiles(fileUrls: readonly string[]): Promise<
       }
       throw new Error(`[e2e-storage] objek ${key} masih ada setelah penghapusan`)
     })
+  }
+}
+
+/**
+ * True bila objek masih ada di bucket; false bila sudah hilang (NotFound).
+ * Untuk membuktikan penghapusan server-side (replace/purge) tanpa menghapus
+ * apa pun — pelengkap `deleteUploadedFiles` yang menghapus.
+ */
+export async function objectExists(fileUrl: string): Promise<boolean> {
+  const key = objectKeyFromUrl(fileUrl)
+  if (key === null) {
+    return false
+  }
+  try {
+    await storage().statObject(BUCKET, key)
+    return true
+  } catch (error) {
+    if (isNotFound(error)) {
+      return false
+    }
+    throw error
   }
 }

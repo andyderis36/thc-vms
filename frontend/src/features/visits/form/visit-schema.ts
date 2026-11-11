@@ -2,7 +2,7 @@
  * Skema validasi SCR-03 — Formulir Pengajuan Kunjungan (zod).
  *
  * Kontrak mengikuti `docs/4. openapi.yaml` (CreateVisitRequest) termasuk
- * field `purpose_note` (tujuan lain, ≤200 karakter). Seluruh pesan galat
+ * field `purpose_note` (keperluan lain, ≤200 karakter). Seluruh pesan galat
  * berbahasa Indonesia. Aturan urutan waktu (selesai setelah mulai) dan
  * "minimal satu tujuan" ditegakkan di `superRefine` di akhir rantai.
  */
@@ -174,13 +174,13 @@ export const visitFormSchema = z
     // Chip tujuan boleh kosong ASALKAN `purpose_note` terisi — divalidasi
     // bersama di `superRefine` di akhir rantai.
     purpose_ids: z.array(z.string()),
-    // "Tujuan lain": teks bebas bila tujuan tidak ada di daftar chip.
+    // "Keperluan lain": teks bebas bila tujuan tidak ada di daftar chip.
     purpose_note: z
       .string()
       .trim()
       .max(
         PURPOSE_NOTE_MAX_LENGTH,
-        `Tujuan lain maksimal ${PURPOSE_NOTE_MAX_LENGTH} karakter.`,
+        `Keperluan lain maksimal ${PURPOSE_NOTE_MAX_LENGTH} karakter.`,
       )
       .optional(),
     start_date: z.string().min(1, 'Waktu mulai wajib diisi.'),
@@ -212,13 +212,13 @@ export const visitFormSchema = z
       ),
   })
   .superRefine((value, ctx) => {
-    // Minimal satu tujuan: chip TERPILIH atau "Tujuan lain" terisi.
+    // Minimal satu tujuan: chip TERPILIH atau "Keperluan lain" terisi.
     if (value.purpose_ids.length === 0 && (value.purpose_note ?? '') === '') {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['purpose_ids'],
         message:
-          'Pilih minimal satu tujuan kunjungan atau isi kolom Tujuan lain.',
+          'Pilih minimal satu tujuan kunjungan atau isi kolom Keperluan lain.',
       })
     }
 
@@ -230,7 +230,7 @@ export const visitFormSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['purpose_note'],
-        message: 'Tujuan lain wajib diisi bila memilih "Other".',
+        message: 'Keperluan lain wajib diisi bila memilih "Other".',
       })
     }
 

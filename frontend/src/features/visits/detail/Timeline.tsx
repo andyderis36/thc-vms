@@ -93,18 +93,35 @@ export interface TimelineProps {
  * Satu baris teks riwayat: `oleh <nama> (<peran>) · <stempel>` untuk
  * transisi berpelaku, dan hanya stempelnya untuk transisi sistem
  * (`actor_name` null) sehingga klause "oleh" tidak pernah mengarang aktor.
- * Murni (pure) agar terkunci oleh unit test.
+ * Klause peran dilewati bila nama sudah membawanya — data seed menaruh
+ * "Hendra Wijaya (Super Admin)" di kolom nama, sehingga tanpa dedupe ini
+ * layar mencetak peran dua kali. Murni (pure) agar terkunci oleh unit test.
  */
 export function historyDetail(entry: VisitHistoryEntry): string {
   const stamp = formatTanggalWaktu(entry.at)
   if (entry.actor_name === null || entry.actor_name === '') {
     return stamp
   }
+  const roleLabel = entry.actor_role_label ?? ''
   const by =
-    entry.actor_role_label !== null && entry.actor_role_label !== ''
-      ? `oleh ${entry.actor_name} (${entry.actor_role_label})`
+    roleLabel !== '' && !roleAlreadyInName(entry.actor_name, roleLabel)
+      ? `oleh ${entry.actor_name} (${roleLabel})`
       : `oleh ${entry.actor_name}`
   return `${by} · ${stamp}`
+}
+
+/**
+ * True bila `<nama>` sudah diakhiri tanda kurung yang isinya sama dengan
+ * label peran (perbandingan tanpa spasi & huruf besar-kecil), mis.
+ * "Hendra Wijaya (Super Admin)" vs label "Superadmin".
+ */
+function roleAlreadyInName(name: string, roleLabel: string): boolean {
+  const match = name.match(/\(([^()]*)\)\s*$/)
+  if (match === null) {
+    return false
+  }
+  const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, '')
+  return normalize(match[1] ?? '') === normalize(roleLabel)
 }
 
 /**
@@ -145,9 +162,21 @@ export function Timeline({
   const activeIndex = ACTIVE_INDEX_BY_STATUS[status]
   const terminal = TERMINAL_STATUSES.has(status)
   const entries = history ?? []
+  const hasRequestedEntry = entries.some((entry) => entry.status === 'requested')
+  // Backend hanya mencatat status_history saat transisi, bukan saat
+  // pembuatan — riwayat produksi tak pernah berisi `requested`. Tanpa
+  // penambalan ini panel menyusut saat kunjungan disetujui; riwayat harus
+  // append-only. Riwayat kosong = fallback langkah turunan sudah
+  // menampilkan Pengajuan, jadi tak perlu ditambal.
+  const showSyntheticRequest = entries.length > 0 && !hasRequestedEntry
 
+  const requestedStep: TimelineStep = {
+    id: 'requested',
+    label: 'Pengajuan',
+    detail: `Diajukan ${formatTanggalWaktu(createdAt)}`,
+  }
   const steps: TimelineStep[] = [
-    { id: 'requested', label: 'Pengajuan', detail: `Diajukan ${formatTanggalWaktu(createdAt)}` },
+    requestedStep,
     {
       id: 'approved',
       label: 'Persetujuan',
@@ -167,57 +196,90 @@ export function Timeline({
 
   // Status terminal: hanya pengajuan yang pasti terjadi; sisanya tidak diketahui.
   const visibleSteps = terminal ? steps.slice(0, 1) : steps
+  // Status non-terminal dengan riwayat: tahap yang sudah tercatat di riwayat
+  // diwakili baris riwayatnya sendiri; tahap yang belum tercatat (termasuk
+  // tahap aktif yang riwayatnya belum masuk) dirender sebagai langkah.
+  // `requested` yang belum tercatat diwakili baris Pengajuan sintetis, jadi
+  // tidak digandakan di sini.
+  const historyStatuses = new Set(entries.map((entry) => entry.status))
+  const futureSteps = steps.filter((step, index) => {
+    if (index < activeIndex) return false
+    if (historyStatuses.has(step.id as VisitStatus)) return false
+    if (step.id === 'requested' && showSyntheticRequest) return false
+    return true
+  })
+
+  function renderStepRow(step: TimelineStep, key: string, state: StepState) {
+    const text = TEXT_CLASS[state]
+    return (
+      <li
+        key={key}
+        aria-current={state === 'current' ? 'step' : undefined}
+        className="relative min-w-0"
+      >
+        <span
+          aria-hidden="true"
+          className={`absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full ${DOT_CLASS[state]}`}
+        >
+          {state === 'done' && (
+            <Check aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />
+          )}
+        </span>
+        <p className={`text-sm ${text.label}`}>{step.label}</p>
+        <p className={`mt-0.5 text-label ${text.detail}`}>{step.detail}</p>
+      </li>
+    )
+  }
+
+  function renderEntryRow(entry: VisitHistoryEntry, index: number) {
+    const label = VISIT_STATUS_META[entry.status].label
+    return (
+      <li key={`${entry.status}-${entry.at}-${index}`} className="relative min-w-0">
+        <span
+          aria-hidden="true"
+          className={`absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full ${DOT_CLASS.done}`}
+        >
+          <Check aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />
+        </span>
+        <p className="text-sm font-semibold text-ink">{label}</p>
+        <p className="mt-0.5 text-label text-ink-secondary">{historyDetail(entry)}</p>
+      </li>
+    )
+  }
+
+  // Baris Pengajuan sintetis: teksnya identik dengan langkah turunan
+  // ("Pengajuan" + "Diajukan …") agar panel terlihat sama sebelum dan
+  // sesudah riwayat pertama tercatat.
+  function renderSyntheticRequestRow() {
+    return renderStepRow(requestedStep, 'requested-synthetic', 'done')
+  }
 
   return (
     <ol className="relative ml-3 flex flex-col gap-6 border-l-2 border-border-light pl-6">
-      {entries.length > 0
-        ? entries.map((entry, index) => {
-            const label = VISIT_STATUS_META[entry.status].label
-            return (
-              <li
-                key={`${entry.status}-${entry.at}-${index}`}
-                className="relative min-w-0"
-              >
-                <span
-                  aria-hidden="true"
-                  className={`absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full ${DOT_CLASS.done}`}
-                >
-                  <Check aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />
-                </span>
-                <p className="text-sm font-semibold text-ink">{label}</p>
-                <p className="mt-0.5 text-label text-ink-secondary">{historyDetail(entry)}</p>
-              </li>
-            )
-          })
-        : visibleSteps.map((step, index) => {
-            const state: StepState = terminal
-              ? 'done'
-              : index < activeIndex
-                ? 'done'
-                : index === activeIndex
-                  ? 'current'
-                  : 'future'
-            const text = TEXT_CLASS[state]
-
-            return (
-              <li
-                key={step.id}
-                aria-current={state === 'current' ? 'step' : undefined}
-                className="relative min-w-0"
-              >
-                <span
-                  aria-hidden="true"
-                  className={`absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full ${DOT_CLASS[state]}`}
-                >
-                  {state === 'done' && (
-                    <Check aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />
-                  )}
-                </span>
-                <p className={`text-sm ${text.label}`}>{step.label}</p>
-                <p className={`mt-0.5 text-label ${text.detail}`}>{step.detail}</p>
-              </li>
-            )
-          })}
+      {terminal ? (
+        <>
+          {entries.length > 0 ? (
+            <>
+              {showSyntheticRequest && renderSyntheticRequestRow()}
+              {entries.map((entry, index) => renderEntryRow(entry, index))}
+            </>
+          ) : (
+            visibleSteps.map((step) => renderStepRow(step, step.id, 'done'))
+          )}
+        </>
+      ) : entries.length > 0 ? (
+        <>
+          {showSyntheticRequest && renderSyntheticRequestRow()}
+          {entries.map((entry, index) => renderEntryRow(entry, index))}
+          {futureSteps.map((step) => renderStepRow(step, `future-${step.id}`, 'future'))}
+        </>
+      ) : (
+        visibleSteps.map((step, index) => {
+          const state: StepState =
+            index < activeIndex ? 'done' : index === activeIndex ? 'current' : 'future'
+          return renderStepRow(step, step.id, state)
+        })
+      )}
 
       {terminal && (
         <li className="relative min-w-0">

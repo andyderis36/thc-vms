@@ -93,13 +93,19 @@ func RoleLabel(roleName string) string {
 //     actor-directed (vendor-cancel routes to staff, admin-cancel routes to
 //     the vendor) and built by HumanCancelledNotification in the repository
 //     write path, which knows the actor; see UpdateStatus.
-func TransitionNotification(to VisitStatus, system bool, visitCode string) *NotificationTemplate {
+//
+// The reason carries the reschedule note (status_history.notes): the
+// rescheduled branch appends it to the bell message, truncated to
+// maxReasonRunes. All other branches ignore it; pass "" there. An empty
+// reason keeps the legacy message byte-identical so old rows and
+// reason-less emits render exactly as before.
+func TransitionNotification(to VisitStatus, system bool, visitCode string, reason string) *NotificationTemplate {
 	switch to {
 	case VisitStatusRescheduled:
 		return &NotificationTemplate{
 			Type:     NotificationVisitRescheduled,
 			Title:    "Jadwal Diubah",
-			Message:  "Permintaan " + visitCode + " dijadwalkan ulang.",
+			Message:  rescheduledMessage(visitCode, reason),
 			Audience: NotificationAudienceStaff,
 		}
 	case VisitStatusApproved:
@@ -212,14 +218,43 @@ func HumanCancelledNotification(visitCode string, byVendor bool, actor string) *
 // staff feed keeps its own visit_rescheduled row from TransitionNotification
 // and the vendor feed gains this second row with the same type. Repeat
 // reschedules collapse on the store's unique constraint, so re-emission is
-// idempotent.
-func RescheduledVendorNotification(visitCode string) *NotificationTemplate {
+// idempotent. The reason is appended exactly like the staff copy; "" keeps
+// the legacy message.
+func RescheduledVendorNotification(visitCode string, reason string) *NotificationTemplate {
 	return &NotificationTemplate{
 		Type:     NotificationVisitRescheduled,
 		Title:    "Jadwal kunjungan diperbarui",
-		Message:  "Permintaan " + visitCode + " dijadwalkan ulang.",
+		Message:  rescheduledMessage(visitCode, reason),
 		Audience: NotificationAudienceVendor,
 	}
+}
+
+// maxRescheduleReasonRunes caps the reason fragment appended to a reschedule
+// bell message, so one long note cannot blow up the feed row.
+const maxRescheduleReasonRunes = 140
+
+// rescheduledMessage renders the shared reschedule bell copy: the legacy
+// sentence alone when the reason is blank, otherwise the sentence plus the
+// trimmed reason fragment (" Alasan: <reason>"). No escaping is added: the
+// bell renders plain text, matching every other template in this file which
+// interpolates its inputs verbatim.
+func rescheduledMessage(visitCode string, reason string) string {
+	base := "Permintaan " + visitCode + " dijadwalkan ulang."
+	trimmed := strings.TrimSpace(reason)
+	if trimmed == "" {
+		return base
+	}
+	return base + " Alasan: " + truncateRunes(trimmed, maxRescheduleReasonRunes)
+}
+
+// truncateRunes cuts s to at most n runes so multi-byte text is never split
+// mid-character. Shorter input returns unchanged.
+func truncateRunes(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
 }
 
 // Notification is one stored notice, already narrowed to a single recipient.

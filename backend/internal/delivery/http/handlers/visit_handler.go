@@ -325,7 +325,7 @@ func checkCreateBody(body createVisitBody) string {
 		return "Minimal satu tujuan kunjungan wajib dipilih atau ditulis."
 	}
 	if validation.RuneLen(strings.TrimSpace(body.PurposeNote)) > validation.PurposeNoteMaxLength {
-		return "Tujuan lain kunjungan maksimal " + strconv.Itoa(validation.PurposeNoteMaxLength) + " karakter."
+		return "Keperluan lain kunjungan maksimal " + strconv.Itoa(validation.PurposeNoteMaxLength) + " karakter."
 	}
 	// Manual visit-level company (migration 000017): trimmed server-side by
 	// the usecase; the over-long case is rejected here with the FE-aligned

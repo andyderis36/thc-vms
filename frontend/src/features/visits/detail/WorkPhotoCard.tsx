@@ -1,9 +1,10 @@
 'use client'
 
-import { useRef, type ChangeEvent, type ReactNode } from 'react'
+import { useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Camera, Eye, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card, CardBody } from '@/components/ui/Card'
+import { Modal } from '@/components/ui/Modal'
 import { useVisitFile } from '@/features/visits/hooks/useVisitFile'
 import {
   useWorkPhotoUpload,
@@ -154,7 +155,8 @@ interface SlotBodyProps {
 /**
  * Slot terisi: pratinjau lewat endpoint berkas kunjungan (object URL lokal,
  * bukan presigned — pola `VisitFilePhoto`), metadata lampiran, serta aksi
- * "Lihat" (buka foto) dan "Ganti" (unggah ulang ke slot yang sama).
+ * "Lihat" (dialog pratinjau modal, sama seperti foto selfie/KTP — tidak
+ * membuka tab baru) dan "Ganti" (unggah ulang ke slot yang sama).
  * Foto tetap bisa dilihat saat kartu terkunci; hanya "Ganti" yang nonaktif.
  */
 function FilledSlot({
@@ -170,12 +172,7 @@ function FilledSlot({
   const meta = SLOT_META[kind]
   const file = useVisitFile({ visitId, kind: FILE_KIND[kind] })
   const viewable = file.objectUrl !== null
-
-  function openPhoto(): void {
-    if (file.objectUrl !== null) {
-      window.open(file.objectUrl, '_blank', 'noopener,noreferrer')
-    }
-  }
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   return (
     <SlotShell label={meta.label}>
@@ -252,9 +249,9 @@ function FilledSlot({
           className="min-h-touch"
           aria-label={`Lihat foto bukti ${meta.short}`}
           disabled={!viewable || file.loading}
-          onClick={openPhoto}
+          onClick={() => setPreviewOpen(true)}
         >
-          <Eye aria-hidden="true" className="size-4 shrink-0" />
+          <Eye aria-hidden="true" className="size-3 shrink-0" />
           Lihat
         </Button>
         <FilePicker
@@ -265,6 +262,22 @@ function FilledSlot({
           onPick={onUpload}
         />
       </div>
+      <Modal
+        open={previewOpen && file.objectUrl !== null}
+        onClose={() => setPreviewOpen(false)}
+        title={`Pratinjau foto bukti ${meta.short}`}
+        size="lg"
+      >
+        {file.objectUrl !== null ? (
+          // eslint-disable-next-line @next/next/no-img-element -- src berupa object URL `blob:` dari useVisitFile, di luar jangkauan optimizer next/image (pola thumbnail di atas).
+          <img
+            src={file.objectUrl}
+            alt={meta.alt}
+            className="max-h-[60vh] w-full rounded-control border border-border-light object-contain"
+          />
+        ) : null}
+        <p className="mt-3 text-ink-muted">{meta.alt}</p>
+      </Modal>
     </SlotShell>
   )
 }

@@ -28,19 +28,21 @@ type Mailer interface {
 	SendWithTeamQR(ctx context.Context, to []string, subject, textBody, htmlBody string, qrPNG []byte, cid string) error
 }
 
-// emailAllowedTypes is the single email allowlist. Exactly these seven
+// emailAllowedTypes is the single email allowlist. Exactly these eight
 // lifecycle types may fan out to email; notably visit_requested stays
 // in_app-only (staff triage the dashboard, they are not emailed every new
-// request) and visit_auto_cancelled stays silent (administrative
-// housekeeping the vendor already sees as a status change).
+// request). visit_auto_cancelled IS emailed: the R1 stale-request sweep and
+// the R2 no-show sweep share this one type (splitting them would need a
+// migration), so both legs notify the vendor by design.
 var emailAllowedTypes = map[NotificationType]struct{}{
-	NotificationVisitApproved:    {},
-	NotificationVisitRejected:    {},
-	NotificationVisitCancelled:   {},
-	NotificationVisitRescheduled: {},
-	NotificationVisitReminder:    {},
-	NotificationVisitCheckIn:     {},
-	NotificationVisitCheckOut:    {},
+	NotificationVisitApproved:      {},
+	NotificationVisitRejected:      {},
+	NotificationVisitCancelled:     {},
+	NotificationVisitAutoCancelled: {},
+	NotificationVisitRescheduled:   {},
+	NotificationVisitReminder:      {},
+	NotificationVisitCheckIn:       {},
+	NotificationVisitCheckOut:      {},
 }
 
 // EmailAllowed reports whether a notification type may be sent as email.

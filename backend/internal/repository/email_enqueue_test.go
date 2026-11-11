@@ -389,9 +389,11 @@ func TestEmailEnqueue_GateTransitionsFlowThroughUpdateStatus(t *testing.T) {
 	}
 }
 
-// TestEmailEnqueue_ExcludedTypesSendZero proves visit_requested (Create) and
-// visit_auto_cancelled (system cancel, no-show) never reach the mailer.
-func TestEmailEnqueue_ExcludedTypesSendZero(t *testing.T) {
+// TestEmailEnqueue_RequestStaysSilentWhileAutoCancelEmailsVendor proves
+// visit_requested (Create) never reaches the mailer, while the R1 system
+// cancel and the R2 no-show — sharing the one visit_auto_cancelled type —
+// each enqueue exactly one email to the visit's vendor user.
+func TestEmailEnqueue_RequestStaysSilentWhileAutoCancelEmailsVendor(t *testing.T) {
 	pool := testPool(t)
 	resetTables(t, pool)
 	ctx := testContext(t)
@@ -414,16 +416,21 @@ func TestEmailEnqueue_ExcludedTypesSendZero(t *testing.T) {
 		t.Fatalf("email calls after Create = %d, want 0 (visit_requested is in_app-only)", len(fake.Calls))
 	}
 
-	// System cancel emits visit_auto_cancelled: zero emails.
+	// System cancel emits visit_auto_cancelled: one email to the vendor (R1).
 	autoVisit := seedEmailVisit(t, pool, "VST-0000000307", fx)
 	if err := repos.UpdateStatus(ctx, autoVisit, domain.VisitStatusCancelled, "", "auto-rule R1"); err != nil {
 		t.Fatalf("system cancel UpdateStatus: %v", err)
 	}
-	if len(fake.Calls) != 0 {
-		t.Fatalf("email calls after auto-cancel = %d, want 0", len(fake.Calls))
+	call := assertToSet(t, fake, []string{fx.vendorEmail})
+	if !strings.Contains(call.Subject, "VST-0000000307") {
+		t.Fatalf("subject = %q, want the visit code", call.Subject)
+	}
+	if !strings.Contains(call.Subject, "Kunjungan Dibatalkan Otomatis") {
+		t.Fatalf("subject = %q, want the canonical auto-cancel title", call.Subject)
 	}
 
-	// No-show emits visit_auto_cancelled: zero emails.
+	// No-show emits visit_auto_cancelled: one email to the vendor (R2).
+	fake.Calls = nil
 	noShowVisit := seedVisit(t, pool, seedVisitParams{
 		Code: "VST-0000000308", VendorUser: fx.vendor, Location: fx.loc,
 		Start: time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second),
@@ -433,8 +440,12 @@ func TestEmailEnqueue_ExcludedTypesSendZero(t *testing.T) {
 	if err := repos.UpdateStatus(ctx, noShowVisit, domain.VisitStatusNotVisit, "", "auto-rule R2"); err != nil {
 		t.Fatalf("no-show UpdateStatus: %v", err)
 	}
-	if len(fake.Calls) != 0 {
-		t.Fatalf("email calls after no-show = %d, want 0", len(fake.Calls))
+	call = assertToSet(t, fake, []string{fx.vendorEmail})
+	if !strings.Contains(call.Subject, "VST-0000000308") {
+		t.Fatalf("subject = %q, want the visit code", call.Subject)
+	}
+	if !strings.Contains(call.Subject, "Kunjungan Dibatalkan Otomatis") {
+		t.Fatalf("subject = %q, want the canonical auto-cancel title", call.Subject)
 	}
 	if created.ID == "" {
 		t.Fatalf("created visit has an empty id")

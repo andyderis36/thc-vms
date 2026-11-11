@@ -1,7 +1,7 @@
 package domain_test
 
 // Port-side suite for the email fan-out contract (mailer.go): the allowlist
-// admits exactly the seven lifecycle types, the FakeMailer records sends,
+// admits exactly the eight lifecycle types, the FakeMailer records sends,
 // and the enqueue-time gate drops excluded types before any Send call.
 
 import (
@@ -11,7 +11,7 @@ import (
 	"thc-vms/backend/internal/domain"
 )
 
-// emailAllowedCases is the locked allowlist expectation: exactly these seven
+// emailAllowedCases is the locked allowlist expectation: exactly these eight
 // notification types may fan out to email; everything else stays in_app-only.
 var emailAllowedCases = []struct {
 	typ   domain.NotificationType
@@ -20,19 +20,19 @@ var emailAllowedCases = []struct {
 	{domain.NotificationVisitApproved, true},
 	{domain.NotificationVisitRejected, true},
 	{domain.NotificationVisitCancelled, true},
+	{domain.NotificationVisitAutoCancelled, true},
 	{domain.NotificationVisitRescheduled, true},
 	{domain.NotificationVisitReminder, true},
 	{domain.NotificationVisitCheckIn, true},
 	{domain.NotificationVisitCheckOut, true},
 	{domain.NotificationVisitRequested, false},
-	{domain.NotificationVisitAutoCancelled, false},
 	{domain.NotificationType(""), false},
 	{domain.NotificationType("visit_deleted"), false},
 }
 
-// TestEmailAllowed_AllowsExactlySevenTypes proves the allowlist admits the
-// seven email-safe lifecycle types and nothing else.
-func TestEmailAllowed_AllowsExactlySevenTypes(t *testing.T) {
+// TestEmailAllowed_AllowsExactlyEightTypes proves the allowlist admits the
+// eight email-safe lifecycle types and nothing else.
+func TestEmailAllowed_AllowsExactlyEightTypes(t *testing.T) {
 	for _, tc := range emailAllowedCases {
 		if got := domain.EmailAllowed(tc.typ); got != tc.allow {
 			t.Errorf("EmailAllowed(%q) = %v, want %v", tc.typ, got, tc.allow)
@@ -61,30 +61,29 @@ func TestFakeMailer_RecordsCalls(t *testing.T) {
 	}
 }
 
-// TestEmailGate_ExcludedTypesNeverReachSend proves the enqueue-time contract:
-// callers check EmailAllowed first, so visit_requested and
-// visit_auto_cancelled never produce a Send call.
-func TestEmailGate_ExcludedTypesNeverReachSend(t *testing.T) {
+// TestEmailGate_RequestedStaysSilentWhileAutoCancelSends proves the
+// enqueue-time contract: visit_requested is still dropped before any Send
+// call, while the R1/R2 visit_auto_cancelled notice now passes the gate and
+// produces exactly one Send.
+func TestEmailGate_RequestedStaysSilentWhileAutoCancelSends(t *testing.T) {
 	fake := &domain.FakeMailer{}
 	ctx := context.Background()
 	visit := testVisit()
-	templates := []*domain.NotificationTemplate{
-		domain.CreatedNotification(visit.VisitID),
-		domain.TransitionNotification(domain.VisitStatusCancelled, true, visit.VisitID),
+	if tpl := domain.CreatedNotification(visit.VisitID); domain.EmailAllowed(tpl.Type) {
+		t.Errorf("EmailAllowed(%q) = true, want false: new requests stay in_app-only", tpl.Type)
 	}
-	for _, tpl := range templates {
-		if tpl == nil {
-			continue
-		}
-		if !domain.EmailAllowed(tpl.Type) {
-			continue // the gate: excluded types are dropped before Send
-		}
-		subject, textBody, htmlBody := domain.BuildEmail(visit, tpl)
-		if err := fake.Send(ctx, []string{"vendor@example.com"}, subject, textBody, htmlBody); err != nil {
-			t.Fatal(err)
-		}
+	tpl := domain.TransitionNotification(domain.VisitStatusCancelled, true, visit.VisitID, "")
+	if tpl == nil {
+		t.Fatal("system-cancel template is nil, want the visit_auto_cancelled notice")
 	}
-	if len(fake.Calls) != 0 {
-		t.Errorf("len(Calls) = %d, want 0: excluded types must never reach Send", len(fake.Calls))
+	if !domain.EmailAllowed(tpl.Type) {
+		t.Fatalf("EmailAllowed(%q) = false, want true: R1/R2 auto-cancel emails the vendor", tpl.Type)
+	}
+	subject, textBody, htmlBody := domain.BuildEmail(visit, tpl)
+	if err := fake.Send(ctx, []string{"vendor@example.com"}, subject, textBody, htmlBody); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.Calls) != 1 {
+		t.Errorf("len(Calls) = %d, want 1: auto-cancel must reach Send", len(fake.Calls))
 	}
 }

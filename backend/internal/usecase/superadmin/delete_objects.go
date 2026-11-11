@@ -24,17 +24,19 @@ func CollectUserStorageKeys(storage domain.IStorageService, target domain.Manage
 }
 
 // CollectVisitStorageKeys returns the bucket keys a visit purge would orphan:
-// the assignment letter, every visitor's KTP and selfie, and the check-in
-// photo (nil checkIn means the visit never checked in). The child rows go
-// away with the visit through ON DELETE CASCADE, so every key must be read
-// while the rows are still there — row-first, object-second. The reversal
-// rule matches CollectUserStorageKeys: blanks are skipped silently,
+// the assignment letter, every visitor's KTP and selfie, the check-in photo
+// (nil checkIn means the visit never checked in), plus any extra stored URLs
+// the caller hands over — the purge caller passes the visit's work photo
+// URLs because the visit row itself carries no work-photo members. The child
+// rows go away with the visit through ON DELETE CASCADE, so every key must
+// be read while the rows are still there — row-first, object-second. The
+// reversal rule matches CollectUserStorageKeys: blanks are skipped silently,
 // unresolvable URLs are logged and skipped.
-func CollectVisitStorageKeys(storage domain.IStorageService, visit domain.VisitRequest, checkIn *domain.CheckIn) []string {
+func CollectVisitStorageKeys(storage domain.IStorageService, visit domain.VisitRequest, checkIn *domain.CheckIn, extraURLs ...string) []string {
 	if storage == nil {
 		return nil
 	}
-	raws := make([]string, 0, 2+2*len(visit.Visitors))
+	raws := make([]string, 0, 2+2*len(visit.Visitors)+len(extraURLs))
 	if visit.AssignmentLetterURL != nil {
 		raws = append(raws, *visit.AssignmentLetterURL)
 	}
@@ -49,6 +51,7 @@ func CollectVisitStorageKeys(storage domain.IStorageService, visit domain.VisitR
 	if checkIn != nil && checkIn.PhotoURL != nil {
 		raws = append(raws, *checkIn.PhotoURL)
 	}
+	raws = append(raws, extraURLs...)
 	return collectStoredKeys(storage, raws...)
 }
 

@@ -77,9 +77,11 @@ func TestSuperAdmin_VendorApproveSendsApprovedMail(t *testing.T) {
 	}
 }
 
-// TestSuperAdmin_VendorRejectSendsNoMail pins the negative leg: inactive sends
-// zero vendor mails (resolve still drains with approved=false).
-func TestSuperAdmin_VendorRejectSendsNoMail(t *testing.T) {
+// TestSuperAdmin_VendorRejectSendsRejectedMail pins the reject leg: flipping
+// a pending vendor to inactive mails the vendor inbox exactly once (belum
+// disetujui copy, NO login CTA since the rejected account cannot log in)
+// while the 200 still stands. Resolve still drains with approved=false.
+func TestSuperAdmin_VendorRejectSendsRejectedMail(t *testing.T) {
 	target := managedAccount("vendor-7", "vendor7@vendor.example", domain.RoleVendor, nil)
 	target.User.Status = domain.UserStatusPending
 	users := newStubManagedUsers(target)
@@ -92,8 +94,61 @@ func TestSuperAdmin_VendorRejectSendsNoMail(t *testing.T) {
 	if resolver.calls != 1 || len(resolver.approved) != 1 || resolver.approved[0] {
 		t.Fatalf("resolver calls = %d approved = %v, want exactly one rejected resolve", resolver.calls, resolver.approved)
 	}
+	if len(mailer.Calls) != 1 {
+		t.Fatalf("mailer calls = %d, want exactly 1 rejected notice", len(mailer.Calls))
+	}
+	call := mailer.Calls[0]
+	if len(call.To) != 1 || !strings.EqualFold(call.To[0], "vendor7@vendor.example") {
+		t.Fatalf("rejected notice to = %v, want the vendor inbox only", call.To)
+	}
+	if call.Subject != "[THC-VMS] Pendaftaran Vendor Belum Disetujui" {
+		t.Fatalf("rejected subject = %q, want the belum-disetujui subject", call.Subject)
+	}
+	lower := strings.ToLower(call.TextBody + " " + call.HTMLBody)
+	if !strings.Contains(lower, "belum disetujui") || !strings.Contains(lower, "hubungi admin") {
+		t.Fatalf("rejected copy = %q / %q, want belum-disetujui + hubungi-admin wording", call.TextBody, call.HTMLBody)
+	}
+	if strings.Contains(call.HTMLBody, "/login") {
+		t.Fatalf("rejected html must NOT carry a /login CTA, got %q", call.HTMLBody)
+	}
+}
+
+// TestSuperAdmin_VendorRejectRepeatSendsNoMail pins idempotency: repeating
+// PATCH inactive on an already-inactive vendor flips nothing new, so the
+// rejected notice must NOT resend (mailer calls stay at 1). The suspension
+// edge active -> inactive stays silent by the same pending-only gate.
+func TestSuperAdmin_VendorRejectRepeatSendsNoMail(t *testing.T) {
+	target := managedAccount("vendor-7", "vendor7@vendor.example", domain.RoleVendor, nil)
+	target.User.Status = domain.UserStatusPending
+	users := newStubManagedUsers(target)
+	mailer := &domain.FakeMailer{}
+	resolver := &fakeStatusResolver{}
+	engine := newStatusEngine(users, mailer, resolver)
+
+	mustStatus(t, serveJSON(engine, "PATCH", "/users/vendor-7/status", `{"status":"inactive"}`), http.StatusOK)
+	// Repeat: target status is now inactive, so the pending-only gate skips.
+	mustStatus(t, serveJSON(engine, "PATCH", "/users/vendor-7/status", `{"status":"inactive"}`), http.StatusOK)
+
+	if len(mailer.Calls) != 1 {
+		t.Fatalf("mailer calls = %d, want exactly 1 (no resend on repeat inactive)", len(mailer.Calls))
+	}
+}
+
+// TestSuperAdmin_VendorSuspendSendsNoMail pins the suspension edge: active ->
+// inactive is an admin suspension, not a registration decision, so it mails
+// nothing while the 200 still stands.
+func TestSuperAdmin_VendorSuspendSendsNoMail(t *testing.T) {
+	target := managedAccount("vendor-6", "vendor6@vendor.example", domain.RoleVendor, nil)
+	target.User.Status = domain.UserStatusActive
+	users := newStubManagedUsers(target)
+	mailer := &domain.FakeMailer{}
+	resolver := &fakeStatusResolver{}
+	engine := newStatusEngine(users, mailer, resolver)
+
+	mustStatus(t, serveJSON(engine, "PATCH", "/users/vendor-6/status", `{"status":"inactive"}`), http.StatusOK)
+
 	if len(mailer.Calls) != 0 {
-		t.Fatalf("mailer calls = %d, want 0 on reject/inactive", len(mailer.Calls))
+		t.Fatalf("mailer calls = %d, want 0 on suspension (active->inactive)", len(mailer.Calls))
 	}
 }
 

@@ -214,7 +214,7 @@ describe('VisitCards — kontrak baris "Lihat SPK" (mobile)', () => {
     }
   })
 
-  it('tujuan lain: purposes kosong menampilkan purpose_note dengan ellipsis + title penuh', () => {
+  it('keperluan lain: purposes kosong menampilkan purpose_note dengan ellipsis + title penuh', () => {
     const note = 'Perbaikan kabel drop core di shelter belakang kantor cabang Sambas'
     renderVisitCards({ visits: [buildVisit({ purposes: [], purpose_note: note })] })
 

@@ -759,7 +759,7 @@ export const handlers: RequestHandler[] = [
     const endDate = stringField(body, 'end_date') ?? '';
     const visitors = body['visitors'];
     const purposeIds = body['purpose_ids'];
-    // "Tujuan lain" (kontrak baru): teks manual ≤200; `purpose_ids` boleh
+    // "Keperluan lain" (kontrak baru): teks manual ≤200; `purpose_ids` boleh
     // kosong selama field ini terisi (cermin BE).
     const purposeNoteRaw = stringField(body, 'purpose_note');
     const purposeNote =
@@ -773,7 +773,7 @@ export const handlers: RequestHandler[] = [
       return fail('BAD_REQUEST', 'Lokasi wajib dipilih.', 400);
     }
     if (purposeNote !== null && purposeNote.length > 200) {
-      return fail('BAD_REQUEST', 'Tujuan lain maksimal 200 karakter.', 400);
+      return fail('BAD_REQUEST', 'Keperluan lain maksimal 200 karakter.', 400);
     }
     const purposeIdList: unknown[] = Array.isArray(purposeIds)
       ? purposeIds
@@ -781,7 +781,7 @@ export const handlers: RequestHandler[] = [
     if (purposeIdList.length === 0 && purposeNote === null) {
       return fail(
         'BAD_REQUEST',
-        'Pilih minimal satu tujuan kunjungan atau isi tujuan lain.',
+        'Pilih minimal satu tujuan kunjungan atau isi keperluan lain.',
         400,
       );
     }

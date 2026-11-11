@@ -81,7 +81,7 @@ export const SEARCH_QUERY_MAX_LENGTH = 100
 /** Panjang maksimum nama tujuan kunjungan (katalog). */
 export const PURPOSE_NAME_MAX_LENGTH = 100
 
-/** Panjang maksimum teks bebas "Tujuan lain" (kontrak CreateVisitRequest). */
+/** Panjang maksimum teks bebas "Keperluan lain" (kontrak CreateVisitRequest). */
 export const PURPOSE_NOTE_MAX_LENGTH = 200
 
 // --- Transport HTTP ---------------------------------------------------------

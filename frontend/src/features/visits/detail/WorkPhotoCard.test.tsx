@@ -142,6 +142,20 @@ describe('WorkPhotoCard — slot terisi', () => {
       screen.getByRole('button', { name: 'Unggah foto bukti sesudah kerja' }),
     ).toBeEnabled()
   })
+
+  it('tombol Lihat membuka dialog pratinjau modal, bukan tab baru', () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    try {
+      renderCard({ status: 'visiting', canEdit: true, before: PHOTO })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Lihat foto bukti sebelum kerja' }))
+
+      expect(screen.getByText('Pratinjau foto bukti sebelum kerja')).toBeInTheDocument()
+      expect(openSpy).not.toHaveBeenCalled()
+    } finally {
+      openSpy.mockRestore()
+    }
+  })
 })
 
 describe('WorkPhotoCard — terkunci setelah check-out', () => {

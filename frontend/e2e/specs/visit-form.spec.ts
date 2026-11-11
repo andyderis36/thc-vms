@@ -129,7 +129,7 @@ interface FillVisitOptions {
   start: string
   end: string
   members: MemberInput[]
-  /** Pilih tujuan dari katalog; false untuk jalur "Tujuan lain". */
+  /** Pilih tujuan dari katalog; false untuk jalur "Keperluan lain". */
   pickCatalogPurpose?: boolean
   purposeNote?: string
   notes?: string
@@ -236,7 +236,7 @@ async function fillVisitForm(page: Page, options: FillVisitOptions): Promise<voi
   await pickLocation(page, catalog.facilityName)
 
   // Katalog tujuan bisa kosong di prod: tanpa purpose runtime, pakai jalur
-  // "Tujuan lain" (purpose_note) agar submit tetap valid.
+  // "Keperluan lain" (purpose_note) agar submit tetap valid.
   const catalogAvailable =
     options.pickCatalogPurpose !== false && catalog.purposeName !== undefined
   if (catalogAvailable) {
@@ -635,7 +635,7 @@ test('@VISIT-05 tiga anggota sekaligus tersimpan lengkap', async ({ h }) => {
   expect(raw.visitors?.every((visitor) => visitor.photo_url)).toBe(true)
 })
 
-test('@VISIT-08 jalur di luar katalog: Tujuan lain + vendor manual tersimpan', async ({ h }) => {
+test('@VISIT-08 jalur di luar katalog: Keperluan lain + vendor manual tersimpan', async ({ h }) => {
   const page = await h.openAs('vendor')
   const marker = h.unique('visit08')
   markers.push(marker)

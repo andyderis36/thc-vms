@@ -88,7 +88,7 @@ func buildEmailText(visit VisitRequest, tpl *NotificationTemplate, base string) 
 		b.WriteString("Keperluan: " + purposes + "\n")
 	}
 	if purposeNote := strings.TrimSpace(derefString(visit.PurposeNote)); purposeNote != "" {
-		b.WriteString("Tujuan lain: " + purposeNote + "\n")
+		b.WriteString("Keperluan lain: " + purposeNote + "\n")
 	}
 	if requester := ActorLine(derefString(visit.CreatedByName), derefString(visit.CreatedByRoleLabel)); requester != "" {
 		b.WriteString("Diajukan oleh: " + requester + "\n")
@@ -159,7 +159,7 @@ func renderEmailHTML(visit VisitRequest, tpl *NotificationTemplate, base string)
 		writeEmailRow(&rows, "Keperluan", purposes)
 	}
 	if purposeNote := strings.TrimSpace(derefString(visit.PurposeNote)); purposeNote != "" {
-		writeEmailRow(&rows, "Tujuan lain", purposeNote)
+		writeEmailRow(&rows, "Keperluan lain", purposeNote)
 	}
 	if requester := ActorLine(derefString(visit.CreatedByName), derefString(visit.CreatedByRoleLabel)); requester != "" {
 		writeEmailRow(&rows, "Diajukan oleh", requester)

@@ -2,6 +2,7 @@ package visit
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"thc-vms/backend/internal/domain"
@@ -58,5 +59,44 @@ func (s *Service) AttachWorkPhoto(ctx context.Context, actor Actor, visitID doma
 	if err := s.validatePhotoURL(trimmed); err != nil {
 		return domain.WorkPhoto{}, false, err
 	}
-	return s.visits.AttachWorkPhoto(ctx, visit.ID, parsed, trimmed, actor.ID)
+	// Remember the currently stored URL so a replacement can delete the
+	// orphaned object afterwards: the upsert below overwrites the row, and
+	// neither the reaper (pending/-only scope) nor the visit purge would
+	// ever see the old key again. A lookup failure degrades to no cleanup
+	// (fail open on the delete, never on the write).
+	previousURL := ""
+	if s.storage != nil {
+		if existing, err := s.visits.ListWorkPhotos(ctx, visit.ID); err == nil {
+			for _, photo := range existing {
+				if photo.Kind == parsed {
+					previousURL = strings.TrimSpace(photo.URL)
+				}
+			}
+		}
+	}
+	photo, created, err := s.visits.AttachWorkPhoto(ctx, visit.ID, parsed, trimmed, actor.ID)
+	if err != nil {
+		return domain.WorkPhoto{}, false, err
+	}
+	s.deleteReplacedWorkPhoto(ctx, previousURL, trimmed)
+	return photo, created, nil
+}
+
+// deleteReplacedWorkPhoto removes the previous slot object after a
+// replacement attach. Best-effort: a nil storage, an unresolvable URL, the
+// same URL re-attached, or a delete failure only skips/logs — the committed
+// write already stands and the leftover stays reaper-visible, never a
+// dangling reference.
+func (s *Service) deleteReplacedWorkPhoto(ctx context.Context, previousURL, currentURL string) {
+	if s.storage == nil || previousURL == "" || previousURL == currentURL {
+		return
+	}
+	key, err := s.storage.ObjectKeyFromStoredURL(previousURL)
+	if err != nil || key == "" {
+		slog.Warn("visit: replaced work photo kept: unresolvable previous URL", "error", err)
+		return
+	}
+	if err := s.storage.DeleteObject(ctx, key); err != nil {
+		slog.Warn("visit: replaced work photo delete failed", "key", key, "error", err)
+	}
 }
