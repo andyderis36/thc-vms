@@ -288,12 +288,13 @@ describe('Timeline jejak status (history)', () => {
 
     expect(screen.getByText('Status akhir')).toBeInTheDocument()
     expect(within(screen.getByText('Status akhir').closest('li')!).getByText(REASON)).toBeInTheDocument()
-    expect(container.querySelectorAll('ol > li')).toHaveLength(2)
+    expect(container.querySelectorAll('ol > li')).toHaveLength(3)
 
     const nodes = stepNodes(container)
-    expect(nodes).toHaveLength(1)
-    expect(nodes[0]!.textContent).toContain('Ditolak')
-    expect(nodes[0]!.textContent).toContain(
+    expect(nodes).toHaveLength(2)
+    expect(nodes[0]!.textContent).toContain('Pengajuan')
+    expect(nodes[1]!.textContent).toContain('Ditolak')
+    expect(nodes[1]!.textContent).toContain(
       `oleh Siti Rahayu (Admin Cabang) · ${formatTanggalWaktu(APPROVED_AT)}`,
     )
   })
