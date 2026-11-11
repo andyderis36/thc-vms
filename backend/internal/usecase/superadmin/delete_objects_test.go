@@ -185,6 +185,31 @@ func TestCollectVisitStorageKeys(t *testing.T) {
 		}
 	})
 
+	t.Run("appends work photo URLs handed over as extras", func(t *testing.T) {
+		keys := superadmin.CollectVisitStorageKeys(storage, seeded, nil,
+			storedURL("work_photos/visit-1/before.jpg"),
+			"",
+			storedURL("work_photos/visit-1/after.jpg"),
+		)
+		want := []string{
+			"assignment_letters/visit-1/spk.pdf",
+			"id_cards/vis-1/ktp.jpg",
+			"profile_photos/vis-1/selfie.jpg",
+			"id_cards/vis-2/ktp.jpg",
+			"profile_photos/vis-2/selfie.jpg",
+			"work_photos/visit-1/before.jpg",
+			"work_photos/visit-1/after.jpg",
+		}
+		if len(keys) != len(want) {
+			t.Fatalf("keys = %v, want %v", keys, want)
+		}
+		for i := range want {
+			if keys[i] != want[i] {
+				t.Fatalf("keys = %v, want %v", keys, want)
+			}
+		}
+	})
+
 	t.Run("nil storage collects nothing", func(t *testing.T) {
 		if keys := superadmin.CollectVisitStorageKeys(nil, seeded, checkIn); keys != nil {
 			t.Fatalf("keys = %v, want nil when storage is unwired", keys)

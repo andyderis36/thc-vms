@@ -85,8 +85,88 @@ func TestAttachWorkPhoto_ReattachReplacesSingleRow(t *testing.T) {
 	}
 }
 
-// Given visits outside the execution window, when a proof is attached, then
-// the write is refused with a conflict and records zero writes.
+// recordingStorage extends fakeFileStorage with a DeleteObject ledger so the
+// replace-cleanup tests can prove the old object is really removed.
+type recordingStorage struct {
+	fakeFileStorage
+	deleted  []string
+	deleteErr error
+}
+
+func (f *recordingStorage) DeleteObject(_ context.Context, key string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deleted = append(f.deleted, key)
+	return nil
+}
+
+// Given an attached before proof, when the slot is replaced, then the old
+// object key is deleted from storage exactly once.
+func TestAttachWorkPhoto_ReplaceDeletesOldObject(t *testing.T) {
+	repo := newFakeVisitRepo(t)
+	seedVisitingVisit(repo)
+	files := &recordingStorage{}
+	svc := newTestService(repo, nil, testNow()).WithFileLinks(files, 15*time.Minute)
+	owner := testActor(domain.RoleVendor, "vendor-1", "")
+
+	first := workPhotoURL("before")
+	if _, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", first); err != nil || !created {
+		t.Fatalf("first attach = (created=%v, err=%v), want (true, nil)", created, err)
+	}
+	if len(files.deleted) != 0 {
+		t.Fatalf("deleted = %v on first attach, want no delete", files.deleted)
+	}
+	second := presignTestBase + "/work_photos/visit-1/before-v2.jpg"
+	if _, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", second); err != nil || created {
+		t.Fatalf("re-attach = (created=%v, err=%v), want (false, nil)", created, err)
+	}
+	if len(files.deleted) != 1 || files.deleted[0] != "work_photos/visit-1/before.jpg" {
+		t.Fatalf("deleted = %v, want exactly the old key", files.deleted)
+	}
+}
+
+// Given a replacement attach, when the storage delete fails, then the write
+// still stands (best-effort cleanup never fails the attach).
+func TestAttachWorkPhoto_ReplaceDeleteFailureStillSucceeds(t *testing.T) {
+	repo := newFakeVisitRepo(t)
+	seedVisitingVisit(repo)
+	files := &recordingStorage{deleteErr: errors.New("minio down")}
+	svc := newTestService(repo, nil, testNow()).WithFileLinks(files, 15*time.Minute)
+	owner := testActor(domain.RoleVendor, "vendor-1", "")
+
+	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before")); err != nil {
+		t.Fatalf("first attach err = %v, want nil", err)
+	}
+	photo, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", presignTestBase+"/work_photos/visit-1/before-v2.jpg")
+	if err != nil {
+		t.Fatalf("re-attach err = %v, want nil despite delete failure", err)
+	}
+	if created || photo.URL == workPhotoURL("before") {
+		t.Fatalf("replacement did not land: created=%v url=%q", created, photo.URL)
+	}
+}
+
+// Given the same URL re-attached, when the slot is written again, then no
+// delete runs (there is no orphan to remove).
+func TestAttachWorkPhoto_SameURLReattachDeletesNothing(t *testing.T) {
+	repo := newFakeVisitRepo(t)
+	seedVisitingVisit(repo)
+	files := &recordingStorage{}
+	svc := newTestService(repo, nil, testNow()).WithFileLinks(files, 15*time.Minute)
+	owner := testActor(domain.RoleVendor, "vendor-1", "")
+
+	url := workPhotoURL("before")
+	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", url); err != nil {
+		t.Fatalf("first attach err = %v, want nil", err)
+	}
+	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", url); err != nil {
+		t.Fatalf("same-URL re-attach err = %v, want nil", err)
+	}
+	if len(files.deleted) != 0 {
+		t.Fatalf("deleted = %v, want no delete for identical URL", files.deleted)
+	}
+}
 func TestAttachWorkPhoto_OutsideVisitingIsConflict(t *testing.T) {
 	for name, status := range map[string]domain.VisitStatus{
 		"requested":   domain.VisitStatusRequested,

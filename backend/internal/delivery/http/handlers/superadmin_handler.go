@@ -1610,7 +1610,18 @@ func (h *SuperAdminHandler) DeleteVisit(c *gin.Context) {
 		if visit.VisitID != "" {
 			meta["visit_code"] = visit.VisitID
 		}
-		keys = superadmin.CollectVisitStorageKeys(h.storage, visit, h.findCheckIn(ctx, targetID))
+		// Work proofs live in their own table, so their URLs are collected
+		// separately; a lookup failure degrades to row-only cleanup (missed
+		// keys become reaper-visible orphans, never dangling references).
+		var photoURLs []string
+		if photos, err := h.visits.ListWorkPhotos(ctx, targetID); err == nil {
+			for _, photo := range photos {
+				photoURLs = append(photoURLs, photo.URL)
+			}
+		} else {
+			slog.Warn("superadmin: work photo keys skipped for storage cleanup", "visit_id", string(targetID), "error", err)
+		}
+		keys = superadmin.CollectVisitStorageKeys(h.storage, visit, h.findCheckIn(ctx, targetID), photoURLs...)
 	}
 	entry := auditEntry(c, actor.UserID, domain.AuditActionVisitDelete,
 		domain.AuditEntityVisit, &targetID, meta)
