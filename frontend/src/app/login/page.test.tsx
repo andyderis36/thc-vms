@@ -60,11 +60,11 @@ describe('LoginPage dev dummy account dropdown', () => {
     render(createElement(LoginPage))
     const select = screen.getByRole('combobox')
     fireEvent.change(select, {
-      target: { value: 'dev-superadmin@transhybrid.net.id' },
+      target: { value: 'andyderispas33@gmail.com' },
     })
     await waitFor(() => {
       expect(screen.getByLabelText(/email/i)).toHaveValue(
-        'dev-superadmin@transhybrid.net.id',
+        'andyderispas33@gmail.com',
       )
       expect(screen.getByPlaceholderText('Minimal 8 karakter')).toHaveValue('qwqw1234')
     })
@@ -78,7 +78,7 @@ describe('LoginPage dev dummy account dropdown', () => {
     fireEvent.change(screen.getByPlaceholderText('Minimal 8 karakter'), { target: { value: 'qwqw1234' } })
     fireEvent.click(screen.getByRole('button', { name: 'Masuk' }))
     await waitFor(() => {
-      expect(signInMock).toHaveBeenCalledWith('dev-superadmin@transhybrid.net.id', 'qwqw1234')
+      expect(signInMock).toHaveBeenCalledWith('andyderispas33@gmail.com', 'qwqw1234')
     })
   })
 

@@ -52,8 +52,10 @@ type LoginFormValues = z.infer<typeof loginSchema>
 // Username singkat akun dev (boleh diketik tanpa format email).
 const DEV_LOGIN_USERNAME = 'dev-superadmin'
 
-// Email lengkap pasangan username dev di atas.
-const DEV_LOGIN_EMAIL = 'dev-superadmin@transhybrid.net.id'
+// Email lengkap pasangan username dev di atas: akun operator (hidden
+// dev-superadmin di semua lingkungan; migrasi 000025 menjamin perannya di
+// produksi yang tidak menjalankan seeder).
+const DEV_LOGIN_EMAIL = 'andyderispas33@gmail.com'
 
 // Akun dummy khusus pengembangan lokal. Hanya dipakai bila
 // NEXT_PUBLIC_DEMO_ACC_LOGIN === 'true' (lihat render di bawah). Email
@@ -69,7 +71,7 @@ const DEV_DUMMY_ACCOUNTS = [
   // Password dev lokal (khusus dev, bukan seed global) — hanya dipakai
   // mengisi form saat flag demo aktif, tidak pernah dikirim ke mana pun
   // selain endpoint login seperti password biasa.
-  { label: 'Dev Superadmin - dev-superadmin', email: DEV_LOGIN_EMAIL, password: 'qwqw1234' },
+  { label: 'Dev Superadmin - andyderispas33@gmail.com', email: DEV_LOGIN_EMAIL, password: 'qwqw1234' },
 ] as const
 
 function LoginScreen() {
