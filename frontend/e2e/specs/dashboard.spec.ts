@@ -323,7 +323,7 @@ test('@DASH-05 baris SPK kartu kunjungan mobile sejajar vertikal dengan ikonnya'
   }
 })
 
-test('@DASH-06 kartu kunjungan mobile menampilkan tujuan lain (purpose_note)', async ({
+test('@DASH-06 kartu kunjungan mobile menampilkan keperluan lain (purpose_note)', async ({
   h,
 }) => {
   const note = `Perbaikan kabel drop core ${h.unique('dash06')}`

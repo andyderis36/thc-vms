@@ -670,10 +670,10 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                 />
                 <InfoRow label="Lokasi" value={visit.location.name} />
                 <InfoRow label="Keperluan" value={purposeChips} />
-                {/* "Tujuan lain" (purpose_note) hanya bila terisi. */}
+                {/* "Keperluan lain" (purpose_note) hanya bila terisi. */}
                 {visit.purpose_note != null &&
                 visit.purpose_note.trim() !== '' ? (
-                  <InfoRow label="Tujuan lain" value={visit.purpose_note} />
+                  <InfoRow label="Keperluan lain" value={visit.purpose_note} />
                 ) : null}
                 <InfoRow
                   label="Rentang Waktu"

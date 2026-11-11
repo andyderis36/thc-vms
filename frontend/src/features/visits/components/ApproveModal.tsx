@@ -52,10 +52,10 @@ export function VisitSummary({ visit, hideVendor = false }: VisitSummaryProps) {
       </p>
       <p className="text-ink-secondary">{visit.location.name}</p>
       <p className="text-ink-secondary">{purposes}</p>
-      {/* "Tujuan lain" (purpose_note) hanya bila terisi — label Indonesia. */}
-      {purposeNote !== '' ? (
-        <p className="text-ink-secondary">
-          <span className="text-ink">Tujuan lain:</span> {purposeNote}
+{/* "Keperluan lain" (purpose_note) hanya bila terisi — label Indonesia. */}
+       {purposeNote !== '' ? (
+         <p className="text-ink-secondary">
+           <span className="text-ink">Keperluan lain:</span> {purposeNote}
         </p>
       ) : null}
       <p className="text-ink-secondary">{formatVisitSchedule(visit)}</p>

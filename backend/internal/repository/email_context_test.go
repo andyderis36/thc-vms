@@ -53,7 +53,7 @@ func TestEmailEnqueue_ApprovedCarriesRichContext(t *testing.T) {
 	textWants := []string{
 		"Vendor/Perusahaan: PT Override Karya",
 		"Keperluan: Maintenance Genset, Splicing FO",
-		"Tujuan lain: Cek backbone",
+		"Keperluan lain: Cek backbone",
 		"Catatan: Bawa alat ukur",
 		"Anggota tim: Andi, Budi (PT Sub Mitra)",
 	}
@@ -69,7 +69,7 @@ func TestEmailEnqueue_ApprovedCarriesRichContext(t *testing.T) {
 	htmlWants := []string{
 		"Vendor/Perusahaan", "PT Override Karya",
 		"Keperluan", "Maintenance Genset, Splicing FO",
-		"Tujuan lain", "Cek backbone",
+		"Keperluan lain", "Cek backbone",
 		"Catatan", "Bawa alat ukur",
 		"Budi (PT Sub Mitra)",
 	}

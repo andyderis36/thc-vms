@@ -102,7 +102,7 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 		return domain.VisitRequest{}, domain.ValidationFailure("Minimal satu tujuan kunjungan wajib dipilih atau ditulis.")
 	}
 	if len([]rune(strings.TrimSpace(in.PurposeNote))) > maxPurposeNoteLen {
-		return domain.VisitRequest{}, domain.ValidationFailure("Tujuan lain kunjungan maksimal 200 karakter.")
+		return domain.VisitRequest{}, domain.ValidationFailure("Keperluan lain kunjungan maksimal 200 karakter.")
 	}
 	if len([]rune(strings.TrimSpace(textOrEmpty(in.VendorName)))) > maxManualVendorNameLen {
 		return domain.VisitRequest{}, domain.ValidationFailure("Nama perusahaan vendor/mitra maksimal 120 karakter.")

@@ -267,7 +267,7 @@ describe('visitFormSchema — email anggota (opsional)', () => {
   })
 })
 
-describe('visitFormSchema — batas catatan dan tujuan lain', () => {
+describe('visitFormSchema — batas catatan dan keperluan lain', () => {
   it('menolak notes lebih dari TEXT_MAX_LENGTH karakter', () => {
     const result = visitFormSchema.safeParse(
       baseForm({ notes: 'a'.repeat(TEXT_MAX_LENGTH + 1) }),
@@ -294,7 +294,7 @@ describe('visitFormSchema — batas catatan dan tujuan lain', () => {
 
     expect(result.success).toBe(false)
     expect(issueAt(result, 'purpose_note')?.message).toBe(
-      `Tujuan lain maksimal ${PURPOSE_NOTE_MAX_LENGTH} karakter.`,
+      `Keperluan lain maksimal ${PURPOSE_NOTE_MAX_LENGTH} karakter.`,
     )
   })
 

@@ -20,13 +20,13 @@ import (
 // repository builds it.
 func lifecycleTemplates(visitCode string) map[domain.NotificationType]*domain.NotificationTemplate {
 	return map[domain.NotificationType]*domain.NotificationTemplate{
-		domain.NotificationVisitApproved:    domain.TransitionNotification(domain.VisitStatusApproved, false, visitCode),
-		domain.NotificationVisitRejected:    domain.TransitionNotification(domain.VisitStatusRejected, false, visitCode),
+		domain.NotificationVisitApproved:    domain.TransitionNotification(domain.VisitStatusApproved, false, visitCode, ""),
+		domain.NotificationVisitRejected:    domain.TransitionNotification(domain.VisitStatusRejected, false, visitCode, ""),
 		domain.NotificationVisitCancelled:   domain.HumanCancelledNotification(visitCode, false, "Budi Santoso (Admin Cabang)"),
-		domain.NotificationVisitRescheduled: domain.TransitionNotification(domain.VisitStatusRescheduled, false, visitCode),
+		domain.NotificationVisitRescheduled: domain.TransitionNotification(domain.VisitStatusRescheduled, false, visitCode, ""),
 		domain.NotificationVisitReminder:    domain.ReminderNotification(visitCode),
-		domain.NotificationVisitCheckIn:     domain.TransitionNotification(domain.VisitStatusVisiting, false, visitCode),
-		domain.NotificationVisitCheckOut:    domain.TransitionNotification(domain.VisitStatusCompleted, false, visitCode),
+		domain.NotificationVisitCheckIn:     domain.TransitionNotification(domain.VisitStatusVisiting, false, visitCode, ""),
+		domain.NotificationVisitCheckOut:    domain.TransitionNotification(domain.VisitStatusCompleted, false, visitCode, ""),
 	}
 }
 
@@ -230,7 +230,7 @@ func TestBuildEmail_HTMLEscapesAllFields(t *testing.T) {
 func TestBuildEmail_HTMLOmitsReasonWhenAbsent(t *testing.T) {
 	visit := testVisit()
 	visit.StatusNote = nil
-	tpl := domain.TransitionNotification(domain.VisitStatusApproved, false, visit.VisitID)
+	tpl := domain.TransitionNotification(domain.VisitStatusApproved, false, visit.VisitID, "")
 	_, _, htmlBody := domain.BuildEmail(visit, tpl)
 	if strings.Contains(htmlBody, "Berkas kurang lengkap") {
 		t.Errorf("htmlBody should omit the reason row when StatusNote is nil:\n%s", htmlBody)
@@ -299,13 +299,13 @@ func TestBuildEmail_RendersCompanyPurposesNotes(t *testing.T) {
 	notes := " Bawa alat ukur dan APD "
 	visit.PurposeNote = &purposeNote
 	visit.Notes = &notes
-	tpl := domain.TransitionNotification(domain.VisitStatusApproved, false, visit.VisitID)
+	tpl := domain.TransitionNotification(domain.VisitStatusApproved, false, visit.VisitID, "")
 
 	_, textBody, htmlBody := domain.BuildEmail(visit, tpl)
 	textRows := []string{
 		"Vendor/Perusahaan: PT Lintas Fiber",
 		"Keperluan: Maintenance Genset, Splicing FO",
-		"Tujuan lain: Cek backbone POP Tebet",
+		"Keperluan lain: Cek backbone POP Tebet",
 		"Catatan: Bawa alat ukur dan APD",
 	}
 	for _, want := range textRows {
@@ -316,7 +316,7 @@ func TestBuildEmail_RendersCompanyPurposesNotes(t *testing.T) {
 	for _, frag := range []string{
 		"Vendor/Perusahaan", "PT Lintas Fiber",
 		"Keperluan", "Maintenance Genset, Splicing FO",
-		"Tujuan lain", "Cek backbone POP Tebet",
+		"Keperluan lain", "Cek backbone POP Tebet",
 		"Catatan", "Bawa alat ukur dan APD",
 	} {
 		if !strings.Contains(htmlBody, frag) {
@@ -341,10 +341,10 @@ func TestBuildEmail_OmitsEmptyExtraContextRows(t *testing.T) {
 	visit.Purposes = nil
 	visit.PurposeNote = nil
 	visit.Notes = nil
-	tpl := domain.TransitionNotification(domain.VisitStatusApproved, false, visit.VisitID)
+	tpl := domain.TransitionNotification(domain.VisitStatusApproved, false, visit.VisitID, "")
 
 	_, textBody, htmlBody := domain.BuildEmail(visit, tpl)
-	for _, forbidden := range []string{"Vendor/Perusahaan", "Keperluan", "Tujuan lain", "Catatan"} {
+	for _, forbidden := range []string{"Vendor/Perusahaan", "Keperluan", "Keperluan lain", "Catatan"} {
 		if strings.Contains(textBody, forbidden) || strings.Contains(htmlBody, forbidden) {
 			t.Errorf("empty context row %q must be omitted", forbidden)
 		}
@@ -361,7 +361,7 @@ func TestBuildEmail_EscapesExtraContextRows(t *testing.T) {
 	visit.PurposeNote = &purposeNote
 	visit.Notes = &notes
 	visit.Purposes = []domain.Purpose{{Name: "<i>Splicing</i>"}}
-	tpl := domain.TransitionNotification(domain.VisitStatusApproved, false, visit.VisitID)
+	tpl := domain.TransitionNotification(domain.VisitStatusApproved, false, visit.VisitID, "")
 
 	_, _, htmlBody := domain.BuildEmail(visit, tpl)
 	for _, raw := range []string{
@@ -385,7 +385,7 @@ func TestBuildEmail_VisitorNamesCarryCompany(t *testing.T) {
 		{Name: " Citra ", VendorName: " PT Gamma "},
 		{Name: "   "},
 	}
-	tpl := domain.TransitionNotification(domain.VisitStatusApproved, false, visit.VisitID)
+	tpl := domain.TransitionNotification(domain.VisitStatusApproved, false, visit.VisitID, "")
 
 	_, textBody, htmlBody := domain.BuildEmail(visit, tpl)
 	want := "Andi (PT Alpha), Budi, Citra (PT Gamma)"

@@ -317,7 +317,7 @@ export function VisitForm() {
       ...(visitVendorUserId !== '' ? { vendor_user_id: visitVendorUserId } : {}),
       ...(visitVendorName !== '' ? { vendor_name: visitVendorName } : {}),
       purpose_ids: matchedPurposeIds,
-      // "Tujuan lain" mengisi kontrak `purpose_note` (≤200); `purpose_ids`
+      // "Keperluan lain" mengisi kontrak `purpose_note` (≤200); `purpose_ids`
       // boleh kosong selama field ini terisi (divalidasi zod sebelum submit).
       ...(purposeNote !== '' ? { purpose_note: purposeNote } : {}),
       start_date: new Date(values.start_date).toISOString(),
@@ -492,13 +492,13 @@ export function VisitForm() {
                 error={errors.purpose_ids?.message}
               />
 
-              {/* Tujuan bebas-teks — memetakan ke `purpose_note`. Teks di sini
-                  TIDAK pernah menjadi saran/salinan tujuan dari katalog. */}
+{/* Keperluan bebas-teks — memetakan ke `purpose_note`. Teks di sini
+                   TIDAK pernah menjadi saran/salinan tujuan dari katalog. */}
               <Input
                 id="visit-purpose-note"
-                label="Tujuan lain (opsional)"
-                placeholder="Tulis tujuan bila tidak ada di daftar"
-                hint="Opsional — maksimal 200 karakter. Cukup isi bila tidak memilih tujuan dari daftar."
+                label="Keperluan lain (opsional)"
+                placeholder="Tulis keperluan bila tidak ada di daftar"
+                hint="Opsional — maksimal 200 karakter. Cukup isi bila tidak memilih keperluan dari daftar."
                 autoComplete="off"
                 maxLength={PURPOSE_NOTE_MAX_LENGTH}
                 error={errors.purpose_note?.message}

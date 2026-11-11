@@ -351,7 +351,7 @@ export interface VisitDetail {
    */
   assignment_letter_url: string | null;
   notes: string | null;
-  /** "Tujuan lain" (teks bebas ≤200) — null/kosong bila tak diisi. */
+  /** "Keperluan lain" (teks bebas ≤200) — null/kosong bila tak diisi. */
   purpose_note?: string | null;
   status_note?: string | null;
   visitors: VisitorItem[];
@@ -597,7 +597,7 @@ export interface CreateVisitRequest {
    */
   vendor_name?: string;
   purpose_ids: string[];
-  /** "Tujuan lain" (≤200) — boleh terisi walau `purpose_ids` kosong. */
+  /** "Keperluan lain" (≤200) — boleh terisi walau `purpose_ids` kosong. */
   purpose_note?: string | null;
   start_date: string;
   end_date: string;
