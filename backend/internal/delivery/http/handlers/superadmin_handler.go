@@ -948,6 +948,16 @@ func (h *SuperAdminHandler) UpdateUserStatus(c *gin.Context) {
 	if updated.Role == domain.RoleVendor && status == domain.UserStatusActive {
 		h.sendVendorApprovedNotice(ctx, updated.User.Email)
 	}
+	// Rejecting a pending vendor (pending -> inactive only, never a
+	// suspension active -> inactive or a repeat inactive -> inactive) mails
+	// the vendor inbox its not-approved notice. The gate reads
+	// target.User.Status (the status BEFORE the flip) so only the
+	// registration-decision edge sends. Best-effort: a send failure is
+	// logged and never fails the 200.
+	if updated.Role == domain.RoleVendor && status == domain.UserStatusInactive &&
+		target.User.Status == domain.UserStatusPending {
+		h.sendVendorRejectedNotice(ctx, updated.User.Email)
+	}
 	response.OK(c, h.managedToAccount(updated))
 }
 
@@ -1196,6 +1206,27 @@ func (h *SuperAdminHandler) sendVendorApprovedNotice(ctx context.Context, vendor
 		"Masuk", loginLink)
 	if err := h.mailer.Send(ctx, []string{to}, "[THC-VMS] Akun Vendor Terverifikasi", text, htmlBody); err != nil {
 		slog.Warn("superadmin: vendor approved notice failed", "error", err)
+	}
+}
+
+// sendVendorRejectedNotice queues the post-rejection notice to the VENDOR
+// inbox: pendaftaran belum disetujui, hubungi admin untuk info lanjut. The
+// rejected account cannot log in, so there is NO login CTA (empty cta via
+// RenderBrandedActionEmail). Best-effort like the approved notice: a nil
+// mailer or a send failure only skips/logs, never the 200.
+func (h *SuperAdminHandler) sendVendorRejectedNotice(ctx context.Context, vendorEmail string) {
+	if h.mailer == nil {
+		return
+	}
+	to := strings.TrimSpace(vendorEmail)
+	if to == "" {
+		slog.Warn("superadmin: vendor rejected notice skipped", "reason", "blank_address")
+		return
+	}
+	text := "Pendaftaran vendor Anda belum disetujui. Silakan hubungi admin THC untuk informasi lebih lanjut."
+	htmlBody := domain.RenderBrandedActionEmail("Pendaftaran Vendor Belum Disetujui", text, "", "")
+	if err := h.mailer.Send(ctx, []string{to}, "[THC-VMS] Pendaftaran Vendor Belum Disetujui", text, htmlBody); err != nil {
+		slog.Warn("superadmin: vendor rejected notice failed", "error", err)
 	}
 }
 
