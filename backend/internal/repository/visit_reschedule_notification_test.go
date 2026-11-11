@@ -62,7 +62,7 @@ func TestReschedule_RepeatRefreshesBellRow(t *testing.T) {
 	singleRescheduledRow(t, notifs, ctx, superAdmin, visit)
 
 	// ...but each row now reflects the SECOND emission.
-	wantMessage := "Permintaan VST-0000000401 dijadwalkan ulang."
+	wantMessage := "Permintaan VST-0000000401 dijadwalkan ulang. Alasan: menara banjir, geser dua hari"
 	for name, pair := range map[string][2]domain.Notification{
 		"vendor": {firstVendor, secondVendor},
 		"staff":  {firstStaff, secondStaff},

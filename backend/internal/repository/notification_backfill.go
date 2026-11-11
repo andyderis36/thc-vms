@@ -39,11 +39,13 @@ func backfillTemplate(row db.ListBackfillNotificationEventsRow) *domain.Notifica
 	case "requested":
 		return domain.CreatedNotification(row.VisitID)
 	case "check_in":
-		return domain.TransitionNotification(domain.VisitStatusVisiting, false, row.VisitID)
+		return domain.TransitionNotification(domain.VisitStatusVisiting, false, row.VisitID, "")
 	case "check_out":
-		return domain.TransitionNotification(domain.VisitStatusCompleted, false, row.VisitID)
+		return domain.TransitionNotification(domain.VisitStatusCompleted, false, row.VisitID, "")
 	case "status":
-		return domain.TransitionNotification(domain.VisitStatus(row.Status), row.IsSystem, row.VisitID)
+		// Reason-free on purpose: backfill rows keep the legacy message
+		// (status_history notes are not replayed into the bell).
+		return domain.TransitionNotification(domain.VisitStatus(row.Status), row.IsSystem, row.VisitID, "")
 	default:
 		return nil
 	}

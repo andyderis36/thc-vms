@@ -72,7 +72,7 @@ func (r *visitRepository) UpdateStatus(
 		// system transition resolves no actor and the email omits the row.
 		changer, _ := fromDomainUUID(changedBy)
 		actors := resolveEmailActors(ctx, tx, locked, changer)
-		first := domain.TransitionNotification(status, !actor.Valid, locked.VisitID)
+		first := domain.TransitionNotification(status, !actor.Valid, locked.VisitID, notes)
 		if err := emit(ctx, q, first, locked.ID, locked.LocationID, locked.VendorUserID, time.Now()); err != nil {
 			return err
 		}
@@ -185,7 +185,7 @@ func (r *visitRepository) Reschedule(
 		locationID, vendorUserID = locked.LocationID, locked.VendorUserID
 		rescheduleChanger, _ := fromDomainUUID(changedBy)
 		actors := resolveEmailActors(ctx, tx, locked, rescheduleChanger)
-		staffTpl := domain.TransitionNotification(domain.VisitStatusRescheduled, false, locked.VisitID)
+		staffTpl := domain.TransitionNotification(domain.VisitStatusRescheduled, false, locked.VisitID, reason)
 		if err := emit(ctx, q, staffTpl, locked.ID, locked.LocationID, locked.VendorUserID, time.Now()); err != nil {
 			return err
 		}
@@ -194,7 +194,7 @@ func (r *visitRepository) Reschedule(
 		// address disjoint recipient sets, and a repeat reschedule collapses
 		// on the store's unique constraint, so the dual emit is idempotent
 		// without actor branching.
-		vendorTpl := domain.RescheduledVendorNotification(locked.VisitID)
+		vendorTpl := domain.RescheduledVendorNotification(locked.VisitID, reason)
 		if err := emit(ctx, q, vendorTpl, locked.ID, locked.LocationID, locked.VendorUserID, time.Now()); err != nil {
 			return err
 		}
