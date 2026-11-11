@@ -28,6 +28,8 @@ import type {
   MemberSuggestionDetail,
   NotificationListParams,
   NotificationListResult,
+  NotificationSettingsMatrix,
+  NotificationToggle,
   PendingRegistrationListParams,
   PendingRegistrationListResult,
   Purpose,
@@ -490,3 +492,27 @@ export function listPendingRegistrations(
       : `/notifications/pending-registrations?${search}`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Pengaturan notifikasi (matriks) - `/settings/notifications`
+// ---------------------------------------------------------------------------
+
+export function getNotificationSettings(): Promise<NotificationSettingsMatrix> {
+  return apiFetch<NotificationSettingsMatrix>('/settings/notifications');
+}
+
+export function updateNotificationSettings(body: {
+  toggles: NotificationToggle[];
+  version: number;
+}): Promise<NotificationSettingsMatrix> {
+  return apiFetch<NotificationSettingsMatrix>('/settings/notifications', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+// Alias nama alternatif.
+export const getNotificationMatrix = getNotificationSettings;
+export const updateNotificationMatrix = updateNotificationSettings;
+export const fetchNotificationSettings = getNotificationSettings;
+export const saveNotificationSettings = updateNotificationSettings;

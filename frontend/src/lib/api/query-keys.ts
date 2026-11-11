@@ -35,6 +35,10 @@ export const queryKeys = {
   auditLogs: (params: AuditLogListParams) => ['audit-logs', 'list', params] as const,
   notifications: (params?: NotificationListParams) =>
     ['notifications', params ?? null] as const,
+  notificationSettings: () => ['notification-settings', 'matrix'] as const,
+  notificationMatrix: () => ['notification-settings', 'matrix'] as const,
+  settingsNotifications: () => ['notification-settings', 'matrix'] as const,
+  notificationsSettings: () => ['notification-settings', 'matrix'] as const,
   pendingRegistrations: (params?: PendingRegistrationListParams) =>
     ['pending-registrations', params ?? null] as const,
   me: () => ['me'] as const,

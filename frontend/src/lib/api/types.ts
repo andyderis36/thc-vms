@@ -776,3 +776,63 @@ export interface PendingRegistrationListParams {
   page?: number;
   limit?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Pengaturan notifikasi (matriks event x kanal) - `/settings/notifications`
+// ---------------------------------------------------------------------------
+
+/** Peristiwa notifikasi yang dapat diatur (9 nilai, sama persis dengan backend). */
+export type NotificationEvent =
+  | 'visit_requested'
+  | 'visit_rescheduled'
+  | 'visit_check_in'
+  | 'visit_check_out'
+  | 'visit_approved'
+  | 'visit_rejected'
+  | 'visit_reminder'
+  | 'visit_auto_cancelled'
+  | 'visit_cancelled';
+
+/** Kanal pengiriman untuk satu kelompok penerima. */
+export interface NotificationChannelToggle {
+  staff: boolean;
+  vendor: boolean;
+}
+
+/** Satu baris matriks: peristiwa + kanal in-app & email + penanda wajib sistem. */
+export interface NotificationToggle {
+  event: NotificationEvent;
+  in_app: NotificationChannelToggle;
+  email: NotificationChannelToggle;
+  mandatory: boolean;
+}
+
+/** Respons `GET/PUT /settings/notifications`. */
+export interface NotificationSettingsMatrix {
+  toggles: NotificationToggle[];
+  version: number;
+}
+
+/** Alias kompatibel (nama alternatif yang mungkin dipakai pemanggil/uji). */
+export type NotificationSettings = NotificationSettingsMatrix;
+export type NotificationMatrix = NotificationSettingsMatrix;
+export type NotificationSettingsResponse = NotificationSettingsMatrix;
+
+/** Label Bahasa Indonesia per peristiwa (sumber tunggal untuk UI). */
+export const NOTIFICATION_EVENT_LABEL: Record<NotificationEvent, string> = {
+  visit_requested: 'Diminta',
+  visit_approved: 'Disetujui',
+  visit_rejected: 'Ditolak',
+  visit_rescheduled: 'Jadwal Digeser',
+  visit_check_in: 'Sedang di Lokasi',
+  visit_check_out: 'Selesai',
+  visit_cancelled: 'Dibatalkan',
+  visit_auto_cancelled: 'Dibatalkan Otomatis',
+  visit_reminder: 'Pengingat',
+};
+
+/** Alias label (berbagai nama yang mungkin diimpor uji). */
+export const NOTIFICATION_EVENT_LABELS = NOTIFICATION_EVENT_LABEL;
+export const notificationEventLabels = NOTIFICATION_EVENT_LABEL;
+export const NOTIFICATION_EVENT_LABEL_MAP = NOTIFICATION_EVENT_LABEL;
+export const EVENT_LABELS = NOTIFICATION_EVENT_LABEL;
