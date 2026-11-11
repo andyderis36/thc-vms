@@ -1,8 +1,8 @@
-// End-to-end mail proof (Task 6): the seven allowlisted lifecycle notices
+// End-to-end mail proof (Task 6): the eight allowlisted lifecycle notices
 // travel through the REAL SMTP adapter into Mailpit (dev-only SMTP catch-all
 // on localhost:1025, no auth, no TLS) and are asserted through the Mailpit
-// HTTP API on :8025. The two excluded types (visit_requested,
-// visit_auto_cancelled) are never sent and asserted ZERO.
+// HTTP API on :8025. The one excluded type (visit_requested) is never sent
+// and asserted ZERO.
 //
 // Recipient guard: every address is @example.com (Mailpit-only). Seeded
 // users live at real domains and are NEVER used here — a test sending to a
@@ -153,11 +153,10 @@ func TestMailE2E(t *testing.T) {
 		t.Fatalf("MAILPIT_SMTP_ADDR %q port must be numeric: %v", smtpAddr, err)
 	}
 
-	// Seven flows through the domain template constructors — the same
+	// Eight flows through the domain template constructors — the same
 	// vocabulary Task 5 enqueue hooks fan out (approve/reject/cancel/
-	// reschedule/reminder/check_in/check_out). Hooks not yet landed are
-	// exercised at the template+adapter surface; the excluded pair is built
-	// only to name the subjects that must stay at ZERO.
+	// auto_cancel/reschedule/reminder/check_in/check_out). The excluded type
+	// is built only to name the subject that must stay at ZERO.
 	visit := domain.VisitRequest{
 		VisitID:      e2eVisitCode,
 		LocationName: "Kantor Cabang E2E",
@@ -169,17 +168,17 @@ func TestMailE2E(t *testing.T) {
 		tpl  *domain.NotificationTemplate
 		to   string
 	}{
-		{"approve", domain.TransitionNotification(domain.VisitStatusApproved, false, e2eVisitCode), "e2e-vendor@example.com"},
-		{"reject", domain.TransitionNotification(domain.VisitStatusRejected, false, e2eVisitCode), "e2e-vendor@example.com"},
+		{"approve", domain.TransitionNotification(domain.VisitStatusApproved, false, e2eVisitCode, ""), "e2e-vendor@example.com"},
+		{"reject", domain.TransitionNotification(domain.VisitStatusRejected, false, e2eVisitCode, ""), "e2e-vendor@example.com"},
 		{"cancel", domain.HumanCancelledNotification(e2eVisitCode, false, ""), "e2e-vendor@example.com"},
-		{"reschedule", domain.RescheduledVendorNotification(e2eVisitCode), "e2e-vendor@example.com"},
+		{"auto_cancel", domain.TransitionNotification(domain.VisitStatusCancelled, true, e2eVisitCode, ""), "e2e-vendor@example.com"},
+		{"reschedule", domain.RescheduledVendorNotification(e2eVisitCode, ""), "e2e-vendor@example.com"},
 		{"reminder", domain.ReminderNotification(e2eVisitCode), "e2e-vendor@example.com"},
-		{"check_in", domain.TransitionNotification(domain.VisitStatusVisiting, false, e2eVisitCode), "e2e-staff@example.com"},
-		{"check_out", domain.TransitionNotification(domain.VisitStatusCompleted, false, e2eVisitCode), "e2e-staff@example.com"},
+		{"check_in", domain.TransitionNotification(domain.VisitStatusVisiting, false, e2eVisitCode, ""), "e2e-staff@example.com"},
+		{"check_out", domain.TransitionNotification(domain.VisitStatusCompleted, false, e2eVisitCode, ""), "e2e-staff@example.com"},
 	}
 	excluded := []*domain.NotificationTemplate{
 		domain.CreatedNotification(e2eVisitCode),
-		domain.TransitionNotification(domain.VisitStatusCancelled, true, e2eVisitCode),
 	}
 
 	wantSubjects := make(map[string]string, len(e2eFlows))
@@ -250,7 +249,7 @@ func TestMailE2E(t *testing.T) {
 		t.Fatalf("Close (drain) = %v", err)
 	}
 
-	// Poll the Mailpit API: all seven must land.
+	// Poll the Mailpit API: all eight must land.
 	var summaries struct {
 		Total    int              `json:"total"`
 		Messages []mailpitSummary `json:"messages"`
@@ -267,7 +266,7 @@ func TestMailE2E(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Exactly the seven subjects, each once; zero of the excluded pair.
+	// Exactly the eight subjects, each once; zero of the excluded type.
 	seen := make(map[string]int, len(e2eFlows))
 	for _, s := range summaries.Messages {
 		seen[s.Subject]++
