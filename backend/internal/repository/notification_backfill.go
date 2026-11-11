@@ -23,7 +23,7 @@ func BackfillNotifications(ctx context.Context, pool *pgxpool.Pool) (int, error)
 		return 0, MapError(err)
 	}
 	for _, row := range rows {
-		if err := emit(ctx, q, backfillTemplate(row), row.VisitRequestID, row.LocationID, row.VendorUserID, row.OccurredAt); err != nil {
+		if err := emit(ctx, q, backfillTemplate(row), row.VisitRequestID, row.LocationID, row.VendorUserID, row.OccurredAt, domain.DefaultNotificationSettings()); err != nil {
 			return 0, err
 		}
 	}

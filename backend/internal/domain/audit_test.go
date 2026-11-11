@@ -9,7 +9,7 @@ import (
 
 func TestAuditMVPEvents_IsAClosedSetOfThirteen(t *testing.T) {
 	events := AuditMVPEvents()
-	if len(events) != 13 {
+	if len(events) != 14 {
 		t.Fatalf("MVP events = %d, want 13: %v", len(events), events)
 	}
 	seen := map[string]bool{}

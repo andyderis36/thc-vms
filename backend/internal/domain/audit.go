@@ -46,6 +46,7 @@ const (
 	AuditActionPurposeUpdate  = "purpose.update"
 	AuditActionPurposeDelete  = "purpose.delete"
 	AuditActionVisitDelete    = "visit.delete"
+	AuditActionSettingsUpdate = "settings.update"
 )
 
 // Audit entity vocabulary: the stored entity column verbatim.
@@ -55,6 +56,7 @@ const (
 	AuditEntityLocation = "location"
 	AuditEntityPurpose  = "purpose"
 	AuditEntityVisit    = "visit"
+	AuditEntitySettings = "settings"
 )
 
 // AuditMVPEvents is the canonical closed list: 2 auth + 4 user + 3 location +
@@ -75,6 +77,7 @@ func AuditMVPEvents() []string {
 		AuditActionPurposeUpdate,
 		AuditActionPurposeDelete,
 		AuditActionVisitDelete,
+		AuditActionSettingsUpdate,
 	}
 }
 

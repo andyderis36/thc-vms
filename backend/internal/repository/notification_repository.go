@@ -146,8 +146,11 @@ func (r *notificationRepository) MarkAllRead(ctx context.Context, userID domain.
 // InsertForVisit writes the notice for one visit, timestamped now. Used by the
 // reminder worker; every lifecycle write inside a status transaction goes
 // through emit instead so it shares that transaction. Nil template is a no-op.
-func (r *notificationRepository) InsertForVisit(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate) error {
+func (r *notificationRepository) InsertForVisit(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate, snap domain.NotificationSettings) error {
 	if tpl == nil {
+		return nil
+	}
+	if !snap.IsInAppEnabled(tpl.Type, tpl.Audience) {
 		return nil
 	}
 	visitRequestID, err := fromDomainUUID(visit.ID)
@@ -162,7 +165,7 @@ func (r *notificationRepository) InsertForVisit(ctx context.Context, visit domai
 	if err != nil {
 		return err
 	}
-	return emit(ctx, db.New(r.pool), tpl, visitRequestID, locationID, vendorUserID, time.Now())
+	return emit(ctx, db.New(r.pool), tpl, visitRequestID, locationID, vendorUserID, time.Now(), snap)
 }
 
 // ResolveEmailRecipients returns the active-only email addresses for one

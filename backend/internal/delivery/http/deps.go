@@ -41,6 +41,7 @@ func ValidateDeps(d Deps) error {
 		{"file", d.File, nil},
 		{"avatars", d.Avatar, nil},
 		{"audit", d.Audit, nil},
+		{"settings", d.Settings, nil},
 		{"notifications", d.Notifications, nil},
 		{"health", d.Health, nil},
 		{"chain", d.Chain, []string{"LoginLimiter", "RegisterLimiter"}},

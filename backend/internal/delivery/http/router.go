@@ -119,6 +119,13 @@ type AuditRoutes struct {
 	List gin.HandlerFunc
 }
 
+// SettingsRoutes carries the bound app-settings handler methods (super_admin
+// only).
+type SettingsRoutes struct {
+	Get    gin.HandlerFunc
+	Update gin.HandlerFunc
+}
+
 // NotificationRoutes carries the bound notification handler methods (every
 // authenticated role: super_admin, admin, security and vendor). The pending
 // vendor-registration queue is the exception: it is super_admin only and
@@ -165,6 +172,7 @@ type Deps struct {
 	File          FileRoutes
 	Avatar        AvatarRoutes
 	Audit         AuditRoutes
+	Settings      SettingsRoutes
 	Notifications NotificationRoutes
 	Health        HealthProbes
 	Chain         Chain
@@ -268,6 +276,8 @@ func New(d Deps) *gin.Engine {
 	super.DELETE("/users/:id", withFallback(d.SuperAdmin.DeleteUser))
 	super.DELETE("/visits/:id", withFallback(d.SuperAdmin.DeleteVisit))
 	super.GET("/audit-logs", withFallback(d.Audit.List))
+	super.GET("/settings/notifications", withFallback(d.Settings.Get))
+	super.PUT("/settings/notifications", withFallback(d.Settings.Update))
 	// The pending vendor-registration queue is the superadmin approval
 	// backlog behind the console bell: global by design, hence SuperAdminOnly
 	// and never the branch-scoped NotifyOnly group.

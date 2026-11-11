@@ -109,8 +109,8 @@ func attachPurposes(ctx context.Context, q *db.Queries, visitID uuid.UUID, pendi
 // non-blank email, all sharing the same subject and bodies. The approval mail
 // additionally carries the ONE team QR (payload = VST- code) as an inline-CID
 // image in every fanned-out copy.
-func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visit domain.VisitRequest, tpl *domain.NotificationTemplate, locationID, vendorUserID uuid.UUID, frontendBaseURL string, audiences ...domain.NotificationAudience) {
-	if mailer == nil || tpl == nil || !domain.EmailAllowed(tpl.Type) {
+func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visit domain.VisitRequest, tpl *domain.NotificationTemplate, locationID, vendorUserID uuid.UUID, frontendBaseURL string, snap domain.NotificationSettings, audiences ...domain.NotificationAudience) {
+	if mailer == nil || tpl == nil || !domain.EmailAllowedWithSettings(tpl.Type, snap) {
 		return
 	}
 	var staffRecipients []string
@@ -129,6 +129,12 @@ func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visi
 	}
 	blankWarned := false
 	for _, audience := range audiences {
+		if audience == domain.NotificationAudienceVendor && !snap.IsEmailEnabled(tpl.Type, domain.NotificationAudienceVendor) {
+			continue
+		}
+		if audience != domain.NotificationAudienceVendor && !snap.IsEmailEnabled(tpl.Type, domain.NotificationAudienceStaff) {
+			continue
+		}
 		emails, err := resolveEmailRecipients(ctx, q, locationID, vendorUserID, audience)
 		if err != nil {
 			slog.Error("email resolver failed, skipping audience",
@@ -154,12 +160,14 @@ func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visi
 	}
 	// Roster members ride along on the vendor leg only: a blank or missing
 	// member email means no mail, never an error, so blanks skip silently.
-	for _, member := range visit.Visitors {
-		if member.Email == nil {
-			continue
-		}
-		if trimmed := strings.TrimSpace(*member.Email); trimmed != "" {
-			collect(&vendorTargets, trimmed)
+	if snap.IsEmailEnabled(tpl.Type, domain.NotificationAudienceVendor) {
+		for _, member := range visit.Visitors {
+			if member.Email == nil {
+				continue
+			}
+			if trimmed := strings.TrimSpace(*member.Email); trimmed != "" {
+				collect(&vendorTargets, trimmed)
+			}
 		}
 	}
 	if len(staffRecipients) == 0 && len(vendorTargets) == 0 {

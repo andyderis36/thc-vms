@@ -31,6 +31,9 @@ type visitRepository struct {
 	// links in lifecycle emails (WithFrontendBaseURL, mirroring WithMailer).
 	// Empty keeps the legacy relative links.
 	frontendBaseURL string
+	// settingsLoader is the optional notification-settings port. nil means
+	// default-Active (today's behaviour).
+	settingsLoader domain.SettingsLoader
 }
 
 // Compile-time proof that the adapter satisfies its port.
@@ -56,6 +59,12 @@ func (r *visitRepository) WithMailer(mailer domain.Mailer) *visitRepository {
 // root, mirroring WithMailer. An empty value keeps the legacy relative links.
 func (r *visitRepository) WithFrontendBaseURL(base string) *visitRepository {
 	r.frontendBaseURL = strings.TrimSpace(base)
+	return r
+}
+
+// WithSettings wires the notification-settings loader used to gate emissions.
+func (r *visitRepository) WithSettings(loader domain.SettingsLoader) *visitRepository {
+	r.settingsLoader = loader
 	return r
 }
 
@@ -101,6 +110,12 @@ func (r *visitRepository) Create(
 
 	var created db.VisitRequest
 	var lastErr error
+	snap := domain.DefaultNotificationSettings()
+	if r.settingsLoader != nil {
+		if loaded, err := r.settingsLoader.LoadNotificationSettings(ctx); err == nil {
+			snap = loaded
+		}
+	}
 	for range visitCodeAttempts {
 		code, err := genVisitCode()
 		if err != nil {
@@ -154,7 +169,7 @@ func (r *visitRepository) Create(
 					return MapError(err)
 				}
 			}
-			if err := emit(ctx, q, domain.CreatedNotification(row.VisitID), row.ID, row.LocationID, row.VendorUserID, time.Now()); err != nil {
+			if err := emit(ctx, q, domain.CreatedNotification(row.VisitID), row.ID, row.LocationID, row.VendorUserID, time.Now(), snap); err != nil {
 				return err
 			}
 			created = row

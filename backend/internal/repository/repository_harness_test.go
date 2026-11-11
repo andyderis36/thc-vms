@@ -208,7 +208,7 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 // yields no error, because a re-applied file raises only "already there"
 // SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL, migrationUserLocationsSQL} {
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL, migrationUserLocationsSQL, migrationAppSettingsSQL} {
 		if err := applyOne(ctx, pool, sql); err != nil {
 			return err
 		}
@@ -335,6 +335,21 @@ var migrationVisitorEmailSQL = func() string {
 // CONFLICT DO NOTHING), so applyOne covers it with no once-gate.
 var migrationUserLocationsSQL = func() string {
 	path := filepath.Join("..", "..", "migrations", "000023_user_locations.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationAppSettingsSQL is the app_settings key/value store (migration
+// 000026), loaded the same way so the scratch schema tracks the notification
+// matrix the settings write/read paths use. It is re-runnable (CREATE TABLE
+// IF NOT EXISTS plus ON CONFLICT DO NOTHING seed), so applyOne covers it with
+// no once-gate.
+var migrationAppSettingsSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000026_app_settings.up.sql")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)

@@ -121,6 +121,8 @@ type Dependencies struct {
 	CheckIns         domain.CheckInOutRepository
 	Notifications    domain.NotificationRepository
 	Mailer           domain.Mailer
+	SettingsLoader   domain.SettingsLoader
+	Settings         domain.SettingsLoader
 	FrontendBaseURL  string
 	Clock            domain.Clock
 	Logger           *slog.Logger
@@ -152,6 +154,7 @@ type Service struct {
 	checkIns         domain.CheckInOutRepository
 	notifications    domain.NotificationRepository
 	mailer           domain.Mailer
+	settingsLoader   domain.SettingsLoader
 	frontendBaseURL  string
 	clock            domain.Clock
 	logger           *slog.Logger
@@ -174,10 +177,19 @@ func NewService(deps Dependencies) *Service {
 		checkIns:        deps.CheckIns,
 		notifications:   deps.Notifications,
 		mailer:          deps.Mailer,
+		settingsLoader:  firstSettingsLoader(deps.SettingsLoader, deps.Settings),
 		frontendBaseURL: strings.TrimSpace(deps.FrontendBaseURL),
 		clock:           clock,
 		logger:          logger,
 	}
+}
+
+// firstSettingsLoader picks the first non-nil loader from the two alias fields.
+func firstSettingsLoader(a, b domain.SettingsLoader) domain.SettingsLoader {
+	if a != nil {
+		return a
+	}
+	return b
 }
 
 // Run executes all three sweeps with a single now and returns the summary. A
@@ -193,6 +205,14 @@ func (s *Service) Run(ctx context.Context) Summary {
 	}
 	now := s.clock.Now()
 	r1, r2, r3 := Thresholds(now)
+	// Load notification settings once per run (Thresholds precedent) so the
+	// reminder sweep and any gated writes see one consistent snapshot.
+	snap := domain.DefaultNotificationSettings()
+	if s.settingsLoader != nil {
+		if loaded, err := s.settingsLoader.LoadNotificationSettings(ctx); err == nil {
+			snap = loaded
+		}
+	}
 	// R2 runs before R1: an overdue request is a no-show, so the no-show sweep
 	// must claim it first. R1 then re-reads a flipped row as not_visit and
 	// skips it, which keeps the two sweeps disjoint even for a visit that is
@@ -200,7 +220,7 @@ func (s *Service) Run(ctx context.Context) Summary {
 	s.sweepNoShow(ctx, r2, &summary)
 	s.sweepRequested(ctx, r1, &summary)
 	s.sweepOverstayed(ctx, r3, &summary)
-	s.sweepReminders(ctx, now, &summary)
+	s.sweepReminders(ctx, now, snap, &summary)
 	s.logger.Info("auto-rule sweep finished",
 		"cancelled", summary.Cancelled,
 		"no_show", summary.NoShow,
@@ -293,7 +313,7 @@ func (s *Service) sweepOverstayed(ctx context.Context, cutoff time.Time, summary
 // one reminder notification to their vendor user. It mutates no visit; idempotency is
 // the notification store's (user_id, type, visit_request_id) unique constraint,
 // so repeated ticks, restarts and concurrent workers never double-post.
-func (s *Service) sweepReminders(ctx context.Context, now time.Time, summary *Summary) {
+func (s *Service) sweepReminders(ctx context.Context, now time.Time, snap domain.NotificationSettings, summary *Summary) {
 	if s.notifications == nil {
 		return
 	}
@@ -314,13 +334,17 @@ func (s *Service) sweepReminders(ctx context.Context, now time.Time, summary *Su
 			continue
 		}
 		tpl := domain.ReminderNotification(visit.VisitID)
-		if err := s.notifications.InsertForVisit(ctx, visit, tpl); err != nil {
+		if !snap.IsInAppEnabled(tpl.Type, domain.NotificationAudienceVendor) {
+			summary.Skipped++
+			continue
+		}
+		if err := s.notifications.InsertForVisit(ctx, visit, tpl, snap); err != nil {
 			summary.Failures = append(summary.Failures, Failure{Rule: RuleReminder, VisitID: visit.ID, Err: err})
 			s.logger.Error("auto-rule reminder emit failed", "rule", RuleReminder, "visit_id", visit.ID, "err", err)
 			continue
 		}
 		summary.Reminded++
-		s.enqueueReminderEmail(ctx, visit, tpl)
+		s.enqueueReminderEmail(ctx, visit, tpl, snap)
 		s.logger.Info("auto-rule reminder emitted", "rule", RuleReminder, "visit_id", visit.ID)
 	}
 }
@@ -329,8 +353,11 @@ func (s *Service) sweepReminders(ctx context.Context, now time.Time, summary *Su
 // has been written. It never fails the sweep: a nil mailer (SMTP disabled),
 // an unresolvable or empty recipient set and every send failure only log and
 // return. No channel='email' row is ever written.
-func (s *Service) enqueueReminderEmail(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate) {
-	if s.mailer == nil || tpl == nil || !domain.EmailAllowed(tpl.Type) {
+func (s *Service) enqueueReminderEmail(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate, snap domain.NotificationSettings) {
+	if s.mailer == nil || tpl == nil || !domain.EmailAllowedWithSettings(tpl.Type, snap) {
+		return
+	}
+	if !snap.IsEmailEnabled(tpl.Type, domain.NotificationAudienceVendor) {
 		return
 	}
 	recipients, err := s.notifications.ResolveEmailRecipients(ctx, visit, domain.NotificationAudienceVendor)

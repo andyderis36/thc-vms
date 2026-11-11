@@ -306,6 +306,6 @@ type NotificationRepository interface {
 	List(ctx context.Context, filter NotificationFilter) (items []Notification, total, unread int64, err error)
 	MarkRead(ctx context.Context, id, userID UUID) (bool, error)
 	MarkAllRead(ctx context.Context, userID UUID) (int64, error)
-	InsertForVisit(ctx context.Context, visit VisitRequest, tpl *NotificationTemplate) error
+	InsertForVisit(ctx context.Context, visit VisitRequest, tpl *NotificationTemplate, snap NotificationSettings) error
 	ResolveEmailRecipients(ctx context.Context, visit VisitRequest, audience NotificationAudience) ([]string, error)
 }

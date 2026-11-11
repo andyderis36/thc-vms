@@ -11,6 +11,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AppSetting struct {
+	Key       string      `json:"key"`
+	Value     []byte      `json:"value"`
+	Version   int32       `json:"version"`
+	UpdatedAt time.Time   `json:"updated_at"`
+	UpdatedBy pgtype.UUID `json:"updated_by"`
+}
+
 // Append-only audit trail - ERD L172-182; one row per auditable action, never updated or deleted by application code
 type AuditLog struct {
 	ID        uuid.UUID   `json:"id"`
