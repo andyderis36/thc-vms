@@ -33,6 +33,7 @@ import (
 	"thc-vms/backend/internal/usecase/avatar"
 	"thc-vms/backend/internal/usecase/gate"
 	"thc-vms/backend/internal/usecase/notification"
+	"thc-vms/backend/internal/usecase/settings"
 	"thc-vms/backend/internal/usecase/visit"
 	"thc-vms/backend/internal/validation"
 	"thc-vms/backend/internal/worker"
@@ -111,12 +112,13 @@ func run(ctx context.Context) error {
 	clock := domain.SystemClock{}
 	logger := slog.Default()
 	users := repository.NewUserRepository(pool)
-	visits := repository.NewVisitRepository(pool).WithMailer(mailPort).WithFrontendBaseURL(cfg.App.FrontendBaseURL)
+	visits := repository.NewVisitRepository(pool).WithMailer(mailPort).WithFrontendBaseURL(cfg.App.FrontendBaseURL).WithSettings(repository.NewSettingsRepository(pool))
 	master := repository.NewMasterDataRepository(pool)
 	checkins := repository.NewCheckInOutRepository(pool)
 	autorules := repository.NewVisitAutoRuleRepository(pool)
 	audit := repository.NewAuditRepository(pool)
 	notifications := repository.NewNotificationRepository(pool)
+	settingsRepo := repository.NewSettingsRepository(pool)
 	// vendorNotices anchors the vendor-registration queue (migration 000020):
 	// the same adapter serves the register fan-out (authSvc Notices), the
 	// superadmin directory serves the mail leg (authSvc SuperAdmins), and
@@ -130,6 +132,7 @@ func run(ctx context.Context) error {
 	// S3_PRESIGN_TTL_MINUTES and is guaranteed positive by config. The object
 	// reader powers the scoped GET /visits/:id/file stream (bytes, not links).
 	notificationSvc := notification.NewService(notifications)
+	settingsSvc := settings.NewService(settingsRepo)
 	// The uploaded-file URL allowlist must accept the URLs this deployment's
 	// own object storage hands out. On a LAN install without TLS the public
 	// base is a plain-http IP (Caddy same-origin /s3 path), so the trusted
@@ -150,6 +153,7 @@ func run(ctx context.Context) error {
 	workerSvc := worker.NewService(worker.Dependencies{
 		Visits: visits, Rules: autorules, CheckIns: checkins, Notifications: notifications, Clock: clock, Logger: logger,
 		Mailer:          mailPort,
+		SettingsLoader:  settingsRepo,
 		FrontendBaseURL: cfg.App.FrontendBaseURL,
 	})
 
@@ -175,9 +179,10 @@ func run(ctx context.Context) error {
 	// self-registration (POST /auth/register, status inactive) and the
 	// superadmin back office below.
 	managedUsers := repository.NewManagedUserRepository(pool)
+	passwordResets := repository.NewPasswordResetTokenRepository(pool)
 	authSvc := auth.NewService(auth.Deps{
 		Users: users, Roles: dir.Roles(), Locations: master, Vendors: repository.NewVendorRepository(pool), Issuer: jwtSvc, Clock: clock,
-		Profiles: repository.NewProfileRepository(pool), Audit: audit,
+		Profiles: repository.NewProfileRepository(pool), Audit: audit, Resets: passwordResets,
 		// Storage backs the avatar ownership proof on PATCH /auth/me; avatar
 		// reads no longer presign, they stream through GET /avatars/:id.
 		Storage: store,
@@ -205,6 +210,8 @@ func run(ctx context.Context) error {
 	authHandler := handlers.NewAuthHandler(authSvc)
 	emailChangeHandler := handlers.NewEmailChangeHandler(authSvc,
 		middleware.NewEmailChangeRateLimiter(middleware.DefaultEmailChangeLimits()))
+	passwordResetHandler := handlers.NewPasswordResetHandler(authSvc,
+		middleware.NewPasswordResetRateLimiter(middleware.DefaultPasswordResetLimits()))
 	visitHandler := handlers.NewVisitHandler(visitSvc)
 	gateHandler := handlers.NewGateHandler(gateSvc)
 	masterHandler := handlers.NewMasterHandler(master)
@@ -226,6 +233,7 @@ func run(ctx context.Context) error {
 	fileHandler := handlers.NewFileHandler(visitSvc)
 	auditHandler := handlers.NewAuditHandler(audit)
 	notificationHandler := handlers.NewNotificationHandler(notificationSvc)
+	settingsHandler := handlers.NewSettingsHandler(settingsSvc)
 	// The pending-registration feed reads the same queue the register fan-out
 	// writes, so a self-registration shows up on the next superadmin poll.
 	pendingRegistrationHandler := handlers.NewPendingRegistrationHandler(vendorNotices)
@@ -271,6 +279,7 @@ func run(ctx context.Context) error {
 			Login: authHandler.Login, Register: authHandler.Register, Me: authHandler.Me, PatchMe: authHandler.PatchMe,
 			Logout:             authHandler.Logout,
 			RequestEmailChange: emailChangeHandler.RequestEmailChange, ConfirmEmailChange: emailChangeHandler.ConfirmEmailChange,
+			RequestPasswordReset: passwordResetHandler.RequestPasswordReset, ConfirmPasswordReset: passwordResetHandler.ConfirmPasswordReset,
 		},
 		Users: deliveryhttp.UserRoutes{
 			List: userHandler.ListSecurity, Create: userHandler.CreateSecurity,
@@ -300,6 +309,7 @@ func run(ctx context.Context) error {
 		File:   deliveryhttp.FileRoutes{File: fileHandler.File},
 		Avatar: deliveryhttp.AvatarRoutes{Avatar: avatarHandler.Avatar},
 		Audit:  deliveryhttp.AuditRoutes{List: auditHandler.List},
+		Settings: deliveryhttp.SettingsRoutes{Get: settingsHandler.Get, Update: settingsHandler.Update},
 		Notifications: deliveryhttp.NotificationRoutes{
 			List:                 notificationHandler.List,
 			MarkRead:             notificationHandler.MarkRead,

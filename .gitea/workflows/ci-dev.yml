@@ -1,0 +1,60 @@
+# Fast feedback for direct pushes to `dev`. The full release gate lives in
+# ci.yml and runs once on pull requests targeting `main`.
+#
+# Kept separate so the same commit is not tested twice with the full suite when
+# it is pushed to dev and then opened as a PR.
+name: ci-dev
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Share the `ci` group with the full PR gate: the self-hosted VPS runner is
+# shared with production, so runs are serialized instead of cancelled.
+concurrency:
+  group: ci
+  cancel-in-progress: false
+
+jobs:
+  backend:
+    runs-on: [self-hosted, linux, vps]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+
+      - name: Build
+        working-directory: backend
+        run: timeout 300 go build ./...
+
+      - name: Vet
+        working-directory: backend
+        run: timeout 180 go vet ./...
+
+  frontend:
+    runs-on: [self-hosted, linux, vps]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: timeout 600 npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: timeout 180 npm run lint
+
+      - name: Typecheck
+        working-directory: frontend
+        run: timeout 180 npm run typecheck

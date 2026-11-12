@@ -28,6 +28,12 @@ import type {
   MemberSuggestionDetail,
   NotificationListParams,
   NotificationListResult,
+  NotificationSettingsMatrix,
+  NotificationToggle,
+  PasswordResetConfirm,
+  PasswordResetConfirmResult,
+  PasswordResetRequest,
+  PasswordResetRequestResult,
   PendingRegistrationListParams,
   PendingRegistrationListResult,
   Purpose,
@@ -117,6 +123,33 @@ export function requestEmailChange(body: EmailChangeRequest): Promise<EmailChang
  */
 export function confirmEmailChange(body: EmailChangeConfirmRequest): Promise<User> {
   return apiFetch<User>('/auth/email-change/confirm', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * `POST /auth/password-reset/request` — minta tautan reset kata sandi
+ * (publik). Respons selalu 202 generik `{ message }` bahkan untuk email
+ * yang tidak terdaftar — pemanggil TIDAK boleh menyimpulkan keberadaan
+ * akun dari status maupun isi respons. SENGAJA tanpa `storeToken` (pola
+ * `registerVendor`): permintaan ini tidak pernah melahirkan sesi.
+ */
+export function requestPasswordReset(body: PasswordResetRequest): Promise<PasswordResetRequestResult> {
+  return apiFetch<PasswordResetRequestResult>('/auth/password-reset/request', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * `POST /auth/password-reset/confirm` — tukar token reset menjadi kata
+ * sandi baru (publik, tanpa sesi). Semua kegagalan token dijawab 401
+ * byte-identical — pemanggil wajib memperlakukannya secara generik tanpa
+ * meneruskan pesan server, dan token tidak pernah disimpan di mana pun.
+ */
+export function confirmPasswordReset(body: PasswordResetConfirm): Promise<PasswordResetConfirmResult> {
+  return apiFetch<PasswordResetConfirmResult>('/auth/password-reset/confirm', {
     method: 'POST',
     body: JSON.stringify(body),
   });
@@ -490,3 +523,27 @@ export function listPendingRegistrations(
       : `/notifications/pending-registrations?${search}`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Pengaturan notifikasi (matriks) - `/settings/notifications`
+// ---------------------------------------------------------------------------
+
+export function getNotificationSettings(): Promise<NotificationSettingsMatrix> {
+  return apiFetch<NotificationSettingsMatrix>('/settings/notifications');
+}
+
+export function updateNotificationSettings(body: {
+  toggles: NotificationToggle[];
+  version: number;
+}): Promise<NotificationSettingsMatrix> {
+  return apiFetch<NotificationSettingsMatrix>('/settings/notifications', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+// Alias nama alternatif.
+export const getNotificationMatrix = getNotificationSettings;
+export const updateNotificationMatrix = updateNotificationSettings;
+export const fetchNotificationSettings = getNotificationSettings;
+export const saveNotificationSettings = updateNotificationSettings;

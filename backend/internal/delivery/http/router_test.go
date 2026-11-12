@@ -68,6 +68,14 @@ func (fakeAuthService) ConfirmEmailChange(_ context.Context, _ domain.UUID, _ st
 	return auth.Profile{}, domain.ErrUnauthorized
 }
 
+func (fakeAuthService) RequestPasswordReset(_ context.Context, _, _ string) error {
+	return domain.ErrUnauthorized
+}
+
+func (fakeAuthService) ConfirmPasswordReset(_ context.Context, _, _ string) error {
+	return domain.ErrUnauthorized
+}
+
 // fakeVisitService answers every visit call with 404.
 type fakeVisitService struct{}
 
@@ -209,6 +217,8 @@ func testEngine() *gin.Engine {
 	auth := handlers.NewAuthHandler(authSvc)
 	emailChange := handlers.NewEmailChangeHandler(authSvc,
 		middleware.NewEmailChangeRateLimiter(middleware.DefaultEmailChangeLimits()))
+	passwordReset := handlers.NewPasswordResetHandler(authSvc,
+		middleware.NewPasswordResetRateLimiter(middleware.DefaultPasswordResetLimits()))
 	visits := handlers.NewVisitHandler(fakeVisitService{})
 	gate := handlers.NewGateHandler(fakeGateService{})
 	master := handlers.NewMasterHandler(fakeMaster{})
@@ -220,6 +230,7 @@ func testEngine() *gin.Engine {
 		Auth: deliveryhttp.AuthRoutes{
 			Login: auth.Login, Register: auth.Register, Me: auth.Me, PatchMe: auth.PatchMe, Logout: auth.Logout,
 			RequestEmailChange: emailChange.RequestEmailChange, ConfirmEmailChange: emailChange.ConfirmEmailChange,
+			RequestPasswordReset: passwordReset.RequestPasswordReset, ConfirmPasswordReset: passwordReset.ConfirmPasswordReset,
 		},
 		Users: deliveryhttp.UserRoutes{
 			List: users.ListSecurity, Create: users.CreateSecurity, UpdateStatus: users.UpdateSecurityStatus,
@@ -286,6 +297,8 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodPost, "/api/v1/auth/logout"},
 		{http.MethodPost, "/api/v1/auth/email-change/request"},
 		{http.MethodPost, "/api/v1/auth/email-change/confirm"},
+		{http.MethodPost, "/api/v1/auth/password-reset/request"},
+		{http.MethodPost, "/api/v1/auth/password-reset/confirm"},
 		{http.MethodGet, "/api/v1/users/security"},
 		// Vendor-account directory for the visit form's owner picker.
 		{http.MethodGet, "/api/v1/users/vendors"},
@@ -327,8 +340,8 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/notifications/pending-registrations"},
 		{http.MethodPost, "/api/v1/uploads"},
 	}
-	if len(wired) != 49 {
-		t.Fatalf("contract drift: wired routes = %d, want 49", len(wired))
+	if len(wired) != 51 {
+		t.Fatalf("contract drift: wired routes = %d, want 51", len(wired))
 	}
 	for _, route := range wired {
 		rec := serve(engine, route.method, route.path)
@@ -344,6 +357,8 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		// or record a token-bearing URL).
 		{http.MethodGet, "/api/v1/auth/email-change/request"},
 		{http.MethodGet, "/api/v1/auth/email-change/confirm"},
+		{http.MethodGet, "/api/v1/auth/password-reset/request"},
+		{http.MethodGet, "/api/v1/auth/password-reset/confirm"},
 	} {
 		if rec := serve(engine, forbidden.method, forbidden.path); rec.Code != http.StatusNotFound {
 			t.Errorf("%s %s must 404, got %d", forbidden.method, forbidden.path, rec.Code)

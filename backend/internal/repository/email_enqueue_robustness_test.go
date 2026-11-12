@@ -69,6 +69,7 @@ func TestEmailEnqueue_StaffFailureStillSendsVendor(t *testing.T) {
 	enqueueEmail(context.Background(), fake, nil, visit, tpl,
 		uuid.New(), uuid.New(),
 		"",
+		domain.DefaultNotificationSettings(),
 		domain.NotificationAudienceStaff, domain.NotificationAudienceVendor)
 
 	if len(fake.Calls) != 1 {
@@ -110,6 +111,7 @@ func TestEmailEnqueue_LogsNeverCarryRecipientAddresses(t *testing.T) {
 	enqueueEmail(context.Background(), fake, nil, visit, tpl,
 		uuid.New(), uuid.New(),
 		"",
+		domain.DefaultNotificationSettings(),
 		domain.NotificationAudienceStaff, domain.NotificationAudienceVendor)
 	if len(fake.Calls) != 2 {
 		t.Fatalf("email calls = %d, want 2 (one per surviving vendor recipient)", len(fake.Calls))
@@ -137,7 +139,7 @@ func TestEmailEnqueue_LogsNeverCarryRecipientAddresses(t *testing.T) {
 	})
 	broken := &domain.FakeMailer{Err: errors.New("smtp 421 downstream temporarily unavailable")}
 	enqueueEmail(context.Background(), broken, nil, visit, tpl,
-		uuid.New(), uuid.New(), "", domain.NotificationAudienceVendor)
+		uuid.New(), uuid.New(), "", domain.DefaultNotificationSettings(), domain.NotificationAudienceVendor)
 	if len(broken.Calls) != 1 {
 		t.Fatalf("dead-letter calls = %d, want 1 recorded attempt", len(broken.Calls))
 	}

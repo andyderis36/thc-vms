@@ -400,7 +400,7 @@ func TestAudit_StatusTransitionsEmitNothing(t *testing.T) {
 			t.Fatalf("audit event %q overlaps the status lifecycle", event)
 		}
 	}
-	if len(domain.AuditMVPEvents()) != 13 {
+	if len(domain.AuditMVPEvents()) != 14 {
 		t.Fatalf("event set drifted: %v", domain.AuditMVPEvents())
 	}
 }

@@ -43,6 +43,12 @@ func (r *visitRepository) UpdateStatus(
 	}
 	var pending *pendingEmail
 	var locationID, vendorUserID uuid.UUID
+	snap := domain.DefaultNotificationSettings()
+	if r.settingsLoader != nil {
+		if loaded, err := r.settingsLoader.LoadNotificationSettings(ctx); err == nil {
+			snap = loaded
+		}
+	}
 	if err := WithTx(ctx, r.pool, func(tx pgx.Tx) error {
 		q := db.New(r.pool).WithTx(tx)
 		locked, err := q.GetVisitByIDForUpdate(ctx, db.GetVisitByIDForUpdateParams{ID: parsed})
@@ -73,7 +79,7 @@ func (r *visitRepository) UpdateStatus(
 		changer, _ := fromDomainUUID(changedBy)
 		actors := resolveEmailActors(ctx, tx, locked, changer)
 		first := domain.TransitionNotification(status, !actor.Valid, locked.VisitID, notes)
-		if err := emit(ctx, q, first, locked.ID, locked.LocationID, locked.VendorUserID, time.Now()); err != nil {
+		if err := emit(ctx, q, first, locked.ID, locked.LocationID, locked.VendorUserID, time.Now(), snap); err != nil {
 			return err
 		}
 		// A human-driven cancellation notifies the other side: the vendor
@@ -89,7 +95,7 @@ func (r *visitRepository) UpdateStatus(
 			changer, _ := fromDomainUUID(changedBy)
 			byVendor := changer == locked.VendorUserID
 			human := domain.HumanCancelledNotification(locked.VisitID, byVendor, domain.ActorLine(actors.actorName, actors.actorRole))
-			if err := emit(ctx, q, human, locked.ID, locked.LocationID, locked.VendorUserID, time.Now()); err != nil {
+			if err := emit(ctx, q, human, locked.ID, locked.LocationID, locked.VendorUserID, time.Now(), snap); err != nil {
 				return err
 			}
 			pending = &pendingEmail{visit: actors.apply(emailVisit(locked, locked.StartDate, locked.EndDate, notes)), tpl: human, audiences: []domain.NotificationAudience{human.Audience}}
@@ -133,7 +139,7 @@ func (r *visitRepository) UpdateStatus(
 	// rolled-back transaction returns above with no pending email, so it
 	// enqueues zero. enqueueEmail itself never fails the caller.
 	if pending != nil {
-		enqueueEmail(ctx, r.mailer, db.New(r.pool), pending.visit, pending.tpl, locationID, vendorUserID, r.frontendBaseURL, pending.audiences...)
+		enqueueEmail(ctx, r.mailer, db.New(r.pool), pending.visit, pending.tpl, locationID, vendorUserID, r.frontendBaseURL, snap, pending.audiences...)
 	}
 	return nil
 }
@@ -160,6 +166,12 @@ func (r *visitRepository) Reschedule(
 	}
 	var pending *pendingEmail
 	var locationID, vendorUserID uuid.UUID
+	snap := domain.DefaultNotificationSettings()
+	if r.settingsLoader != nil {
+		if loaded, err := r.settingsLoader.LoadNotificationSettings(ctx); err == nil {
+			snap = loaded
+		}
+	}
 	if err := WithTx(ctx, r.pool, func(tx pgx.Tx) error {
 		q := db.New(r.pool).WithTx(tx)
 		locked, err := q.GetVisitByIDForUpdate(ctx, db.GetVisitByIDForUpdateParams{ID: parsed})
@@ -186,7 +198,7 @@ func (r *visitRepository) Reschedule(
 		rescheduleChanger, _ := fromDomainUUID(changedBy)
 		actors := resolveEmailActors(ctx, tx, locked, rescheduleChanger)
 		staffTpl := domain.TransitionNotification(domain.VisitStatusRescheduled, false, locked.VisitID, reason)
-		if err := emit(ctx, q, staffTpl, locked.ID, locked.LocationID, locked.VendorUserID, time.Now()); err != nil {
+		if err := emit(ctx, q, staffTpl, locked.ID, locked.LocationID, locked.VendorUserID, time.Now(), snap); err != nil {
 			return err
 		}
 		// Every reschedule also notifies the vendor with the same
@@ -195,7 +207,7 @@ func (r *visitRepository) Reschedule(
 		// on the store's unique constraint, so the dual emit is idempotent
 		// without actor branching.
 		vendorTpl := domain.RescheduledVendorNotification(locked.VisitID, reason)
-		if err := emit(ctx, q, vendorTpl, locked.ID, locked.LocationID, locked.VendorUserID, time.Now()); err != nil {
+		if err := emit(ctx, q, vendorTpl, locked.ID, locked.LocationID, locked.VendorUserID, time.Now(), snap); err != nil {
 			return err
 		}
 		// The dual in_app emit collapses to ONE email over the union of both
@@ -217,7 +229,7 @@ func (r *visitRepository) Reschedule(
 		return err
 	}
 	if pending != nil {
-		enqueueEmail(ctx, r.mailer, db.New(r.pool), pending.visit, pending.tpl, locationID, vendorUserID, r.frontendBaseURL, pending.audiences...)
+		enqueueEmail(ctx, r.mailer, db.New(r.pool), pending.visit, pending.tpl, locationID, vendorUserID, r.frontendBaseURL, snap, pending.audiences...)
 	}
 	return nil
 }

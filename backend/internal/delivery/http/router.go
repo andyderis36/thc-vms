@@ -18,13 +18,15 @@ import (
 
 // AuthRoutes carries the bound auth-handler methods.
 type AuthRoutes struct {
-	Login              gin.HandlerFunc
-	Register           gin.HandlerFunc
-	Me                 gin.HandlerFunc
-	PatchMe            gin.HandlerFunc
-	Logout             gin.HandlerFunc
-	RequestEmailChange gin.HandlerFunc
-	ConfirmEmailChange gin.HandlerFunc
+	Login                gin.HandlerFunc
+	Register             gin.HandlerFunc
+	Me                   gin.HandlerFunc
+	PatchMe              gin.HandlerFunc
+	Logout               gin.HandlerFunc
+	RequestEmailChange   gin.HandlerFunc
+	ConfirmEmailChange   gin.HandlerFunc
+	RequestPasswordReset gin.HandlerFunc
+	ConfirmPasswordReset gin.HandlerFunc
 }
 
 // UserRoutes carries the bound security-account handler methods.
@@ -119,6 +121,13 @@ type AuditRoutes struct {
 	List gin.HandlerFunc
 }
 
+// SettingsRoutes carries the bound app-settings handler methods (super_admin
+// only).
+type SettingsRoutes struct {
+	Get    gin.HandlerFunc
+	Update gin.HandlerFunc
+}
+
 // NotificationRoutes carries the bound notification handler methods (every
 // authenticated role: super_admin, admin, security and vendor). The pending
 // vendor-registration queue is the exception: it is super_admin only and
@@ -165,6 +174,7 @@ type Deps struct {
 	File          FileRoutes
 	Avatar        AvatarRoutes
 	Audit         AuditRoutes
+	Settings      SettingsRoutes
 	Notifications NotificationRoutes
 	Health        HealthProbes
 	Chain         Chain
@@ -225,6 +235,11 @@ func New(d Deps) *gin.Engine {
 	v1.Use(withFallback(d.Chain.BodyLimit))
 	v1.POST("/auth/login", withFallback(d.Chain.LoginLimiter), withFallback(d.Auth.Login))
 	v1.POST("/auth/register", withFallback(d.Chain.RegisterLimiter), withFallback(d.Auth.Register))
+	// Self-service password reset is PUBLIC by design (the caller cannot log
+	// in, that is the point): both legs mount beside login/register, never
+	// behind Authenticate. The handlers own their per-IP/per-target throttle.
+	v1.POST("/auth/password-reset/request", withFallback(d.Auth.RequestPasswordReset))
+	v1.POST("/auth/password-reset/confirm", withFallback(d.Auth.ConfirmPasswordReset))
 	v1.GET("/health", withFallback(d.Health.Health))
 	v1.GET("/ready", withFallback(d.Health.Ready))
 	// The public /register page needs the vendor-company suggestions BEFORE a
@@ -268,6 +283,8 @@ func New(d Deps) *gin.Engine {
 	super.DELETE("/users/:id", withFallback(d.SuperAdmin.DeleteUser))
 	super.DELETE("/visits/:id", withFallback(d.SuperAdmin.DeleteVisit))
 	super.GET("/audit-logs", withFallback(d.Audit.List))
+	super.GET("/settings/notifications", withFallback(d.Settings.Get))
+	super.PUT("/settings/notifications", withFallback(d.Settings.Update))
 	// The pending vendor-registration queue is the superadmin approval
 	// backlog behind the console bell: global by design, hence SuperAdminOnly
 	// and never the branch-scoped NotifyOnly group.

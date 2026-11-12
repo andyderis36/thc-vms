@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import {
+  Bell,
   Building2,
   Clock,
   LayoutDashboard,
@@ -225,6 +226,7 @@ export function SuperadminShell({
     { href: '/coordinators', label: NAV_LABELS.coordinators.desktop, icon: <MapPinned aria-hidden="true" className="size-5 shrink-0" /> },
     { href: '/vendor-registrations', label: NAV_LABELS.vendorRegistrations.desktop, icon: <Building2 aria-hidden="true" className="size-5 shrink-0" /> },
     { href: '/audit', label: NAV_LABELS.auditLogs.desktop, icon: <ScrollText aria-hidden="true" className="size-5 shrink-0" /> },
+    { href: '/settings/notifications', label: NAV_LABELS.notificationSettings.desktop, icon: <Bell aria-hidden="true" className="size-5 shrink-0" /> },
   ]
 
   /** Mobile 4 tab sesuai desain §6.1: Dashboard, Approval, Fasilitas, Security. */
@@ -233,6 +235,7 @@ export function SuperadminShell({
     { href: '/approvals', label: NAV_LABELS.approvals.mobile, icon: <Clock aria-hidden="true" className="size-5 shrink-0" />, badge: pendingCount ?? 0 },
     { href: '/facilities', label: NAV_LABELS.facilities.mobile, icon: <MapPin aria-hidden="true" className="size-5 shrink-0" /> },
     { href: '/security', label: NAV_LABELS.security.mobile, icon: <Shield aria-hidden="true" className="size-5 shrink-0" /> },
+    { href: '/settings/notifications', label: NAV_LABELS.notificationSettings.mobile, icon: <Bell aria-hidden="true" className="size-5 shrink-0" /> },
   ]
 
   // `unoptimized` WAJIB: `/_next/image?url=%2Fthcw.png&w=1080&q=75` dengan

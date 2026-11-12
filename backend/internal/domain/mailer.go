@@ -45,12 +45,27 @@ var emailAllowedTypes = map[NotificationType]struct{}{
 	NotificationVisitCheckOut:      {},
 }
 
+// EmailAllowedWithSettings reports whether a notification type may be sent as
+// email under the given settings snapshot. Mandatory types always return true
+// (even when stored Off); non-mandatory types require both the type-level
+// capability (emailAllowedTypes) and an enabled email toggle in the snapshot.
+func EmailAllowedWithSettings(t NotificationType, snap NotificationSettings) bool {
+	if _, ok := MandatoryNotificationTypes[t]; ok {
+		return true
+	}
+	if _, ok := emailAllowedTypes[t]; !ok {
+		return false
+	}
+	return snap.IsEmailEnabled(t, NotificationAudienceStaff) || snap.IsEmailEnabled(t, NotificationAudienceVendor)
+}
+
 // EmailAllowed reports whether a notification type may be sent as email.
 // Callers check this at enqueue time and drop anything it rejects before
-// any Mailer.Send call is ever made.
+// any Mailer.Send call is ever made. It delegates to
+// EmailAllowedWithSettings with the default-Active snapshot so existing
+// callers and tests keep their behaviour.
 func EmailAllowed(t NotificationType) bool {
-	_, ok := emailAllowedTypes[t]
-	return ok
+	return EmailAllowedWithSettings(t, DefaultNotificationSettings())
 }
 
 // MailCall is one recorded FakeMailer.Send invocation. QRPNG/QRCID carry

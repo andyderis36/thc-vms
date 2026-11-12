@@ -25,7 +25,7 @@ func (f *fakeNotificationRepo) MarkAllRead(_ context.Context, _ domain.UUID) (in
 	return 0, nil
 }
 
-func (f *fakeNotificationRepo) InsertForVisit(_ context.Context, _ domain.VisitRequest, _ *domain.NotificationTemplate) error {
+func (f *fakeNotificationRepo) InsertForVisit(_ context.Context, _ domain.VisitRequest, _ *domain.NotificationTemplate, _ domain.NotificationSettings) error {
 	return nil
 }
 

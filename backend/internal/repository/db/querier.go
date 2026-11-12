@@ -122,6 +122,10 @@ type Querier interface {
 	// round trip and lets the usecase verify every id is still an active purpose
 	// before inserting into visit_purpose.
 	GetActivePurposesByIDs(ctx context.Context, arg GetActivePurposesByIDsParams) ([]GetActivePurposesByIDsRow, error)
+	// =============================================================================
+	// settings.sql - App settings (ERD: app_settings, migration 000026).
+	// =============================================================================
+	GetAppSetting(ctx context.Context, arg GetAppSettingParams) (AppSetting, error)
 	// Existence + fact read used by the auto-rule worker (SweepNoShowVisits)
 	// and by SCR-05 to render the "Sedang di Lokasi" badge. pgx reports a missing
 	// row as pgx.ErrNoRows, which is the existence check. The users LEFT JOIN
@@ -770,6 +774,7 @@ type Querier interface {
 	// writes them verbatim. The flag is monotonic by contract: the caller only
 	// ever passes TRUE forward, so the adapter stores max(stored, passed) via OR.
 	UpdateVisitorContact(ctx context.Context, arg UpdateVisitorContactParams) (Visitor, error)
+	UpsertAppSetting(ctx context.Context, arg UpsertAppSettingParams) (AppSetting, error)
 	// The single write path for POST /visits/{id}/work-photos. Callers must hold
 	// the GetVisitByIDForUpdate row lock and must have verified the visit is
 	// still `visiting` in the same transaction (the concurrent check-out gate).

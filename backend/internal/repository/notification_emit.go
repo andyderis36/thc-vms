@@ -27,8 +27,12 @@ func emit(
 	locationID uuid.UUID,
 	vendorUserID uuid.UUID,
 	at time.Time,
+	snap domain.NotificationSettings,
 ) error {
 	if tpl == nil {
+		return nil
+	}
+	if !snap.IsInAppEnabled(tpl.Type, tpl.Audience) {
 		return nil
 	}
 	switch tpl.Audience {

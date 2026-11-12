@@ -1,19 +1,18 @@
-# CI for the dev -> PR -> main -> deploy flow:
-#   1. push to `dev`          -> this workflow runs.
-#   2. blocking checks green -> open PR `dev` -> `main`.
-#   3. PR targets `main`      -> this workflow runs again on the PR head.
-#   4. required checks green  -> merge the PR (branch protection enforces them).
-#   5. merge pushes `main`    -> deploy.yml deploys; this file never deploys.
-# There is no tag trigger and no feature-branch-to-dev requirement: only pushes
-# to `dev` and PRs targeting `main` are validated.
+# Full release gate for the dev -> PR -> main -> deploy flow:
+#   1. push to `dev`          -> ci-dev.yml runs quick checks only.
+#   2. PR targets `main`      -> this workflow runs the full suite on the PR head.
+#   3. required checks green  -> merge the PR (branch protection enforces them).
+#   4. merge pushes `main`    -> deploy.yml deploys; this file never deploys.
+#
+# Keeping the full suite on the PR event only avoids running it twice for the
+# same commit (once on push to dev, once on the PR). Use workflow_dispatch to
+# run the full suite manually when needed.
 #
 # Playwright E2E is intentionally not run on the VPS runner; run it locally
 # against deploy/ci/compose.ci.yml when needed.
 name: ci
 
 on:
-  push:
-    branches: [dev]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -120,7 +119,7 @@ jobs:
       - name: Unit tests
         working-directory: frontend
         # Vitest's default parallelism over-spawns workers on this runner; the
-        # single-worker run is the stable baseline (82 files / 1117 tests).
+        # single-worker run is the stable baseline.
         run: timeout 600 npm test -- --maxWorkers=1
 
       - name: Build
