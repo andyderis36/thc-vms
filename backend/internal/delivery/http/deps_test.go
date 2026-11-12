@@ -15,7 +15,7 @@ func wired() gin.HandlerFunc {
 // fullyWiredDeps builds a Deps whose every route member is bound, so a
 // failing check can only come from a member that was actually left out.
 func fullyWiredDeps() Deps {
-	auth := AuthRoutes{Login: wired(), Register: wired(), Me: wired(), PatchMe: wired(), Logout: wired(), RequestEmailChange: wired(), ConfirmEmailChange: wired()}
+	auth := AuthRoutes{Login: wired(), Register: wired(), Me: wired(), PatchMe: wired(), Logout: wired(), RequestEmailChange: wired(), ConfirmEmailChange: wired(), RequestPasswordReset: wired(), ConfirmPasswordReset: wired()}
 	users := UserRoutes{List: wired(), Create: wired(), UpdateStatus: wired(), Update: wired(), Delete: wired()}
 	super := SuperAdminRoutes{
 		CreateLocation: wired(), UpdateLocation: wired(), DeleteLocation: wired(),

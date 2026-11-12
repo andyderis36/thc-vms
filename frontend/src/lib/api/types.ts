@@ -582,6 +582,36 @@ export interface EmailChangeConfirmRequest {
   token: string;
 }
 
+/**
+ * `POST /auth/password-reset/request` — permintaan tautan reset kata sandi
+ * (publik, dibatasi rate limiter). Respons selalu 202 generik agar tidak
+ * membocorkan apakah email sudah terdaftar.
+ */
+export interface PasswordResetRequest {
+  email: string;
+}
+
+/** `POST /auth/password-reset/request` → 202 generik `{ success, data: { message } }`. */
+export interface PasswordResetRequestResult {
+  message: string;
+}
+
+/**
+ * `POST /auth/password-reset/confirm` — tukar token reset menjadi kata sandi
+ * baru (publik, tanpa sesi: login terpisah lewat `POST /auth/login`). Semua
+ * kegagalan token dijawab 401 UNAUTHORIZED byte-identical untuk setiap
+ * penyebab (kedaluwarsa, terpakai, rusak, tidak dikenal).
+ */
+export interface PasswordResetConfirm {
+  token: string;
+  new_password: string;
+}
+
+/** `POST /auth/password-reset/confirm` → 200 generik `{ success, data: { message } }`. */
+export interface PasswordResetConfirmResult {
+  message: string;
+}
+
 export interface CreateVisitRequest {
   location_id: string;
   /**

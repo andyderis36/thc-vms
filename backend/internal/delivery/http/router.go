@@ -18,13 +18,15 @@ import (
 
 // AuthRoutes carries the bound auth-handler methods.
 type AuthRoutes struct {
-	Login              gin.HandlerFunc
-	Register           gin.HandlerFunc
-	Me                 gin.HandlerFunc
-	PatchMe            gin.HandlerFunc
-	Logout             gin.HandlerFunc
-	RequestEmailChange gin.HandlerFunc
-	ConfirmEmailChange gin.HandlerFunc
+	Login                gin.HandlerFunc
+	Register             gin.HandlerFunc
+	Me                   gin.HandlerFunc
+	PatchMe              gin.HandlerFunc
+	Logout               gin.HandlerFunc
+	RequestEmailChange   gin.HandlerFunc
+	ConfirmEmailChange   gin.HandlerFunc
+	RequestPasswordReset gin.HandlerFunc
+	ConfirmPasswordReset gin.HandlerFunc
 }
 
 // UserRoutes carries the bound security-account handler methods.
@@ -233,6 +235,11 @@ func New(d Deps) *gin.Engine {
 	v1.Use(withFallback(d.Chain.BodyLimit))
 	v1.POST("/auth/login", withFallback(d.Chain.LoginLimiter), withFallback(d.Auth.Login))
 	v1.POST("/auth/register", withFallback(d.Chain.RegisterLimiter), withFallback(d.Auth.Register))
+	// Self-service password reset is PUBLIC by design (the caller cannot log
+	// in, that is the point): both legs mount beside login/register, never
+	// behind Authenticate. The handlers own their per-IP/per-target throttle.
+	v1.POST("/auth/password-reset/request", withFallback(d.Auth.RequestPasswordReset))
+	v1.POST("/auth/password-reset/confirm", withFallback(d.Auth.ConfirmPasswordReset))
 	v1.GET("/health", withFallback(d.Health.Health))
 	v1.GET("/ready", withFallback(d.Health.Ready))
 	// The public /register page needs the vendor-company suggestions BEFORE a

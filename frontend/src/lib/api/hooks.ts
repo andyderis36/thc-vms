@@ -27,6 +27,7 @@ import {
   checkInVisit,
   checkOutVisit,
   confirmEmailChange,
+  confirmPasswordReset,
   createLocation,
   createManagedUser,
   createSecurityUser,
@@ -59,6 +60,7 @@ import {
   markNotificationRead,
   rejectVisit,
   requestEmailChange,
+  requestPasswordReset,
   rescheduleVisit,
   updateLocation,
   updateManagedUser,
@@ -91,6 +93,8 @@ import type {
   NotificationListParams,
   NotificationListResult,
   NotificationToggle,
+  PasswordResetConfirm,
+  PasswordResetRequest,
   PendingRegistrationListParams,
   RejectRequest,
   RescheduleRequest,
@@ -991,6 +995,28 @@ export function useConfirmEmailChangeMutation() {
       queryClient.setQueryData(queryKeys.me(), user)
       applyUser(user)
     },
+  })
+}
+
+/**
+ * `POST /auth/password-reset/request` — permintaan tautan reset kata sandi
+ * (publik). Tanpa invalidasi: respons 202 generik tidak mengubah data apa
+ * pun di cache, dan tidak ada kunci query yang membawa alamat email.
+ */
+export function useRequestPasswordResetMutation() {
+  return useMutation({
+    mutationFn: (body: PasswordResetRequest) => requestPasswordReset(body),
+  })
+}
+
+/**
+ * `POST /auth/password-reset/confirm` — tukar token reset menjadi kata
+ * sandi baru. Tanpa invalidasi cache: konfirmasi tidak mengubah sesi (login
+ * terpisah) dan tidak ada kunci yang membawa data kata sandi/token.
+ */
+export function useConfirmPasswordResetMutation() {
+  return useMutation({
+    mutationFn: (body: PasswordResetConfirm) => confirmPasswordReset(body),
   })
 }
 

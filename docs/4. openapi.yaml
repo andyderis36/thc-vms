@@ -287,6 +287,78 @@ paths:
         '429':
           description: 'Terlalu banyak percobaan (rate limiter login). Amplop galat: { success: false, error: { code: "RATE_LIMITED", message } }.'
 
+  /auth/password-reset/request:
+    post:
+      tags: [Auth]
+      summary: Minta tautan reset kata sandi mandiri (publik, dibatasi rate limiter)
+      description: |
+        Meminta tautan reset kata sandi ke alamat email yang terdaftar. Respons
+        selalu generik 202 agar tidak membocorkan apakah email terdaftar:
+        `{ success: true, data: { message: "Jika email terdaftar, tautan reset kata sandi telah dikirim." } }`.
+        Email yang tidak dikenal berhasil diam-diam tanpa baris token dan tanpa
+        surat, supaya endpoint tidak menjadi account oracle. Akun `pending`
+        dijawab 403 `ACCOUNT_PENDING`, akun `inactive` dijawab 403
+        `ACCOUNT_INACTIVE`. Tautan reset dikirim ke kotak masuk pemilik akun dan
+        kedaluwarsa dalam 30 menit; tautan mengarah ke
+        `{FRONTEND_BASE_URL}/reset-password?token=...`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '202':
+          description: Permintaan diterima — tautan reset dikirim bila email terdaftar dan akun aktif
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordResetRequestResponse'
+        '400':
+          description: 'Body tidak ketat (kunci selain `email` atau bukan JSON) — VALIDATION_ERROR dengan pesan "Format isi permintaan tidak valid.". Amplop galat: { success: false, error: { code, message } }.'
+        '403':
+          description: 'Akun pending (ACCOUNT_PENDING, pesan "Akun Anda menunggu persetujuan superadmin.") atau inactive (ACCOUNT_INACTIVE, pesan "Akun Anda dinonaktifkan."). Amplop galat: { success: false, error: { code, message } }.'
+        '422':
+          description: 'Bentuk email tidak valid (VALIDATION_ERROR, pesan "Format email tidak valid."). Amplop galat: { success: false, error: { code, message } }.'
+        '429':
+          description: 'Terlalu banyak percobaan (rate limiter: 3/jam per email target, 3/jam per IP). Amplop galat: { success: false, error: { code: "RATE_LIMITED", message: "Terlalu banyak percobaan. Silakan coba lagi nanti." } }.'
+
+  /auth/password-reset/confirm:
+    post:
+      tags: [Auth]
+      summary: Konfirmasi reset kata sandi dengan token dari tautan email
+      description: |
+        Menukar token reset dari tautan yang dikirim ke kotak masuk pemilik
+        akun menjadi kata sandi baru. Sukses dijawab 200 generik tanpa token
+        sesi — pemanggil masuk terpisah lewat `POST /auth/login`:
+        `{ success: true, data: { message: "Kata sandi berhasil diubah. Silakan masuk dengan kata sandi baru." } }`.
+        SEMUA kegagalan token (kedaluwarsa, terpakai, rusak, asing, body salah
+        atau kosong) dijawab byte-identik 401 `UNAUTHORIZED` dengan pesan
+        generik "Tautan tidak valid atau kedaluwarsa.", supaya endpoint tidak
+        menjadi account oracle. Kata sandi lemah dijawab 400
+        `VALIDATION_ERROR`. Konfirmasi kedua atas token yang sama kalah dalam
+        perebutan kunci baris dan dijawab 401 yang sama.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+      responses:
+        '200':
+          description: Kata sandi berhasil diubah
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordResetConfirmResponse'
+        '400':
+          description: 'Kata sandi baru melanggar kebijakan (VALIDATION_ERROR, pesan "Kata sandi minimal 8 karakter." atau "Kata sandi terlalu panjang (maksimal 72 byte)."). Amplop galat: { success: false, error: { code, message } }.'
+        '401':
+          description: 'Token tidak valid, kedaluwarsa, terpakai, atau body salah/kosong (UNAUTHORIZED, pesan "Tautan tidak valid atau kedaluwarsa."). Byte-identik untuk semua kasus gagal. Amplop galat: { success: false, error: { code, message } }.'
+        '429':
+          description: 'Terlalu banyak percobaan (rate limiter: 10/menit per IP). Amplop galat: { success: false, error: { code: "RATE_LIMITED", message: "Terlalu banyak percobaan. Silakan coba lagi nanti." } }.'
+
   # ============================================================
   # USER MANAGEMENT (BRANCH SECURITY)
   # ============================================================
@@ -2142,6 +2214,74 @@ components:
         token:
           type: string
           description: Token verifikasi dari tautan email baru (opaque, sekali pakai).
+
+    PasswordResetRequest:
+      type: object
+      required: [email]
+      additionalProperties: false
+      description: |
+        Permintaan tautan reset kata sandi mandiri. `email` adalah alamat akun
+        yang sudah terdaftar; dinormalisasi (dipangkas dan dikecilkan hurufnya)
+        lalu diperiksa bentuknya (maksimal 254 rune, mailbox polos tanpa
+        display-name). Kunci lain TIDAK diterima — body yang tidak ketat
+        dijawab 400.
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: Alamat email akun yang meminta reset kata sandi.
+
+    PasswordResetRequestResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          required: [message]
+          additionalProperties: false
+          properties:
+            message:
+              type: string
+              example: Jika email terdaftar, tautan reset kata sandi telah dikirim.
+
+    PasswordResetConfirmRequest:
+      type: object
+      required: [token, new_password]
+      additionalProperties: false
+      description: |
+        Konfirmasi reset kata sandi dengan token dari tautan email plus kata
+        sandi baru pilihan pemohon (minimal 8 karakter, maksimal 72 byte —
+        batas yang sama dengan x-limits). Token kedaluwarsa, terpakai, asing,
+        atau rusak semuanya dijawab byte-identik 401 UNAUTHORIZED dengan pesan
+        generik "Tautan tidak valid atau kedaluwarsa.".
+      properties:
+        token:
+          type: string
+          description: Token reset dari tautan email (opaque, sekali pakai, kedaluwarsa 30 menit).
+        new_password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          description: Kata sandi baru; lemah dijawab 400. Tidak pernah dikembalikan pada respons.
+
+    PasswordResetConfirmResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          required: [message]
+          additionalProperties: false
+          properties:
+            message:
+              type: string
+              example: Kata sandi berhasil diubah. Silakan masuk dengan kata sandi baru.
 
     Location:
       type: object

@@ -179,9 +179,10 @@ func run(ctx context.Context) error {
 	// self-registration (POST /auth/register, status inactive) and the
 	// superadmin back office below.
 	managedUsers := repository.NewManagedUserRepository(pool)
+	passwordResets := repository.NewPasswordResetTokenRepository(pool)
 	authSvc := auth.NewService(auth.Deps{
 		Users: users, Roles: dir.Roles(), Locations: master, Vendors: repository.NewVendorRepository(pool), Issuer: jwtSvc, Clock: clock,
-		Profiles: repository.NewProfileRepository(pool), Audit: audit,
+		Profiles: repository.NewProfileRepository(pool), Audit: audit, Resets: passwordResets,
 		// Storage backs the avatar ownership proof on PATCH /auth/me; avatar
 		// reads no longer presign, they stream through GET /avatars/:id.
 		Storage: store,
@@ -209,6 +210,8 @@ func run(ctx context.Context) error {
 	authHandler := handlers.NewAuthHandler(authSvc)
 	emailChangeHandler := handlers.NewEmailChangeHandler(authSvc,
 		middleware.NewEmailChangeRateLimiter(middleware.DefaultEmailChangeLimits()))
+	passwordResetHandler := handlers.NewPasswordResetHandler(authSvc,
+		middleware.NewPasswordResetRateLimiter(middleware.DefaultPasswordResetLimits()))
 	visitHandler := handlers.NewVisitHandler(visitSvc)
 	gateHandler := handlers.NewGateHandler(gateSvc)
 	masterHandler := handlers.NewMasterHandler(master)
@@ -276,6 +279,7 @@ func run(ctx context.Context) error {
 			Login: authHandler.Login, Register: authHandler.Register, Me: authHandler.Me, PatchMe: authHandler.PatchMe,
 			Logout:             authHandler.Logout,
 			RequestEmailChange: emailChangeHandler.RequestEmailChange, ConfirmEmailChange: emailChangeHandler.ConfirmEmailChange,
+			RequestPasswordReset: passwordResetHandler.RequestPasswordReset, ConfirmPasswordReset: passwordResetHandler.ConfirmPasswordReset,
 		},
 		Users: deliveryhttp.UserRoutes{
 			List: userHandler.ListSecurity, Create: userHandler.CreateSecurity,

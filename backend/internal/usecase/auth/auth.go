@@ -121,6 +121,10 @@ type Deps struct {
 	// SuperAdmins resolves the active superadmin email set for the
 	// registration fan-out. A nil value disables only the email leg.
 	SuperAdmins SuperAdminDirectory
+	// Resets is the opaque single-use token store behind POST
+	// /auth/password-reset/request and /confirm (migration 000029). A nil
+	// value disables both (500), never login/logout/me.
+	Resets domain.PasswordResetTokenRepository
 }
 
 // Service is the authentication usecase.
@@ -143,6 +147,7 @@ type Service struct {
 	frontendBaseURL string
 	notices         domain.VendorRegistrationNoticeRepository
 	superAdmins     SuperAdminDirectory
+	resets          domain.PasswordResetTokenRepository
 }
 
 // NewService wires the collaborators. A nil Clock defaults to SystemClock;
@@ -168,6 +173,7 @@ func NewService(d Deps) *Service {
 		frontendBaseURL: strings.TrimRight(strings.TrimSpace(d.FrontendBaseURL), "/"),
 		notices:         d.Notices,
 		superAdmins:     d.SuperAdmins,
+		resets:          d.Resets,
 	}
 }
 

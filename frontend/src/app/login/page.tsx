@@ -293,6 +293,12 @@ function LoginScreen() {
               {...register('password')}
             />
 
+            <div className="-mt-1 text-right">
+              <Link href="/forgot-password" className="text-sm font-semibold text-brand underline-offset-4 hover:underline">
+                Lupa kata sandi?
+              </Link>
+            </div>
+
             <Button type="submit" size="lg" fullWidth loading={isSubmitting}>
               Masuk
             </Button>

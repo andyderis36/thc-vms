@@ -89,4 +89,12 @@ describe('LoginPage dev dummy account dropdown', () => {
       screen.getByRole('link', { name: 'Daftar sebagai Vendor/Mitra' }),
     ).toHaveAttribute('href', '/register')
   })
+
+  it('links to the forgot-password page', () => {
+    signInMock.mockReset()
+    render(createElement(LoginPage))
+    expect(
+      screen.getByRole('link', { name: 'Lupa kata sandi?' }),
+    ).toHaveAttribute('href', '/forgot-password')
+  })
 })
