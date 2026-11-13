@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
-import { ChevronDown, LogOut, UserRound } from 'lucide-react'
+import { ChevronDown, LogOut, Settings, UserRound } from 'lucide-react'
 import { useUserAvatar } from '@/components/ui/useUserAvatar'
 
 export interface ProfileMenuUser {
@@ -16,6 +16,13 @@ export interface ProfileMenuUser {
 export interface ProfileMenuProps {
   user: ProfileMenuUser
   onLogout: () => void
+  /**
+   * Tautan hub Pengaturan (mis. `/settings`) sebagai item menu di antara
+   * Profil dan Keluar. Opsional agar shell tanpa layar pengaturan (vendor,
+   * security, admin cabang) tidak menampilkan item buntu — hanya shell yang
+   * mengisi prop ini yang merender itemnya.
+   */
+  settingsHref?: string
   /**
    * Slot opsional di bawah nama pada PEMICU (mis. lencana peran).
    * Bila diisi, slot ini menggantikan baris `user.role` bawaan pada pemicu;
@@ -77,7 +84,7 @@ function initialsOf(name: string): string {
  * eksternal. Baris peran pada pemicu berasal dari `roleSlot` (bila ada) agar
  * shell sidebar bisa menyejajarkan lencana peran dengan kolom nama.
  */
-export function ProfileMenu({ user, onLogout, roleSlot, alwaysShowName = false }: ProfileMenuProps) {
+export function ProfileMenu({ user, onLogout, settingsHref, roleSlot, alwaysShowName = false }: ProfileMenuProps) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -186,6 +193,17 @@ export function ProfileMenu({ user, onLogout, roleSlot, alwaysShowName = false }
             <UserRound aria-hidden="true" className="size-4 shrink-0" />
             Profil
           </Link>
+          {settingsHref !== undefined && settingsHref !== '' ? (
+            <Link
+              href={settingsHref}
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className={ITEM_CLASS}
+            >
+              <Settings aria-hidden="true" className="size-4 shrink-0" />
+              Pengaturan
+            </Link>
+          ) : null}
           <button
             type="button"
             role="menuitem"

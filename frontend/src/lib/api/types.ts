@@ -848,6 +848,69 @@ export type NotificationSettings = NotificationSettingsMatrix;
 export type NotificationMatrix = NotificationSettingsMatrix;
 export type NotificationSettingsResponse = NotificationSettingsMatrix;
 
+// ---------------------------------------------------------------------------
+// Pengaturan sistem - `/settings/system` (hanya dev-superadmin)
+// ---------------------------------------------------------------------------
+
+/** Status antrean mailer. */
+export interface SystemMailerStatus {
+  queueDepth?: number;
+  queue_depth?: number;
+  dropped: number;
+}
+
+/** Respons `GET /settings/system`. */
+export type MailLogStatus = 'queued' | 'sent' | 'failed'
+
+export interface MailLog {
+  id: string
+  to: string[]
+  bcc?: string[]
+  subject: string
+  template: string
+  status: MailLogStatus | string
+  attempts: number
+  error?: string | null
+  createdAt?: string
+  created_at?: string
+  sentAt?: string | null
+  sent_at?: string | null
+  textBody?: string
+  text_body?: string
+}
+
+export interface MailLogListResult {
+  items: MailLog[]
+  total: number
+  page?: number
+  limit?: number
+}
+
+export interface MailLogDetail extends MailLog {
+  textBody: string
+  text_body?: string
+}
+
+export interface MailLogListParams {
+  status?: string
+  page?: number
+  limit?: number
+}
+
+export interface SystemSettings {
+  dbVersion?: number | null;
+  db_version?: number | null;
+  repoVersion?: number;
+  repo_version?: number;
+  inSync?: boolean;
+  in_sync?: boolean;
+  mailer: SystemMailerStatus;
+}
+
+/** Alias kompatibel. */
+export type SystemSettingsResponse = SystemSettings;
+export type SettingsSystem = SystemSettings;
+export type SystemConfig = SystemSettings;
 /** Label Bahasa Indonesia per peristiwa (sumber tunggal untuk UI). */
 export const NOTIFICATION_EVENT_LABEL: Record<NotificationEvent, string> = {
   visit_requested: 'Diminta',

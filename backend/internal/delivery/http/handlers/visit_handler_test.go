@@ -345,7 +345,8 @@ func TestCreateVisit_RejectsMalformedVendorUserID(t *testing.T) {
 	mustStatus(t, rec, 400)
 }
 
-func TestGetVisit_RendersVendorNameAndVisitorPhoto(t *testing.T) {	v := cannedVisit()
+func TestGetVisit_RendersVendorNameAndVisitorPhoto(t *testing.T) {
+	v := cannedVisit()
 	svc := &fakeVisitService{visitByKey: map[string]domain.VisitRequest{"visit-1": v}}
 	engine := newVisitEngine(svc, domain.RoleAdmin, "loc-A")
 
@@ -547,10 +548,10 @@ func TestGetVisit_RendersActorDisplayAndHistory(t *testing.T) {
 	assertSubset(t, "VisitDetail", detail)
 
 	for key, want := range map[string]any{
-		"created_by_name":      "Wulan Sari",
+		"created_by_name":       "Wulan Sari",
 		"created_by_role_label": "Vendor/Mitra",
-		"checked_in_by_name":   "Bagus Prakoso",
-		"checked_out_by_name":  "Rina Wati",
+		"checked_in_by_name":    "Bagus Prakoso",
+		"checked_out_by_name":   "Rina Wati",
 	} {
 		if detail[key] != want {
 			t.Errorf("%s = %v, want %v", key, detail[key], want)

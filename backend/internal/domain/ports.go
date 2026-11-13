@@ -164,6 +164,7 @@ type UserLocationRepository interface {
 	// never global; a lookup failure is an error so callers fail closed.
 	ListUserLocationIDs(ctx context.Context, userID UUID) ([]UUID, error)
 }
+
 // ProfileRepository is the self-service profile port. It is separate from
 // UserRepository for the same reason ManagedUserRepository is (see admin.go):
 // the older usecase/delivery fakes implement only the narrow ports, so

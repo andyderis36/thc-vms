@@ -40,5 +40,8 @@ export const NAV_LABELS = {
   createVisit: { desktop: 'Buat Kunjungan Baru', mobile: 'Buat Kunjungan' },
   /** `/audit` — jejak audit lintas cabang; hanya SHELL-01 (superadmin). */
   auditLogs: { desktop: 'Jejak Audit', mobile: 'Jejak Audit' },
-  notificationSettings: { desktop: 'Pengaturan Notifikasi', mobile: 'Notifikasi' },
+  /** `/settings/mail-logs` — log email notifikasi; hanya SHELL-01 (superadmin). */
+  mailLogs: { desktop: 'Log Email', mobile: 'Log' },
+  /** `/settings` — hub pengaturan (notifikasi, sistem); hanya SHELL-01, dibuka dari menu profil. */
+  settings: { desktop: 'Pengaturan', mobile: 'Pengaturan' },
 } satisfies Record<string, NavLabel>

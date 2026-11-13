@@ -13,7 +13,7 @@ type Actor = visit.Actor
 
 // ToggleInput is one row of the PUT body.
 type ToggleInput struct {
-	Event string                      `json:"event"`
+	Event string                           `json:"event"`
 	InApp domain.NotificationChannelToggle `json:"in_app"`
 	Email domain.NotificationChannelToggle `json:"email"`
 }
@@ -27,6 +27,13 @@ type UpdateInput struct {
 // Service is the settings usecase.
 type Service struct {
 	repo domain.SettingsRepository
+	// versions, mailStats and repoVersion are the optional observability
+	// seams behind GET /settings/system (see system.go). They stay nil/zero
+	// until WithSystem wires them, so the notification-matrix behaviour is
+	// unchanged for callers that never ask for the system probe.
+	versions    AppliedVersionSource
+	mailStats   MailQueueStats
+	repoVersion int
 }
 
 // NewService wires the usecase to its repository port.

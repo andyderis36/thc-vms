@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"strings"
 )
 
 // This file owns the EMAIL SENDING contract for visit lifecycle notices:
@@ -20,12 +21,31 @@ import (
 // Mailer is the outbound email port. Implementations (the go-mail SMTP
 // adapter) send one message; to holds the envelope recipients, subject is
 // the [THC-VMS] line, and textBody/htmlBody are the two MIME parts.
+// SendBcc puts the direct owners in To and the national overseers
+// (super_admin incl. the hidden dev-superadmin) in Bcc, so overseers stay
+// informed without being visible to the direct recipients.
 // SendWithTeamQR sends the same message with one inline-CID PNG attached
 // (the approval team QR); qrPNG is the encoded image bytes and cid its
 // Content-ID, referenced from the HTML as "cid:<cid>".
 type Mailer interface {
 	Send(ctx context.Context, to []string, subject, textBody, htmlBody string) error
+	SendBcc(ctx context.Context, to, bcc []string, subject, textBody, htmlBody string) error
 	SendWithTeamQR(ctx context.Context, to []string, subject, textBody, htmlBody string, qrPNG []byte, cid string) error
+}
+
+// TemplatedMailer is the optional sending port for lifecycle fan-outs that
+// know their notification template. It mirrors Mailer one-to-one but carries
+// the template label (e.g. visit_approved) alongside, so the single flush
+// point (the SMTP worker) can stamp the mail_log row without changing the
+// send/retry behaviour. Callers that go through it MUST keep the plain Mailer
+// fallback: adapters that predate the port (and every test fake) only
+// implement Mailer, and the label is observability metadata, never a reason
+// to refuse a send.
+type TemplatedMailer interface {
+	Mailer
+	SendTemplated(ctx context.Context, template string, to []string, subject, textBody, htmlBody string) error
+	SendTemplatedBcc(ctx context.Context, template string, to, bcc []string, subject, textBody, htmlBody string) error
+	SendTemplatedWithTeamQR(ctx context.Context, template string, to []string, subject, textBody, htmlBody string, qrPNG []byte, cid string) error
 }
 
 // emailAllowedTypes is the single email allowlist. Exactly these eight
@@ -68,11 +88,32 @@ func EmailAllowed(t NotificationType) bool {
 	return EmailAllowedWithSettings(t, DefaultNotificationSettings())
 }
 
+// SplitOverseerBcc carves the hidden dev-superadmin address out of a flat
+// recipient list: direct owners stay in To, the dev address moves to Bcc.
+// Case-insensitive and trims blanks; returns nil slices when empty so the
+// caller can skip the send exactly like a blank To. Used by fan-outs that
+// only resolve flat email lists (no role information available).
+func SplitOverseerBcc(recipients []string) (to, bcc []string) {
+	for _, addr := range recipients {
+		trimmed := strings.TrimSpace(addr)
+		if trimmed == "" {
+			continue
+		}
+		if strings.EqualFold(trimmed, DevSuperadminEmail) {
+			bcc = append(bcc, trimmed)
+		} else {
+			to = append(to, trimmed)
+		}
+	}
+	return to, bcc
+}
+
 // MailCall is one recorded FakeMailer.Send invocation. QRPNG/QRCID carry
 // the team QR attached through SendWithTeamQR; both stay empty for plain
 // Send calls and for every non-approval mail.
 type MailCall struct {
 	To       []string
+	Bcc      []string
 	Subject  string
 	TextBody string
 	HTMLBody string
@@ -91,6 +132,14 @@ type FakeMailer struct {
 func (f *FakeMailer) Send(ctx context.Context, to []string, subject, textBody, htmlBody string) error {
 	_ = ctx
 	f.Calls = append(f.Calls, MailCall{To: to, Subject: subject, TextBody: textBody, HTMLBody: htmlBody})
+	return f.Err
+}
+
+// SendBcc records the call with its Bcc set and returns the configured
+// error, mirroring Send without touching the network.
+func (f *FakeMailer) SendBcc(ctx context.Context, to, bcc []string, subject, textBody, htmlBody string) error {
+	_ = ctx
+	f.Calls = append(f.Calls, MailCall{To: to, Bcc: bcc, Subject: subject, TextBody: textBody, HTMLBody: htmlBody})
 	return f.Err
 }
 

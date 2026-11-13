@@ -138,16 +138,18 @@ func TestRegisterVendor_FansOutNoticeAndSuperAdminEmail(t *testing.T) {
 		t.Fatalf("subject = %q, want %q", call.Subject, wantSubject)
 	}
 	wantTo := map[string]bool{
-		"superadmin@thc.local":                true,
-		"dev-superadmin@transhybrid.net.id": true,
+		"superadmin@thc.local": true,
 	}
 	if len(call.To) != len(wantTo) {
-		t.Fatalf("recipients = %v, want exactly the superadmin set", call.To)
+		t.Fatalf("recipients = %v, want exactly the superadmin set in To", call.To)
 	}
 	for _, addr := range call.To {
 		if !wantTo[addr] {
-			t.Fatalf("recipients = %v, want exactly the superadmin set (branch staff must be absent)", call.To)
+			t.Fatalf("recipients = %v, want exactly the superadmin set in To (branch staff must be absent)", call.To)
 		}
+	}
+	if len(call.Bcc) != 1 || call.Bcc[0] != "dev-superadmin@transhybrid.net.id" {
+		t.Fatalf("bcc = %v, want exactly the hidden dev-superadmin address", call.Bcc)
 	}
 	pending := mailer.Calls[1]
 	if len(pending.To) != 1 || pending.To[0] != "dimas@vendor.example" {

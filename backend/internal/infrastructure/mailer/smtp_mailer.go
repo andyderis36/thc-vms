@@ -23,6 +23,8 @@ import (
 
 	mail "github.com/wneessen/go-mail"
 
+	"github.com/google/uuid"
+
 	"thc-vms/backend/internal/config"
 	"thc-vms/backend/internal/domain"
 )
@@ -45,6 +47,13 @@ const (
 	// failure. Only transient failures are retried; a permanent SMTP 5xx is
 	// never retried.
 	maxRetries = 3
+	// defaultLogTimeout bounds one detached mail_log write. The write never
+	// runs on the request hot path (enqueue spawns it, the worker owns the
+	// verdict), so this is only a leak guard for a wedged database.
+	defaultLogTimeout = 5 * time.Second
+	// maxLogErrorChars caps the stored verdict error text so one verbose SMTP
+	// transcript cannot bloat the row.
+	maxLogErrorChars = 2000
 )
 
 // backoffs paces the three retries: 5s after the first failure, 10s after
@@ -71,7 +80,16 @@ type sleepFunc func(ctx context.Context, d time.Duration) error
 // visit notification, so workers deliver under context.Background bounded
 // per attempt by the configured mail timeout.
 type mailJob struct {
+	// id correlates the queued row with its sent/failed verdict. It is
+	// client-generated so the enqueue path can hand it to the detached log
+	// write without waiting for the database round-trip.
+	id       domain.UUID
+	template string
 	to       []string
+	// bcc carries the national overseers (super_admin incl. the hidden
+	// dev-superadmin): hidden from the To recipients by the envelope, but
+	// stored on the mail_log row so the back-office trail stays complete.
+	bcc      []string
 	subject  string
 	textBody string
 	htmlBody string
@@ -86,7 +104,7 @@ type mailJob struct {
 // workers, each dialing a fresh SMTP connection per message. The zero value
 // is not usable; build it with New (production) or newSMTPMailer (tests).
 type SMTPMailer struct {
-	from          string
+	from string
 	// fromName is the sender display name rendered as `"Name" <addr>`.
 	// Empty means a bare address From.
 	fromName      string
@@ -103,6 +121,12 @@ type SMTPMailer struct {
 	// so workers observe it without synchronization.
 	dryRun bool
 
+	// logs is the optional mail_log writer behind the delivery verdicts
+	// (migration 000030). Nil disables verdict tracking: the send path is
+	// byte-for-byte the old one. Wired once via WithMailLog before the
+	// first Send, never toggled afterwards, so no synchronization is needed.
+	logs domain.MailLogWriter
+
 	wg           sync.WaitGroup
 	send         sendFunc
 	sleep        sleepFunc
@@ -112,6 +136,9 @@ type SMTPMailer struct {
 
 // compile-time proof that the adapter satisfies the domain Mailer port.
 var _ domain.Mailer = (*SMTPMailer)(nil)
+
+// compile-time proof that the adapter satisfies the optional templated port.
+var _ domain.TemplatedMailer = (*SMTPMailer)(nil)
 
 // New builds the adapter from configuration, mirroring the MinIO adapter's
 // fail-fast shape: a half-configured mailer must fail at startup, never at
@@ -220,40 +247,75 @@ func newSMTPMailer(from string, timeout, clientTimeout time.Duration, queueSize,
 	return m
 }
 
+// WithMailLog wires the mail_log writer behind the delivery verdicts and
+// returns the mailer for chained wiring at the composition root. A nil
+// writer disables verdict tracking.
+func (m *SMTPMailer) WithMailLog(logs domain.MailLogWriter) *SMTPMailer {
+	m.logs = logs
+	return m
+}
+
+// logEnabled reports whether a verdict write is due: a writer is wired and
+// the adapter is really dialing. Dry-run skips logging so CI legs without
+// Mailpit never accumulate phantom queued rows for mails that were never
+// sent.
+func (m *SMTPMailer) logEnabled() bool {
+	return m != nil && m.logs != nil && !m.dryRun
+}
+
 // Send enqueues one notification and returns immediately. A full queue never
 // blocks the caller: the message is dropped, a warning is logged (recipient
 // and subject only, never credentials) and the dropped counter is bumped.
 // Sending after Close is refused with an error.
 func (m *SMTPMailer) Send(_ context.Context, to []string, subject, textBody, htmlBody string) error {
-	recipients := trimRecipients(to)
-	if len(recipients) == 0 {
-		return fmt.Errorf("mailer: at least one recipient is required: %w", domain.ErrValidation)
-	}
-	job := mailJob{to: recipients, subject: subject, textBody: textBody, htmlBody: htmlBody}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.closed {
-		return errors.New("mailer: mailer is closed")
-	}
-	select {
-	case m.queue <- job:
-		return nil
-	default:
-		dropped := m.dropped.Add(1)
-		slog.Warn("mailer: queue full, dropping email", "to", to, "subject", subject, "dropped_total", dropped)
-		return nil
-	}
+	return m.enqueue(to, nil, "", subject, textBody, htmlBody, nil, "")
+}
+
+// SendBcc enqueues one notification with the direct owners in To and the
+// overseers in Bcc, mirroring Send otherwise.
+func (m *SMTPMailer) SendBcc(_ context.Context, to, bcc []string, subject, textBody, htmlBody string) error {
+	return m.enqueue(to, bcc, "", subject, textBody, htmlBody, nil, "")
 }
 
 // SendWithTeamQR enqueues one notification with its inline team QR attached
 // and returns immediately, mirroring Send: a full queue drops (never blocks)
 // and sending after Close is refused.
 func (m *SMTPMailer) SendWithTeamQR(_ context.Context, to []string, subject, textBody, htmlBody string, qrPNG []byte, cid string) error {
+	return m.enqueue(to, nil, "", subject, textBody, htmlBody, qrPNG, cid)
+}
+
+// SendTemplated enqueues one lifecycle notification carrying its template
+// label for the mail_log row, mirroring Send otherwise.
+func (m *SMTPMailer) SendTemplated(_ context.Context, template string, to []string, subject, textBody, htmlBody string) error {
+	return m.enqueue(to, nil, template, subject, textBody, htmlBody, nil, "")
+}
+
+// SendTemplatedBcc enqueues one lifecycle notification with the direct
+// owners in To and the overseers in Bcc, carrying its template label for
+// the mail_log row, mirroring SendTemplated otherwise.
+func (m *SMTPMailer) SendTemplatedBcc(_ context.Context, template string, to, bcc []string, subject, textBody, htmlBody string) error {
+	return m.enqueue(to, bcc, template, subject, textBody, htmlBody, nil, "")
+}
+
+// SendTemplatedWithTeamQR enqueues one lifecycle notification with its inline
+// team QR and its template label, mirroring SendWithTeamQR otherwise.
+func (m *SMTPMailer) SendTemplatedWithTeamQR(_ context.Context, template string, to []string, subject, textBody, htmlBody string, qrPNG []byte, cid string) error {
+	return m.enqueue(to, nil, template, subject, textBody, htmlBody, qrPNG, cid)
+}
+
+// enqueue validates the recipients, queues one job and records its queued
+// row from a detached goroutine: the caller never waits on the database, so
+// the HTTP hot path keeps the old non-blocking shape. A log failure only
+// warns; the queued send stands regardless. Bcc recipients ride along in
+// the envelope but never appear in To; at least one of To/Bcc must be
+// non-empty.
+func (m *SMTPMailer) enqueue(to, bcc []string, template, subject, textBody, htmlBody string, qrPNG []byte, cid string) error {
 	recipients := trimRecipients(to)
-	if len(recipients) == 0 {
+	hidden := trimRecipients(bcc)
+	if len(recipients) == 0 && len(hidden) == 0 {
 		return fmt.Errorf("mailer: at least one recipient is required: %w", domain.ErrValidation)
 	}
-	job := mailJob{to: recipients, subject: subject, textBody: textBody, htmlBody: htmlBody, qrPNG: qrPNG, cid: cid}
+	job := mailJob{id: domain.UUID(uuid.NewString()), template: template, to: recipients, bcc: hidden, subject: subject, textBody: textBody, htmlBody: htmlBody, qrPNG: qrPNG, cid: cid}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.closed {
@@ -261,12 +323,75 @@ func (m *SMTPMailer) SendWithTeamQR(_ context.Context, to []string, subject, tex
 	}
 	select {
 	case m.queue <- job:
+		if m.logEnabled() {
+			go m.logQueued(job)
+		}
 		return nil
 	default:
 		dropped := m.dropped.Add(1)
-		slog.Warn("mailer: queue full, dropping email", "to", to, "subject", subject, "dropped_total", dropped)
+		slog.Warn("mailer: queue full, dropping email", "to", to, "bcc_count", len(hidden), "subject", subject, "dropped_total", dropped)
 		return nil
 	}
+}
+
+// logQueued records the accepted send. It runs on a detached goroutine with
+// its own timeout so a slow database can never block the enqueueing request;
+// a failure only warns because the queued send must stand regardless.
+func (m *SMTPMailer) logQueued(job mailJob) {
+	if !m.logEnabled() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultLogTimeout)
+	defer cancel()
+	entry := domain.MailLog{
+		ID: job.id, Recipients: job.to, Bcc: job.bcc, Subject: job.subject, Template: job.template,
+		Status: domain.MailLogQueued, CreatedAt: time.Now().UTC(),
+	}
+	if job.textBody != "" {
+		body := job.textBody
+		entry.TextBody = &body
+	}
+	if err := m.logs.InsertQueued(ctx, entry); err != nil {
+		slog.Warn("mailer: mail_log queued insert failed", "to", job.to, "subject", job.subject, "err", err)
+	}
+}
+
+// logVerdict records the final verdict (sent, or failed with the attempt
+// count and error text). It runs on the worker, never on the request hot
+// path; a failure only warns.
+func (m *SMTPMailer) logVerdict(job mailJob, status domain.MailLogStatus, attempts int, err error) {
+	if !m.logEnabled() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultLogTimeout)
+	defer cancel()
+	entry := domain.MailLog{
+		ID: job.id, Recipients: job.to, Bcc: job.bcc, Subject: job.subject, Template: job.template,
+		Status: status, Attempts: attempts, CreatedAt: time.Now().UTC(),
+	}
+	if job.textBody != "" {
+		body := job.textBody
+		entry.TextBody = &body
+	}
+	if err != nil {
+		msg := truncateLogError(err)
+		entry.Error = &msg
+	}
+	if uerr := m.logs.RecordVerdict(ctx, entry); uerr != nil {
+		slog.Warn("mailer: mail_log verdict update failed", "status", string(status), "err", uerr)
+	}
+}
+
+// truncateLogError renders the verdict error text within the column budget.
+func truncateLogError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if len([]rune(msg)) > maxLogErrorChars {
+		msg = string([]rune(msg)[:maxLogErrorChars])
+	}
+	return msg
 }
 
 // trimRecipients drops blank entries and copies the slice so later caller
@@ -284,6 +409,17 @@ func trimRecipients(to []string) []string {
 // Dropped reports how many notifications were shed under a full queue.
 func (m *SMTPMailer) Dropped() int64 {
 	return m.dropped.Load()
+}
+
+// QueueDepth reports how many notifications are currently waiting in the
+// queue. len on a channel is safe for concurrent use, so no lock is taken;
+// the value is a point-in-time sample for the /settings/system probe only,
+// never a flow-control signal. It changes nothing about the send path.
+func (m *SMTPMailer) QueueDepth() int {
+	if m == nil {
+		return 0
+	}
+	return len(m.queue)
 }
 
 // Close stops intake, drains every queued notification through the workers,
@@ -326,11 +462,14 @@ func (m *SMTPMailer) run() {
 
 // deliver flushes one job with transient-only retry: up to maxRetries
 // re-deliveries paced by backoffs. A permanent failure (SMTP 5xx, cancelled
-// context, unbuildable message) is logged once and never retried.
+// context, unbuildable message) is logged once and never retried. The final
+// verdict (sent, or failed with the attempt count and error text) is recorded
+// to mail_log best-effort; the retry discipline itself is unchanged.
 func (m *SMTPMailer) deliver(parent context.Context, job mailJob) {
 	msg, err := m.compose(job)
 	if err != nil {
 		slog.Error("mailer: cannot compose email, dropping", "to", job.to, "error", err)
+		m.logVerdict(job, domain.MailLogFailed, 0, err)
 		return
 	}
 	// Dry-run renders and validates exactly like production but never dials:
@@ -341,14 +480,17 @@ func (m *SMTPMailer) deliver(parent context.Context, job mailJob) {
 	}
 	for attempt := 0; ; attempt++ {
 		if err := m.send(parent, msg); err == nil {
+			m.logVerdict(job, domain.MailLogSent, attempt+1, nil)
 			return
 		} else if attempt >= maxRetries || !isTransient(err) {
 			slog.Error("mailer: delivery failed", "to", job.to, "attempt", attempt+1, "error", err)
+			m.logVerdict(job, domain.MailLogFailed, attempt+1, err)
 			return
 		} else {
 			backoff := backoffs[attempt]
 			slog.Warn("mailer: transient failure, retrying", "to", job.to, "attempt", attempt+1, "backoff", backoff, "error", err)
 			if serr := m.sleep(parent, backoff); serr != nil {
+				m.logVerdict(job, domain.MailLogFailed, attempt+1, err)
 				return
 			}
 		}
@@ -393,6 +535,11 @@ func (m *SMTPMailer) compose(job mailJob) (*mail.Msg, error) {
 	}
 	if err := msg.To(job.to...); err != nil {
 		return nil, fmt.Errorf("mailer: invalid recipient: %w", err)
+	}
+	if len(job.bcc) > 0 {
+		if err := msg.Bcc(job.bcc...); err != nil {
+			return nil, fmt.Errorf("mailer: invalid bcc recipient: %w", err)
+		}
 	}
 	msg.Subject(job.subject)
 	msg.SetBodyString(mail.TypeTextPlain, job.textBody)

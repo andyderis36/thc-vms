@@ -74,6 +74,18 @@ describe('ProfileMenu', () => {
     expect(screen.getByRole('menuitem', { name: 'Keluar' }).tagName).toBe('BUTTON')
   })
 
+  it('menampilkan item Pengaturan sebagai tautan saat settingsHref diisi', () => {
+    renderMenu({ settingsHref: '/settings' })
+    openMenu()
+
+    const settings = screen.getByRole('menuitem', { name: 'Pengaturan' })
+    expect(settings.tagName).toBe('A')
+    expect(settings).toHaveAttribute('href', '/settings')
+
+    const menuItems = screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())
+    expect(menuItems).toEqual(['Profil', 'Pengaturan', 'Keluar'])
+  })
+
   it('menutup panel dan mengembalikan fokus ke pemicu saat Escape ditekan', () => {
     renderMenu()
     openMenu()

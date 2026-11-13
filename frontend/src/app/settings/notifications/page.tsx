@@ -7,6 +7,7 @@ import { SuperadminShell } from '@/components/layouts/SuperadminShell'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
+import { ProfileBackLink } from '@/features/profile/components/ProfileBackLink'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 import { RequireRole } from '@/lib/auth/guards'
 import * as apiHooks from '@/lib/api/hooks'
@@ -176,7 +177,8 @@ function SettingsNotificationsScreen() {
 
   return (
     <SuperadminShell pendingCount={pendingCount} activeHref="/settings/notifications">
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+      <ProfileBackLink href="/settings" label="Pengaturan" />
+      <div className="mb-5 mt-3 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-bold text-ink">Pengaturan Notifikasi</h1>

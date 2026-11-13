@@ -106,7 +106,28 @@ jobs:
 
       - name: Install dependencies
         working-directory: frontend
-        run: timeout 600 npm ci
+        # Use a per-run cache: a stale shared npm cache on the runner makes
+        # `npm ci` fail before lint/test even start.
+        run: |
+          cache_dir="${RUNNER_TEMP:-/tmp}/npm-cache-thc"
+          rm -rf "$cache_dir"
+          for attempt in 1 2 3; do
+            if timeout 600 npm ci --cache "$cache_dir" --no-audit --no-fund; then
+              exit 0
+            fi
+            echo "npm ci failed (attempt ${attempt}/3), retrying..." >&2
+            sleep 15
+          done
+          exit 1
+
+      - name: Upload npm debug logs
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-debug-logs
+          path: ~/.npm/_logs
+          if-no-files-found: ignore
 
       - name: Lint
         working-directory: frontend
