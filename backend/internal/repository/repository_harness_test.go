@@ -129,6 +129,15 @@ func scrubScratch(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("scrub registration notices: %w", err)
 		}
 	}
+	mailPresent, mailErr := tableExists(ctx, pool, "mail_log")
+	if mailErr != nil {
+		return fmt.Errorf("probe mail_log: %w", mailErr)
+	}
+	if mailPresent {
+		if _, err := pool.Exec(ctx, `TRUNCATE mail_log RESTART IDENTITY CASCADE`); err != nil {
+			return fmt.Errorf("scrub mail log: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -208,7 +217,7 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 // yields no error, because a re-applied file raises only "already there"
 // SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL, migrationUserLocationsSQL, migrationAppSettingsSQL} {
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL, migrationUserLocationsSQL, migrationAppSettingsSQL, migrationMailLogSQL, migrationMailBccSQL} {
 		if err := applyOne(ctx, pool, sql); err != nil {
 			return err
 		}
@@ -366,6 +375,34 @@ var migrationAppSettingsSQL = func() string {
 // idempotent.
 var migrationCreatedBySQL = func() string {
 	path := filepath.Join("..", "..", "migrations", "000024_created_by_and_work_photo.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationMailLogSQL is the mail delivery log (migration 000030), loaded
+// the same way so the scratch schema tracks the verdict store the SMTP
+// worker writes. It is re-runnable (CREATE TABLE/INDEX IF NOT EXISTS), so
+// applyOne covers it with no once-gate.
+var migrationMailLogSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000030_mail_log.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationMailBccSQL is the mail_log Bcc column (migration 000031), loaded
+// the same way so the scratch schema tracks the overseer column the SMTP
+// worker persists. It is re-runnable (ADD COLUMN IF NOT EXISTS), so
+// applyOne covers it with no once-gate.
+var migrationMailBccSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000031_mail_log_bcc.up.sql")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
@@ -664,7 +701,7 @@ func resetTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := testContext(t)
 	_, err := pool.Exec(ctx, `TRUNCATE visit_request, users, status_history,
-		check_in, check_out, visitor, visit_purpose, vendor, location, purpose, audit_log, notification, vendor_registration_notices RESTART IDENTITY CASCADE`)
+		check_in, check_out, visitor, visit_purpose, vendor, location, purpose, audit_log, notification, vendor_registration_notices, mail_log RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate scratch tables: %v", err)
 	}

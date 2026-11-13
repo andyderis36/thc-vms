@@ -321,3 +321,46 @@ func TestCompose_TeamQRAttachesWithoutError(t *testing.T) {
 		t.Fatalf("compose with half-set QR = %v", err)
 	}
 }
+
+func TestCompose_BccOnlySendHasNoToHeader(t *testing.T) {
+	// Given: a branch with no direct owners, only national overseers.
+	// When:  it is composed with an empty To and a Bcc set.
+	// Then:  composition succeeds (delivery rides the envelope), the To
+	//        header stays empty, and Bcc carries the overseers.
+	m := newSMTPMailer("noreply@example.internal", 5*time.Second, 5*time.Second, 10, 0, nil, realSleep)
+	msg, err := m.compose(mailJob{bcc: []string{"superadmin@thc.local"}, subject: "s", textBody: "t"})
+	if err != nil {
+		t.Fatalf("compose = %v", err)
+	}
+	if got := msg.GetTo(); len(got) != 0 {
+		t.Fatalf("To = %v, want empty when there are no branch owners", msg.GetToString())
+	}
+	gotBcc := msg.GetBcc()
+	if len(gotBcc) != 1 || gotBcc[0].Address != "superadmin@thc.local" {
+		t.Fatalf("Bcc = %v, want exactly the overseer", msg.GetBccString())
+	}
+}
+
+func TestCompose_BccHeaderHoldsOverseersOnly(t *testing.T) {
+	// Given: a job with branch owners in To and overseers in Bcc.
+	// When:  it is composed.
+	// Then:  the Bcc header carries exactly the overseers and the To
+	//        header carries exactly the branch owners (no leak either way).
+	m := newSMTPMailer("noreply@example.internal", 5*time.Second, 5*time.Second, 10, 0, nil, realSleep)
+	msg, err := m.compose(mailJob{
+		to:       []string{"admin-cabang@thc.local"},
+		bcc:      []string{"superadmin@thc.local", "dev-superadmin@transhybrid.net.id"},
+		subject:  "s",
+		textBody: "t",
+	})
+	if err != nil {
+		t.Fatalf("compose = %v", err)
+	}
+	if got := msg.GetTo(); len(got) != 1 || got[0].Address != "admin-cabang@thc.local" {
+		t.Fatalf("To = %v, want exactly the branch owner", msg.GetToString())
+	}
+	gotBcc := msg.GetBcc()
+	if len(gotBcc) != 2 || gotBcc[0].Address != "superadmin@thc.local" || gotBcc[1].Address != "dev-superadmin@transhybrid.net.id" {
+		t.Fatalf("Bcc = %v, want exactly the two overseers", msg.GetBccString())
+	}
+}

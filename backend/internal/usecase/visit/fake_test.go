@@ -56,9 +56,9 @@ type fakeVisitRepo struct {
 	lastFilter      domain.VisitFilter
 	// listCalls counts List invocations so refusal tests can prove the
 	// repository query never ran.
-	listCalls       int
-	listResult      []domain.VisitRequest
-	listTotal       int64
+	listCalls  int
+	listResult []domain.VisitRequest
+	listTotal  int64
 	// jabatanRows holds raw stored Jabatan values (blanks and duplicates
 	// included) so ListVisitorJabatan can model the SQL contract.
 	jabatanRows []string
@@ -107,16 +107,16 @@ func (f *fakeVisitRepo) FindByID(_ context.Context, id domain.UUID) (domain.Visi
 		return domain.VisitRequest{}, domain.NotFoundEntity("Kunjungan")
 	}
 	return visit, nil
-	}
+}
 
-	func (f *fakeVisitRepo) ListStatusHistory(_ context.Context, id domain.UUID) ([]domain.StatusEvent, error) {
-		if f.historyErr != nil {
-			return nil, f.historyErr
-		}
-		return f.history[id], nil
+func (f *fakeVisitRepo) ListStatusHistory(_ context.Context, id domain.UUID) ([]domain.StatusEvent, error) {
+	if f.historyErr != nil {
+		return nil, f.historyErr
 	}
+	return f.history[id], nil
+}
 
-	func (f *fakeVisitRepo) FindByVisitCode(_ context.Context, code string) (domain.VisitRequest, error) {
+func (f *fakeVisitRepo) FindByVisitCode(_ context.Context, code string) (domain.VisitRequest, error) {
 	visit, ok := f.byCode[code]
 	if !ok {
 		return domain.VisitRequest{}, domain.NotFoundEntity("Kunjungan")
@@ -363,7 +363,8 @@ func visitVendorAccount(id string, status domain.UserStatus) domain.ManagedUser 
 	}
 }
 
-func testActor(role domain.RoleName, id string, loc string) Actor {	actor := Actor{ID: domain.UUID(id), Role: role}
+func testActor(role domain.RoleName, id string, loc string) Actor {
+	actor := Actor{ID: domain.UUID(id), Role: role}
 	if loc != "" {
 		locationID := domain.UUID(loc)
 		actor.LocationID = &locationID
@@ -397,8 +398,8 @@ func validCreateInput() CreateVisitInput {
 		LocationID: domain.UUID("loc-A"),
 		PurposeIDs: []domain.UUID{domain.UUID("pur-1"), domain.UUID("pur-2")},
 		Visitors: []VisitorInput{
-{Name: "Andi", IDNumber: "ID123", Phone: "0812345678"},
-{Name: "Budi", IDNumber: "ID456", Phone: "0812345679"},
+			{Name: "Andi", IDNumber: "ID123", Phone: "0812345678"},
+			{Name: "Budi", IDNumber: "ID456", Phone: "0812345679"},
 		},
 		StartDate:     time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC),
 		EndDate:       time.Date(2026, time.October, 1, 17, 0, 0, 0, time.UTC),

@@ -65,6 +65,9 @@ func (s *Service) mailSuperAdmins(ctx context.Context, user domain.User) {
 		slog.Info("auth: vendor registration email skipped: no active superadmin recipients", "user_id", string(user.ID))
 		return
 	}
+	// The hidden dev-superadmin rides in Bcc, never in To: the operator
+	// stays informed without appearing on the visible recipient list.
+	to, bcc := domain.SplitOverseerBcc(recipients)
 	name := strings.TrimSpace(user.Name)
 	if name == "" {
 		name = strings.TrimSpace(user.Email)
@@ -100,7 +103,7 @@ func (s *Service) mailSuperAdmins(ctx context.Context, user domain.User) {
 	htmlBody := domain.RenderBrandedActionEmail("Pendaftaran Vendor Baru",
 		fmt.Sprintf("Vendor baru %s baru saja mendaftar dan menunggu persetujuan akun.\n\n%s", name, details),
 		"Tinjau Pendaftaran", ctaLink)
-	if err := s.mailer.Send(ctx, recipients, subject, textBody, htmlBody); err != nil {
+	if err := s.mailer.SendBcc(ctx, to, bcc, subject, textBody, htmlBody); err != nil {
 		slog.Warn("auth: vendor registration email failed", "user_id", string(user.ID), "error", err)
 	}
 }

@@ -44,19 +44,19 @@ type UserRoutes struct {
 // visit purge. The fields stay separate from UserRoutes/MasterRoutes so a
 // nil member degrades to pass-through in tests mounting a subset.
 type SuperAdminRoutes struct {
-	CreateLocation   gin.HandlerFunc
-	UpdateLocation   gin.HandlerFunc
-	DeleteLocation   gin.HandlerFunc
-	CreatePurpose    gin.HandlerFunc
-	UpdatePurpose    gin.HandlerFunc
-	DeletePurpose    gin.HandlerFunc
-	ListUsers        gin.HandlerFunc
+	CreateLocation     gin.HandlerFunc
+	UpdateLocation     gin.HandlerFunc
+	DeleteLocation     gin.HandlerFunc
+	CreatePurpose      gin.HandlerFunc
+	UpdatePurpose      gin.HandlerFunc
+	DeletePurpose      gin.HandlerFunc
+	ListUsers          gin.HandlerFunc
 	ListVendorAccounts gin.HandlerFunc
-	CreateUser       gin.HandlerFunc
-	UpdateUserStatus gin.HandlerFunc
-	UpdateUser       gin.HandlerFunc
-	DeleteUser       gin.HandlerFunc
-	DeleteVisit      gin.HandlerFunc
+	CreateUser         gin.HandlerFunc
+	UpdateUserStatus   gin.HandlerFunc
+	UpdateUser         gin.HandlerFunc
+	DeleteUser         gin.HandlerFunc
+	DeleteVisit        gin.HandlerFunc
 }
 
 // MasterRoutes carries the bound catalogue handler methods.
@@ -121,11 +121,19 @@ type AuditRoutes struct {
 	List gin.HandlerFunc
 }
 
-// SettingsRoutes carries the bound app-settings handler methods (super_admin
-// only).
+// SettingsRoutes carries the bound app-settings handler methods. Get/Update
+// serve the notification matrix (super_admin only); MailLogs/MailLogDetail
+// serve the mail delivery trail reads (super_admin only, no audit row —
+// read-only probe like System); System/TestMail serve the read-only
+// observability probes (dev-superadmin only: the handler gate narrows
+// further than the SuperAdminOnly chain they mount behind).
 type SettingsRoutes struct {
-	Get    gin.HandlerFunc
-	Update gin.HandlerFunc
+	Get           gin.HandlerFunc
+	Update        gin.HandlerFunc
+	MailLogs      gin.HandlerFunc
+	MailLogDetail gin.HandlerFunc
+	System        gin.HandlerFunc
+	TestMail      gin.HandlerFunc
 }
 
 // NotificationRoutes carries the bound notification handler methods (every
@@ -285,6 +293,10 @@ func New(d Deps) *gin.Engine {
 	super.GET("/audit-logs", withFallback(d.Audit.List))
 	super.GET("/settings/notifications", withFallback(d.Settings.Get))
 	super.PUT("/settings/notifications", withFallback(d.Settings.Update))
+	super.GET("/settings/mail-logs", withFallback(d.Settings.MailLogs))
+	super.GET("/settings/mail-logs/:id", withFallback(d.Settings.MailLogDetail))
+	super.GET("/settings/system", withFallback(d.Settings.System))
+	super.POST("/settings/test-mail", withFallback(d.Settings.TestMail))
 	// The pending vendor-registration queue is the superadmin approval
 	// backlog behind the console bell: global by design, hence SuperAdminOnly
 	// and never the branch-scoped NotifyOnly group.

@@ -108,6 +108,7 @@ func pgTextBlankNull(s *string) pgtype.Text {
 	}
 	return pgtype.Text{Valid: false}
 }
+
 // textPtr converts a nullable text column back: NULL becomes nil.
 func textPtr(t pgtype.Text) *string {
 	if !t.Valid {

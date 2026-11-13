@@ -37,6 +37,7 @@ import (
 	"thc-vms/backend/internal/usecase/visit"
 	"thc-vms/backend/internal/validation"
 	"thc-vms/backend/internal/worker"
+	"thc-vms/backend/migrations"
 )
 
 // timeouts for the HTTP server and the graceful shutdown.
@@ -119,6 +120,15 @@ func run(ctx context.Context) error {
 	audit := repository.NewAuditRepository(pool)
 	notifications := repository.NewNotificationRepository(pool)
 	settingsRepo := repository.NewSettingsRepository(pool)
+	// mailLogRepo anchors the mail delivery trail (migration 000030): the
+	// SMTP worker verdicts flush here (wired below) and the back-office
+	// mail-log reads serve from the same adapter.
+	mailLogRepo := repository.NewMailLogRepository(pool)
+	// Verdict tracking is best-effort observability: a nil mailer (SMTP
+	// disabled) simply never logs, and a log failure never fails a send.
+	if smtpMailer != nil {
+		smtpMailer.WithMailLog(mailLogRepo)
+	}
 	// vendorNotices anchors the vendor-registration queue (migration 000020):
 	// the same adapter serves the register fan-out (authSvc Notices), the
 	// superadmin directory serves the mail leg (authSvc SuperAdmins), and
@@ -132,7 +142,16 @@ func run(ctx context.Context) error {
 	// S3_PRESIGN_TTL_MINUTES and is guaranteed positive by config. The object
 	// reader powers the scoped GET /visits/:id/file stream (bytes, not links).
 	notificationSvc := notification.NewService(notifications)
-	settingsSvc := settings.NewService(settingsRepo)
+	// The system probe reads the applied migration high-water mark straight
+	// from schema_migrations and compares it against the embedded maximum
+	// (parsed once); the mailer half observes the live queue when SMTP is
+	// enabled and reads zero when it is not.
+	var mailStats settings.MailQueueStats
+	if smtpMailer != nil {
+		mailStats = smtpMailer
+	}
+	settingsSvc := settings.NewService(settingsRepo).
+		WithSystem(repository.NewSystemRepository(pool), mailStats, migrations.MaxVersion())
 	// The uploaded-file URL allowlist must accept the URLs this deployment's
 	// own object storage hands out. On a LAN install without TLS the public
 	// base is a plain-http IP (Caddy same-origin /s3 path), so the trusted
@@ -233,7 +252,11 @@ func run(ctx context.Context) error {
 	fileHandler := handlers.NewFileHandler(visitSvc)
 	auditHandler := handlers.NewAuditHandler(audit)
 	notificationHandler := handlers.NewNotificationHandler(notificationSvc)
-	settingsHandler := handlers.NewSettingsHandler(settingsSvc)
+	settingsHandler := handlers.NewSettingsHandler(settingsSvc).
+		WithUsers(users).
+		WithMailer(mailPort).
+		WithAudit(audit)
+	mailLogHandler := handlers.NewMailLogHandler(mailLogRepo)
 	// The pending-registration feed reads the same queue the register fan-out
 	// writes, so a self-registration shows up on the next superadmin poll.
 	pendingRegistrationHandler := handlers.NewPendingRegistrationHandler(vendorNotices)
@@ -309,7 +332,11 @@ func run(ctx context.Context) error {
 		File:   deliveryhttp.FileRoutes{File: fileHandler.File},
 		Avatar: deliveryhttp.AvatarRoutes{Avatar: avatarHandler.Avatar},
 		Audit:  deliveryhttp.AuditRoutes{List: auditHandler.List},
-		Settings: deliveryhttp.SettingsRoutes{Get: settingsHandler.Get, Update: settingsHandler.Update},
+		Settings: deliveryhttp.SettingsRoutes{
+			Get: settingsHandler.Get, Update: settingsHandler.Update,
+			MailLogs: mailLogHandler.List, MailLogDetail: mailLogHandler.Get,
+			System: settingsHandler.System, TestMail: settingsHandler.TestMail,
+		},
 		Notifications: deliveryhttp.NotificationRoutes{
 			List:                 notificationHandler.List,
 			MarkRead:             notificationHandler.MarkRead,
@@ -322,11 +349,11 @@ func run(ctx context.Context) error {
 			// Asal tunnel Cloudflare (mis. https://xxx.trycloudflare.com) didaftarkan
 			// lewat CORS_ALLOWED_ORIGINS (koma-dipisah di backend/.env); kosong =
 			// default lokal middleware (localhost:3210).
-			CORS:         middleware.CORS(envList("CORS_ALLOWED_ORIGINS")...),
-			BodyLimit:    middleware.BodyLimit(validation.JSONBodyMaxBytes, deliveryhttp.UploadPath),
-			LoginLimiter: loginLimiter,
+			CORS:            middleware.CORS(envList("CORS_ALLOWED_ORIGINS")...),
+			BodyLimit:       middleware.BodyLimit(validation.JSONBodyMaxBytes, deliveryhttp.UploadPath),
+			LoginLimiter:    loginLimiter,
 			RegisterLimiter: registerLimiter,
-			Authenticate: middleware.JWT(jwtSvc, authSvc, repository.NewUserLocationRepository(pool)),
+			Authenticate:    middleware.JWT(jwtSvc, authSvc, repository.NewUserLocationRepository(pool)),
 			AdminOnly: middleware.RequireRoles(
 				domain.RoleSuperAdmin, domain.RoleDevSuperAdmin, domain.RoleAdmin),
 			SuperAdminOnly: middleware.RequireSuperAdmin(),
@@ -458,18 +485,18 @@ func (a emailChangeTokenAdapter) Verify(token string) (auth.EmailChangeClaims, e
 // member mounts as a pass-through and would answer 200 with an empty body.
 func superAdminRoutes(h *handlers.SuperAdminHandler) deliveryhttp.SuperAdminRoutes {
 	return deliveryhttp.SuperAdminRoutes{
-		CreateLocation:   h.CreateLocation,
-		UpdateLocation:   h.UpdateLocation,
-		DeleteLocation:   h.DeleteLocation,
-		CreatePurpose:    h.CreatePurpose,
-		UpdatePurpose:    h.UpdatePurpose,
-		DeletePurpose:    h.DeletePurpose,
-		ListUsers:        h.ListUsers,
+		CreateLocation:     h.CreateLocation,
+		UpdateLocation:     h.UpdateLocation,
+		DeleteLocation:     h.DeleteLocation,
+		CreatePurpose:      h.CreatePurpose,
+		UpdatePurpose:      h.UpdatePurpose,
+		DeletePurpose:      h.DeletePurpose,
+		ListUsers:          h.ListUsers,
 		ListVendorAccounts: h.ListVendorAccounts,
-		CreateUser:       h.CreateUser,
-		UpdateUser:       h.UpdateUser,
-		UpdateUserStatus: h.UpdateUserStatus,
-		DeleteUser:       h.DeleteUser,
-		DeleteVisit:      h.DeleteVisit,
+		CreateUser:         h.CreateUser,
+		UpdateUser:         h.UpdateUser,
+		UpdateUserStatus:   h.UpdateUserStatus,
+		DeleteUser:         h.DeleteUser,
+		DeleteVisit:        h.DeleteVisit,
 	}
 }

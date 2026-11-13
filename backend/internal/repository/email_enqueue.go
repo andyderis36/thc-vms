@@ -50,6 +50,41 @@ var resolveEmailRecipients = func(ctx context.Context, q *db.Queries, locationID
 	}
 }
 
+// splitStaffBcc partitions one resolved staff recipient set into the branch
+// direct owners (To) and the national overseers (Bcc). Overseers are the
+// active super_admin accounts incl. the hidden dev-superadmin, resolved by
+// the role predicate — never by comparing against a single address — so a
+// renamed or additional overseer account is classified correctly. When the
+// overseer lookup fails, the split degrades to the old shape (everyone in
+// To, empty Bcc) so the notification is never lost because of observability
+// routing. staffActive false means no staff audience was enabled and both
+// halves come back empty.
+func splitStaffBcc(ctx context.Context, q *db.Queries, visitID string, template string, staffActive bool, staff []string) (to, bcc []string) {
+	if !staffActive || len(staff) == 0 {
+		return nil, nil
+	}
+	overseers, err := q.ListSuperAdminEmails(ctx)
+	if err != nil {
+		slog.Error("email overseer lookup failed, sending staff copy without Bcc split",
+			"visit_id", visitID, "template", template, "err", err)
+		return staff, nil
+	}
+	hidden := make(map[string]struct{}, len(overseers))
+	for _, addr := range overseers {
+		if trimmed := strings.TrimSpace(addr); trimmed != "" {
+			hidden[strings.ToLower(trimmed)] = struct{}{}
+		}
+	}
+	for _, addr := range staff {
+		if _, ok := hidden[strings.ToLower(addr)]; ok {
+			bcc = append(bcc, addr)
+		} else {
+			to = append(to, addr)
+		}
+	}
+	return to, bcc
+}
+
 // hasVendorAudience reports whether a vendor-leg send is pending, in which
 // case the roster must be loaded for the member fan-out.
 func hasVendorAudience(audiences []domain.NotificationAudience) bool {
@@ -103,12 +138,16 @@ func attachPurposes(ctx context.Context, q *db.Queries, visitID uuid.UUID, pendi
 // transaction inserted. The send itself is non-blocking: the SMTP adapter
 // queues and returns immediately, so no HTTP handler ever waits on delivery.
 //
-// Fan-out shape is visit-scoped: the staff audiences keep one single send to
-// their active set, while the vendor audience fans out per recipient — one
+// Fan-out shape is visit-scoped: the staff audiences keep one single send
+// to their active set, while the vendor audience fans out per recipient — one
 // send to the requester plus one send to every roster member carrying a
-// non-blank email, all sharing the same subject and bodies. The approval mail
-// additionally carries the ONE team QR (payload = VST- code) as an inline-CID
-// image in every fanned-out copy.
+// non-blank email, all sharing the same subject and bodies. The staff send
+// puts the branch direct owners (admin/security of the visit's branch) in
+// To and the national overseers (super_admin incl. the hidden
+// dev-superadmin) in Bcc, so overseers stay informed without being visible
+// to the branch recipients. The approval mail additionally carries the ONE
+// team QR (payload = VST- code) as an inline-CID image in every fanned-out
+// copy.
 func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visit domain.VisitRequest, tpl *domain.NotificationTemplate, locationID, vendorUserID uuid.UUID, frontendBaseURL string, snap domain.NotificationSettings, audiences ...domain.NotificationAudience) {
 	if mailer == nil || tpl == nil || !domain.EmailAllowedWithSettings(tpl.Type, snap) {
 		return
@@ -128,12 +167,16 @@ func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visi
 		*dst = append(*dst, trimmed)
 	}
 	blankWarned := false
+	staffActive := false
 	for _, audience := range audiences {
 		if audience == domain.NotificationAudienceVendor && !snap.IsEmailEnabled(tpl.Type, domain.NotificationAudienceVendor) {
 			continue
 		}
 		if audience != domain.NotificationAudienceVendor && !snap.IsEmailEnabled(tpl.Type, domain.NotificationAudienceStaff) {
 			continue
+		}
+		if audience != domain.NotificationAudienceVendor {
+			staffActive = true
 		}
 		emails, err := resolveEmailRecipients(ctx, q, locationID, vendorUserID, audience)
 		if err != nil {
@@ -176,12 +219,40 @@ func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visi
 		return
 	}
 	subject, textBody, htmlBody := domain.BuildEmail(visit, tpl, frontendBaseURL)
+	// The lifecycle template label travels through the optional templated
+	// port so the mail_log row carries it; adapters predating the port
+	// (and every test fake) fall back to the plain sends with no behaviour
+	// change.
+	send := func(to []string) error {
+		if tm, ok := mailer.(domain.TemplatedMailer); ok {
+			return tm.SendTemplated(ctx, string(tpl.Type), to, subject, textBody, htmlBody)
+		}
+		return mailer.Send(ctx, to, subject, textBody, htmlBody)
+	}
+	// sendStaff delivers the single staff copy with the branch direct
+	// owners in To and the national overseers in Bcc. The Bcc split is
+	// best-effort: when the overseer lookup fails, the branch owners still
+	// get the mail with everyone in To (the old shape) rather than losing
+	// the notification.
+	sendStaff := func(to, bcc []string) error {
+		if tm, ok := mailer.(domain.TemplatedMailer); ok {
+			return tm.SendTemplatedBcc(ctx, string(tpl.Type), to, bcc, subject, textBody, htmlBody)
+		}
+		return mailer.SendBcc(ctx, to, bcc, subject, textBody, htmlBody)
+	}
 	if len(staffRecipients) > 0 {
-		if err := mailer.Send(ctx, staffRecipients, subject, textBody, htmlBody); err != nil {
+		staffTo, staffBcc := splitStaffBcc(ctx, q, visit.VisitID, string(tpl.Type), staffActive, staffRecipients)
+		if err := sendStaff(staffTo, staffBcc); err != nil {
 			slog.Error("email dead-letter",
 				"visit_id", visit.VisitID, "template", string(tpl.Type),
-				"recipient_count", len(staffRecipients), "err", err)
+				"recipient_count", len(staffTo), "bcc_count", len(staffBcc), "err", err)
 		}
+	}
+	sendQR := func(to []string, qrPNG []byte, cid string) error {
+		if tm, ok := mailer.(domain.TemplatedMailer); ok {
+			return tm.SendTemplatedWithTeamQR(ctx, string(tpl.Type), to, subject, textBody, htmlBody, qrPNG, cid)
+		}
+		return mailer.SendWithTeamQR(ctx, to, subject, textBody, htmlBody, qrPNG, cid)
 	}
 	// Only the approval mail carries the team QR: one shared PNG encoded
 	// from the VST- code, referenced from every fanned-out copy through the
@@ -204,9 +275,9 @@ func enqueueEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visi
 	for _, addr := range vendorTargets {
 		var err error
 		if qrPNG != nil {
-			err = mailer.SendWithTeamQR(ctx, []string{addr}, subject, textBody, htmlBody, qrPNG, cid)
+			err = sendQR([]string{addr}, qrPNG, cid)
 		} else {
-			err = mailer.Send(ctx, []string{addr}, subject, textBody, htmlBody)
+			err = send([]string{addr})
 		}
 		if err != nil {
 			slog.Error("email dead-letter",

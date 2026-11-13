@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"thc-vms/backend/internal/domain"
+	"thc-vms/backend/internal/repository/db"
 )
 
 // emailStaffFixture seeds one branch with a full staff roster plus a vendor
@@ -150,6 +151,66 @@ func assertToSet(t *testing.T, fake *domain.FakeMailer, want []string) domain.Ma
 	return fake.Calls[0]
 }
 
+// assertStaffSplit pins the staff-leg To/Bcc contract: branch direct owners
+// (admin + security of the visit's branch) ride in To, national overseers
+// (super_admin + hidden dev-superadmin) ride in Bcc, so overseers stay
+// informed without being visible to the branch recipients.
+func assertStaffSplit(t *testing.T, call domain.MailCall, fx emailStaffFixture) {
+	t.Helper()
+	wantTo := map[string]bool{fx.adminEmail: true, fx.securityEmail: true}
+	if len(call.To) != len(wantTo) {
+		t.Fatalf("staff To = %v, want exactly the branch owners", call.To)
+	}
+	for _, addr := range call.To {
+		if !wantTo[addr] {
+			t.Fatalf("staff To = %v, want exactly the branch owners (no overseers visible)", call.To)
+		}
+	}
+	wantBcc := map[string]bool{fx.superAdminEmail: true, fx.devEmail: true}
+	if len(call.Bcc) != len(wantBcc) {
+		t.Fatalf("staff Bcc = %v, want exactly the national overseers", call.Bcc)
+	}
+	for _, addr := range call.Bcc {
+		if !wantBcc[addr] {
+			t.Fatalf("staff Bcc = %v, want exactly the national overseers", call.Bcc)
+		}
+	}
+}
+
+// TestSplitStaffBcc_OverseerLookupFailureFallsBackToAllTo proves the
+// fail-open contract: when the national-overseer lookup errors (here a
+// closed pool), nobody is dropped — the whole staff set goes out in To
+// with an empty Bcc, exactly the pre-Bcc shape.
+func TestSplitStaffBcc_OverseerLookupFailureFallsBackToAllTo(t *testing.T) {
+	// A pool pointed at a closed port fails every query fast, without
+	// touching the shared test pool (which must never be closed here).
+	broken, err := pgxpool.New(testContext(t), "postgres://127.0.0.1:1/nope?connect_timeout=2")
+	if err != nil {
+		t.Fatalf("broken pool = %v", err)
+	}
+	defer broken.Close()
+	q := db.New(broken)
+	staff := []string{"admin-cabang@thc.local", "superadmin@thc.local"}
+	to, bcc := splitStaffBcc(testContext(t), q, "VST-0000000399", "visit_approved", true, staff)
+	if len(to) != len(staff) {
+		t.Fatalf("to = %v, want the full staff set %v on lookup failure", to, staff)
+	}
+	if len(bcc) != 0 {
+		t.Fatalf("bcc = %v, want empty on lookup failure", bcc)
+	}
+}
+
+// TestSplitStaffBcc_InactiveLegReturnsEmpty proves a disabled staff audience
+// yields no recipients at all instead of a stray all-To send.
+func TestSplitStaffBcc_InactiveLegReturnsEmpty(t *testing.T) {
+	pool := testPool(t)
+	q := db.New(pool)
+	to, bcc := splitStaffBcc(testContext(t), q, "VST-0000000398", "visit_approved", false, []string{"a@thc.local"})
+	if len(to) != 0 || len(bcc) != 0 {
+		t.Fatalf("to = %v bcc = %v, want both empty when the staff leg is off", to, bcc)
+	}
+}
+
 // TestEmailEnqueue_ApproveSendsOneVendorEmail proves the approve emission
 // enqueues exactly one email addressed to the visit's vendor user.
 func TestEmailEnqueue_ApproveSendsOneVendorEmail(t *testing.T) {
@@ -232,7 +293,11 @@ func TestEmailEnqueue_HumanCancelByVendorSendsOneStaffEmail(t *testing.T) {
 	if err := repos.UpdateStatus(ctx, visitID, domain.VisitStatusCancelled, fx.vendor, "batal vendor"); err != nil {
 		t.Fatalf("vendor cancel UpdateStatus: %v", err)
 	}
-	call := assertToSet(t, fake, fx.staffEmails)
+	if len(fake.Calls) != 1 {
+		t.Fatalf("email calls = %d, want exactly 1", len(fake.Calls))
+	}
+	call := fake.Calls[0]
+	assertStaffSplit(t, call, fx)
 	if !strings.Contains(call.Subject, "VST-0000000303") {
 		t.Fatalf("subject = %q, want the visit code", call.Subject)
 	}
@@ -302,18 +367,7 @@ func TestEmailEnqueue_RescheduleSendsStaffPlusVendorEmails(t *testing.T) {
 		t.Fatalf("email calls = %d, want exactly 2 (one staff send, one vendor send)", len(fake.Calls))
 	}
 	staffCall := fake.Calls[0]
-	if len(staffCall.To) != len(fx.staffEmails) {
-		t.Fatalf("staff recipients = %v, want the staff set %v", staffCall.To, fx.staffEmails)
-	}
-	seen := make(map[string]bool, len(staffCall.To))
-	for _, addr := range staffCall.To {
-		seen[addr] = true
-	}
-	for _, addr := range fx.staffEmails {
-		if !seen[addr] {
-			t.Fatalf("staff recipients = %v, want the staff set %v", staffCall.To, fx.staffEmails)
-		}
-	}
+	assertStaffSplit(t, staffCall, fx)
 	// ...and the vendor leg as one per-recipient send to the requester.
 	vendorCall := fake.Calls[1]
 	if len(vendorCall.To) != 1 || vendorCall.To[0] != fx.vendorEmail {
@@ -360,7 +414,11 @@ func TestEmailEnqueue_GateTransitionsFlowThroughUpdateStatus(t *testing.T) {
 	if err := repos.UpdateStatus(ctx, visitID, domain.VisitStatusVisiting, fx.security, ""); err != nil {
 		t.Fatalf("check-in UpdateStatus: %v", err)
 	}
-	call := assertToSet(t, fake, fx.staffEmails)
+	if len(fake.Calls) != 1 {
+		t.Fatalf("email calls = %d, want exactly 1", len(fake.Calls))
+	}
+	call := fake.Calls[0]
+	assertStaffSplit(t, call, fx)
 	if !strings.Contains(call.Subject, "VST-0000000306") {
 		t.Fatalf("check-in subject = %q, want the visit code", call.Subject)
 	}
@@ -375,15 +433,7 @@ func TestEmailEnqueue_GateTransitionsFlowThroughUpdateStatus(t *testing.T) {
 		t.Fatalf("email calls = %d, want exactly 2 (one per gate transition)", len(fake.Calls))
 	}
 	out := fake.Calls[1]
-	seen := make(map[string]bool, len(out.To))
-	for _, addr := range out.To {
-		seen[addr] = true
-	}
-	for _, addr := range fx.staffEmails {
-		if !seen[addr] {
-			t.Fatalf("check-out recipients = %v, want the staff set %v", out.To, fx.staffEmails)
-		}
-	}
+	assertStaffSplit(t, out, fx)
 	if !strings.Contains(out.TextBody, "Petugas check-out: Security Surel (Petugas Keamanan)") {
 		t.Fatalf("check-out text body missing the officer row:\n%s", out.TextBody)
 	}
@@ -405,8 +455,8 @@ func TestEmailEnqueue_RequestStaysSilentWhileAutoCancelEmailsVendor(t *testing.T
 	// Create emits visit_requested: in_app-only, zero emails.
 	created, err := repos.Create(ctx, domain.VisitRequest{
 		VendorUserID: fx.vendor, LocationID: fx.loc,
-		StartDate: time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second),
-		EndDate:   time.Now().UTC().Add(52 * time.Hour).Truncate(time.Second),
+		StartDate:     time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second),
+		EndDate:       time.Now().UTC().Add(52 * time.Hour).Truncate(time.Second),
 		IsNDAAccepted: true,
 	}, []domain.Visitor{{Name: "Teknisi Sunyi", IDNumber: "ID-1", Phone: "0811"}}, []domain.UUID{purpose})
 	if err != nil {
@@ -433,8 +483,8 @@ func TestEmailEnqueue_RequestStaysSilentWhileAutoCancelEmailsVendor(t *testing.T
 	fake.Calls = nil
 	noShowVisit := seedVisit(t, pool, seedVisitParams{
 		Code: "VST-0000000308", VendorUser: fx.vendor, Location: fx.loc,
-		Start: time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second),
-		End:   time.Now().UTC().Add(-68 * time.Hour).Truncate(time.Second),
+		Start:  time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second),
+		End:    time.Now().UTC().Add(-68 * time.Hour).Truncate(time.Second),
 		Status: domain.VisitStatusApproved,
 	})
 	if err := repos.UpdateStatus(ctx, noShowVisit, domain.VisitStatusNotVisit, "", "auto-rule R2"); err != nil {

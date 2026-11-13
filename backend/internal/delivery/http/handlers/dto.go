@@ -97,21 +97,21 @@ type visitDetailDTO struct {
 	// PurposeNote mirrors VisitDetail.purpose_note (migration 000005): no
 	// omitempty so the key is always present, null when the visit carries no
 	// free-typed purpose.
-	PurposeNote *string      `json:"purpose_note"`
+	PurposeNote *string `json:"purpose_note"`
 	// StatusNote mirrors VisitDetail.status_note: the note of the current
 	// status transition (rejection/cancellation/reschedule reason). Null when
 	// the transition carried no note.
 	StatusNote *string      `json:"status_note"`
-	Visitors    []visitorDTO `json:"visitors"`
-	CreatedAt   string       `json:"created_at"`
+	Visitors   []visitorDTO `json:"visitors"`
+	CreatedAt  string       `json:"created_at"`
 	// WorkPhotos mirrors VisitDetail.work_photos: both evidence slots, each
 	// null until its proof is attached. It is set ONLY on the single-GET
 	// path (the usecase leaves it nil on list items and the create echo),
 	// so the key stays absent there instead of rendering empty slots.
 	WorkPhotos  *workPhotosDTO `json:"work_photos,omitempty"`
-	CheckInAt   *string      `json:"check_in_at,omitempty"`
-	CheckOutAt  *string      `json:"check_out_at,omitempty"`
-	CheckedInBy *string      `json:"checked_in_by,omitempty"`
+	CheckInAt   *string        `json:"check_in_at,omitempty"`
+	CheckOutAt  *string        `json:"check_out_at,omitempty"`
+	CheckedInBy *string        `json:"checked_in_by,omitempty"`
 	// Actor display data for the "Diajukan oleh" / "Check-in oleh" /
 	// "Check-out oleh" info rows: filled ONLY by the single-GET enrichment
 	// (usecase withGateTimes + the read joins), omitted when unknown so the
@@ -167,7 +167,7 @@ type uploadDTO struct {
 // visitors[].photo_url is the optional selfie uploaded via the id_card
 // upload category.
 type createVisitBody struct {
-	LocationID string   `json:"location_id"`
+	LocationID string `json:"location_id"`
 	// VendorUserID names the vendor ACCOUNT owning the visit (migration
 	// 000024). It is honoured for admin/superadmin/dev-superadmin; a vendor
 	// caller may only name itself (a foreign id is refused 403, never silently
@@ -262,6 +262,7 @@ func toAttachedWorkPhoto(p domain.WorkPhoto) workPhotoDTO {
 	out := workPhotoDTO{Kind: &kind, UploadedAt: dto.UploadedAt, URL: dto.URL, UploadedBy: dto.UploadedBy, UploadedByName: dto.UploadedByName}
 	return out
 }
+
 // toVisitorDTO maps one domain roster entry onto the openapi VisitorItem
 // shape. It is shared by the visit detail roster and the single-member
 // PATCH /visits/{id}/visitors/{visitorId} response so both render the same
