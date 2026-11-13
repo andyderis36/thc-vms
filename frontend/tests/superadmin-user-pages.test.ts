@@ -247,7 +247,7 @@ describe('SuperadminShell — pemisahan menu per peran', () => {
       '/coordinators',
       '/vendor-registrations',
       '/audit',
-      '/settings/notifications',
+      '/settings/mail-logs',
     ])
   })
 })

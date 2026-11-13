@@ -40,6 +40,10 @@ import {
   getMemberSuggestion,
   getNotificationSettings,
   updateNotificationSettings,
+  getSystemSettings,
+  sendTestMail,
+  listMailLogs,
+  getMailLog,
   getVisit,
   getVisitQr,
   listAuditLogs,
@@ -80,6 +84,7 @@ import { clampSuggestionQuery } from '@/lib/visits/suggestions'
 import type {
   ApproveRequest,
   AuditLogListParams,
+  MailLogListParams,
   CancelRequest,
   CheckInRequest,
   CreateLocationRequest,
@@ -1153,4 +1158,148 @@ export function useUpdateNotificationSettings() {
 
 export function useUpdateNotificationsSettingsMutation() {
   return useUpdateNotificationSettingsMutation();
+}
+
+// ---------------------------------------------------------------------------
+// Pengaturan sistem - `/settings/system` (hanya dev-superadmin)
+// ---------------------------------------------------------------------------
+
+export const systemSettingsQueryOptions = queryOptions({
+  queryKey: queryKeys.systemSettings(),
+  queryFn: () => getSystemSettings(),
+  staleTime: 30 * 1000,
+  retry: shouldRetry,
+});
+
+export const settingsSystemQueryOptions = systemSettingsQueryOptions;
+export const systemConfigQueryOptions = systemSettingsQueryOptions;
+
+export function useSystemSettingsQuery(enabled = true) {
+  return useQuery({ ...systemSettingsQueryOptions, enabled });
+}
+
+export function useSettingsSystemQuery(enabled = true) {
+  return useSystemSettingsQuery(enabled);
+}
+
+export function useSystemSettings(enabled = true) {
+  return useSystemSettingsQuery(enabled);
+}
+
+export function useSettingsSystem(enabled = true) {
+  return useSystemSettingsQuery(enabled);
+}
+
+export function useSystemConfigQuery(enabled = true) {
+  return useSystemSettingsQuery(enabled);
+}
+
+export function useSystemConfig(enabled = true) {
+  return useSystemSettingsQuery(enabled);
+}
+
+export function useSendTestMailMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => sendTestMail(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.systemSettings() });
+    },
+  });
+}
+
+export function useTestMailMutation() {
+  return useSendTestMailMutation();
+}
+
+export function useSendTestEmailMutation() {
+  return useSendTestMailMutation();
+}
+
+export function useTestEmailMutation() {
+  return useSendTestMailMutation();
+}
+
+export function useSendTestMail() {
+  return useSendTestMailMutation();
+}
+
+export function useTestMail() {
+  return useSendTestMailMutation();
+}
+
+
+// ---------------------------------------------------------------------------
+// Log email - `/settings/mail-logs` (hanya super_admin/dev-superadmin)
+// ---------------------------------------------------------------------------
+
+export function mailLogsQueryOptions(params: MailLogListParams = {}) {
+  return queryOptions({
+    queryKey: queryKeys.mailLogs(params),
+    queryFn: () => listMailLogs(params),
+    placeholderData: (previous) => previous,
+    staleTime: 30 * 1000,
+    retry: shouldRetry,
+  })
+}
+
+export const mailLogListQueryOptions = mailLogsQueryOptions;
+export const settingsMailLogsQueryOptions = mailLogsQueryOptions;
+export const notificationSettingsMailLogsQueryOptions = mailLogsQueryOptions;
+
+export function mailLogQueryOptions(id: string | null) {
+  return queryOptions({
+    queryKey: queryKeys.mailLog(id ?? ''),
+    queryFn: () => getMailLog(id ?? ''),
+    enabled: id !== null && id !== '',
+    staleTime: 30 * 1000,
+    retry: shouldRetry,
+  })
+}
+
+export const mailLogDetailQueryOptions = mailLogQueryOptions;
+export const settingsMailLogQueryOptions = mailLogQueryOptions;
+
+export function useMailLogsQuery(params: MailLogListParams = {}, enabled = true) {
+  return useQuery({ ...mailLogsQueryOptions(params), enabled })
+}
+
+export function useMailLogs(params: MailLogListParams = {}, enabled = true) {
+  return useMailLogsQuery(params, enabled)
+}
+
+export function useMailLogListQuery(params: MailLogListParams = {}, enabled = true) {
+  return useMailLogsQuery(params, enabled)
+}
+
+export function useSettingsMailLogsQuery(params: MailLogListParams = {}, enabled = true) {
+  return useMailLogsQuery(params, enabled)
+}
+
+export function useNotificationSettingsMailLogsQuery(params: MailLogListParams = {}, enabled = true) {
+  return useMailLogsQuery(params, enabled)
+}
+
+export function useSystemMailLogsQuery(params: MailLogListParams = {}, enabled = true) {
+  return useMailLogsQuery(params, enabled)
+}
+
+export function useMailLogQuery(id: string | null, enabled = true) {
+  return useQuery({ ...mailLogQueryOptions(id), enabled: id !== null && id !== '' && enabled })
+}
+
+export function useMailLogDetailQuery(id: string | null, enabled = true) {
+  return useMailLogQuery(id, enabled)
+}
+
+export function useMailLogDetail(id: string | null, enabled = true) {
+  return useMailLogQuery(id, enabled)
+}
+
+export function useSettingsMailLogQuery(id: string | null, enabled = true) {
+  return useMailLogQuery(id, enabled)
+}
+
+export function useMailLogsList(params: MailLogListParams = {}, enabled = true) {
+  return useMailLogsQuery(params, enabled)
 }

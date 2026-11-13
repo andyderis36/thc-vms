@@ -34,6 +34,10 @@ import type {
   PasswordResetConfirmResult,
   PasswordResetRequest,
   PasswordResetRequestResult,
+  SystemSettings,
+  MailLogDetail,
+  MailLogListParams,
+  MailLogListResult,
   PendingRegistrationListParams,
   PendingRegistrationListResult,
   Purpose,
@@ -545,5 +549,47 @@ export function updateNotificationSettings(body: {
 // Alias nama alternatif.
 export const getNotificationMatrix = getNotificationSettings;
 export const updateNotificationMatrix = updateNotificationSettings;
+
+// ---------------------------------------------------------------------------
+// Pengaturan sistem - `/settings/system` (hanya dev-superadmin)
+// ---------------------------------------------------------------------------
+
+export function getSystemSettings(): Promise<SystemSettings> {
+  return apiFetch<SystemSettings>('/settings/system');
+}
+
+export function sendTestMail(): Promise<{ ok?: boolean } | void> {
+  return apiFetch<{ ok?: boolean } | void>('/settings/test-mail', { method: 'POST' });
+}
+
+// ---------------------------------------------------------------------------
+// Log email - /settings/mail-logs (hanya super_admin/dev-superadmin)
+// ---------------------------------------------------------------------------
+
+export function listMailLogs(params: MailLogListParams = {}): Promise<MailLogListResult> {
+  const query = new URLSearchParams();
+  if (params.status !== undefined && params.status !== '') query.set('status', params.status);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const search = query.toString();
+  return apiFetch<MailLogListResult>(search === '' ? '/settings/mail-logs' : `/settings/mail-logs?${search}`);
+}
+
+export function getMailLog(id: string): Promise<MailLogDetail> {
+  return apiFetch<MailLogDetail>(`/settings/mail-logs/${id}`);
+}
+
+// Alias nama alternatif.
+export const getSettingsSystem = getSystemSettings;
+export const fetchSystemSettings = getSystemSettings;
+export const getMailLogs = listMailLogs;
+export const fetchMailLogs = listMailLogs;
+export const listMailLog = listMailLogs;
+export const getMailLogsList = listMailLogs;
+export const getMailLogDetail = getMailLog;
+export const fetchMailLog = getMailLog;
+export const mailLogs = listMailLogs;
+export const triggerTestMail = sendTestMail;
+export const sendTestEmail = sendTestMail;
 export const fetchNotificationSettings = getNotificationSettings;
 export const saveNotificationSettings = updateNotificationSettings;
