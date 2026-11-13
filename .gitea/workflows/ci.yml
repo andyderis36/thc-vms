@@ -106,7 +106,17 @@ jobs:
 
       - name: Install dependencies
         working-directory: frontend
-        run: timeout 600 npm ci
+        # The shared runner has no persistent npm cache; retry transient
+        # registry failures instead of failing the whole release gate.
+        run: |
+          for attempt in 1 2 3; do
+            if timeout 600 npm ci --prefer-offline --no-audit --no-fund; then
+              exit 0
+            fi
+            echo "npm ci failed (attempt ${attempt}/3), retrying..." >&2
+            sleep 15
+          done
+          exit 1
 
       - name: Lint
         working-directory: frontend
