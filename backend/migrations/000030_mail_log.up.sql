@@ -42,5 +42,5 @@ CREATE TABLE IF NOT EXISTS mail_log (
     sent_at    timestamptz NULL
 );
 
-CREATE INDEX idx_mail_log_status_created_at
+CREATE INDEX IF NOT EXISTS idx_mail_log_status_created_at
     ON mail_log (status, created_at);
