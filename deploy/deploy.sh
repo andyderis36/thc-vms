@@ -162,6 +162,25 @@ $legacy_rows
 EOF
 echo "    legacy containers removed: $orphan_count"
 
+echo "==> snapshot image aktif (target rollback)"
+# Backend/frontend di-build lokal TANPA tag versi (nama default compose:
+# thc-vms-prod-backend / thc-vms-prod-frontend), jadi `up --build` menimpa
+# image yang sedang jalan. Tandai image aktif SEBELUM build agar smoke test
+# yang gagal bisa rollback ke versi ini.
+ROLLBACK_TS="$(date +%Y%m%d%H%M%S)"
+snapshot_service_image() {
+  local svc="$1" ref="thc-vms-prod-$svc" img_id=""
+  img_id="$(compose -f "$COMPOSE_FILE" images -q "$svc" 2>/dev/null | head -n 1 || true)"
+  if [ -z "$img_id" ]; then
+    echo "    $svc: tidak ada image aktif (deploy pertama?) — snapshot dilewati"
+    return 0
+  fi
+  docker_cli tag "$img_id" "$ref:rollback-$ROLLBACK_TS" >/dev/null
+  echo "    $svc: $img_id -> $ref:rollback-$ROLLBACK_TS"
+}
+snapshot_service_image backend
+snapshot_service_image frontend
+
 echo "==> build + up"
 # Infrastruktur dulu: postgres & minio harus hidup sebelum DB bisa diperiksa, dan
 # backend butuh role `security` saat boot (backend/cmd/server/main.go). Kalau DB
@@ -202,39 +221,123 @@ if ! compose -f "$COMPOSE_FILE" up -d --build; then
   exit 1
 fi
 
-echo "==> wait backend ready ($READY_URL)"
-for i in $(seq 1 60); do
-  if curl -fsS --max-time 5 "$READY_URL" >/dev/null 2>&1; then
-    echo "backend ready after ~$((i * 2))s"
-    break
-  fi
-  if [ "$i" -eq 60 ]; then
-    echo "ABORT: backend not ready; recent logs:" >&2
-    compose -f "$COMPOSE_FILE" logs --tail=50 backend migrate >&2 || true
-    echo "       Bila log menyebut role/seed (mis. 'resolve security role id')," >&2
-    echo "       DB-nya belum ter-seed. Bootstrap manual (lihat docs/7. DEPLOY_VPS.md):" >&2
-    echo "         compose -f $COMPOSE_FILE up -d postgres minio" >&2
-    echo "         compose -f $COMPOSE_FILE run --rm --no-deps migrate" >&2
-    echo "         compose -f $COMPOSE_FILE run --rm --no-deps backend ./seeds" >&2
-    echo "         compose -f $COMPOSE_FILE up -d" >&2
-    exit 1
-  fi
-  sleep 2
-done
+wait_backend() {
+  echo "==> wait backend ready ($READY_URL)"
+  for i in $(seq 1 60); do
+    if curl -fsS --max-time 5 "$READY_URL" >/dev/null 2>&1; then
+      echo "backend ready after ~$((i * 2))s"
+      return 0
+    fi
+    if [ "$i" -eq 60 ]; then
+      echo "ABORT: backend not ready; recent logs:" >&2
+      compose -f "$COMPOSE_FILE" logs --tail=50 backend migrate >&2 || true
+      echo "       Bila log menyebut role/seed (mis. 'resolve security role id')," >&2
+      echo "       DB-nya belum ter-seed. Bootstrap manual (lihat docs/7. DEPLOY_VPS.md):" >&2
+      echo "         compose -f $COMPOSE_FILE up -d postgres minio" >&2
+      echo "         compose -f $COMPOSE_FILE run --rm --no-deps migrate" >&2
+      echo "         compose -f $COMPOSE_FILE run --rm --no-deps backend ./seeds" >&2
+      echo "         compose -f $COMPOSE_FILE up -d" >&2
+      return 1
+    fi
+    sleep 2
+  done
+}
 
-echo "==> wait frontend via caddy ($FRONTEND_URL)"
-for i in $(seq 1 30); do
-  if curl -fsS --max-time 5 "$FRONTEND_URL" >/dev/null 2>&1; then
-    echo "frontend reachable after ~$((i * 2))s"
-    break
+wait_frontend() {
+  echo "==> wait frontend via caddy ($FRONTEND_URL)"
+  for i in $(seq 1 30); do
+    if curl -fsS --max-time 5 "$FRONTEND_URL" >/dev/null 2>&1; then
+      echo "frontend reachable after ~$((i * 2))s"
+      return 0
+    fi
+    if [ "$i" -eq 30 ]; then
+      echo "ABORT: frontend not reachable through caddy; recent logs:" >&2
+      compose -f "$COMPOSE_FILE" logs --tail=50 caddy frontend >&2 || true
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+wait_backend || exit 1
+wait_frontend || exit 1
+
+# Smoke test pasca-deploy lewat caddy (satu origin produksi): health backend,
+# halaman login, dan satu endpoint guard yang WAJIB 401 tanpa token (membuktikan
+# rantai auth-middleware ikut ter-deploy, bukan cuma container hidup).
+SMOKE_TMP="$(mktemp /tmp/vms-smoke.XXXXXX)"
+trap 'rm -f "$SMOKE_TMP"' EXIT
+smoke_check() {
+  local name="$1" url="$2" want="$3" pat="${4:-}" got=""
+  got="$(curl -sS --max-time 10 -o "$SMOKE_TMP" -w '%{http_code}' "$url" 2>/dev/null || echo 000)"
+  if [ "$got" != "$want" ]; then
+    echo "    [FAIL] $name: HTTP $got (harap $want) <- $url" >&2
+    return 1
   fi
-  if [ "$i" -eq 30 ]; then
-    echo "ABORT: frontend not reachable through caddy; recent logs:" >&2
-    compose -f "$COMPOSE_FILE" logs --tail=50 caddy frontend >&2 || true
-    exit 1
+  if [ -n "$pat" ] && ! grep -q "$pat" "$SMOKE_TMP"; then
+    echo "    [FAIL] $name: body tidak memuat '$pat'" >&2
+    return 1
   fi
-  sleep 2
-done
+  echo "    [OK] $name: HTTP $got <- $url"
+  return 0
+}
+smoke_test() {
+  echo "==> smoke test pasca-deploy"
+  local ok=0
+  smoke_check "health via caddy" "http://127.0.0.1/api/v1/health" 200 'healthy' || ok=1
+  smoke_check "halaman login" "http://127.0.0.1/login" 200 || ok=1
+  smoke_check "endpoint guard tanpa token" "http://127.0.0.1/api/v1/settings/system" 401 || ok=1
+  return "$ok"
+}
+
+# Rollback: label rollback-* menunjuk image SEBELUM build; tag ulang ke nama
+# utama lalu `up` tanpa --build. Migrasi TIDAK di-rollback (forward-only, sama
+# seperti `git revert` di runbook) jadi rollback code wajib backward-compatible.
+rollback_to_snapshot() {
+  echo "ROLLBACK: mengembalikan image sebelum deploy (tag rollback-$ROLLBACK_TS)" >&2
+  local svc ref
+  for svc in backend frontend; do
+    ref="thc-vms-prod-$svc:rollback-$ROLLBACK_TS"
+    if docker_cli image inspect "$ref" >/dev/null 2>&1; then
+      docker_cli tag "$ref" "thc-vms-prod-$svc"
+      echo "    $svc: dikembalikan ke $ref" >&2
+    else
+      echo "    $svc: snapshot $ref tidak ada — lewati" >&2
+    fi
+  done
+  compose -f "$COMPOSE_FILE" up -d --force-recreate backend frontend
+  if wait_backend && wait_frontend && smoke_test; then
+    echo "ROLLBACK OK: versi lama pulih dan lolos smoke. Deploy baru DITOLAK." >&2
+  else
+    echo "ROLLBACK GAGAL: butuh intervensi manual di VPS (lihat docs/8. CI-CD.md)." >&2
+  fi
+  exit 1
+}
+
+# Simpan 1 generasi rollback per service; sisanya hapus agar tag tidak menumpuk
+# di disk (insiden build cache 24GB, Nov 2026).
+cleanup_rollback_tags() {
+  local svc tags t keep
+  for svc in backend frontend; do
+    tags="$(docker_cli images --format '{{.Tag}}' "thc-vms-prod-$svc" 2>/dev/null | grep '^rollback-' | sort -r || true)"
+    keep=1
+    while IFS= read -r t; do
+      [ -z "$t" ] && continue
+      if [ "$keep" -eq 1 ]; then keep=0; continue; fi
+      docker_cli rmi "thc-vms-prod-$svc:$t" >/dev/null 2>&1 || true
+      echo "    hapus thc-vms-prod-$svc:$t"
+    done <<EOF
+$tags
+EOF
+  done
+}
+
+if smoke_test; then
+  echo "SMOKE OK"
+else
+  rollback_to_snapshot
+fi
+cleanup_rollback_tags
 
 echo "==> prune dangling images"
 docker_cli image prune -f >/dev/null
