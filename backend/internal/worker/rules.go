@@ -542,3 +542,4 @@ func (s *Service) apply(ctx context.Context, visit domain.VisitRequest, to domai
 		"rule", rule, "visit_id", visit.ID,
 		"from", string(visit.Status), "to", string(to))
 }
+// ci-probe: backend-only (HAPUS — PR uji, jangan merge)
