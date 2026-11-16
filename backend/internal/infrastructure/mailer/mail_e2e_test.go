@@ -153,10 +153,11 @@ func TestMailE2E(t *testing.T) {
 		t.Fatalf("MAILPIT_SMTP_ADDR %q port must be numeric: %v", smtpAddr, err)
 	}
 
-	// Eight flows through the domain template constructors — the same
-	// vocabulary Task 5 enqueue hooks fan out (approve/reject/cancel/
-	// auto_cancel/reschedule/reminder/check_in/check_out). The excluded type
-	// is built only to name the subject that must stay at ZERO.
+	// Nine flows through the domain template constructors — the same
+	// vocabulary the enqueue hooks fan out (requested/approve/reject/cancel/
+	// auto_cancel/reschedule/reminder/check_in/check_out). visit_requested
+	// rides the staff leg only, so its flow targets the staff address. No
+	// type stays excluded: the allowlist admits all nine lifecycle types.
 	visit := domain.VisitRequest{
 		VisitID:      e2eVisitCode,
 		LocationName: "Kantor Cabang E2E",
@@ -168,6 +169,7 @@ func TestMailE2E(t *testing.T) {
 		tpl  *domain.NotificationTemplate
 		to   string
 	}{
+		{"requested", domain.CreatedNotification(e2eVisitCode), "e2e-staff@example.com"},
 		{"approve", domain.TransitionNotification(domain.VisitStatusApproved, false, e2eVisitCode, ""), "e2e-vendor@example.com"},
 		{"reject", domain.TransitionNotification(domain.VisitStatusRejected, false, e2eVisitCode, ""), "e2e-vendor@example.com"},
 		{"cancel", domain.HumanCancelledNotification(e2eVisitCode, false, ""), "e2e-vendor@example.com"},
@@ -177,9 +179,7 @@ func TestMailE2E(t *testing.T) {
 		{"check_in", domain.TransitionNotification(domain.VisitStatusVisiting, false, e2eVisitCode, ""), "e2e-staff@example.com"},
 		{"check_out", domain.TransitionNotification(domain.VisitStatusCompleted, false, e2eVisitCode, ""), "e2e-staff@example.com"},
 	}
-	excluded := []*domain.NotificationTemplate{
-		domain.CreatedNotification(e2eVisitCode),
-	}
+	excluded := []*domain.NotificationTemplate{}
 
 	wantSubjects := make(map[string]string, len(e2eFlows))
 	for _, f := range e2eFlows {
@@ -249,7 +249,7 @@ func TestMailE2E(t *testing.T) {
 		t.Fatalf("Close (drain) = %v", err)
 	}
 
-	// Poll the Mailpit API: all eight must land.
+	// Poll the Mailpit API: all nine must land.
 	var summaries struct {
 		Total    int              `json:"total"`
 		Messages []mailpitSummary `json:"messages"`
@@ -266,7 +266,7 @@ func TestMailE2E(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Exactly the eight subjects, each once; zero of the excluded type.
+	// Exactly the nine subjects, each once; zero of the excluded type.
 	seen := make(map[string]int, len(e2eFlows))
 	for _, s := range summaries.Messages {
 		seen[s.Subject]++

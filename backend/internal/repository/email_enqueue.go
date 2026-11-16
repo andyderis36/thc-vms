@@ -85,6 +85,82 @@ func splitStaffBcc(ctx context.Context, q *db.Queries, visitID string, template 
 	return to, bcc
 }
 
+// resolveAdminEmailRecipients returns the active-only email set behind the
+// visit_requested staff leg: every active national super_admin (including the
+// hidden dev-superadmin) plus the active admin of the visit's branch — and
+// deliberately no security role and no vendor. It mirrors
+// ListAdminEmailRecipients the way resolveEmailRecipients mirrors its own
+// fan-out predicates.
+var resolveAdminEmailRecipients = func(ctx context.Context, q *db.Queries, locationID uuid.UUID) ([]string, error) {
+	emails, err := q.ListAdminEmailRecipients(ctx, db.ListAdminEmailRecipientsParams{LocationID: locationID})
+	if err != nil {
+		return nil, MapError(err)
+	}
+	return emails, nil
+}
+
+// enqueueCreateEmail fans one visit_requested notice out to email AFTER the
+// Create transaction that wrote its in_app row has committed. It never fails
+// the caller: a nil mailer, a disabled toggle, an empty recipient set and
+// every resolution or send failure only log and return. Non-mandatory OFF
+// suppresses this mail through the shared EmailAllowedWithSettings gate.
+//
+// Recipients are staff-approvers only (branch admins in To, national
+// overseers in Bcc through the shared splitStaffBcc): the filing vendor and
+// the branch security roster are never mailed a new request.
+func enqueueCreateEmail(ctx context.Context, mailer domain.Mailer, q *db.Queries, visit domain.VisitRequest, tpl *domain.NotificationTemplate, locationID uuid.UUID, frontendBaseURL string, snap domain.NotificationSettings) {
+	if mailer == nil || tpl == nil || !domain.EmailAllowedWithSettings(tpl.Type, snap) {
+		return
+	}
+	if !snap.IsEmailEnabled(tpl.Type, domain.NotificationAudienceStaff) {
+		return
+	}
+	staff, err := resolveAdminEmailRecipients(ctx, q, locationID)
+	if err != nil {
+		slog.Error("email resolver failed, skipping audience",
+			"visit_id", visit.VisitID, "template", string(tpl.Type),
+			"audience", string(domain.NotificationAudienceStaff), "err", err)
+		return
+	}
+	recipients := make([]string, 0, len(staff))
+	seen := make(map[string]struct{}, len(staff))
+	blankWarned := false
+	for _, addr := range staff {
+		trimmed := strings.TrimSpace(addr)
+		if trimmed == "" {
+			if !blankWarned {
+				slog.Warn("email recipient skipped: blank address",
+					"visit_id", visit.VisitID, "template", string(tpl.Type))
+				blankWarned = true
+			}
+			continue
+		}
+		if _, dup := seen[trimmed]; dup {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		recipients = append(recipients, trimmed)
+	}
+	if len(recipients) == 0 {
+		slog.Info("email skipped: no active recipients",
+			"visit_id", visit.VisitID, "template", string(tpl.Type))
+		return
+	}
+	subject, textBody, htmlBody := domain.BuildEmail(visit, tpl, frontendBaseURL)
+	to, bcc := splitStaffBcc(ctx, q, visit.VisitID, string(tpl.Type), true, recipients)
+	var sendErr error
+	if tm, ok := mailer.(domain.TemplatedMailer); ok {
+		sendErr = tm.SendTemplatedBcc(ctx, string(tpl.Type), to, bcc, subject, textBody, htmlBody)
+	} else {
+		sendErr = mailer.SendBcc(ctx, to, bcc, subject, textBody, htmlBody)
+	}
+	if sendErr != nil {
+		slog.Error("email dead-letter",
+			"visit_id", visit.VisitID, "template", string(tpl.Type),
+			"recipient_count", len(to), "bcc_count", len(bcc), "err", sendErr)
+	}
+}
+
 // hasVendorAudience reports whether a vendor-leg send is pending, in which
 // case the roster must be loaded for the member fan-out.
 func hasVendorAudience(audiences []domain.NotificationAudience) bool {

@@ -203,6 +203,50 @@ func (q *Queries) InsertVendorNotification(ctx context.Context, arg InsertVendor
 	return err
 }
 
+const listAdminEmailRecipients = `-- name: ListAdminEmailRecipients :many
+SELECT u.email
+FROM users u
+JOIN role r ON r.id = u.role_id
+WHERE u.status = 'active'
+  AND (
+        r.name IN ('super_admin', 'dev-superadmin')
+        OR (r.name = 'admin'
+            AND (u.location_id = $1::uuid
+                 OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = u.id AND ul.location_id = $1::uuid)))
+      )
+ORDER BY u.email ASC
+`
+
+type ListAdminEmailRecipientsParams struct {
+	LocationID uuid.UUID `json:"location_id"`
+}
+
+// Active-only email mirror of the visit_requested staff leg: every ACTIVE
+// national super_admin (including the hidden dev-superadmin) plus the ACTIVE
+// branch admin of the visit's branch — and deliberately NO security role and
+// NO vendor. The visit_requested in_app fan-out still covers admin+security,
+// but the new-request mail goes to the approvers only, so the gate roster is
+// never mailed every new request.
+func (q *Queries) ListAdminEmailRecipients(ctx context.Context, arg ListAdminEmailRecipientsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listAdminEmailRecipients, arg.LocationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		items = append(items, email)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBackfillNotificationEvents = `-- name: ListBackfillNotificationEvents :many
 SELECT 'requested'::text AS source,
        ''::text AS status,

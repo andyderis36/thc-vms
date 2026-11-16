@@ -11,12 +11,15 @@ import (
 	"thc-vms/backend/internal/domain"
 )
 
-// emailAllowedCases is the locked allowlist expectation: exactly these eight
+// emailAllowedCases is the locked allowlist expectation: exactly these nine
 // notification types may fan out to email; everything else stays in_app-only.
+// visit_requested is email-safe on the staff leg only (branch admins plus the
+// national overseers); the vendor and branch security legs are never mailed.
 var emailAllowedCases = []struct {
 	typ   domain.NotificationType
 	allow bool
 }{
+	{domain.NotificationVisitRequested, true},
 	{domain.NotificationVisitApproved, true},
 	{domain.NotificationVisitRejected, true},
 	{domain.NotificationVisitCancelled, true},
@@ -25,14 +28,13 @@ var emailAllowedCases = []struct {
 	{domain.NotificationVisitReminder, true},
 	{domain.NotificationVisitCheckIn, true},
 	{domain.NotificationVisitCheckOut, true},
-	{domain.NotificationVisitRequested, false},
 	{domain.NotificationType(""), false},
 	{domain.NotificationType("visit_deleted"), false},
 }
 
-// TestEmailAllowed_AllowsExactlyEightTypes proves the allowlist admits the
-// eight email-safe lifecycle types and nothing else.
-func TestEmailAllowed_AllowsExactlyEightTypes(t *testing.T) {
+// TestEmailAllowed_AllowsExactlyNineTypes proves the allowlist admits the
+// nine email-safe lifecycle types and nothing else.
+func TestEmailAllowed_AllowsExactlyNineTypes(t *testing.T) {
 	for _, tc := range emailAllowedCases {
 		if got := domain.EmailAllowed(tc.typ); got != tc.allow {
 			t.Errorf("EmailAllowed(%q) = %v, want %v", tc.typ, got, tc.allow)
@@ -61,16 +63,16 @@ func TestFakeMailer_RecordsCalls(t *testing.T) {
 	}
 }
 
-// TestEmailGate_RequestedStaysSilentWhileAutoCancelSends proves the
-// enqueue-time contract: visit_requested is still dropped before any Send
-// call, while the R1/R2 visit_auto_cancelled notice now passes the gate and
-// produces exactly one Send.
-func TestEmailGate_RequestedStaysSilentWhileAutoCancelSends(t *testing.T) {
+// TestEmailGate_RequestedPassesWhileAutoCancelSends proves the enqueue-time
+// contract: visit_requested now passes the gate (staff leg: branch admins
+// plus national overseers), and the R1/R2 visit_auto_cancelled notice passes
+// it too, producing exactly one Send each.
+func TestEmailGate_RequestedPassesWhileAutoCancelSends(t *testing.T) {
 	fake := &domain.FakeMailer{}
 	ctx := context.Background()
 	visit := testVisit()
-	if tpl := domain.CreatedNotification(visit.VisitID); domain.EmailAllowed(tpl.Type) {
-		t.Errorf("EmailAllowed(%q) = true, want false: new requests stay in_app-only", tpl.Type)
+	if tpl := domain.CreatedNotification(visit.VisitID); !domain.EmailAllowed(tpl.Type) {
+		t.Errorf("EmailAllowed(%q) = false, want true: new requests mail the staff leg", tpl.Type)
 	}
 	tpl := domain.TransitionNotification(domain.VisitStatusCancelled, true, visit.VisitID, "")
 	if tpl == nil {

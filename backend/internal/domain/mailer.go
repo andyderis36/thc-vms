@@ -48,13 +48,15 @@ type TemplatedMailer interface {
 	SendTemplatedWithTeamQR(ctx context.Context, template string, to []string, subject, textBody, htmlBody string, qrPNG []byte, cid string) error
 }
 
-// emailAllowedTypes is the single email allowlist. Exactly these eight
-// lifecycle types may fan out to email; notably visit_requested stays
-// in_app-only (staff triage the dashboard, they are not emailed every new
-// request). visit_auto_cancelled IS emailed: the R1 stale-request sweep and
-// the R2 no-show sweep share this one type (splitting them would need a
+// emailAllowedTypes is the single email allowlist. Exactly these nine
+// lifecycle types may fan out to email. visit_requested IS emailed, but only
+// on the staff leg: the branch admins plus the national overseers are told of
+// every new request, while the vendor (who filed it) and the branch security
+// get no mail. visit_auto_cancelled IS emailed: the R1 stale-request sweep
+// and the R2 no-show sweep share this one type (splitting them would need a
 // migration), so both legs notify the vendor by design.
 var emailAllowedTypes = map[NotificationType]struct{}{
+	NotificationVisitRequested:     {},
 	NotificationVisitApproved:      {},
 	NotificationVisitRejected:      {},
 	NotificationVisitCancelled:     {},

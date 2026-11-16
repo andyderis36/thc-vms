@@ -11,6 +11,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Spinner } from '@/components/ui/Spinner'
 import { ProfileBackLink } from '@/features/profile/components/ProfileBackLink'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
+import { formatTanggalWaktu } from '@/features/visits/detail/Timeline'
 import { RequireRole } from '@/lib/auth/guards'
 import {
   useMailLogDetailQuery,
@@ -205,9 +206,16 @@ function SettingsMailLogsScreen() {
             <table className={TABLE_CLASS}>
               <thead>
                 <tr>
-                  {['Waktu', 'Penerima', 'Subjek', 'Template', 'Status', 'Aksi'].map((h) => (
-                    <th key={h} scope="col" className={TABLE_TH_CLASS}>
-                      {h}
+                  {[
+                    { label: 'Waktu', width: 'w-[18%]' },
+                    { label: 'Penerima', width: 'w-[22%]' },
+                    { label: 'Subjek', width: 'w-[24%]' },
+                    { label: 'Template', width: 'w-[12%]' },
+                    { label: 'Status', width: 'w-[12%]' },
+                    { label: 'Aksi', width: 'w-[12%]' },
+                  ].map((h) => (
+                    <th key={h.label} scope="col" className={`${TABLE_TH_CLASS} ${h.width}`}>
+                      {h.label}
                     </th>
                   ))}
                 </tr>
@@ -227,10 +235,24 @@ function SettingsMailLogsScreen() {
                       className="cursor-pointer transition-colors hover:bg-brand/5"
                       onClick={() => setSelectedMailId(id)}
                     >
-                      <td className={TABLE_TD_CLASS}>{createdAt}</td>
-                      <td className={TABLE_TD_CLASS}>{to.join(', ')}</td>
-                      <td className={TABLE_TD_CLASS}>{subject}</td>
-                      <td className={TABLE_TD_CLASS}>{template}</td>
+                      <td className={`${TABLE_TD_CLASS} whitespace-nowrap`}>
+                        {createdAt ? formatTanggalWaktu(createdAt) : '—'}
+                      </td>
+                      <td className={TABLE_TD_CLASS}>
+                        <p className="truncate" title={to.join(', ')}>
+                          {to.join(', ')}
+                        </p>
+                      </td>
+                      <td className={TABLE_TD_CLASS}>
+                        <p className="truncate" title={subject}>
+                          {subject}
+                        </p>
+                      </td>
+                      <td className={TABLE_TD_CLASS}>
+                        <p className="truncate" title={template}>
+                          {template}
+                        </p>
+                      </td>
                       <td className={TABLE_TD_CLASS}>
                         <Badge tone={status === 'sent' ? 'success' : status === 'failed' ? 'danger' : 'warning'} className="rounded-badge">
                           {status === 'sent' ? 'Terkirim' : status === 'failed' ? 'Gagal' : 'Antre'}
@@ -271,14 +293,20 @@ function SettingsMailLogsScreen() {
                     onClick={() => setSelectedMailId(id)}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-ink">{subject}</p>
+                      <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink" title={subject}>
+                        {subject}
+                      </p>
                       <Badge tone={status === 'sent' ? 'success' : status === 'failed' ? 'danger' : 'warning'} className="rounded-badge">
                         {status === 'sent' ? 'Terkirim' : status === 'failed' ? 'Gagal' : 'Antre'}
                       </Badge>
                     </div>
-                    <p className="text-xs text-ink-secondary">{to.join(', ')}</p>
-                    <p className="text-xs text-ink-muted">{template}</p>
-                    <p className="text-xs text-ink-muted">{createdAt}</p>
+                    <p className="break-all text-xs text-ink-secondary" title={to.join(', ')}>
+                      {to.join(', ')}
+                    </p>
+                    <p className="truncate text-xs text-ink-muted" title={template}>
+                      {template}
+                    </p>
+                    <p className="text-xs text-ink-muted">{createdAt ? formatTanggalWaktu(createdAt) : '—'}</p>
                   </button>
                 </li>
               )
@@ -318,12 +346,12 @@ function SettingsMailLogsScreen() {
                 <>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Penerima</p>
-                    <p className="mt-1 text-sm text-ink">{to.join(', ')}</p>
+                    <p className="mt-1 break-all text-sm text-ink">{to.join(', ')}</p>
                   </div>
                   {bcc.length > 0 ? (
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Bcc (tersembunyi)</p>
-                      <p className="mt-1 text-sm text-ink">{bcc.join(', ')}</p>
+                      <p className="mt-1 break-all text-sm text-ink">{bcc.join(', ')}</p>
                     </div>
                   ) : null}
                   <div>
@@ -352,11 +380,11 @@ function SettingsMailLogsScreen() {
                   ) : null}
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Dibuat</p>
-                    <p className="mt-1 text-sm text-ink">{createdAt}</p>
+                    <p className="mt-1 text-sm text-ink">{createdAt ? formatTanggalWaktu(createdAt) : '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Terkirim</p>
-                    <p className="mt-1 text-sm text-ink">{sentAt}</p>
+                    <p className="mt-1 text-sm text-ink">{sentAt ? formatTanggalWaktu(sentAt) : '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Isi Teks</p>

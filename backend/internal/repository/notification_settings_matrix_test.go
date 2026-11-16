@@ -121,6 +121,29 @@ func TestSettingsMatrix_MandatoryStoredOffStillEmitsAndEnqueues(t *testing.T) {
 	}
 }
 
+// TestSettingsMatrix_AutoCancelledStoredOffStillMandatory membuktikan
+// visit_auto_cancelled yang tersimpan Off tetap emit dan enqueue: R1/R2
+// adalah tipe wajib (fail-closed ke Active), jadi penolakan PUT dan bypass
+// pengiriman berlaku dua arah kanal.
+func TestSettingsMatrix_AutoCancelledStoredOffStillMandatory(t *testing.T) {
+	snap := allOffSettings()
+	if !snap.IsInAppEnabled(domain.NotificationVisitAutoCancelled, domain.NotificationAudienceStaff) {
+		t.Fatal("auto_cancelled staff harus in_app-Active walau tersimpan Off")
+	}
+	if !snap.IsInAppEnabled(domain.NotificationVisitAutoCancelled, domain.NotificationAudienceVendor) {
+		t.Fatal("auto_cancelled vendor harus in_app-Active walau tersimpan Off")
+	}
+	if !domain.EmailAllowedWithSettings(domain.NotificationVisitAutoCancelled, snap) {
+		t.Fatal("auto_cancelled harus email-Active walau tersimpan Off")
+	}
+	if !snap.IsEmailEnabled(domain.NotificationVisitAutoCancelled, domain.NotificationAudienceStaff) {
+		t.Fatal("auto_cancelled staff email harus Active walau tersimpan Off")
+	}
+	if !snap.IsEmailEnabled(domain.NotificationVisitAutoCancelled, domain.NotificationAudienceVendor) {
+		t.Fatal("auto_cancelled vendor email harus Active walau tersimpan Off")
+	}
+}
+
 // TestSettingsMatrix_NonMandatoryOffEmitsNothing membuktikan tipe
 // non-mandatory yang Off tidak emit di kedua kanal: 0 baris in_app (kedua
 // audiens) dan 0 email.
@@ -204,13 +227,17 @@ func TestSettingsMatrix_CreateRespectsStoredOff(t *testing.T) {
 	}
 
 	offReq, offVis, offPur := newReq()
-	offRepos := NewVisitRepository(pool).WithSettings(fixedSettingsLoader{snap: allOffSettings()})
+	offMailer := &domain.FakeMailer{}
+	offRepos := NewVisitRepository(pool).WithMailer(offMailer).WithSettings(fixedSettingsLoader{snap: allOffSettings()})
 	offCreated, err := offRepos.Create(ctx, offReq, offVis, offPur)
 	if err != nil {
 		t.Fatalf("Create dengan stored-Off: %v", err)
 	}
 	if n := countTypeForVisit(t, notifs, ctx, admin, offCreated.ID, domain.NotificationVisitRequested); n != 0 {
 		t.Fatalf("visit_requested rows = %d, want 0 (toggle Off harus menghentikan emit Create)", n)
+	}
+	if len(offMailer.Calls) != 0 {
+		t.Fatalf("email calls dengan stored-Off = %d, want 0 (toggle Off harus menekan email Create non-mandatory)", len(offMailer.Calls))
 	}
 
 	defReq, defVis, defPur := newReq()

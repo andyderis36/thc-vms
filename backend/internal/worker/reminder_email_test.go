@@ -45,36 +45,82 @@ func reminderVisit(id domain.UUID) domain.VisitRequest {
 		workerNow.Add(-time.Hour), workerNow.Add(30*time.Minute), workerNow.Add(2*time.Hour))
 }
 
-// TestReminder_EnqueuesOneVendorEmail proves an in-window reminder enqueues
-// exactly one email to the resolved vendor address with the visit code in
-// the subject.
-func TestReminder_EnqueuesOneVendorEmail(t *testing.T) {
+// TestReminder_EnqueuesVendorPlusStaffEmails proves an in-window reminder
+// enqueues one email to the resolved vendor address plus one staff send with
+// the branch direct owners in To and the national overseers in Bcc.
+func TestReminder_EnqueuesVendorPlusStaffEmails(t *testing.T) {
 	t.Parallel()
-	// Given: an approved in-window visit and a resolver returning one address.
+	// Given: an approved in-window visit and resolvers returning both legs.
 	v := reminderVisit("visit-r4mail")
 	visits := newFakeVisitRepo(v)
 	rules := &fakeAutoRules{reminders: []domain.VisitRequest{v}}
-	notif := &fakeNotificationRepo{recipients: []string{"vendor-r4@example.com"}}
+	notif := &fakeNotificationRepo{
+		recipients: []string{"vendor-r4@example.com"},
+		staffTo:      []string{"admin-r4@thc.test", "security-r4@thc.test"},
+		staffBcc:     []string{"super-r4@thc.test"},
+	}
 	fake := &domain.FakeMailer{}
 	svc := workerServiceWithMailer(visits, rules, newFakeCheckInOutRepo(), notif, fake)
 	// When: the sweep runs.
 	summary := svc.Run(t.Context())
-	// Then: one in_app reminder and exactly one email to the vendor.
+	// Then: one reminder counted, two in_app rows, two email sends.
 	if summary.Reminded != 1 {
 		t.Fatalf("expected 1 reminder, got %+v", summary)
 	}
-	if len(notif.writes) != 1 {
-		t.Fatalf("expected 1 notification write, got %d", len(notif.writes))
+	if len(notif.writes) != 2 {
+		t.Fatalf("expected 2 notification writes (vendor + staff), got %d", len(notif.writes))
+	}
+	if len(fake.Calls) != 2 {
+		t.Fatalf("email calls = %d, want exactly 2 (one vendor send, one staff send)", len(fake.Calls))
+	}
+	vendorCall := fake.Calls[0]
+	if len(vendorCall.To) != 1 || vendorCall.To[0] != "vendor-r4@example.com" {
+		t.Fatalf("vendor To = %v, want [vendor-r4@example.com]", vendorCall.To)
+	}
+	if len(vendorCall.Bcc) != 0 {
+		t.Fatalf("vendor Bcc = %v, want empty on the vendor leg", vendorCall.Bcc)
+	}
+	if got := vendorCall.Subject; !containsCode(got, v.VisitID) {
+		t.Fatalf("vendor subject = %q, want the visit code %q", got, v.VisitID)
+	}
+	staffCall := fake.Calls[1]
+	if len(staffCall.To) != 2 || staffCall.To[0] != "admin-r4@thc.test" || staffCall.To[1] != "security-r4@thc.test" {
+		t.Fatalf("staff To = %v, want the branch admin+security", staffCall.To)
+	}
+	if len(staffCall.Bcc) != 1 || staffCall.Bcc[0] != "super-r4@thc.test" {
+		t.Fatalf("staff Bcc = %v, want the national overseers", staffCall.Bcc)
+	}
+	if got := staffCall.Subject; !containsCode(got, v.VisitID) {
+		t.Fatalf("staff subject = %q, want the visit code %q", got, v.VisitID)
+	}
+}
+
+// TestReminder_StaffSplitErrorKeepsVendorEmail proves a staff-leg resolver
+// failure drops only the staff send: the vendor email still goes out and the
+// sweep stays green.
+func TestReminder_StaffSplitErrorKeepsVendorEmail(t *testing.T) {
+	t.Parallel()
+	// Given: an approved in-window visit whose staff split fails.
+	v := reminderVisit("visit-r4staffail")
+	visits := newFakeVisitRepo(v)
+	rules := &fakeAutoRules{reminders: []domain.VisitRequest{v}}
+	notif := &fakeNotificationRepo{
+		recipients:   []string{"vendor-r4@example.com"},
+		staffSplitErr: errTestSMTPDown,
+	}
+	fake := &domain.FakeMailer{}
+	svc := workerServiceWithMailer(visits, rules, newFakeCheckInOutRepo(), notif, fake)
+	// When: the sweep runs.
+	summary := svc.Run(t.Context())
+	// Then: the reminder counts and exactly the vendor email goes out.
+	if summary.Reminded != 1 {
+		t.Fatalf("expected 1 reminder, got %+v", summary)
 	}
 	if len(fake.Calls) != 1 {
-		t.Fatalf("email calls = %d, want exactly 1", len(fake.Calls))
+		t.Fatalf("email calls = %d, want exactly 1 (vendor leg survives the staff failure)", len(fake.Calls))
 	}
-	call := fake.Calls[0]
-	if len(call.To) != 1 || call.To[0] != "vendor-r4@example.com" {
-		t.Fatalf("To = %v, want [vendor-r4@example.com]", call.To)
-	}
-	if got := call.Subject; !containsCode(got, v.VisitID) {
-		t.Fatalf("subject = %q, want the visit code %q", got, v.VisitID)
+	if len(summary.Failures) != 0 {
+		t.Fatalf("expected no failures, got %+v", summary.Failures)
 	}
 }
 
@@ -91,12 +137,12 @@ func TestReminder_NilMailerSendsZeroButStillNotifies(t *testing.T) {
 	svc := workerServiceWithNotifications(visits, rules, newFakeCheckInOutRepo(), notif)
 	// When: the sweep runs.
 	summary := svc.Run(t.Context())
-	// Then: the reminder is counted and written, with no mailer to fail it.
+	// Then: the reminder is counted and both legs written, with no mailer to fail it.
 	if summary.Reminded != 1 {
 		t.Fatalf("expected 1 reminder, got %+v", summary)
 	}
-	if len(notif.writes) != 1 {
-		t.Fatalf("expected 1 notification write, got %d", len(notif.writes))
+	if len(notif.writes) != 2 {
+		t.Fatalf("expected 2 notification writes (vendor + staff), got %d", len(notif.writes))
 	}
 	if len(summary.Failures) != 0 {
 		t.Fatalf("expected no failures, got %+v", summary.Failures)
@@ -143,12 +189,12 @@ func TestReminder_EmptyRecipientsSendZero(t *testing.T) {
 	svc := workerServiceWithMailer(visits, rules, newFakeCheckInOutRepo(), notif, fake)
 	// When: the sweep runs.
 	summary := svc.Run(t.Context())
-	// Then: the in_app reminder lands, no email goes out, no failure.
+	// Then: both in_app legs land, no email goes out, no failure.
 	if summary.Reminded != 1 {
 		t.Fatalf("expected 1 reminder, got %+v", summary)
 	}
-	if len(notif.writes) != 1 {
-		t.Fatalf("expected 1 notification write, got %d", len(notif.writes))
+	if len(notif.writes) != 2 {
+		t.Fatalf("expected 2 notification writes (vendor + staff), got %d", len(notif.writes))
 	}
 	if len(fake.Calls) != 0 {
 		t.Fatalf("email calls = %d, want 0 for an empty recipient set", len(fake.Calls))

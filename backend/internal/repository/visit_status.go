@@ -84,13 +84,14 @@ func (r *visitRepository) UpdateStatus(
 		}
 		// A human-driven cancellation notifies the other side: the vendor
 		// cancelling its own visit tells the branch staff, an admin or
-		// superadmin cancelling tells the vendor. The worker (empty actor,
-		// SQL NULL) keeps its visit_auto_cancelled row from the emit above.
-		// byVendor compares the actor against the visit's vendor user: only
-		// the owning vendor may cancel via the usecase guard, so equality
-		// means a vendor-side cancel. The message names the person (name +
-		// Indonesian role label), falling back to the role word only when
-		// the user row could not be resolved.
+		// superadmin cancelling tells the vendor. A system-driven cancel
+		// (empty actor, SQL NULL) notifies both: the vendor row from the emit
+		// above plus the staff row emitted below, fanned out over one email
+		// each. byVendor compares the actor against the visit's vendor user:
+		// only the owning vendor may cancel via the usecase guard, so
+		// equality means a vendor-side cancel. The message names the person
+		// (name + Indonesian role label), falling back to the role word only
+		// when the user row could not be resolved.
 		if status == domain.VisitStatusCancelled && actor.Valid {
 			changer, _ := fromDomainUUID(changedBy)
 			byVendor := changer == locked.VendorUserID
@@ -100,8 +101,23 @@ func (r *visitRepository) UpdateStatus(
 			}
 			pending = &pendingEmail{visit: actors.apply(emailVisit(locked, locked.StartDate, locked.EndDate, notes)), tpl: human, audiences: []domain.NotificationAudience{human.Audience}}
 		}
+		var staffAuto *domain.NotificationTemplate
+		if status == domain.VisitStatusCancelled && !actor.Valid {
+			staffAuto = domain.AutoCancelledStaffNotification(locked.VisitID)
+			if err := emit(ctx, q, staffAuto, locked.ID, locked.LocationID, locked.VendorUserID, time.Now(), snap); err != nil {
+				return err
+			}
+		}
 		if first != nil {
 			v := actors.apply(emailVisit(locked, locked.StartDate, locked.EndDate, notes))
+			audiences := []domain.NotificationAudience{first.Audience}
+			if staffAuto != nil {
+				audiences = append(audiences, staffAuto.Audience)
+			}
+			if status == domain.VisitStatusCompleted && !actor.Valid {
+				name, role := domain.SystemActorName, domain.SystemActorRole
+				v.ActorName, v.ActorRoleLabel = &name, &role
+			}
 			if status == domain.VisitStatusVisiting {
 				now := time.Now()
 				v.CheckInAt = &now
@@ -118,7 +134,7 @@ func (r *visitRepository) UpdateStatus(
 					v.CheckedOutBy = &cb
 				}
 			}
-			pending = &pendingEmail{visit: v, tpl: first, audiences: []domain.NotificationAudience{first.Audience}}
+			pending = &pendingEmail{visit: v, tpl: first, audiences: audiences}
 		}
 		// Load the roster for every pending email so check-in/out (and other)
 		// notices can carry the visitor/team names. A roster read failure

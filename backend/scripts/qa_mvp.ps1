@@ -14,7 +14,7 @@ in docs/4. openapi.yaml and the ERD win):
   checklist `checked_in`  -> API `visiting`
   checklist `checked_out` -> API `completed`
   checklist `VMS-2026-0925-01` -> API `VST-` + 10 digits
-  AUTO-01 "cancel pending past start_date" -> PRD L137 7-day stale-request rule
+  AUTO-01 "cancel pending past start_date" -> R1 auto-cancel once the visit window started (start_date <= now)
   AUTO-02 "OVERSTAY label at end_date+1h"  -> PRD L148 auto-complete at +24h;
                                                no OVERSTAY field exists in the
                                                openapi/ERD schema, so the

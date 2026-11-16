@@ -19,9 +19,10 @@ const SettingsKeyNotifications = "notifications"
 // threading settings into the user-status write path, which is out of scope
 // for Slice A and is deferred.
 var MandatoryNotificationTypes = map[NotificationType]struct{}{
-	NotificationVisitApproved:  {},
-	NotificationVisitRejected:  {},
-	NotificationVisitCancelled: {},
+	NotificationVisitApproved:      {},
+	NotificationVisitRejected:      {},
+	NotificationVisitCancelled:     {},
+	NotificationVisitAutoCancelled: {},
 }
 
 // IsMandatoryNotification reports whether t is a mandatory (locked-Active)

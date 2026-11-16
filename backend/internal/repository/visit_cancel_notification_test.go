@@ -81,6 +81,91 @@ func TestUpdateStatus_HumanCancelWritesVisitCancelled(t *testing.T) {
 	}
 }
 
+// TestHumanCancel_MandatoryBypassEmailsBothWays proves the human-cancel
+// routing carries its mandatory bypass on both directions even when the
+// matrix is stored all-Off: a vendor cancelling its own visit still mails the
+// branch staff (admin+security in To, super_admins in Bcc), and an
+// admin/superadmin cancelling still mails the vendor — with no mail the other
+// way in either direction.
+func TestHumanCancel_MandatoryBypassEmailsBothWays(t *testing.T) {
+	pool := testPool(t)
+	resetTables(t, pool)
+	ctx := testContext(t)
+
+	loc := seedLocation(t, pool, "Cabang Batal Wajib", "cabang")
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Batal", Email: "batal.wajib@vendor.test", Role: "vendor", Type: "external"})
+	admin := seedUser(t, pool, seedUserParams{Name: "Admin Batal", Email: "admin.batal.wajib@thc.test", Role: "admin", Location: loc, Type: "internal"})
+	security := seedUser(t, pool, seedUserParams{Name: "Security Batal", Email: "sec.batal.wajib@thc.test", Role: "security", Location: loc, Type: "internal"})
+	superAdmin := seedUser(t, pool, seedUserParams{Name: "Super Batal", Email: "super.batal.wajib@thc.test", Role: "super_admin", Type: "internal"})
+	fake := &domain.FakeMailer{}
+	repos := NewVisitRepository(pool).WithMailer(fake).WithSettings(fixedSettingsLoader{snap: allOffSettings()})
+	notifs := NewNotificationRepository(pool)
+
+	start := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+
+	vendorVisit := seedVisit(t, pool, seedVisitParams{
+		Code: "VST-0000000211", VendorUser: vendor, Location: loc,
+		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusRequested,
+	})
+	if err := repos.UpdateStatus(ctx, vendorVisit, domain.VisitStatusCancelled, vendor, "dibatalkan vendor"); err != nil {
+		t.Fatalf("vendor cancel UpdateStatus: %v", err)
+	}
+	if len(fake.Calls) != 1 {
+		t.Fatalf("email calls after vendor cancel = %d, want exactly 1 staff email (mandatory bypass)", len(fake.Calls))
+	}
+	staffCall := fake.Calls[0]
+	wantTo := map[string]bool{"admin.batal.wajib@thc.test": true, "sec.batal.wajib@thc.test": true}
+	if len(staffCall.To) != len(wantTo) {
+		t.Fatalf("staff To = %v, want the branch admin+security", staffCall.To)
+	}
+	for _, addr := range staffCall.To {
+		if !wantTo[addr] {
+			t.Fatalf("staff To = %v, want only the branch admin+security", staffCall.To)
+		}
+		if addr == "batal.wajib@vendor.test" {
+			t.Fatalf("staff To = %v, vendor must not be mailed its own cancel", staffCall.To)
+		}
+	}
+	if len(staffCall.Bcc) != 1 || staffCall.Bcc[0] != "super.batal.wajib@thc.test" {
+		t.Fatalf("staff Bcc = %v, want the national super_admin", staffCall.Bcc)
+	}
+	for _, staff := range []domain.UUID{superAdmin, admin, security} {
+		if n := cancelledCount(t, notifs, ctx, staff, vendorVisit); n != 1 {
+			t.Fatalf("staff in_app visit_cancelled rows = %d, want 1 (mandatory bypass)", n)
+		}
+	}
+	if n := cancelledCount(t, notifs, ctx, vendor, vendorVisit); n != 0 {
+		t.Fatalf("vendor in_app visit_cancelled rows = %d, want 0 on own cancel", n)
+	}
+
+	fake.Calls = nil
+	adminVisit := seedVisit(t, pool, seedVisitParams{
+		Code: "VST-0000000212", VendorUser: vendor, Location: loc,
+		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusRequested,
+	})
+	if err := repos.UpdateStatus(ctx, adminVisit, domain.VisitStatusCancelled, admin, "dibatalkan admin"); err != nil {
+		t.Fatalf("admin cancel UpdateStatus: %v", err)
+	}
+	if len(fake.Calls) != 1 {
+		t.Fatalf("email calls after admin cancel = %d, want exactly 1 vendor email (mandatory bypass)", len(fake.Calls))
+	}
+	vendorCall := fake.Calls[0]
+	if len(vendorCall.To) != 1 || vendorCall.To[0] != "batal.wajib@vendor.test" {
+		t.Fatalf("vendor To = %v, want the vendor user", vendorCall.To)
+	}
+	if len(vendorCall.Bcc) != 0 {
+		t.Fatalf("vendor Bcc = %v, want empty", vendorCall.Bcc)
+	}
+	if n := cancelledCount(t, notifs, ctx, vendor, adminVisit); n != 1 {
+		t.Fatalf("vendor in_app visit_cancelled rows = %d, want 1 (mandatory bypass)", n)
+	}
+	for _, staff := range []domain.UUID{superAdmin, admin, security} {
+		if n := cancelledCount(t, notifs, ctx, staff, adminVisit); n != 0 {
+			t.Fatalf("staff in_app visit_cancelled rows = %d, want 0 on admin cancel", n)
+		}
+	}
+}
+
 // cancelledCount counts the caller's visit_cancelled notices for one visit.
 func cancelledCount(t *testing.T, repo domain.NotificationRepository, ctx context.Context, user, visit domain.UUID) int {
 	t.Helper()

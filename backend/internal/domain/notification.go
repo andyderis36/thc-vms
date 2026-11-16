@@ -87,8 +87,6 @@ func RoleLabel(roleName string) string {
 // automatic worker (status_history.changed_by IS NULL).
 //
 // Nil cases are deliberate:
-//   - completed by the worker (R3 auto-complete) is administrative housekeeping,
-//     not an event the branch staff need to be told about;
 //   - cancelled by a human emits nothing here because the notice is
 //     actor-directed (vendor-cancel routes to staff, admin-cancel routes to
 //     the vendor) and built by HumanCancelledNotification in the repository
@@ -131,7 +129,15 @@ func TransitionNotification(to VisitStatus, system bool, visitCode string, reaso
 		}
 	case VisitStatusCompleted:
 		if system {
-			return nil
+			// R3 auto-complete: same staff audience as a human check-out,
+			// but marked automatic — (Otomatis) marker plus the System
+			// actor, never a human name (repository pins the actor rows).
+			return &NotificationTemplate{
+				Type:     NotificationVisitCheckOut,
+				Title:    "Check-out Tercatat (Otomatis)",
+				Message:  "Tamu " + visitCode + " telah check-out otomatis oleh Sistem (Otomatis).",
+				Audience: NotificationAudienceStaff,
+			}
 		}
 		return &NotificationTemplate{
 			Type:     NotificationVisitCheckOut,
@@ -144,7 +150,7 @@ func TransitionNotification(to VisitStatus, system bool, visitCode string, reaso
 			return &NotificationTemplate{
 				Type:     NotificationVisitAutoCancelled,
 				Title:    "Kunjungan Dibatalkan Otomatis",
-				Message:  "Permintaan " + visitCode + " batal otomatis: tanpa persetujuan 7 hari.",
+				Message:  "Permintaan " + visitCode + " batal otomatis: jadwal kunjungan telah dimulai tanpa persetujuan.",
 				Audience: NotificationAudienceVendor,
 			}
 		}
@@ -182,6 +188,39 @@ func ReminderNotification(visitCode string) *NotificationTemplate {
 		Audience: NotificationAudienceVendor,
 	}
 }
+
+// ReminderStaffNotification is the branch-staff copy of the same R4 reminder:
+// identical type/title/message, staff audience. The worker emits it alongside
+// the vendor row so the branch admin/security see the same heads-up in-app
+// and by email.
+func ReminderStaffNotification(visitCode string) *NotificationTemplate {
+	return &NotificationTemplate{
+		Type:     NotificationVisitReminder,
+		Title:    "Pengingat Kunjungan",
+		Message:  "Kunjungan " + visitCode + " akan dimulai dalam sekitar 45 menit.",
+		Audience: NotificationAudienceStaff,
+	}
+}
+
+// AutoCancelledStaffNotification is the branch-staff copy of the R1
+// auto-cancel: same type/title/message as the vendor row, staff audience. The
+// repository emits it alongside the vendor row on every system-driven cancel.
+func AutoCancelledStaffNotification(visitCode string) *NotificationTemplate {
+	return &NotificationTemplate{
+		Type:     NotificationVisitAutoCancelled,
+		Title:    "Kunjungan Dibatalkan Otomatis",
+		Message:  "Permintaan " + visitCode + " batal otomatis: jadwal kunjungan telah dimulai tanpa persetujuan.",
+		Audience: NotificationAudienceStaff,
+	}
+}
+
+// SystemActorName/SystemActorRole are the resolved actor rows pinned onto the
+// R3 auto-complete email context: the "Petugas check-out" line reads
+// "System (Otomatis)", never a human name.
+const (
+	SystemActorName = "System"
+	SystemActorRole = "Otomatis"
+)
 
 // HumanCancelledNotification is the notice for a human-driven cancellation:
 // a vendor cancelling its own visit tells the branch staff (byVendor=true),
@@ -308,4 +347,9 @@ type NotificationRepository interface {
 	MarkAllRead(ctx context.Context, userID UUID) (int64, error)
 	InsertForVisit(ctx context.Context, visit VisitRequest, tpl *NotificationTemplate, snap NotificationSettings) error
 	ResolveEmailRecipients(ctx context.Context, visit VisitRequest, audience NotificationAudience) ([]string, error)
+	// ResolveStaffEmailSplit returns the active-only staff email set already
+	// partitioned into the branch direct owners (To) and the national
+	// overseers (Bcc), for callers that send the staff leg outside the
+	// repository after-commit path (the R4 reminder worker).
+	ResolveStaffEmailSplit(ctx context.Context, visit VisitRequest) (to, bcc []string, err error)
 }

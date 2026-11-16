@@ -77,7 +77,9 @@ Sistem ini dirancang khusus untuk mengelola izin masuk teknisi internal, vendor 
 > **Halaman back-office (di luar 5 layar inti, memakai ulang permukaan SCR-02):**
 > `/approvals` (antrean approval, admin+superadmin), `/security` (kelola pengawas, admin+superadmin),
 > `/facilities` + `/coordinators` + `/vendor-registrations` (superadmin), `/profile` (semua peran),
-> `/verify-email` (konfirmasi ganti email), `/qr` (resolver tiket QR vendor → SCR-04).
+> `/verify-email` (konfirmasi ganti email), `/qr` (resolver tiket QR vendor → SCR-04),
+> `/register` + `/forgot-password` + `/reset-password` (publik: daftar vendor pending, reset mandiri),
+> `/settings` + `/settings/mail-logs` + `/settings/system` + `/settings/notifications` (superadmin).
 > (`/users` dihapus → 404; filter peran pindah ke kolom "Peran" di `/coordinators`.)
 
 ### Arsitektur Base Layout Shell
@@ -134,6 +136,8 @@ npm run dev
 | [`docs/4. openapi.yaml`](docs/4.%20openapi.yaml) | Kontrak REST API spesifikasi OpenAPI 3.1.0 (*Validasi 0-Error*) |
 | [`docs/5. LOCAL_DEV.md`](docs/5.%20LOCAL_DEV.md) | Panduan lokal Docker, env variables, master seed data, dan kredensial uji coba |
 | [`docs/6. QA_CHECKLIST.md`](docs/6.%20QA_CHECKLIST.md) | Matriks pengujian RBAC, isolasi cabang, toleransi 2 jam, dan batas file MinIO |
+| [`docs/7. DEPLOY_VPS.md`](docs/7.%20DEPLOY_VPS.md) | Aturan deploy VPS, stack prod, operasi rutin, dan troubleshooting |
+| [`docs/8. CI-CD.md`](docs/8.%20CI-CD.md) | CI/CD: branch, workflow, proteksi, smoke/rollback deploy, cron perawatan |
 
 > ⚠️ **Otoritas desain UI**: pola komponen **jokoui** (`https://www.jokoui.web.id/components/application`) — radius lega, permukaan ber-tint lembut, spasi bersih, elevasi tertahan. Palet tetap biru THC `#422AD5` (primary) + magenta `#F43098` (secondary). Folder `docs/stitch-ui/` **sudah basi (*stale*)** dan hanya merupakan arsip *starter kit* awal — **bukan** acuan radius, warna, tipografi, atau spesifikasi layar (lihat `AGENTS.md` §3.1).
 

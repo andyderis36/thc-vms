@@ -32,11 +32,12 @@ func workerServiceWithNotifications(
 	})
 }
 
-func TestRule1_AutoCancelsRequestedAfterSevenDays(t *testing.T) {
+func TestRule1_AutoCancelsRequestedOnceWindowStarted(t *testing.T) {
 	t.Parallel()
-	// Given: a requested visit created 8 days ago (past the 7d timeout).
+	// Given: a freshly filed requested visit whose window already started
+	// (created an hour ago, start an hour ago) and never got approved.
 	old := mkVisit("visit-r1", domain.VisitStatusRequested,
-		workerNow.Add(-8*24*time.Hour), workerNow, workerNow.Add(2*time.Hour))
+		workerNow.Add(-time.Hour), workerNow.Add(-time.Hour), workerNow.Add(2*time.Hour))
 	visits := newFakeVisitRepo(old)
 	rules := &fakeAutoRules{stale: []domain.VisitRequest{old}}
 	svc := workerService(visits, rules, newFakeCheckInOutRepo())
@@ -54,26 +55,25 @@ func TestRule1_AutoCancelsRequestedAfterSevenDays(t *testing.T) {
 	}
 }
 
-func TestRule1_BoundarySevenDays(t *testing.T) {
+func TestRule1_BoundaryWindowStart(t *testing.T) {
 	t.Parallel()
-	// Given: the R1 cut-off derived from the frozen clock.
-	r1, _, _ := worker.Thresholds(workerNow)
+	// Given: the R1 instant (the frozen clock itself).
 	cases := []struct {
-		name      string
-		createdAt time.Time
-		want      bool
+		name  string
+		start time.Time
+		want  bool
 	}{
-		{"exactly 7d is stale and cancelled", r1, true},
-		{"7d minus 1s is not yet stale", r1.Add(time.Second), false},
-		{"8d is stale", workerNow.Add(-8 * 24 * time.Hour), true},
+		{"start exactly now counts as started", workerNow, true},
+		{"start one second ago counts as started", workerNow.Add(-time.Second), true},
+		{"start one second ahead has not started", workerNow.Add(time.Second), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			v := mkVisit("visit-r1b", domain.VisitStatusRequested,
-				tc.createdAt, workerNow, workerNow.Add(2*time.Hour))
-			if got := worker.ShouldAutoCancel(v, r1); got != tc.want {
-				t.Fatalf("ShouldAutoCancel(created=%v) = %v, want %v", tc.createdAt, got, tc.want)
+				workerNow.Add(-time.Hour), tc.start, tc.start.Add(2*time.Hour))
+			if got := worker.ShouldAutoCancel(v, workerNow); got != tc.want {
+				t.Fatalf("ShouldAutoCancel(start=%v) = %v, want %v", tc.start, got, tc.want)
 			}
 		})
 	}
@@ -168,7 +168,7 @@ func TestRule2_NoShowFromOverdueRescheduled(t *testing.T) {
 func TestRule2_BoundaryAtGraceIsInclusive(t *testing.T) {
 	t.Parallel()
 	// Given: the R2 cut-off (now - NoShowGrace) derived from the frozen clock.
-	_, r2, _ := worker.Thresholds(workerNow)
+	r2, _ := worker.Thresholds(workerNow)
 	cases := []struct {
 		name    string
 		endDate time.Time
@@ -190,40 +190,46 @@ func TestRule2_BoundaryAtGraceIsInclusive(t *testing.T) {
 	}
 }
 
-func TestRule1_StaleRequestWithOpenWindowStillCancels(t *testing.T) {
+func TestRule1_FutureWindowRequestSurvives(t *testing.T) {
 	t.Parallel()
-	// Given: a requested visit created 8d ago whose window is still in the FUTURE,
-	// so only R1 (not R2) may claim it.
-	old := mkVisit("visit-r1open", domain.VisitStatusRequested,
-		workerNow.Add(-8*24*time.Hour), workerNow.Add(3*time.Hour), workerNow.Add(5*time.Hour))
-	r1, r2, _ := worker.Thresholds(workerNow)
-	if !worker.ShouldAutoCancel(old, r1) {
-		t.Fatal("ShouldAutoCancel = false, want true for a stale open request")
+	// Given: a requested visit whose window has NOT started yet (start 3h in
+	// the future), so neither R1 nor R2 may claim it.
+	future := mkVisit("visit-r1open", domain.VisitStatusRequested,
+		workerNow.Add(-time.Hour), workerNow.Add(3*time.Hour), workerNow.Add(5*time.Hour))
+	r2, _ := worker.Thresholds(workerNow)
+	if worker.ShouldAutoCancel(future, workerNow) {
+		t.Fatal("ShouldAutoCancel = true, want false while the window has not started")
 	}
-	if worker.ShouldMarkNoShow(old, r2, false) {
+	if worker.ShouldMarkNoShow(future, r2, false) {
 		t.Fatal("ShouldMarkNoShow = true, want false while the window is still open")
 	}
-	visits := newFakeVisitRepo(old)
-	rules := &fakeAutoRules{stale: []domain.VisitRequest{old}}
+	visits := newFakeVisitRepo(future)
+	rules := &fakeAutoRules{stale: []domain.VisitRequest{future}}
 	svc := workerService(visits, rules, newFakeCheckInOutRepo())
 	// When: the sweep runs.
 	summary := svc.Run(t.Context())
-	// Then: it is auto-cancelled by R1, never marked a no-show.
-	if summary.Cancelled != 1 {
-		t.Fatalf("expected 1 cancellation, got %+v", summary)
+	// Then: it is skipped, never cancelled nor marked a no-show.
+	if summary.Cancelled != 0 {
+		t.Fatalf("expected 0 cancellations, got %+v", summary)
 	}
 	if summary.NoShow != 0 {
 		t.Fatalf("expected 0 no-shows, got %+v", summary)
 	}
-	if visits.visits[old.ID].Status != domain.VisitStatusCancelled {
-		t.Fatalf("expected status cancelled, got %q", visits.visits[old.ID].Status)
+	if summary.Skipped < 1 {
+		t.Fatalf("expected at least 1 skip, got %+v", summary)
+	}
+	if visits.visits[future.ID].Status != domain.VisitStatusRequested {
+		t.Fatalf("expected status to stay requested, got %q", visits.visits[future.ID].Status)
+	}
+	if len(visits.writes) != 0 {
+		t.Fatalf("expected zero status writes, got %d", len(visits.writes))
 	}
 }
 
 func TestRules_OverdueStaleRequestBecomesNoShowNotCancelled(t *testing.T) {
 	t.Parallel()
-	// Given: a requested visit that is BOTH >7d old AND past its closed window,
-	// so it appears on the R1 and R2 candidate lists at once.
+	// Given: a requested visit whose window BOTH started AND closed, so it
+	// appears on the R1 and R2 candidate lists at once.
 	both := mkVisit("visit-both", domain.VisitStatusRequested,
 		workerNow.Add(-8*24*time.Hour), workerNow.Add(-5*time.Hour), workerNow.Add(-3*time.Hour))
 	visits := newFakeVisitRepo(both)
@@ -272,7 +278,7 @@ func TestRule3_AutoCompletesAfterTwentyFourHours(t *testing.T) {
 func TestRule3_BoundaryTwentyFourHours(t *testing.T) {
 	t.Parallel()
 	// Given: the R3 cut-off derived from the frozen clock.
-	_, _, r3 := worker.Thresholds(workerNow)
+	_, r3 := worker.Thresholds(workerNow)
 	cases := []struct {
 		name    string
 		endDate time.Time
@@ -408,21 +414,65 @@ func TestRule4_EmitsReminderForApprovedVisitInWindow(t *testing.T) {
 	svc := workerServiceWithNotifications(visits, rules, newFakeCheckInOutRepo(), notif)
 	// When: the sweep runs.
 	summary := svc.Run(t.Context())
-	// Then: exactly one reminder is emitted for the visit's vendor user.
+	// Then: exactly one reminder is emitted, fanned out to the vendor leg and
+	// the branch-staff leg (security included).
+	if summary.Reminded != 1 {
+		t.Fatalf("expected 1 reminder, got %+v", summary)
+	}
+	if len(notif.writes) != 2 {
+		t.Fatalf("expected 2 notification writes (vendor + staff), got %d", len(notif.writes))
+	}
+	seen := map[domain.NotificationAudience]bool{}
+	for _, w := range notif.writes {
+		if w.tpl == nil {
+			t.Fatalf("expected a notification template, got nil")
+		}
+		if w.tpl.Type != domain.NotificationVisitReminder {
+			t.Fatalf("expected template type %q, got %q", domain.NotificationVisitReminder, w.tpl.Type)
+		}
+		seen[w.tpl.Audience] = true
+	}
+	if !seen[domain.NotificationAudienceVendor] || !seen[domain.NotificationAudienceStaff] {
+		t.Fatalf("expected one vendor and one staff reminder write, got %v", seen)
+	}
+	if len(summary.Failures) != 0 {
+		t.Fatalf("expected no failures, got %+v", summary.Failures)
+	}
+}
+
+func TestRule4_StaffLegGatedIndependentlyOfVendorLeg(t *testing.T) {
+	t.Parallel()
+	// Given: an approved in-window visit under a snapshot with the vendor leg
+	// fully off but the staff leg on.
+	v := mkVisit("visit-r4gate", domain.VisitStatusApproved,
+		workerNow.Add(-time.Hour), workerNow.Add(30*time.Minute), workerNow.Add(2*time.Hour))
+	visits := newFakeVisitRepo(v)
+	rules := &fakeAutoRules{reminders: []domain.VisitRequest{v}}
+	notif := &fakeNotificationRepo{}
+	snap := domain.DefaultNotificationSettings()
+	vendorOff := snap.Toggles[domain.NotificationVisitReminder]
+	vendorOff.InApp.Vendor = false
+	vendorOff.Email.Vendor = false
+	snap.Toggles[domain.NotificationVisitReminder] = vendorOff
+	svc := worker.NewService(worker.Dependencies{
+		Visits:         visits,
+		Rules:          rules,
+		CheckIns:       newFakeCheckInOutRepo(),
+		Notifications:  notif,
+		Clock:          &stubClock{now: workerNow},
+		SettingsLoader: stubSettingsLoader{snap: snap},
+	})
+	// When: the sweep runs.
+	summary := svc.Run(t.Context())
+	// Then: only the staff row is written, and the visit still counts.
 	if summary.Reminded != 1 {
 		t.Fatalf("expected 1 reminder, got %+v", summary)
 	}
 	if len(notif.writes) != 1 {
-		t.Fatalf("expected 1 notification write, got %d", len(notif.writes))
+		t.Fatalf("expected 1 notification write (staff only), got %d", len(notif.writes))
 	}
-	if notif.writes[0].tpl == nil {
-		t.Fatalf("expected a notification template, got nil")
-	}
-	if notif.writes[0].tpl.Type != domain.NotificationVisitReminder {
-		t.Fatalf("expected template type %q, got %q", domain.NotificationVisitReminder, notif.writes[0].tpl.Type)
-	}
-	if len(summary.Failures) != 0 {
-		t.Fatalf("expected no failures, got %+v", summary.Failures)
+	if notif.writes[0].tpl == nil || notif.writes[0].tpl.Audience != domain.NotificationAudienceStaff {
+		t.Fatalf("expected the staff reminder write, got %+v", notif.writes[0].tpl)
 	}
 }
 
@@ -460,18 +510,20 @@ func TestRule4_ReminderInsertFailureIsCollected(t *testing.T) {
 	svc := workerServiceWithNotifications(visits, rules, newFakeCheckInOutRepo(), notif)
 	// When: the sweep runs.
 	summary := svc.Run(t.Context())
-	// Then: the failure is collected, not aborted, and nothing is counted.
+	// Then: both leg failures are collected, not aborted, and nothing counts.
 	if summary.Reminded != 0 {
 		t.Fatalf("expected 0 reminders, got %+v", summary)
 	}
-	if len(summary.Failures) != 1 {
-		t.Fatalf("expected 1 collected failure, got %+v", summary.Failures)
+	if len(summary.Failures) != 2 {
+		t.Fatalf("expected 2 collected failures (vendor + staff leg), got %+v", summary.Failures)
 	}
-	if summary.Failures[0].Rule != worker.RuleReminder {
-		t.Fatalf("expected failure rule %q, got %q", worker.RuleReminder, summary.Failures[0].Rule)
-	}
-	if summary.Failures[0].VisitID != v.ID {
-		t.Fatalf("expected failure visit %q, got %q", v.ID, summary.Failures[0].VisitID)
+	for _, failure := range summary.Failures {
+		if failure.Rule != worker.RuleReminder {
+			t.Fatalf("expected failure rule %q, got %q", worker.RuleReminder, failure.Rule)
+		}
+		if failure.VisitID != v.ID {
+			t.Fatalf("expected failure visit %q, got %q", v.ID, failure.VisitID)
+		}
 	}
 }
 

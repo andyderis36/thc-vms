@@ -184,3 +184,26 @@ func (r *notificationRepository) ResolveEmailRecipients(ctx context.Context, vis
 	}
 	return resolveEmailRecipients(ctx, db.New(r.pool), locationID, vendorUserID, audience)
 }
+
+// ResolveStaffEmailSplit returns the active-only staff email set already
+// partitioned into the branch direct owners (To) and the national overseers
+// (Bcc), mirroring the after-commit staff-leg split for callers that send the
+// staff leg outside a status-write transaction (the R4 reminder worker).
+func (r *notificationRepository) ResolveStaffEmailSplit(ctx context.Context, visit domain.VisitRequest) (to, bcc []string, err error) {
+	snap := domain.DefaultNotificationSettings()
+	locationID, err := fromDomainUUID(visit.LocationID)
+	if err != nil {
+		return nil, nil, err
+	}
+	vendorUserID, err := fromDomainUUID(visit.VendorUserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	q := db.New(r.pool)
+	staff, err := resolveEmailRecipients(ctx, q, locationID, vendorUserID, domain.NotificationAudienceStaff)
+	if err != nil {
+		return nil, nil, err
+	}
+	to, bcc = splitStaffBcc(ctx, q, visit.VisitID, string(domain.NotificationVisitReminder), snap.IsEmailEnabled(domain.NotificationVisitReminder, domain.NotificationAudienceStaff), staff)
+	return to, bcc, nil
+}

@@ -31,7 +31,7 @@ dev  = branch KERJA.     Semua pengembangan (fitur, UI, refactor, hotfix) terjad
   - hasilnya `main` atau branch lain → **BERHENTI**, laporkan ke user, dan **JANGAN** pindah branch secara otomatis. Minta konfirmasi lebih dulu.
 - **`main` HANYA boleh maju lewat merge dari `dev`** (`git merge --no-ff dev`). **DILARANG** commit langsung di `main`, termasuk untuk hotfix: hotfix dikerjakan di `dev`, diuji, lalu dikirim ke `main` melalui merge yang sama.
 - **Konsekuensinya:** `dev` selalu ancestor dari `main`, sehingga **tidak ada** kewajiban merge-back `main` → `dev` dan tidak ada divergensi yang perlu dikejar.
-- **Push ke `dev` tidak pernah men-deploy** — `.gitea/workflows/deploy.yml` hanya memicu pada `branches: [main]`. Push yang tidak sengaja ke `dev` karena itu aman; push `dev` ke `origin` tetap butuh perintah user (Aturan Emas #1).
+- **Push ke `dev` tidak pernah men-deploy** — `.gitea/workflows/deploy.yml` hanya memicu pada `branches: [main]`. Push yang tidak sengaja ke `dev` karena itu aman; push `dev` ke `origin` tetap butuh perintah user (Aturan Emas #1). Model CI saat ini: push `dev` → job `*-quick` di `ci.yml` (build+vet, lint+typecheck); PR → job full (`backend`/`frontend`); `main` diproteksi branch protection (wajib PR + 2 check hijau).
 - **DILARANG** `git push origin main` untuk pekerjaan yang belum selesai atau belum lolos gate. Satu-satunya jalan ke produksi: merge `dev` → `main`, lalu push `main` **atas perintah eksplisit user**.
 - **Migrasi database bersifat forward-only.** Migrasi baru di `dev` wajib dicek ulang nomornya saat merge ke `main` agar tidak bentrok dengan migrasi dari jalur lain.
 
@@ -45,7 +45,7 @@ cd backend && go build ./... && go vet ./... && go test ./...
 cd frontend && npm run lint && npm run typecheck && npm test
 ```
 
-Bila salah satu perintah gagal, **DILARANG** merge ke `main`; perbaiki dulu di `dev`.
+Bila salah satu perintah gagal, **DILARANG** merge ke `main`; perbaiki dulu di `dev`. Gate yang sama ditegakkan otomatis oleh branch protection `main` (required checks `ci / backend (pull_request)` + `ci / frontend (pull_request)`).
 
 #### 1.1.2 Runbook: mengirim perubahan ke produksi
 
@@ -68,7 +68,7 @@ git push origin main
 git switch dev
 ```
 
-> **Rollback produksi:** `deploy.sh` selalu memaksa working copy VPS ke `origin/main`, sehingga `git reset --hard` manual di VPS hanya sementara dan ditimpa deploy berikutnya. Rollback yang bertahan lama: `git revert` commit yang bermasalah di `main`, lalu `push origin main`. Migrasi tidak di-rollback, jadi revert wajib backward-compatible.
+> **Rollback produksi:** deploy yang smoke test-nya gagal di-rollback OTOMATIS oleh `deploy.sh` ke image sebelum build (tag `rollback-<TS>`, 1 generasi disimpan). Bila versi bermasalah sempat live: `deploy.sh` selalu memaksa working copy VPS ke `origin/main`, sehingga `git reset --hard` manual di VPS hanya sementara dan ditimpa deploy berikutnya. Rollback yang bertahan lama: `git revert` commit yang bermasalah di `main`, lalu `push origin main`. Migrasi tidak di-rollback, jadi revert wajib backward-compatible.
 
 ---
 
@@ -99,6 +99,7 @@ Sebelum menulis kode atau membuat perubahan, agent **WAJIB** membaca dan merujuk
 | **Panduan Dev & Seed Data** | [`docs/5. LOCAL_DEV.md`](file:///D:/otak-atik/THC/thc-vms/docs/5.%20LOCAL_DEV.md) |
 | **Skenario Uji & QA Checklist** | [`docs/6. QA_CHECKLIST.md`](file:///D:/otak-atik/THC/thc-vms/docs/6.%20QA_CHECKLIST.md) |
 | **Pipeline Deploy & Aturan VPS** | [`docs/7. DEPLOY_VPS.md`](file:///D:/otak-atik/THC/thc-vms/docs/7.%20DEPLOY_VPS.md) |
+| **CI/CD, Smoke/Rollback & Cron VPS** | [`docs/8. CI-CD.md`](file:///D:/otak-atik/THC/thc-vms/docs/8.%20CI-CD.md) |
 
 > ⚠️ **PERINGATAN**: Dilarang mengarang field JSON baru atau query SQL yang bertentangan dengan `docs/4. openapi.yaml` dan `docs/1. Entity Relationship Diagram (ERD).mermaid`. Berkas di dalam folder `docs/stitch-ui/` **DILARANG DIEDIT**; koreksi apa pun wajib dilakukan pada codebase atau dokumen SSOT, bukan pada folder arsip tersebut.
 
@@ -194,8 +195,10 @@ Aturan pakai:
 
 ### 6.1 Multi-Branch Data Scoping (Isolasi Cabang)
 - Setiap query data kunjungan (`GET /visits`) atau antrean approval:
-  * Jika role = `admin` atau `security`: **Wajib** di-filter ketat oleh backend:
-    `WHERE location_id = auth_user.location_id`.
+  * Jika role = `admin` atau `security`: **Wajib** di-filter ketat oleh backend
+    ke cabang penugasannya: lokasi primer (`location_id`) UNION coverage
+    multi-branch (`user_locations`). Superadmin dapat memakai filter global
+    `?location_id=...` atau lokasi jamak (`location_ids`).
   * Jika role = `super_admin`: Mengizinkan query lintas cabang atau filter opsional `?location_id=...`.
   * Jika role = `vendor`: **Wajib** di-filter ketat oleh backend:
     `WHERE vendor_user_id = auth_user.id`.
@@ -229,7 +232,7 @@ Aturan pakai:
 
 ## 7. HAL-HAL YANG DILARANG KERAS (*WHAT AI MUST NEVER DO*)
 
-1. **JANGAN** membuat fitur pendaftaran mandiri publik (self-registration) untuk vendor di MVP. Akun vendor didaftarkan secara manual oleh Admin/Superadmin.
+1. Self-registration vendor publik (`POST /auth/register`) diizinkan TETAPI hasilnya selalu `pending` — wajib disetujui Admin/Superadmin sebelum bisa login (lihat SYS-09 di QA_CHECKLIST). Akun vendor juga tetap bisa didaftarkan manual oleh Admin/Superadmin.
 2. **JANGAN** membuat layar terpisah untuk Emergency Evacuation List gedung (sudah digantikan oleh tab *Sedang di Lokasi* pada SCR-02).
 3. **JANGAN** menempatkan tombol Approve/Reject/Check-in pada tampilan peran vendor.
 4. **JANGAN** membocorkan data kunjungan cabang lain kepada Admin Cabang yang berbeda.
@@ -248,3 +251,6 @@ Aturan pakai:
 6. `deploy.sh` WAJIB menolak deploy bila `.env` hilang atau masih mengandung placeholder `CHANGEME`.
 7. `NEXT_PUBLIC_*` frontend dibakar saat build (`--build-arg`); JANGAN mengandalkannya sebagai runtime `environment:`.
 8. `main` adalah branch produksi dan satu-satunya branch yang men-deploy. Satu-satunya cara `main` maju adalah merge dari `dev` (§1.1); push ke `dev` tidak pernah memicu deploy.
+9. JANGAN buka PR ke `main` yang check-nya merah: branch protection menolak merge sampai `ci / backend (pull_request)` + `ci / frontend (pull_request)` hijau. Uji E2E Playwright tidak jalan di CI — jalankan lokal bila perlu.
+10. `deploy.sh` menjalankan smoke test pasca-deploy (`/api/v1/health` + `healthy`, `/login` 200, `/api/v1/settings/system` 401 tanpa token); gagal = rollback otomatis ke image `rollback-<TS>`. JANGAN menonaktifkan smoke/rollback untuk "mempercepat" deploy.
+11. JANGAN mematikan cron perawatan VPS (`vps-maintenance.sh`, Sabtu 20:00 UTC = Minggu 03:00 WIB): prune build cache + image dangling + lapor disk. Insiden Nov 2026: cache 24GB membuat disk 99% dan CI merah.
