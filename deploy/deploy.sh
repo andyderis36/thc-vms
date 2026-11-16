@@ -169,7 +169,12 @@ echo "==> snapshot image aktif (target rollback)"
 # yang gagal bisa rollback ke versi ini.
 ROLLBACK_TS="$(date +%Y%m%d%H%M%S)"
 snapshot_service_image() {
-  local svc="$1" ref="thc-vms-prod-$svc" img_id=""
+  # JANGAN gabung dalam satu baris `local a=.. b=$a`: bash mengekspansi
+  # SEMUA sisi-kanan sebelum assignment berlaku, jadi $svc di `ref=` akan
+  # membaca scope luar -> "unbound variable" di bawah `set -u`.
+  local svc="$1"
+  local ref="thc-vms-prod-$svc"
+  local img_id=""
   img_id="$(compose -f "$COMPOSE_FILE" images -q "$svc" 2>/dev/null | head -n 1 || true)"
   if [ -z "$img_id" ]; then
     echo "    $svc: tidak ada image aktif (deploy pertama?) — snapshot dilewati"
