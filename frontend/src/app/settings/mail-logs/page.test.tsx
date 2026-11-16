@@ -164,6 +164,13 @@ describe('/settings/mail-logs', () => {
     expect(screen.getAllByText('Gagal').length).toBeGreaterThan(0)
   })
 
+  it('menampilkan waktu format lokal, bukan ISO mentah', () => {
+    render(createElement(SettingsMailLogsPage))
+
+    expect(screen.queryByText('2026-01-01T00:00:00Z')).not.toBeInTheDocument()
+    expect(screen.getAllByText(/\d{2} \w{3} \d{4}, \d{2}\.\d{2}/).length).toBeGreaterThan(0)
+  })
+
   it('opens mail log detail modal showing textBody on row click', async () => {
     render(createElement(SettingsMailLogsPage))
 
