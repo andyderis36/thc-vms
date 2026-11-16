@@ -137,10 +137,11 @@ func testMailContent() (subject, textBody, htmlBody string) {
 
 // settingsToggleWire is the wire shape for one matrix row.
 type settingsToggleWire struct {
-	Event     string                           `json:"event"`
-	InApp     domain.NotificationChannelToggle `json:"in_app"`
-	Email     domain.NotificationChannelToggle `json:"email"`
-	Mandatory bool                             `json:"mandatory"`
+	Event       string                           `json:"event"`
+	InApp       domain.NotificationChannelToggle `json:"in_app"`
+	Email       domain.NotificationChannelToggle `json:"email"`
+	Mandatory   bool                             `json:"mandatory"`
+	Applicable  domain.NotificationApplicability `json:"applicable"`
 }
 
 // settingsMatrixWire is the GET/PUT response payload.
@@ -158,11 +159,13 @@ func toSettingsMatrix(st domain.NotificationSettings) settingsMatrixWire {
 	} {
 		tg := st.Toggles[t]
 		tg.Mandatory = domain.IsMandatoryNotification(t)
+		applicable := domain.NotificationApplicabilityFor(t)
 		out.Toggles = append(out.Toggles, settingsToggleWire{
-			Event:     string(t),
-			InApp:     tg.InApp,
-			Email:     tg.Email,
-			Mandatory: tg.Mandatory,
+			Event:      string(t),
+			InApp:      domain.MaskByApplicability(tg.InApp, applicable.InApp),
+			Email:      domain.MaskByApplicability(tg.Email, applicable.Email),
+			Mandatory:  tg.Mandatory,
+			Applicable: applicable,
 		})
 	}
 	return out

@@ -158,6 +158,49 @@ func (q *Queries) InsertStaffNotifications(ctx context.Context, arg InsertStaffN
 	return err
 }
 
+const insertAdminNotifications = `-- name: InsertAdminNotifications :exec
+INSERT INTO notification (user_id, visit_request_id, type, title, message, created_at)
+SELECT u.id,
+       $1::uuid,
+       $2::text,
+       $3::text,
+       $4::text,
+       $5::timestamptz
+FROM users u
+JOIN role r ON r.id = u.role_id
+WHERE u.status = 'active'
+  AND (
+        r.name IN ('super_admin', 'dev-superadmin')
+        OR (r.name = 'admin'
+            AND (u.location_id = $6::uuid
+                 OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = u.id AND ul.location_id = $6::uuid)))
+      )
+ON CONFLICT (user_id, type, visit_request_id) DO NOTHING
+`
+
+type InsertAdminNotificationsParams struct {
+	VisitRequestID uuid.UUID `json:"visit_request_id"`
+	Type           string    `json:"type"`
+	Title          string    `json:"title"`
+	Message        string    `json:"message"`
+	CreatedAt      time.Time `json:"created_at"`
+	LocationID     uuid.UUID `json:"location_id"`
+}
+
+// InsertAdminNotifications fans a visit_requested notice out to approvers
+// only: national super_admins plus the branch admin, never security.
+func (q *Queries) InsertAdminNotifications(ctx context.Context, arg InsertAdminNotificationsParams) error {
+	_, err := q.db.Exec(ctx, insertAdminNotifications,
+		arg.VisitRequestID,
+		arg.Type,
+		arg.Title,
+		arg.Message,
+		arg.CreatedAt,
+		arg.LocationID,
+	)
+	return err
+}
+
 const insertVendorNotification = `-- name: InsertVendorNotification :exec
 INSERT INTO notification (user_id, visit_request_id, type, title, message, created_at)
 SELECT u.id,
@@ -224,9 +267,9 @@ type ListAdminEmailRecipientsParams struct {
 // Active-only email mirror of the visit_requested staff leg: every ACTIVE
 // national super_admin (including the hidden dev-superadmin) plus the ACTIVE
 // branch admin of the visit's branch — and deliberately NO security role and
-// NO vendor. The visit_requested in_app fan-out still covers admin+security,
-// but the new-request mail goes to the approvers only, so the gate roster is
-// never mailed every new request.
+// NO vendor. The visit_requested in_app fan-out covers the same approvers
+// only (InsertAdminNotifications), so the bell and the new-request mail
+// reach exactly the same roster: the gate roster is never notified.
 func (q *Queries) ListAdminEmailRecipients(ctx context.Context, arg ListAdminEmailRecipientsParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listAdminEmailRecipients, arg.LocationID)
 	if err != nil {

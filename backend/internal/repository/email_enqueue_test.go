@@ -446,7 +446,7 @@ func TestEmailEnqueue_GateTransitionsFlowThroughUpdateStatus(t *testing.T) {
 // TestEmailEnqueue_RequestMailsStaffApproversOnly proves Create emits
 // visit_requested as exactly one staff email — branch admins in To, national
 // overseers in Bcc — while the filing vendor and the branch security roster
-// get no mail and the in_app fan-out still covers admin+security. The R1
+// get no mail and the in_app fan-out is admin-only as well. The R1
 // system cancel then fans out to BOTH legs (one staff send plus one vendor
 // send), while the R2 no-show keeps its single vendor send.
 func TestEmailEnqueue_RequestMailsStaffApproversOnly(t *testing.T) {
@@ -495,11 +495,13 @@ func TestEmailEnqueue_RequestMailsStaffApproversOnly(t *testing.T) {
 	if !strings.Contains(staffOnly.Subject, "Permintaan kunjungan baru") {
 		t.Fatalf("subject = %q, want the canonical visit_requested title", staffOnly.Subject)
 	}
-	// In-app stays as-is: admin AND security each gain their bell row.
-	for _, user := range []domain.UUID{fx.admin, fx.security} {
-		if n := countTypedNotifs(t, pool, user, created.ID, domain.NotificationVisitRequested); n != 1 {
-			t.Fatalf("in_app visit_requested rows = %d, want 1 (Create fan-out unchanged)", n)
-		}
+	// In-app is admin-only too: the branch admin gains the bell row, the
+	// gate roster does not (the new-request notice is for the approvers).
+	if n := countTypedNotifs(t, pool, fx.admin, created.ID, domain.NotificationVisitRequested); n != 1 {
+		t.Fatalf("in_app visit_requested rows = %d, want 1 (admin bell)", n)
+	}
+	if n := countTypedNotifs(t, pool, fx.security, created.ID, domain.NotificationVisitRequested); n != 0 {
+		t.Fatalf("in_app visit_requested rows = %d, want 0 (security is not an approver)", n)
 	}
 
 	// System cancel emits visit_auto_cancelled on BOTH legs (R1).
