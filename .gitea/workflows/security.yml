@@ -1,13 +1,13 @@
-# Advisory security scans. This is deliberately NOT a merge gate: the current
-# baseline has known findings, so blocking on it would freeze the dev -> main
-# flow. Run manually, or let the weekly schedule report drift. Promote these
+# Advisory security scans, manual-only. This is deliberately NOT a merge gate
+# and NOT scheduled: the current baseline has known findings (govulncheck
+# melaporkan 19 kerentanan pada Nov 2026, mayoritas stdlib net/http via
+# toolchain go1.26.5), so blocking or weekly red noise would freeze/desensitize
+# the dev -> main flow. Run manually before dependency upgrades; promote these
 # steps into ci.yml only after the dependency baseline is clean.
 name: security
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 3 * * 1'
 
 permissions:
   contents: read

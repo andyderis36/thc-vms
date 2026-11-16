@@ -132,30 +132,33 @@ test('@VC-01 ikon SPK dan label "Lihat SPK" segaris tengah di ponsel 320/375/390
 
     // Perpindahan viewport memicu reflow dan (pada suite paralel) refetch
     // react-query; saat itu node anchor bisa sesaat terlepas dari dokumen dan
-    // `getBoundingClientRect()` mengembalikan 0. Tunggu geometri benar-benar
-    // terpasang sebelum mengukur — ambang batas di bawah tetap ketat.
+    // `getBoundingClientRect()` mengembalikan 0. Poll LANGSUNG pada assertion
+    // akhir (bukan cek terpasang lalu ukur sekali) agar pengukuran yang lolos
+    // adalah pengukuran yang stabil — pola lama gagal flaky karena node bisa
+    // terlepas lagi di celah antara poll dan ukur.
     await expect
-      .poll(async () => (await measureAlignment(anchor)).anchorHeight, {
-        message: `[@VC-01] geometri anchor di ${width}px harus terpasang`,
+      .poll(async () => (await measureAlignment(anchor)).delta, {
+        message:
+          `[@VC-01] delta garis tengah ikon vs teks di ${width}px harus <= ` +
+          `${CENTER_DELTA_TOLERANCE_PX}px`,
         timeout: 5000,
       })
-      .toBeGreaterThan(0)
+      .toBeLessThanOrEqual(CENTER_DELTA_TOLERANCE_PX)
+    await expect
+      .poll(async () => (await measureAlignment(anchor)).anchorHeight, {
+        message: `[@VC-01] anchor di ${width}px harus mempertahankan min-h-touch`,
+        timeout: 5000,
+      })
+      .toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX)
 
+    // Assertion sudah lolos lewat poll di atas; blok ini hanya log + cek
+    // overflow (pengukuran DOM statis, tidak terpengaruh refetch).
     const metrics = await measureAlignment(anchor)
     console.log(
       `[@VC-01] width=${width}px iconCenterY=${metrics.iconCenterY.toFixed(2)} ` +
         `textCenterY=${metrics.textCenterY.toFixed(2)} delta=${metrics.delta.toFixed(2)}px ` +
         `anchorHeight=${metrics.anchorHeight.toFixed(2)}px`,
     )
-
-    expect(
-      metrics.delta,
-      `[@VC-01] delta garis tengah ikon vs teks di ${width}px harus <= ${CENTER_DELTA_TOLERANCE_PX}px`,
-    ).toBeLessThanOrEqual(CENTER_DELTA_TOLERANCE_PX)
-    expect(
-      metrics.anchorHeight,
-      `[@VC-01] anchor di ${width}px harus mempertahankan min-h-touch`,
-    ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX)
 
     const overflow = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,

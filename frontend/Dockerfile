@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # THC-VMS frontend — standalone production image.
 # NEXT_PUBLIC_* is inlined at BUILD time (fetcher.ts reads it in browser
 # code), so pass --build-arg at build; compose `environment:` cannot change it.
@@ -5,7 +6,10 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# BuildKit cache mount: tarball npm bertahan di daemon VPS antar build
+# (deploy.sh me-rebuild tiap deploy di host yang sama).
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci --no-audit --no-fund --prefer-offline
 
 FROM node:20-alpine AS builder
 WORKDIR /app
