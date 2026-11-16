@@ -81,17 +81,29 @@ func (s *Service) Update(ctx context.Context, actor Actor, in UpdateInput, audit
 				return domain.NotificationSettings{}, domain.ValidationFailure("Notifikasi wajib tidak dapat dinonaktifkan.")
 			}
 		}
+		applicable := domain.NotificationApplicabilityFor(nt)
+		if !applicable.Allows(tg.InApp, tg.Email) {
+			return domain.NotificationSettings{}, domain.ValidationFailure("Togel tidak berlaku untuk peristiwa ini.")
+		}
 		st.Toggles[nt] = domain.NotificationEventToggle{
 			InApp:     tg.InApp,
 			Email:     tg.Email,
 			Mandatory: domain.IsMandatoryNotification(nt),
 		}
 	}
-	// fill missing with defaults
+	// The events missing from the payload keep the default all-ON row, but
+	// masked by the leg map: a cell with no send leg behind it is stored OFF,
+	// so the storage can never hold ON in a cell the backend never delivers.
 	def := domain.DefaultNotificationSettings()
 	for t, tg := range def.Toggles {
-		if _, ok := st.Toggles[t]; !ok {
-			st.Toggles[t] = tg
+		if _, ok := st.Toggles[t]; ok {
+			continue
+		}
+		applicable := domain.NotificationApplicabilityFor(t)
+		st.Toggles[t] = domain.NotificationEventToggle{
+			InApp:     domain.MaskByApplicability(tg.InApp, applicable.InApp),
+			Email:     domain.MaskByApplicability(tg.Email, applicable.Email),
+			Mandatory: domain.IsMandatoryNotification(t),
 		}
 	}
 

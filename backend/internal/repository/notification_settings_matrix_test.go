@@ -250,6 +250,64 @@ func TestSettingsMatrix_CreateRespectsStoredOff(t *testing.T) {
 	}
 }
 
+// TestNotification_RequestedInAppIsAdminOnly membuktikan visit_requested
+// in_app hanya menjangkau super_admin + admin cabang (tanpa security),
+// sementara tipe staff lain (rescheduled) tetap menjangkau security.
+func TestNotification_RequestedInAppIsAdminOnly(t *testing.T) {
+	pool := testPool(t)
+	resetTables(t, pool)
+	ctx := testContext(t)
+	notifs := NewNotificationRepository(pool)
+
+	loc := seedLocation(t, pool, "Cabang Minta", "cabang")
+	vendor := seedUser(t, pool, seedUserParams{Name: "Vendor Minta", Email: "minta@vendor.test", Role: "vendor", Type: "external"})
+	superAdmin := seedUser(t, pool, seedUserParams{Name: "Super Minta", Email: "super.minta@thc.test", Role: "super_admin", Type: "internal"})
+	admin := seedUser(t, pool, seedUserParams{Name: "Admin Minta", Email: "admin.minta@thc.test", Role: "admin", Location: loc, Type: "internal"})
+	security := seedUser(t, pool, seedUserParams{Name: "Sec Minta", Email: "sec.minta@thc.test", Role: "security", Location: loc, Type: "internal"})
+	visit := seedVisit(t, pool, seedVisitParams{
+		Code: "VST-0000000701", VendorUser: vendor, Location: loc,
+		Start: time.Now().Add(time.Hour), End: time.Now().Add(2 * time.Hour),
+		Status: domain.VisitStatusRequested,
+	})
+
+	snap := domain.DefaultNotificationSettings()
+	visitUUID, err := fromDomainUUID(visit)
+	if err != nil {
+		t.Fatalf("parse visit id: %v", err)
+	}
+	locUUID, err := fromDomainUUID(loc)
+	if err != nil {
+		t.Fatalf("parse location id: %v", err)
+	}
+	vendorUUID, err := fromDomainUUID(vendor)
+	if err != nil {
+		t.Fatalf("parse vendor id: %v", err)
+	}
+	if err := emit(ctx, db.New(pool), domain.CreatedNotification("VST-0000000701"), visitUUID, locUUID, vendorUUID, time.Now(), snap); err != nil {
+		t.Fatalf("emit requested: %v", err)
+	}
+	if n := countTypeForVisit(t, notifs, ctx, superAdmin, visit, domain.NotificationVisitRequested); n != 1 {
+		t.Fatalf("super_admin requested rows = %d, want 1", n)
+	}
+	if n := countTypeForVisit(t, notifs, ctx, admin, visit, domain.NotificationVisitRequested); n != 1 {
+		t.Fatalf("admin requested rows = %d, want 1", n)
+	}
+	if n := countTypeForVisit(t, notifs, ctx, security, visit, domain.NotificationVisitRequested); n != 0 {
+		t.Fatalf("security requested rows = %d, want 0 (admin-only)", n)
+	}
+
+	resched := domain.TransitionNotification(domain.VisitStatusRescheduled, false, "VST-0000000701", "")
+	if resched == nil {
+		t.Fatal("rescheduled template must not be nil")
+	}
+	if err := emit(ctx, db.New(pool), resched, visitUUID, locUUID, vendorUUID, time.Now(), snap); err != nil {
+		t.Fatalf("emit rescheduled: %v", err)
+	}
+	if n := countTypeForVisit(t, notifs, ctx, security, visit, domain.NotificationVisitRescheduled); n != 1 {
+		t.Fatalf("security rescheduled rows = %d, want 1 (other types unchanged)", n)
+	}
+}
+
 // TestSettings_PutWritesSingleAuditRow membuktikan PUT (via
 // settingsRepository.Update seperti yang dipakai usecase) menulis tepat 1
 // baris audit berisi {key, old, new} aktual.

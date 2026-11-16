@@ -69,9 +69,11 @@ func TestNotification_CheckInYieldsExactlyOne(t *testing.T) {
 	if checkInCount != 1 {
 		t.Fatalf("check-in notifications = %d, want 1 (no duplicate from status_history)", checkInCount)
 	}
-	// requested (1) + check_in (1) = 2; a broken de-dup would make it 3.
-	if total != 2 {
-		t.Fatalf("total = %d, want 2 (requested + check_in, no visiting duplicate)", total)
+	// The security roster is not an approver, so the visit_requested bell
+	// never reaches it: the feed holds the check_in row only. A broken
+	// de-dup would make the check-in count 2 (asserted above).
+	if total != 1 {
+		t.Fatalf("total = %d, want 1 (check_in only: visit_requested is admin-only)", total)
 	}
 }
 

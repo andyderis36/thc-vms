@@ -1,8 +1,9 @@
-// End-to-end mail proof (Task 6): the eight allowlisted lifecycle notices
-// travel through the REAL SMTP adapter into Mailpit (dev-only SMTP catch-all
+// End-to-end mail proof: the nine allowlisted lifecycle notices travel
+// through the REAL SMTP adapter into Mailpit (dev-only SMTP catch-all
 // on localhost:1025, no auth, no TLS) and are asserted through the Mailpit
-// HTTP API on :8025. The one excluded type (visit_requested) is never sent
-// and asserted ZERO.
+// HTTP API on :8025. visit_requested rides the staff leg only (approvers),
+// the other eight fan out per their audiences; the excluded list is
+// intentionally empty (no lifecycle type is excluded from email).
 //
 // Recipient guard: every address is @example.com (Mailpit-only). Seeded
 // users live at real domains and are NEVER used here — a test sending to a

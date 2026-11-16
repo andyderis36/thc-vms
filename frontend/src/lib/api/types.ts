@@ -835,6 +835,15 @@ export interface NotificationToggle {
   in_app: NotificationChannelToggle;
   email: NotificationChannelToggle;
   mandatory: boolean;
+  /**
+   * Peta kaki yang benar-benar ada di backend per peristiwa (GET
+   * /settings/notifications). Absen = berlaku semua (kompatibel payload
+   * lama); `false` = tak ada leg pengiriman untuk sel itu.
+   */
+  applicable?: {
+    in_app: NotificationChannelToggle;
+    email: NotificationChannelToggle;
+  };
 }
 
 /** Respons `GET/PUT /settings/notifications`. */

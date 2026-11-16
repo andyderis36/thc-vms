@@ -958,6 +958,88 @@ paths:
               schema:
                 $ref: '#/components/schemas/NotificationReadAllResponse'
 
+  /settings/notifications:
+    get:
+      tags: [UserManagement]
+      summary: Matriks preferensi notifikasi global 9 peristiwa (Superadmin)
+      description: Setiap baris membawa flag mandatory (kunci Wajib sistem, dari server) dan peta applicable (sel tanpa leg pengiriman; UI wajib menyembunyikan/menonaktifkan sel itu). Nilai yang dipublikasikan sudah efektif (sel inapplicable dilaporkan OFF).
+      responses:
+        '200':
+          description: Matriks preferensi berhasil diambil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    required: [toggles, version]
+                    properties:
+                      version:
+                        type: integer
+                      toggles:
+                        type: array
+                        items:
+                          type: object
+                          required: [event, in_app, email, mandatory, applicable]
+                          properties:
+                            event:
+                              type: string
+                              example: visit_requested
+                            in_app:
+                              $ref: '#/components/schemas/NotificationChannelToggle'
+                            email:
+                              $ref: '#/components/schemas/NotificationChannelToggle'
+                            mandatory:
+                              type: boolean
+                            applicable:
+                              type: object
+                              properties:
+                                in_app:
+                                  $ref: '#/components/schemas/NotificationChannelToggle'
+                                email:
+                                  $ref: '#/components/schemas/NotificationChannelToggle'
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+    put:
+      tags: [UserManagement]
+      summary: Simpan matriks preferensi notifikasi global (Superadmin, optimistic locking)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toggles, version]
+              properties:
+                version:
+                  type: integer
+                toggles:
+                  type: array
+                  items:
+                    type: object
+                    required: [event, in_app, email]
+                    properties:
+                      event:
+                        type: string
+                      in_app:
+                        $ref: '#/components/schemas/NotificationChannelToggle'
+                      email:
+                        $ref: '#/components/schemas/NotificationChannelToggle'
+      responses:
+        '200':
+          description: Matriks berhasil disimpan
+        '400':
+          description: Versi basi (konflik tulis) atau payload tidak valid
+        '422':
+          description: Menonaktifkan baris Wajib sistem atau menyalakan sel inapplicable
+        '403':
+          description: Akses ditolak (hanya untuk Superadmin)
+
   /purposes:
     get:
       tags: [MasterData]
@@ -2664,6 +2746,15 @@ components:
           properties:
             updated:
               type: integer
+
+    NotificationChannelToggle:
+      type: object
+      required: [staff, vendor]
+      properties:
+        staff:
+          type: boolean
+        vendor:
+          type: boolean
 
     PendingRegistrationItem:
       type: object

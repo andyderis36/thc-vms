@@ -73,6 +73,29 @@ ON CONFLICT (user_id, type, visit_request_id) DO UPDATE SET
 WHERE EXCLUDED.type = 'visit_rescheduled'
   AND notification.created_at < EXCLUDED.created_at;
 
+-- name: InsertAdminNotifications :exec
+-- Admin-only fan-out for visit_requested in_app: every active super_admin
+-- (national, including the hidden dev-superadmin) plus the active admin whose
+-- primary OR coverage union holds the visit's branch — and deliberately NO
+-- security role. ON CONFLICT is a no-op (visit_requested never refreshes).
+INSERT INTO notification (user_id, visit_request_id, type, title, message, created_at)
+SELECT u.id,
+       sqlc.arg('visit_request_id')::uuid,
+       sqlc.arg('type')::text,
+       sqlc.arg('title')::text,
+       sqlc.arg('message')::text,
+       sqlc.arg('created_at')::timestamptz
+FROM users u
+JOIN role r ON r.id = u.role_id
+WHERE u.status = 'active'
+  AND (
+        r.name IN ('super_admin', 'dev-superadmin')
+        OR (r.name = 'admin'
+            AND (u.location_id = sqlc.arg('location_id')::uuid
+                 OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = u.id AND ul.location_id = sqlc.arg('location_id')::uuid)))
+      )
+ON CONFLICT (user_id, type, visit_request_id) DO NOTHING;
+
 -- name: InsertVendorNotification :exec
 -- Single-recipient insert: the visit's vendor user, but only if that account is a
 -- 'vendor'. A vendor account that is internal staff (admin-posted request) receives
@@ -120,9 +143,9 @@ ORDER BY u.email ASC;
 -- Active-only email mirror of the visit_requested staff leg: every ACTIVE
 -- national super_admin (including the hidden dev-superadmin) plus the ACTIVE
 -- branch admin of the visit's branch — and deliberately NO security role and
--- NO vendor. The visit_requested in_app fan-out still covers admin+security,
--- but the new-request mail goes to the approvers only, so the gate roster is
--- never mailed every new request.
+-- NO vendor. The visit_requested in_app fan-out covers the same approvers
+-- only (InsertAdminNotifications), so the bell and the new-request mail
+-- reach exactly the same roster: the gate roster is never notified.
 SELECT u.email
 FROM users u
 JOIN role r ON r.id = u.role_id

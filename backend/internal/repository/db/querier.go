@@ -371,6 +371,8 @@ type Querier interface {
 	// conflict, while a repeat visit_rescheduled REFRESHES message + created_at
 	// to the latest emission (WHERE guard on the upsert below).
 	InsertStaffNotifications(ctx context.Context, arg InsertStaffNotificationsParams) error
+	// Admin-only fan-out for visit_requested in_app (no security role).
+	InsertAdminNotifications(ctx context.Context, arg InsertAdminNotificationsParams) error
 	// Atomic audit append (PRD L129). changed_by is NULL for the background
 	// auto-rule worker, which has no acting user.
 	InsertStatusHistory(ctx context.Context, arg InsertStatusHistoryParams) (StatusHistory, error)
@@ -428,9 +430,9 @@ type Querier interface {
 	// Active-only email mirror of the visit_requested staff leg: every ACTIVE
 	// national super_admin (including the hidden dev-superadmin) plus the ACTIVE
 	// branch admin of the visit's branch — and deliberately NO security role and
-	// NO vendor. The visit_requested in_app fan-out still covers admin+security,
-	// but the new-request mail goes to the approvers only, so the gate roster is
-	// never mailed every new request.
+	// NO vendor. The visit_requested in_app fan-out covers the same approvers
+	// only (InsertAdminNotifications), so the bell and the new-request mail
+	// reach exactly the same roster: the gate roster is never notified.
 	ListAdminEmailRecipients(ctx context.Context, arg ListAdminEmailRecipientsParams) ([]string, error)
 	// GET /locations?active_only=false (super_admin console only): every
 	// facility row including deactivated ones, so a switched-off branch stays

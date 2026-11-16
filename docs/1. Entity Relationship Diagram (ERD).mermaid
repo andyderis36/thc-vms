@@ -166,7 +166,10 @@ erDiagram
     }
 
     %% NOTIFICATION is IMPLEMENTED (migration 000008): persisted per-user feed,
-    %% one row per (user, type, visit_request); written in the visit lifecycle tx.
+    %% one row per (user, type, visit_request). Rows are in-app only (no
+    %% channel='email' rows are ever written); email delivery is observed in
+    %% MAIL_LOG, toggles live in APP_SETTINGS. visit_requested in-app fans
+    %% out to super_admin + branch admin only (no security).
     NOTIFICATION {
         uuid id PK
         uuid user_id FK "Recipient; per-user row"
@@ -174,9 +177,36 @@ erDiagram
         string type "visit_requested | visit_rescheduled | visit_check_in | visit_check_out | visit_cancelled | visit_approved | visit_rejected | visit_reminder | visit_auto_cancelled"
         string title
         text message
-        string channel "in_app | email | wa"
+        string channel "Always in_app (email/wa never persisted here)"
         boolean is_read "Default false"
         timestamp created_at
+    }
+
+    %% MAIL_LOG is IMPLEMENTED (migrations 000030 + 000031): observability for
+    %% every email the SMTP adapter enqueues (queued -> sent/failed), incl. BCC
+    %% overseer trail. Skips (preference OFF, empty recipients, dry-run, queue
+    %% full) never write rows — only sends that reach the adapter are logged.
+    MAIL_LOG {
+        uuid id PK
+        text recipients "To addresses"
+        text bcc "Overseer Bcc (000031)"
+        string subject
+        string template "Lifecycle type or '' for direct sends"
+        text text_body "HTML body is never stored"
+        string status "queued | sent | failed"
+        integer attempts
+        text error
+        timestamp created_at
+    }
+
+    %% APP_SETTINGS is IMPLEMENTED (migration 000026): global key/value store.
+    %% Key 'notifications' holds the 9-event toggle matrix {toggles, version}
+    %% served by GET /settings/notifications (mandatory + applicable flags are
+    %% computed server-side, not stored).
+    APP_SETTINGS {
+        string key PK "'notifications'"
+        jsonb value
+        timestamp updated_at
     }
 
     AUDIT_LOG {

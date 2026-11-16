@@ -11,7 +11,7 @@ import { ProfileBackLink } from '@/features/profile/components/ProfileBackLink'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 import { RequireRole } from '@/lib/auth/guards'
 import * as apiHooks from '@/lib/api/hooks'
-import type { NotificationEvent, NotificationToggle } from '@/lib/api/types'
+import type { NotificationChannelToggle, NotificationEvent, NotificationToggle } from '@/lib/api/types'
 import { NOTIFICATION_EVENT_LABEL } from '@/lib/api/types'
 import {
   TABLE_CARD_LIST_CLASS,
@@ -64,12 +64,44 @@ function labelFor(event: NotificationEvent): string {
   return (NOTIFICATION_EVENT_LABEL as Record<string, string>)[event] ?? event
 }
 
-function cloneToggles(toggles: NotificationToggle[]): NotificationToggle[] {
+/**
+ * Matriks efektif: sel tanpa kaki pengiriman tidak dirender (placeholder
+ * "-") dan dimatikan. Peta `applicable` datang dari server, jadi halaman ini
+ * tidak pernah menebak nama peristiwa. Server juga memublikasikan keadaan
+ * efektif, tetapi sel yang tersimpan ON di sel tak berlaku akan ditolak PUT —
+ * menyalin dengan pemaskean membuat draft dan payload konsisten dengan apa
+ * yang benar-benar dikirim.
+ */
+function effectiveToggles(toggles: NotificationToggle[]): NotificationToggle[] {
   return toggles.map((t) => ({
     ...t,
-    in_app: { ...t.in_app },
-    email: { ...t.email },
+    in_app: maskChannel(t.in_app, t.applicable?.in_app),
+    email: maskChannel(t.email, t.applicable?.email),
+    ...(t.applicable
+      ? { applicable: { in_app: { ...t.applicable.in_app }, email: { ...t.applicable.email } } }
+      : null),
   }))
+}
+
+function maskChannel(
+  toggle: NotificationChannelToggle,
+  applicable: NotificationChannelToggle | undefined,
+): NotificationChannelToggle {
+  if (!applicable) return toggle
+  return { staff: toggle.staff && applicable.staff, vendor: toggle.vendor && applicable.vendor }
+}
+
+function isApplicable(
+  toggle: NotificationToggle,
+  channel: 'in_app' | 'email',
+  audience: 'staff' | 'vendor',
+): boolean {
+  const cell = toggle.applicable?.[channel]?.[audience]
+  return cell ?? true
+}
+
+function cellTitle(toggle: NotificationToggle): string | undefined {
+  return toggle.mandatory ? 'Wajib sistem' : undefined
 }
 
 interface SettingsData {
@@ -110,7 +142,7 @@ function SettingsNotificationsScreen() {
 
   if (query.data && query.data !== seenData) {
     setSeenData(query.data)
-    setDraft(cloneToggles(query.data.toggles))
+    setDraft(effectiveToggles(query.data.toggles))
     setVersion(query.data.version)
   }
 
@@ -133,10 +165,10 @@ function SettingsNotificationsScreen() {
 
   const handleSave = async (): Promise<void> => {
     if (!draft || version === null) return
-    const payload = { toggles: cloneToggles(draft), version }
+    const payload = { toggles: effectiveToggles(draft), version }
     const onSuccess = (data: unknown): void => {
       const d = data as SettingsData | undefined
-      if (d?.toggles) setDraft(cloneToggles(d.toggles))
+      if (d?.toggles) setDraft(effectiveToggles(d.toggles))
       if (typeof d?.version === 'number') setVersion(d.version)
     }
     const onError = (err: unknown): void => {
@@ -148,7 +180,7 @@ function SettingsNotificationsScreen() {
           ;(toast as (m: string) => void)('Versi basi — memuat ulang…')
         }
         if (query.data) {
-          setDraft(cloneToggles(query.data.toggles))
+          setDraft(effectiveToggles(query.data.toggles))
           setVersion(query.data.version)
         }
         void query.refetch()
@@ -173,7 +205,7 @@ function SettingsNotificationsScreen() {
     }
   }
 
-  const rows = draft ?? query.data?.toggles ?? []
+  const rows = draft ?? (query.data ? effectiveToggles(query.data.toggles) : [])
 
   return (
     <SuperadminShell pendingCount={pendingCount} activeHref="/settings/notifications">
@@ -239,19 +271,24 @@ function SettingsNotificationsScreen() {
                       </td>
                       {([['in_app', 'staff'], ['in_app', 'vendor'], ['email', 'staff'], ['email', 'vendor']] as const).map(([channel, audience]) => {
                         const checked = channel === 'in_app' ? toggle.in_app[audience] : toggle.email[audience]
+                        const applicable = isApplicable(toggle, channel, audience)
                         return (
                           <td key={`${channel}-${audience}`} className={`${TABLE_TD_CLASS} text-center`}>
-                            <input
-                              type="checkbox"
-                              className="size-5 rounded-control accent-brand"
-                              checked={checked}
-                              disabled={mandatory}
-                              title={mandatory ? 'Wajib sistem' : undefined}
-                              onChange={(e) =>
-                                handleToggle(event, channel, audience, e.target.checked)
-                              }
-                              aria-label={`${labelFor(event)} ${channel} ${audience}`}
-                            />
+                            {applicable ? (
+                              <input
+                                type="checkbox"
+                                className="size-5 rounded-control accent-brand"
+                                checked={checked}
+                                disabled={mandatory}
+                                title={cellTitle(toggle)}
+                                onChange={(e) =>
+                                  handleToggle(event, channel, audience, e.target.checked)
+                                }
+                                aria-label={`${labelFor(event)} ${channel} ${audience}`}
+                              />
+                            ) : (
+                              <span className="text-xs text-ink-muted">-</span>
+                            )}
                           </td>
                         )
                       })}
@@ -291,24 +328,31 @@ function SettingsNotificationsScreen() {
                     {(['in_app', 'email'] as const).map((channel) =>
                       (['staff', 'vendor'] as const).map((audience) => {
                         const checked = channel === 'in_app' ? toggle.in_app[audience] : toggle.email[audience]
+                        const applicable = isApplicable(toggle, channel, audience)
+                        const cellLabel = `${channel === 'in_app' ? 'Dalam aplikasi' : 'Email'} · ${audience === 'staff' ? 'Staf' : 'Vendor'}`
+                        const cellClass =
+                          'flex min-h-touch items-center gap-2 rounded-control border border-border-light px-3 py-2 text-sm'
+                        if (!applicable) {
+                          return (
+                            <div key={`${channel}-${audience}`} className={cellClass}>
+                              <span className="text-xs text-ink-muted">-</span>
+                              <span className="text-xs text-ink-secondary">{cellLabel}</span>
+                            </div>
+                          )
+                        }
                         return (
-                          <label
-                            key={`${channel}-${audience}`}
-                            className="flex min-h-touch items-center gap-2 rounded-control border border-border-light px-3 py-2 text-sm"
-                          >
+                          <label key={`${channel}-${audience}`} className={cellClass}>
                             <input
                               type="checkbox"
                               className="size-5 rounded-control accent-brand"
                               checked={checked}
                               disabled={mandatory}
-                              title={mandatory ? 'Wajib sistem' : undefined}
+                              title={cellTitle(toggle)}
                               onChange={(e) =>
                                 handleToggle(event, channel, audience, e.target.checked)
                               }
                             />
-                            <span className="text-xs text-ink-secondary">
-                              {channel === 'in_app' ? 'Dalam aplikasi' : 'Email'} · {audience === 'staff' ? 'Staf' : 'Vendor'}
-                            </span>
+                            <span className="text-xs text-ink-secondary">{cellLabel}</span>
                           </label>
                         )
                       }),
