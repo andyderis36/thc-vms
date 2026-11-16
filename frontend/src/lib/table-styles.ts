@@ -25,4 +25,4 @@ export const TABLE_TD_CLASS = 'px-2 sm:px-3 lg:px-6 py-3'
 export const TABLE_CARD_LIST_CLASS = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:hidden'
 
 /** Placeholder sel Aksi saat baris tidak punya aksi yang sah. */
-export const TABLE_NO_ACTION_CLASS = 'text-xs sm:text-sm text-ink-muted'
+export const TABLE_NO_ACTION_CLASS = 'text-xs sm:text-sm text-ink-muted'// ci-probe: frontend-only (HAPUS — PR uji, jangan merge)
