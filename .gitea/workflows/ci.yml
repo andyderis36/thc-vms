@@ -31,8 +31,12 @@ concurrency:
 jobs:
   # Security scans live in security.yml (advisory, manual-only) so known
   # baseline findings cannot block the dev -> main flow.
-  # Deteksi path yang tersentuh PR vs base-nya. Gagal-aman: bila fetch/diff
-  # gagal, kedua sisi dianggap tersentuh (job jalan, bukan skip).
+  # Deteksi path yang tersentuh PR vs base-nya. Gagal-aman: bila fetch,
+  # rev-parse, ATAU diff gagal, kedua sisi dianggap tersentuh (job jalan,
+  # bukan skip). `|| true` pada diff DILARANG di sini: diff yang gagal dan
+  # diff yang kosong terlihat sama ("") dan semua job akan salah-skip.
+  # Checkout WAJIB full history: clone dangkal membuat merge-base gagal,
+  # `git diff A...HEAD` error diam-diam, dan semua job ter-skip (insiden PR #30).
   changes:
     if: github.event_name == 'pull_request'
     runs-on: [self-hosted, linux, vps]
@@ -41,6 +45,8 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - id: filter
         run: |
@@ -48,8 +54,8 @@ jobs:
           backend=1
           frontend=1
           if git fetch origin "$base_ref" --depth=100 >/dev/null 2>&1 \
-            && git rev-parse --verify "origin/$base_ref" >/dev/null 2>&1; then
-            touched="$(git diff --name-only "origin/$base_ref...HEAD" 2>/dev/null || true)"
+            && git rev-parse --verify "origin/$base_ref" >/dev/null 2>&1 \
+            && touched="$(git diff --name-only "origin/$base_ref...HEAD" 2>/dev/null)"; then
             backend=0
             frontend=0
             if printf '%s\n' "$touched" | grep -qE '^(backend/|\.gitea/|deploy/|docker-compose[^/]*\.ya?ml$|.*Dockerfile$|.*Caddyfile$|caddy/)'; then
