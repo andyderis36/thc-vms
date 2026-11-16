@@ -322,7 +322,7 @@ type VisitRepository interface {
 //
 // The three rules come from the PRD state machine:
 //
-//	R1 status=requested and created_at  < before            -> cancelled  (7 days)
+//	R1 status=requested and start_date <= before            -> cancelled  (window started, never approved)
 //	R2 status in (requested,approved,rescheduled) and end_date < before and no check-in -> not_visit
 //	R3 status=visiting  and end_date    < before            -> completed  (end_date + 24h)
 //

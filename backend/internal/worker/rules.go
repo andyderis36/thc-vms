@@ -17,9 +17,6 @@ import (
 // Automatic-rule horizons. All three are absolute durations — no timezone
 // conversion — measured against the injected clock.
 const (
-	// RequestedTimeout is the PRD "Timeout 7 Hari": a requested visit with no
-	// answer for 7 days is abandoned (R1).
-	RequestedTimeout = 7 * 24 * time.Hour
 	// NoShowGrace is the R2 horizon: once now passes end_date+NoShowGrace the
 	// check-in window has closed, so a pre-arrival visit with no check-in row
 	// is a definitive no-show. It aliases the domain value so the worker and
@@ -30,7 +27,8 @@ const (
 	// closed automatically (R3).
 	AutoCompleteDelay = 24 * time.Hour
 	// ReminderWindow is the R4 lead time: an approved visit whose start_date
-	// falls inside (now, now+ReminderWindow] gets one reminder to its vendor user.
+	// falls inside (now, now+ReminderWindow] gets one reminder to its vendor
+	// user and one to the branch staff.
 	ReminderWindow = 45 * time.Minute
 )
 
@@ -45,7 +43,7 @@ const (
 // Automatic-transition history notes: stable, Bahasa, carrying the rule id so
 // the audit trail tells a worker write apart from a manual one.
 const (
-	noteAutoCancel   = "Otomatis dibatalkan: pengajuan tanpa respons selama 7 hari (R1)."
+	noteAutoCancel   = "Otomatis dibatalkan: jadwal kunjungan telah dimulai tanpa persetujuan (R1)."
 	noteNoShow       = "Otomatis ditandai tidak hadir: jadwal kunjungan terlewat tanpa kedatangan (R2)."
 	noteAutoComplete = "Otomatis diselesaikan: 24 jam setelah jadwal berakhir (R3)."
 )
@@ -54,17 +52,19 @@ const (
 // repository persists it as SQL NULL: no human made the move.
 const NoActor = domain.UUID("")
 
-// Thresholds derives the three rule cut-offs from one instant so they live in
-// exactly one place: R1 compares created_at, R2 and R3 compare end_date.
-func Thresholds(now time.Time) (staleRequested, noShowApproved, overstayedVisiting time.Time) {
-	return now.Add(-RequestedTimeout), now.Add(-NoShowGrace), now.Add(-AutoCompleteDelay)
+// Thresholds derives the two end_date-based rule cut-offs from one instant so
+// they live in exactly one place. R1 needs no cut-off: it compares start_date
+// against now itself (a request still unanswered once its window has started
+// is abandoned).
+func Thresholds(now time.Time) (noShowApproved, overstayedVisiting time.Time) {
+	return now.Add(-NoShowGrace), now.Add(-AutoCompleteDelay)
 }
 
-// ShouldAutoCancel is the R1 evaluator: requested AND created at or before
-// the 7-day cut-off. The comparison is inclusive: exactly 7 days old counts
-// as stale.
-func ShouldAutoCancel(visit domain.VisitRequest, cutoff time.Time) bool {
-	return visit.Status == domain.VisitStatusRequested && !visit.CreatedAt.After(cutoff)
+// ShouldAutoCancel is the R1 evaluator: requested AND the visit window has
+// already started (now at or past start_date). The comparison is inclusive: a
+// window starting exactly now counts as started.
+func ShouldAutoCancel(visit domain.VisitRequest, now time.Time) bool {
+	return visit.Status == domain.VisitStatusRequested && !visit.StartDate.After(now)
 }
 
 // ShouldMarkNoShow is the R2 evaluator: a pre-arrival status (requested,
@@ -204,7 +204,7 @@ func (s *Service) Run(ctx context.Context) Summary {
 		return summary
 	}
 	now := s.clock.Now()
-	r1, r2, r3 := Thresholds(now)
+	r2, r3 := Thresholds(now)
 	// Load notification settings once per run (Thresholds precedent) so the
 	// reminder sweep and any gated writes see one consistent snapshot.
 	snap := domain.DefaultNotificationSettings()
@@ -218,7 +218,7 @@ func (s *Service) Run(ctx context.Context) Summary {
 	// skips it, which keeps the two sweeps disjoint even for a visit that is
 	// both stale and past its window.
 	s.sweepNoShow(ctx, r2, &summary)
-	s.sweepRequested(ctx, r1, &summary)
+	s.sweepRequested(ctx, now, &summary)
 	s.sweepOverstayed(ctx, r3, &summary)
 	s.sweepReminders(ctx, now, snap, &summary)
 	s.logger.Info("auto-rule sweep finished",
@@ -231,9 +231,10 @@ func (s *Service) Run(ctx context.Context) Summary {
 	return summary
 }
 
-// sweepRequested applies R1: stale requested visits become cancelled.
-func (s *Service) sweepRequested(ctx context.Context, cutoff time.Time, summary *Summary) {
-	candidates, err := s.rules.FindStaleRequested(ctx, cutoff)
+// sweepRequested applies R1: requested visits whose window has started become
+// cancelled. now is both the sweep horizon and the evaluator instant.
+func (s *Service) sweepRequested(ctx context.Context, now time.Time, summary *Summary) {
+	candidates, err := s.rules.FindStaleRequested(ctx, now)
 	if err != nil {
 		summary.Failures = append(summary.Failures, Failure{Rule: RuleAutoCancel, Err: err})
 		s.logger.Error("auto-rule sweep listing failed", "rule", RuleAutoCancel, "err", err)
@@ -244,7 +245,7 @@ func (s *Service) sweepRequested(ctx context.Context, cutoff time.Time, summary 
 		if !ok {
 			continue
 		}
-		if !ShouldAutoCancel(visit, cutoff) {
+		if !ShouldAutoCancel(visit, now) {
 			summary.Skipped++
 			continue
 		}
@@ -310,9 +311,13 @@ func (s *Service) sweepOverstayed(ctx context.Context, cutoff time.Time, summary
 }
 
 // sweepReminders applies R4: approved visits starting within ReminderWindow get
-// one reminder notification to their vendor user. It mutates no visit; idempotency is
-// the notification store's (user_id, type, visit_request_id) unique constraint,
-// so repeated ticks, restarts and concurrent workers never double-post.
+// one reminder notification to their vendor user plus one to the branch staff
+// (admin/security of the visit's branch plus the national super_admins). It
+// mutates no visit; idempotency is the notification store's (user_id, type,
+// visit_request_id) unique constraint, so repeated ticks, restarts and
+// concurrent workers never double-post. Each leg is gated by its own in_app
+// toggle: a visit counts as reminded when at least one leg emits, and is
+// skipped only when both legs are off (or the window no longer holds).
 func (s *Service) sweepReminders(ctx context.Context, now time.Time, snap domain.NotificationSettings, summary *Summary) {
 	if s.notifications == nil {
 		return
@@ -333,28 +338,51 @@ func (s *Service) sweepReminders(ctx context.Context, now time.Time, snap domain
 			summary.Skipped++
 			continue
 		}
-		tpl := domain.ReminderNotification(visit.VisitID)
-		if !snap.IsInAppEnabled(tpl.Type, domain.NotificationAudienceVendor) {
+		vendorTpl := domain.ReminderNotification(visit.VisitID)
+		staffTpl := domain.ReminderStaffNotification(visit.VisitID)
+		emitted := false
+		if snap.IsInAppEnabled(vendorTpl.Type, domain.NotificationAudienceVendor) {
+			if err := s.notifications.InsertForVisit(ctx, visit, vendorTpl, snap); err != nil {
+				summary.Failures = append(summary.Failures, Failure{Rule: RuleReminder, VisitID: visit.ID, Err: err})
+				s.logger.Error("auto-rule reminder emit failed", "rule", RuleReminder, "visit_id", visit.ID, "audience", "vendor", "err", err)
+			} else {
+				emitted = true
+			}
+		}
+		if snap.IsInAppEnabled(staffTpl.Type, domain.NotificationAudienceStaff) {
+			if err := s.notifications.InsertForVisit(ctx, visit, staffTpl, snap); err != nil {
+				summary.Failures = append(summary.Failures, Failure{Rule: RuleReminder, VisitID: visit.ID, Err: err})
+				s.logger.Error("auto-rule reminder emit failed", "rule", RuleReminder, "visit_id", visit.ID, "audience", "staff", "err", err)
+			} else {
+				emitted = true
+			}
+		}
+		if !emitted {
 			summary.Skipped++
 			continue
 		}
-		if err := s.notifications.InsertForVisit(ctx, visit, tpl, snap); err != nil {
-			summary.Failures = append(summary.Failures, Failure{Rule: RuleReminder, VisitID: visit.ID, Err: err})
-			s.logger.Error("auto-rule reminder emit failed", "rule", RuleReminder, "visit_id", visit.ID, "err", err)
-			continue
-		}
 		summary.Reminded++
-		s.enqueueReminderEmail(ctx, visit, tpl, snap)
+		s.enqueueReminderEmails(ctx, visit, vendorTpl, staffTpl, snap)
 		s.logger.Info("auto-rule reminder emitted", "rule", RuleReminder, "visit_id", visit.ID)
 	}
 }
 
-// enqueueReminderEmail fans one R4 reminder out to email AFTER its in_app row
-// has been written. It never fails the sweep: a nil mailer (SMTP disabled),
-// an unresolvable or empty recipient set and every send failure only log and
-// return. No channel='email' row is ever written.
-func (s *Service) enqueueReminderEmail(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate, snap domain.NotificationSettings) {
-	if s.mailer == nil || tpl == nil || !domain.EmailAllowedWithSettings(tpl.Type, snap) {
+// enqueueReminderEmails fans the R4 reminder out to email AFTER its in_app
+// rows have been written: one send per vendor recipient (the requester plus
+// the roster members), plus one staff send with the branch direct owners in
+// To and the national overseers in Bcc. It never fails the sweep: a nil
+// mailer (SMTP disabled), an unresolvable or empty recipient set and every
+// send failure only log and return. No channel='email' row is ever written.
+func (s *Service) enqueueReminderEmails(ctx context.Context, visit domain.VisitRequest, vendorTpl, staffTpl *domain.NotificationTemplate, snap domain.NotificationSettings) {
+	if s.mailer == nil {
+		return
+	}
+	s.enqueueReminderVendorEmail(ctx, visit, vendorTpl, snap)
+	s.enqueueReminderStaffEmail(ctx, visit, staffTpl, snap)
+}
+
+func (s *Service) enqueueReminderVendorEmail(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate, snap domain.NotificationSettings) {
+	if tpl == nil || !domain.EmailAllowedWithSettings(tpl.Type, snap) {
 		return
 	}
 	if !snap.IsEmailEnabled(tpl.Type, domain.NotificationAudienceVendor) {
@@ -363,7 +391,7 @@ func (s *Service) enqueueReminderEmail(ctx context.Context, visit domain.VisitRe
 	recipients, err := s.notifications.ResolveEmailRecipients(ctx, visit, domain.NotificationAudienceVendor)
 	if err != nil {
 		s.logger.Error("auto-rule reminder email resolver failed, dropping email",
-			"rule", RuleReminder, "visit_id", visit.ID, "err", err)
+			"rule", RuleReminder, "visit_id", visit.ID, "audience", "vendor", "err", err)
 		return
 	}
 	trimmed := make([]string, 0, len(recipients))
@@ -407,6 +435,32 @@ func (s *Service) enqueueReminderEmail(ctx context.Context, visit domain.VisitRe
 			s.logger.Error("auto-rule reminder email dead-letter",
 				"rule", RuleReminder, "visit_id", visit.VisitID, "template", string(tpl.Type), "err", err)
 		}
+	}
+}
+
+func (s *Service) enqueueReminderStaffEmail(ctx context.Context, visit domain.VisitRequest, tpl *domain.NotificationTemplate, snap domain.NotificationSettings) {
+	if tpl == nil || !domain.EmailAllowedWithSettings(tpl.Type, snap) {
+		return
+	}
+	if !snap.IsEmailEnabled(tpl.Type, domain.NotificationAudienceStaff) {
+		return
+	}
+	to, bcc, err := s.notifications.ResolveStaffEmailSplit(ctx, visit)
+	if err != nil {
+		s.logger.Error("auto-rule reminder email resolver failed, dropping email",
+			"rule", RuleReminder, "visit_id", visit.ID, "audience", "staff", "err", err)
+		return
+	}
+	if len(to) == 0 && len(bcc) == 0 {
+		s.logger.Info("auto-rule reminder email skipped: no active recipients",
+			"rule", RuleReminder, "visit_id", visit.ID, "audience", "staff")
+		return
+	}
+	subject, textBody, htmlBody := domain.BuildEmail(visit, tpl, s.frontendBaseURL)
+	if err := s.mailer.SendBcc(ctx, to, bcc, subject, textBody, htmlBody); err != nil {
+		s.logger.Error("auto-rule reminder email dead-letter",
+			"rule", RuleReminder, "visit_id", visit.VisitID, "template", string(tpl.Type),
+			"recipient_count", len(to), "bcc_count", len(bcc), "err", err)
 	}
 }
 

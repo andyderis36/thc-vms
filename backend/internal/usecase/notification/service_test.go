@@ -33,6 +33,10 @@ func (f *fakeNotificationRepo) ResolveEmailRecipients(_ context.Context, _ domai
 	return nil, nil
 }
 
+func (f *fakeNotificationRepo) ResolveStaffEmailSplit(_ context.Context, _ domain.VisitRequest) ([]string, []string, error) {
+	return nil, nil, nil
+}
+
 func TestService_AdminScopedToOwnLocation(t *testing.T) {
 	repo := &fakeNotificationRepo{}
 	svc := NewService(repo)

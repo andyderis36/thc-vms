@@ -15,13 +15,13 @@ import (
 // visitAutoRuleRepository is the PostgreSQL adapter for
 // domain.VisitAutoRuleRepository: the read side of the background worker.
 //
-// The three sweep queries take NO time parameter — each hard-codes its PRD
-// threshold against now() (7 days, end_date + 2h, end_date + 24h) and locks
-// the matched rows. The before instant the port receives is therefore applied
-// as a second, in-Go comparison on the hydrated visit, so a caller can narrow
-// the sweep to an older horizon without inventing a query parameter the SQL
-// does not support. With before == now the Go comparison is a no-op and the
-// result is exactly the SQL sweep.
+// The three sweep queries take NO time parameter — each hard-codes its
+// threshold against now() (start_date for R1, end_date + 2h for R2, end_date
+// + 24h for R3) and locks the matched rows. The before instant the port
+// receives is therefore applied as a second, in-Go comparison on the hydrated
+// visit, so a caller can narrow the sweep to an older horizon without
+// inventing a query parameter the SQL does not support. With before == now
+// the Go comparison is a no-op and the result is exactly the SQL sweep.
 //
 // Sweep rows carry only the rule's ordering key; the full visit (vendor,
 // NDA flag, notes, audit timestamps) is hydrated with ONE batched
@@ -48,9 +48,9 @@ func NewVisitAutoRuleRepository(pool *pgxpool.Pool) domain.VisitAutoRuleReposito
 	return r
 }
 
-// FindStaleRequested returns requested visits older than before (R1: the SQL
-// pre-filters to created_at < now() - 7 days; the Go comparison keeps rows
-// with created_at strictly before the caller's horizon).
+// FindStaleRequested returns requested visits whose window has started (R1:
+// the SQL pre-filters to start_date <= now(); the Go comparison keeps rows
+// with start_date at or before the caller's horizon).
 func (r *visitAutoRuleRepository) FindStaleRequested(
 	ctx context.Context,
 	before time.Time,
@@ -64,7 +64,7 @@ func (r *visitAutoRuleRepository) FindStaleRequested(
 		ids = append(ids, row.ID)
 	}
 	return r.hydrate(ctx, ids, []domain.VisitStatus{domain.VisitStatusRequested}, func(visit domain.VisitRequest) bool {
-		return visit.CreatedAt.Before(before)
+		return !visit.StartDate.After(before)
 	})
 }
 

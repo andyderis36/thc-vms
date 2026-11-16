@@ -116,6 +116,25 @@ WHERE u.status = 'active'
       )
 ORDER BY u.email ASC;
 
+-- name: ListAdminEmailRecipients :many
+-- Active-only email mirror of the visit_requested staff leg: every ACTIVE
+-- national super_admin (including the hidden dev-superadmin) plus the ACTIVE
+-- branch admin of the visit's branch — and deliberately NO security role and
+-- NO vendor. The visit_requested in_app fan-out still covers admin+security,
+-- but the new-request mail goes to the approvers only, so the gate roster is
+-- never mailed every new request.
+SELECT u.email
+FROM users u
+JOIN role r ON r.id = u.role_id
+WHERE u.status = 'active'
+  AND (
+        r.name IN ('super_admin', 'dev-superadmin')
+        OR (r.name = 'admin'
+            AND (u.location_id = sqlc.arg('location_id')::uuid
+                 OR EXISTS (SELECT 1 FROM user_locations ul WHERE ul.user_id = u.id AND ul.location_id = sqlc.arg('location_id')::uuid)))
+      )
+ORDER BY u.email ASC;
+
 -- name: ListSuperAdminEmails :many
 -- Active-only email set behind the vendor-registration fan-out (migration
 -- 000020): every ACTIVE national super_admin, including the hidden

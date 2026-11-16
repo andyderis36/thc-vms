@@ -425,6 +425,13 @@ type Querier interface {
 	// consume. Only non-blacklisted companies are offered, mirroring the
 	// active-only purpose catalogue above.
 	ListActiveVendors(ctx context.Context) ([]ListActiveVendorsRow, error)
+	// Active-only email mirror of the visit_requested staff leg: every ACTIVE
+	// national super_admin (including the hidden dev-superadmin) plus the ACTIVE
+	// branch admin of the visit's branch — and deliberately NO security role and
+	// NO vendor. The visit_requested in_app fan-out still covers admin+security,
+	// but the new-request mail goes to the approvers only, so the gate roster is
+	// never mailed every new request.
+	ListAdminEmailRecipients(ctx context.Context, arg ListAdminEmailRecipientsParams) ([]string, error)
 	// GET /locations?active_only=false (super_admin console only): every
 	// facility row including deactivated ones, so a switched-off branch stays
 	// visible and can be reactivated via PATCH /locations/:id. Same column
@@ -671,7 +678,7 @@ type Querier interface {
 	//   FOR UPDATE ... SKIP LOCKED is mandatory: a single-tick sweeper must not block
 	//   on - or double-process - rows another instance is already migrating.
 	//
-	// R1  requested, untouched for 7 days   -> cancelled   (PRD L137 "Timeout 7 Hari")
+	// R1  requested with a started window   -> cancelled   (start_date <= now(), never approved)
 	// R2  pre-arrival (requested | approved | rescheduled),
 	//     window already closed,
 	//     never checked in                   -> not_visit   (PRD L142 "No Show")
@@ -686,9 +693,10 @@ type Querier interface {
 	// R1 and R2 predicates are DISJOINT on end_date: R2 owns end_date <= now()-2h,
 	// R1 owns end_date > now()-2h, together partitioning every requested row.
 	// =============================================================================
-	// R1: an unanswered request 7 days old is abandoned (PRD L137). Only requests
-	// whose window has NOT fully closed are R1's business: an overdue request is
-	// claimed by R2 instead, so end_date > now()-2h keeps the two sweeps disjoint.
+	// R1: a request still unanswered once its visit window has started (start_date
+	// <= now()) is abandoned. Only requests whose window has NOT fully closed are
+	// R1's business: an overdue request is claimed by R2 instead, so
+	// end_date > now()-2h keeps the two sweeps disjoint.
 	// Capped at 500 rows per tick (S4): one sweep locks and migrates at most one
 	// batch, never the whole table.
 	SweepStaleRequestedVisits(ctx context.Context) ([]SweepStaleRequestedVisitsRow, error)

@@ -113,6 +113,60 @@ func TestRescheduledNotifications_CarryReason(t *testing.T) {
 	}
 }
 
+// TestAutoCompleteNotification_MarksAutomaticWithSystemActor proves the R3
+// system move to completed emits a staff visit_check_out notice (never nil,
+// never vendor) whose copy is marked automatic: the title and message carry
+// the (Otomatis) marker and name System, never a human.
+func TestAutoCompleteNotification_MarksAutomaticWithSystemActor(t *testing.T) {
+	tpl := domain.TransitionNotification(domain.VisitStatusCompleted, true, "VST-0000000001", "")
+	if tpl == nil {
+		t.Fatal("TransitionNotification(completed, system) = nil, want the automatic check-out notice")
+	}
+	if tpl.Type != domain.NotificationVisitCheckOut {
+		t.Fatalf("type = %q, want %q", tpl.Type, domain.NotificationVisitCheckOut)
+	}
+	if tpl.Audience != domain.NotificationAudienceStaff {
+		t.Fatalf("audience = %q, want %q", tpl.Audience, domain.NotificationAudienceStaff)
+	}
+	for _, frag := range []string{"(Otomatis)", "Sistem"} {
+		if !strings.Contains(tpl.Title, frag) && !strings.Contains(tpl.Message, frag) {
+			t.Fatalf("copy = %q / %q, want the %q marker naming System", tpl.Title, tpl.Message, frag)
+		}
+	}
+	if tpl.Title == "Check-out Tercatat" || tpl.Message == "Tamu VST-0000000001 telah check-out." {
+		t.Fatalf("copy = %q / %q, want it distinct from the human check-out", tpl.Title, tpl.Message)
+	}
+	human := domain.TransitionNotification(domain.VisitStatusCompleted, false, "VST-0000000001", "")
+	if human == nil || strings.Contains(human.Title, "(Otomatis)") || strings.Contains(human.Message, "(Otomatis)") {
+		t.Fatalf("human copy = %+v, want no (Otomatis) marker", human)
+	}
+}
+
+// TestStaffLegNotifications_MirrorTypeWithStaffAudience proves the staff
+// copies of the reminder and the auto-cancel carry the same type/title/message
+// as their vendor rows and differ only in audience.
+func TestStaffLegNotifications_MirrorTypeWithStaffAudience(t *testing.T) {
+	vendor := domain.ReminderNotification("VST-0000000001")
+	staff := domain.ReminderStaffNotification("VST-0000000001")
+	if staff.Type != vendor.Type || staff.Title != vendor.Title || staff.Message != vendor.Message {
+		t.Fatalf("staff reminder = %+v, want the vendor copy %+v with staff audience", staff, vendor)
+	}
+	if staff.Audience != domain.NotificationAudienceStaff {
+		t.Fatalf("reminder staff audience = %q, want staff", staff.Audience)
+	}
+	staffAuto := domain.AutoCancelledStaffNotification("VST-0000000001")
+	sysVendor := domain.TransitionNotification(domain.VisitStatusCancelled, true, "VST-0000000001", "")
+	if sysVendor == nil {
+		t.Fatal("system-cancel vendor template is nil, want the auto-cancelled notice")
+	}
+	if staffAuto.Type != sysVendor.Type || staffAuto.Title != sysVendor.Title || staffAuto.Message != sysVendor.Message {
+		t.Fatalf("staff auto-cancel = %+v, want the vendor copy %+v with staff audience", staffAuto, sysVendor)
+	}
+	if staffAuto.Audience != domain.NotificationAudienceStaff {
+		t.Fatalf("auto-cancel staff audience = %q, want staff", staffAuto.Audience)
+	}
+}
+
 // TestRescheduledNotifications_TruncateLongReason proves a very long reason
 // is cut to ~140 runes in the bell instead of bloating the feed row.
 func TestRescheduledNotifications_TruncateLongReason(t *testing.T) {

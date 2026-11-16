@@ -17,6 +17,15 @@ type stubClock struct {
 
 func (c *stubClock) Now() time.Time { return c.now }
 
+type stubSettingsLoader struct {
+	snap domain.NotificationSettings
+	err  error
+}
+
+func (s stubSettingsLoader) LoadNotificationSettings(_ context.Context) (domain.NotificationSettings, error) {
+	return s.snap, s.err
+}
+
 type statusWrite struct {
 	id        domain.UUID
 	status    domain.VisitStatus
@@ -192,6 +201,9 @@ type fakeNotificationRepo struct {
 	insertErr      error
 	recipients     []string
 	recipientsErr  error
+	staffTo        []string
+	staffBcc       []string
+	staffSplitErr  error
 }
 
 func (f *fakeNotificationRepo) List(_ context.Context, _ domain.NotificationFilter) ([]domain.Notification, int64, int64, error) {
@@ -221,6 +233,16 @@ func (f *fakeNotificationRepo) ResolveEmailRecipients(_ context.Context, _ domai
 		return nil, f.recipientsErr
 	}
 	return f.recipients, nil
+}
+
+// ResolveStaffEmailSplit returns the canned staff To/Bcc split so reminder
+// staff-leg email tests stay hermetic; the SQL mirror is proven by the
+// repository suite.
+func (f *fakeNotificationRepo) ResolveStaffEmailSplit(_ context.Context, _ domain.VisitRequest) ([]string, []string, error) {
+	if f.staffSplitErr != nil {
+		return nil, nil, f.staffSplitErr
+	}
+	return f.staffTo, f.staffBcc, nil
 }
 
 func mkVisit(id domain.UUID, status domain.VisitStatus, createdAt, start, end time.Time) domain.VisitRequest {

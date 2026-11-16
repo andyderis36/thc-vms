@@ -80,7 +80,7 @@ function makeUser(role: Role): User {
 
 function makeData() {
   const events = ['visit_requested', 'visit_approved', 'visit_rejected', 'visit_rescheduled', 'visit_check_in', 'visit_check_out', 'visit_cancelled', 'visit_auto_cancelled', 'visit_reminder']
-  const mandatory = new Set(['visit_approved', 'visit_rejected', 'visit_cancelled'])
+  const mandatory = new Set(['visit_approved', 'visit_rejected', 'visit_cancelled', 'visit_auto_cancelled'])
   return {
     toggles: events.map((event, i) => ({
       event,
@@ -123,8 +123,6 @@ describe('/settings/notifications', () => {
     })
     render(createElement(SettingsNotificationsPage))
     const checkboxes = screen.getAllByRole('checkbox')
-    // toggle first non-mandatory? requested is mandatory; find approved row checkbox
-    // Just click first checkbox that is not disabled
     const enabledCb = checkboxes.find((cb) => !(cb as HTMLInputElement).disabled) as HTMLElement
     fireEvent.click(enabledCb)
     fireEvent.click(screen.getByRole('button', { name: 'Simpan' }))
@@ -179,6 +177,60 @@ describe('/settings/notifications', () => {
       'visit_auto_cancelled',
       'visit_reminder',
     ])
+  })
+
+  it('dibatalkan otomatis terkunci dari flag server (mandatory)', () => {
+    render(createElement(SettingsNotificationsPage))
+    const autoBoxes = screen.getAllByRole('checkbox', { name: /Dibatalkan Otomatis in_app staff/i })
+    expect(autoBoxes.length).toBeGreaterThan(0)
+    for (const box of autoBoxes) {
+      expect(box).toBeDisabled()
+      expect(box).toHaveAttribute('title', 'Wajib sistem')
+    }
+  })
+
+  it('email staf baris diminta hidup dan terkirim di PUT', async () => {
+    mutationState.mutate.mockImplementation((payload, opts) => {
+      opts?.onSuccess?.({ toggles: payload.toggles, version: payload.version })
+    })
+    render(createElement(SettingsNotificationsPage))
+    const emailStaffBoxes = screen.getAllByRole('checkbox', { name: /Diminta email staff/i })
+    expect(emailStaffBoxes.length).toBeGreaterThan(0)
+    for (const box of emailStaffBoxes.slice(0, 1)) {
+      expect(box).toBeEnabled()
+    }
+    fireEvent.click(emailStaffBoxes[0]!)
+    fireEvent.click(screen.getByRole('button', { name: 'Simpan' }))
+    await waitFor(() => {
+      expect(mutationState.mutate).toHaveBeenCalled()
+    })
+    const payload = mutationState.mutate.mock.calls[0]![0]
+    const requested = payload.toggles.find((t: { event: string }) => t.event === 'visit_requested')
+    expect(requested.email.staff).toBe(false)
+    expect(payload.toggles).toHaveLength(9)
+    expect(payload.version).toBe(7)
+  })
+
+  it('togel staf baris pengingat dapat diubah', async () => {
+    mutationState.mutate.mockImplementation((payload, opts) => {
+      opts?.onSuccess?.({ toggles: payload.toggles, version: payload.version })
+    })
+    render(createElement(SettingsNotificationsPage))
+    const reminderInApp = screen.getAllByRole('checkbox', { name: /Pengingat in_app staff/i })
+    const reminderEmail = screen.getAllByRole('checkbox', { name: /Pengingat email staff/i })
+    expect(reminderInApp.length).toBeGreaterThan(0)
+    expect(reminderEmail.length).toBeGreaterThan(0)
+    for (const box of [...reminderInApp, ...reminderEmail]) {
+      expect(box).toBeEnabled()
+    }
+    fireEvent.click(reminderEmail[0]!)
+    fireEvent.click(screen.getByRole('button', { name: 'Simpan' }))
+    await waitFor(() => {
+      expect(mutationState.mutate).toHaveBeenCalled()
+    })
+    const payload = mutationState.mutate.mock.calls[0]![0]
+    const reminder = payload.toggles.find((t: { event: string }) => t.event === 'visit_reminder')
+    expect(reminder.email.staff).toBe(true)
   })
 
   it('loading + error states', () => {

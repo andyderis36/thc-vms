@@ -16,7 +16,7 @@
 --   FOR UPDATE ... SKIP LOCKED is mandatory: a single-tick sweeper must not block
 --   on - or double-process - rows another instance is already migrating.
 --
--- R1  requested, untouched for 7 days   -> cancelled   (PRD L137 "Timeout 7 Hari")
+-- R1  requested with a started window   -> cancelled   (start_date <= now(), never approved)
 -- R2  pre-arrival (requested | approved | rescheduled),
 --     window already closed,
 --     never checked in                   -> not_visit   (PRD L142 "No Show")
@@ -33,17 +33,18 @@
 -- =============================================================================
 
 -- name: SweepStaleRequestedVisits :many
--- R1: an unanswered request 7 days old is abandoned (PRD L137). Only requests
--- whose window has NOT fully closed are R1's business: an overdue request is
--- claimed by R2 instead, so end_date > now()-2h keeps the two sweeps disjoint.
+-- R1: a request still unanswered once its visit window has started (start_date
+-- <= now()) is abandoned. Only requests whose window has NOT fully closed are
+-- R1's business: an overdue request is claimed by R2 instead, so
+-- end_date > now()-2h keeps the two sweeps disjoint.
 -- Capped at 500 rows per tick (S4): one sweep locks and migrates at most one
 -- batch, never the whole table.
 SELECT vr.id, vr.visit_id, vr.status, vr.vendor_user_id, vr.location_id, vr.start_date, vr.end_date
 FROM visit_request vr
 WHERE vr.status = 'requested'
-  AND vr.created_at < now() - interval '7 days'
+  AND vr.start_date <= now()
   AND vr.end_date > now() - interval '2 hours'
-ORDER BY vr.created_at ASC
+ORDER BY vr.start_date ASC
 LIMIT 500
 FOR UPDATE OF vr SKIP LOCKED;
 

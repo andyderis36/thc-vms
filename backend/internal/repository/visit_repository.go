@@ -109,6 +109,8 @@ func (r *visitRepository) Create(
 	}
 
 	var created db.VisitRequest
+	var pendingCreate *pendingEmail
+	var createLocation uuid.UUID
 	var lastErr error
 	snap := domain.DefaultNotificationSettings()
 	if r.settingsLoader != nil {
@@ -169,13 +171,36 @@ func (r *visitRepository) Create(
 					return MapError(err)
 				}
 			}
-			if err := emit(ctx, q, domain.CreatedNotification(row.VisitID), row.ID, row.LocationID, row.VendorUserID, time.Now(), snap); err != nil {
+			tpl := domain.CreatedNotification(row.VisitID)
+			if err := emit(ctx, q, tpl, row.ID, row.LocationID, row.VendorUserID, time.Now(), snap); err != nil {
 				return err
 			}
+			locked, err := q.GetVisitByIDForUpdate(ctx, db.GetVisitByIDForUpdateParams{ID: row.ID})
+			if err != nil {
+				return MapError(err)
+			}
+			var changer uuid.UUID
+			if row.CreatedBy.Valid {
+				changer = row.CreatedBy.Bytes
+			}
+			pendingCreate = &pendingEmail{
+				visit: resolveEmailActors(ctx, tx, locked, changer).apply(emailVisit(locked, locked.StartDate, locked.EndDate, "")),
+				tpl:   tpl,
+			}
+			if err := attachMembers(ctx, q, row.ID, pendingCreate); err != nil {
+				return err
+			}
+			if err := attachPurposes(ctx, q, row.ID, pendingCreate); err != nil {
+				return err
+			}
+			createLocation = row.LocationID
 			created = row
 			return nil
 		})
 		if err == nil {
+			if pendingCreate != nil {
+				enqueueCreateEmail(ctx, r.mailer, db.New(r.pool), pendingCreate.visit, pendingCreate.tpl, createLocation, r.frontendBaseURL, snap)
+			}
 			return visitRowToDomain(created)
 		}
 		lastErr = err

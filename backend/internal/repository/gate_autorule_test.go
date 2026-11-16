@@ -78,8 +78,9 @@ func TestDoubleCheckOut_ReturnsConflict(t *testing.T) {
 
 // TestAutoRules_SweepsMatchThePRDThresholds seeds one matching and one
 // non-matching row per rule and asserts exactly the matching rows return:
-// R1 requested + created 8d ago (7-day timeout), R2 approved + ended 3h ago
-// with no check-in (2h grace), R3 visiting + ended 25h ago (24h auto-complete).
+// R1 requested + window started (start_date <= now), R2 approved + ended 3h
+// ago with no check-in (2h grace), R3 visiting + ended 25h ago (24h
+// auto-complete).
 func TestAutoRules_SweepsMatchThePRDThresholds(t *testing.T) {
 	pool := testPool(t)
 	resetTables(t, pool)
@@ -94,11 +95,10 @@ func TestAutoRules_SweepsMatchThePRDThresholds(t *testing.T) {
 
 	window := func(start time.Time) (time.Time, time.Time) { return start, start.Add(4 * time.Hour) }
 
-	// R1: stale requested (created 8d ago) still INSIDE its open window, vs a
-	// fresh requested visit (created now).
-	eightDaysAgo := now.Add(-8 * 24 * time.Hour)
-	staleStart, staleEnd := window(now.Add(24 * time.Hour))
-	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000311", VendorUser: vendor, Location: loc, Start: staleStart, End: staleEnd, Status: domain.VisitStatusRequested, CreatedAt: &eightDaysAgo})
+	// R1: requested with a STARTED window (start 1h ago, still inside the open
+	// window) vs a requested visit whose window has not started yet.
+	staleStart, staleEnd := window(now.Add(-time.Hour))
+	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000311", VendorUser: vendor, Location: loc, Start: staleStart, End: staleEnd, Status: domain.VisitStatusRequested})
 	freshStart, freshEnd := window(now.Add(24 * time.Hour))
 	seedVisit(t, pool, seedVisitParams{Code: "VST-0000000312", VendorUser: vendor, Location: loc, Start: freshStart, End: freshEnd, Status: domain.VisitStatusRequested})
 
