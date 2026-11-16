@@ -1,19 +1,20 @@
-# CI tunggal untuk `dev`: satu file, dua mode.
-#   push ke `dev`            -> job *-quick jalan (build+vet, lint+typecheck).
-#   PR ke `dev`/`main`       -> job backend/frontend jalan full suite
-#                                (frontend build dilewati bila tujuan PR = `dev`).
-#   merge pushes `main`       -> deploy.yml deploys; file ini tidak deploy.
+# CI: satu file, dua gerbang. Push TIDAK memicu apa pun (direct push ke `dev`
+# tanpa CI — disengaja agar satu-satunya sinyal adalah PR).
+#   PR ke `dev`   -> job changes (deteksi path) + job *-quick yang jalurnya
+#                    tersentuh (build+vet, lint+typecheck). Tanpa test/build.
+#   PR ke `main`  -> job backend/frontend full suite (termasuk next build).
+#   merge ke main -> deploy.yml deploys; file ini tidak deploy.
+#   dispatch      -> full suite manual.
 #
-# Mode dipilih via `github.event_name` agar commit yang sama tidak diuji dua
-# kali (push lalu PR). Use workflow_dispatch to run the full suite manually.
+# Aturan main ("dev PRs are advisory, dev->main PR is the gate"): hanya gate
+# PR ke `main` yang wajib hijau (branch protection); gate PR ke `dev` adalah
+# sinyal review, bukan penghalang merge.
 #
 # Playwright E2E is intentionally not run on the VPS runner; run it locally
 # against deploy/ci/compose.ci.yml when needed.
 name: ci
 
 on:
-  push:
-    branches: [dev]
   pull_request:
     branches: [dev, main]
   workflow_dispatch:
@@ -28,11 +29,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Security scans live in security.yml (advisory, manual/scheduled) so known
+  # Security scans live in security.yml (advisory, manual-only) so known
   # baseline findings cannot block the dev -> main flow.
+  # Deteksi path yang tersentuh PR vs base-nya. Gagal-aman: bila fetch/diff
+  # gagal, kedua sisi dianggap tersentuh (job jalan, bukan skip).
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: [self-hosted, linux, vps]
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: filter
+        run: |
+          base_ref="${{ github.base_ref }}"
+          backend=1
+          frontend=1
+          if git fetch origin "$base_ref" --depth=100 >/dev/null 2>&1 \
+            && git rev-parse --verify "origin/$base_ref" >/dev/null 2>&1; then
+            touched="$(git diff --name-only "origin/$base_ref...HEAD" 2>/dev/null || true)"
+            backend=0
+            frontend=0
+            if printf '%s\n' "$touched" | grep -qE '^(backend/|\.gitea/|deploy/|docker-compose[^/]*\.ya?ml$|.*Dockerfile$|.*Caddyfile$|caddy/)'; then
+              backend=1
+            fi
+            if printf '%s\n' "$touched" | grep -qE '^(frontend/|\.gitea/|deploy/|docker-compose[^/]*\.ya?ml$|.*Dockerfile$|.*Caddyfile$|caddy/)'; then
+              frontend=1
+            fi
+          fi
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
+
   backend:
-    # Full suite hanya untuk PR/manual; push ke `dev` dilayani backend-quick.
-    if: github.event_name != 'push'
+    # Full suite: hanya gate PR ke `main` + dispatch manual.
+    if: github.base_ref == 'main' || github.event_name == 'workflow_dispatch'
     # Move CI jobs to a dedicated [self-hosted, linux, ci] runner when available;
     # deploy stays on [self-hosted, linux, vps].
     runs-on: [self-hosted, linux, vps]
@@ -98,8 +130,8 @@ jobs:
           retention-days: 14
 
   frontend:
-    # Full suite hanya untuk PR/manual; push ke `dev` dilayani frontend-quick.
-    if: github.event_name != 'push'
+    # Full suite: hanya gate PR ke `main` + dispatch manual.
+    if: github.base_ref == 'main' || github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, linux, vps]
     steps:
       - uses: actions/checkout@v4
@@ -161,19 +193,18 @@ jobs:
         run: timeout 600 npm test -- --maxWorkers=1
 
       - name: Build
-        # PR ke `dev` = verify saja (hemat menit build); build final tetap di
-        # gate PR ke `main`. `github.base_ref` = branch tujuan PR (kosong saat
-        # manual dispatch, jadi dispatch tetap build).
-        if: github.base_ref != 'dev'
+        # Job ini hanya jalan untuk base `main`/dispatch (lihat `if` job),
+        # jadi build final selalu ikut di sini.
         working-directory: frontend
         env:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8080/api/v1
         run: timeout 600 npm run build
 
-  # Quick check untuk direct push ke `dev` (pengganti ci-dev.yml yang dihapus):
-  # umpan balik menit-an tanpa test/build. Full suite tetap di PR.
+  # Quick check PR ke `dev`: umpan balik menit-an tanpa test/build. Hanya jalan
+  # bila jalurnya tersentuh (lihat job changes); PR docs-only hijau instan.
   backend-quick:
-    if: github.event_name == 'push'
+    needs: [changes]
+    if: github.base_ref == 'dev' && needs.changes.outputs.backend == '1'
     runs-on: [self-hosted, linux, vps]
     steps:
       - uses: actions/checkout@v4
@@ -192,7 +223,8 @@ jobs:
         run: timeout 180 go vet ./...
 
   frontend-quick:
-    if: github.event_name == 'push'
+    needs: [changes]
+    if: github.base_ref == 'dev' && needs.changes.outputs.frontend == '1'
     runs-on: [self-hosted, linux, vps]
     steps:
       - uses: actions/checkout@v4
