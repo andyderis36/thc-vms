@@ -207,8 +207,8 @@ func TestIsTerminal_OnlyTheFourClosedStatusesAreTerminal(t *testing.T) {
 		domain.VisitStatusCompleted: true,
 	}
 	all := domain.AllVisitStatuses()
-	if len(all) != 8 {
-		t.Fatalf("len(AllVisitStatuses()) = %d, want 8", len(all))
+	if len(all) != 9 {
+		t.Fatalf("len(AllVisitStatuses()) = %d, want 9", len(all))
 	}
 	for _, status := range all {
 		want := terminal[status]
@@ -227,13 +227,14 @@ func TestIsTerminal_OnlyTheFourClosedStatusesAreTerminal(t *testing.T) {
 }
 
 func TestParseVisitStatus(t *testing.T) {
-	// Given: the exact 8-value vocabulary fixed for the MVP.
+	// Given: the exact 9-value vocabulary (multi-entry adds offsite).
 	// When:  each value is parsed back from its stored string form.
 	// Then:   it round-trips to the matching constant.
 	want := map[string]domain.VisitStatus{
 		"requested":   domain.VisitStatusRequested,
 		"approved":    domain.VisitStatusApproved,
 		"visiting":    domain.VisitStatusVisiting,
+		"offsite":     domain.VisitStatusOffsite,
 		"completed":   domain.VisitStatusCompleted,
 		"not_visit":   domain.VisitStatusNotVisit,
 		"rejected":    domain.VisitStatusRejected,

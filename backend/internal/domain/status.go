@@ -10,8 +10,9 @@ import (
 )
 
 // VisitStatus is the lifecycle state of a visit request. The vocabulary is
-// fixed by the PRD state machine (section 5) and the openapi VisitStatus
-// enum: exactly these eight values exist, and the lowercase strings are the
+// fixed by the PRD state machine (section 5), the multi-entry permit plan
+// (.omo/plans/multi-entry-permit.md) and the openapi VisitStatus enum:
+// exactly these nine values exist, and the lowercase strings are the
 // values stored in the database and exchanged over the API.
 type VisitStatus string
 
@@ -25,6 +26,10 @@ const (
 	VisitStatusApproved VisitStatus = "approved"
 	// VisitStatusVisiting marks a guest who has checked in at the gate.
 	VisitStatusVisiting VisitStatus = "visiting"
+	// VisitStatusOffsite marks a guest who has checked out of the gate while
+	// the multi-entry permit is still active: off site, permit still valid,
+	// re-check-in allowed (plan .omo/plans/multi-entry-permit.md section 2).
+	VisitStatusOffsite VisitStatus = "offsite"
 	// VisitStatusCompleted marks a visit closed by check-out or auto-complete.
 	VisitStatusCompleted VisitStatus = "completed"
 	// VisitStatusNotVisit marks a visit whose window closed without a check-in
@@ -46,12 +51,13 @@ const (
 // derive their threshold from this one value.
 const NoShowGrace = 2 * time.Hour
 
-// AllVisitStatuses returns the eight statuses in enum order.
+// AllVisitStatuses returns the nine statuses in enum order.
 func AllVisitStatuses() []VisitStatus {
 	return []VisitStatus{
 		VisitStatusRequested,
 		VisitStatusApproved,
 		VisitStatusVisiting,
+		VisitStatusOffsite,
 		VisitStatusCompleted,
 		VisitStatusNotVisit,
 		VisitStatusRejected,
@@ -61,7 +67,7 @@ func AllVisitStatuses() []VisitStatus {
 }
 
 // ParseVisitStatus converts a stored or received string back into the typed
-// vocabulary, refusing anything outside the eight legal values.
+// vocabulary, refusing anything outside the nine legal values.
 func ParseVisitStatus(raw string) (VisitStatus, error) {
 	status := VisitStatus(raw)
 	if status == VisitStatusNone || !slices.Contains(AllVisitStatuses(), status) {

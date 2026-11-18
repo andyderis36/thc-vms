@@ -127,6 +127,16 @@ func TransitionNotification(to VisitStatus, system bool, visitCode string, reaso
 			Message:  "Tamu " + visitCode + " telah check-in.",
 			Audience: NotificationAudienceStaff,
 		}
+	case VisitStatusOffsite:
+		// Multi-entry check-out reuses the existing check-out template: no
+		// new notification type (plan .omo/plans/multi-entry-permit.md
+		// section 6). The permit stays active; only the team is off site.
+		return &NotificationTemplate{
+			Type:     NotificationVisitCheckOut,
+			Title:    "Check-out Tercatat",
+			Message:  "Tamu " + visitCode + " telah check-out.",
+			Audience: NotificationAudienceStaff,
+		}
 	case VisitStatusCompleted:
 		if system {
 			// R3 auto-complete: same staff audience as a human check-out,

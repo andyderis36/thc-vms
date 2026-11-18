@@ -301,7 +301,10 @@ type VisitRepository interface {
 	// after completion. The returned bool reports whether the row was
 	// created (true, answer 201) or replaced (false, answer 200). A missing
 	// visit is ErrNotFound; uploadedBy is the authenticated actor.
-	AttachWorkPhoto(ctx context.Context, visitID UUID, kind WorkPhotoKind, url string, uploadedBy UUID) (WorkPhoto, bool, error)
+	// visitLogID binds the proof to one visit_logs cycle (migration 000034):
+	// nil resolves to the latest 'in' log of the visit (NULL when the visit
+	// has no log row yet), a foreign log id is a validation failure.
+	AttachWorkPhoto(ctx context.Context, visitID UUID, kind WorkPhotoKind, url string, uploadedBy UUID, visitLogID *UUID) (WorkPhoto, bool, error)
 	// ListWorkPhotos returns both work proofs of one visit (at most the
 	// before and after rows), with the uploader display names resolved. A
 	// visit without proofs yields an empty slice, never nil.
