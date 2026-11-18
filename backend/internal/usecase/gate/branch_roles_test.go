@@ -55,8 +55,8 @@ func TestCheckOut_AdminOnOwnBranchSucceeds(t *testing.T) {
 	if got.CheckedOutBy != actor.ID {
 		t.Fatalf("expected checked-out by %q, got %q", actor.ID, got.CheckedOutBy)
 	}
-	if visits.visits[visit.ID].Status != domain.VisitStatusCompleted {
-		t.Fatalf("expected status completed, got %q", visits.visits[visit.ID].Status)
+	if visits.visits[visit.ID].Status != domain.VisitStatusOffsite {
+		t.Fatalf("expected status offsite, got %q", visits.visits[visit.ID].Status)
 	}
 }
 
@@ -82,8 +82,8 @@ func TestCheckOut_SuperAdminBypassesBranch(t *testing.T) {
 	if got.CheckedOutBy != actor.ID {
 		t.Fatalf("expected checked-out by %q, got %q", actor.ID, got.CheckedOutBy)
 	}
-	if visits.visits[visit.ID].Status != domain.VisitStatusCompleted {
-		t.Fatalf("expected status completed, got %q", visits.visits[visit.ID].Status)
+	if visits.visits[visit.ID].Status != domain.VisitStatusOffsite {
+		t.Fatalf("expected status offsite, got %q", visits.visits[visit.ID].Status)
 	}
 }
 

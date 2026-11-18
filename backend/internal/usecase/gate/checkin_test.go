@@ -132,7 +132,8 @@ func TestCheckIn_RefusesRescheduledVisitUntilReapproved(t *testing.T) {
 
 func TestCheckIn_RefusesNonApprovedStates(t *testing.T) {
 	t.Parallel()
-	// Given: every non-approved status, each in-window on the actor's branch.
+	// Given: every status ResolveGateTransition refuses for check-in (only
+	// approved and offsite are admitted), each in-window on the actor's branch.
 	statuses := []domain.VisitStatus{
 		domain.VisitStatusRequested,
 		domain.VisitStatusVisiting,

@@ -44,6 +44,7 @@ sql:
       - "migrations/000023_user_locations.up.sql"
       - "migrations/000024_created_by_and_work_photo.up.sql"
       - "migrations/000026_app_settings.up.sql"
+      - "migrations/000033_visit_logs.up.sql"
     queries: "internal/repository/db/queries"
 
     gen:

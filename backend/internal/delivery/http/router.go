@@ -85,7 +85,10 @@ type VisitRoutes struct {
 	// AttachWorkPhoto serves the before/after work-proof attach
 	// (migration 000024): POST /visits/:id/work-photos.
 	AttachWorkPhoto gin.HandlerFunc
-	Jabatan         gin.HandlerFunc
+	// Logs serves the per-entry gate timeline. It reuses the visits detail
+	// scoping through GetVisit, so it mounts on the authenticated group.
+	Logs    gin.HandlerFunc
+	Jabatan gin.HandlerFunc
 	// VendorSuggestions/MemberSuggestions/MemberSuggestion serve the two
 	// read-only suggestion feeds (T8 vendor identity, T10 member reuse). All
 	// three are branch/owner scoped inside the usecase.
@@ -98,6 +101,7 @@ type VisitRoutes struct {
 type GateRoutes struct {
 	CheckIn  gin.HandlerFunc
 	CheckOut gin.HandlerFunc
+	Complete gin.HandlerFunc
 }
 
 // UploadRoutes carries the bound upload handler method.
@@ -327,6 +331,9 @@ func New(d Deps) *gin.Engine {
 	authed.GET("/visits/member-suggestions", withFallback(d.Visits.MemberSuggestions))
 	authed.GET("/visits/member-suggestions/:visitorId", withFallback(d.Visits.MemberSuggestion))
 	authed.GET("/visits/:id", withFallback(d.Visits.Get))
+	// The entry timeline is a scoped read (vendor owner included), so it
+	// mounts beside the visits detail read, never behind GateOnly.
+	authed.GET("/visits/:id/logs", withFallback(d.Visits.Logs))
 	authed.GET("/visits/:id/file", withFallback(d.File.File))
 	// The work-proof attach stays on the authenticated group without a role
 	// gate: the usecase owns the scope (owning vendor, branch admin/security,
@@ -349,6 +356,9 @@ func New(d Deps) *gin.Engine {
 	gate.Use(withFallback(d.Chain.GateOnly))
 	gate.POST("/visits/:id/checkin", withFallback(d.Gate.CheckIn))
 	gate.POST("/visits/:id/checkout", withFallback(d.Gate.CheckOut))
+	// The admin/super_admin + branch guard is owned by CompleteVisit; the
+	// GateOnly chain only keeps external vendor accounts out of the gate group.
+	gate.POST("/visits/:id/complete", withFallback(d.Gate.Complete))
 
 	authed.POST("/uploads", withFallback(d.Upload.Upload))
 

@@ -145,6 +145,15 @@ type VendorRegistrationNotice struct {
 	CreatedAt  time.Time          `json:"created_at"`
 }
 
+type VisitLog struct {
+	ID             uuid.UUID   `json:"id"`
+	VisitRequestID uuid.UUID   `json:"visit_request_id"`
+	Direction      string      `json:"direction"`
+	ActorUserID    pgtype.UUID `json:"actor_user_id"`
+	ActorRole      pgtype.Text `json:"actor_role"`
+	CreatedAt      time.Time   `json:"created_at"`
+}
+
 type VisitPurpose struct {
 	VisitRequestID uuid.UUID `json:"visit_request_id"`
 	PurposeID      uuid.UUID `json:"purpose_id"`

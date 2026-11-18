@@ -142,6 +142,30 @@ func TestAutoCompleteNotification_MarksAutomaticWithSystemActor(t *testing.T) {
 	}
 }
 
+// TestOffsiteNotification_ReusesHumanCheckOutTemplate proves the multi-entry
+// check-out to offsite emits the existing human check-out notice: same type,
+// title and message as a human check-out to completed, staff audience, and
+// no new notification type.
+func TestOffsiteNotification_ReusesHumanCheckOutTemplate(t *testing.T) {
+	offsite := domain.TransitionNotification(domain.VisitStatusOffsite, false, "VST-0000000001", "")
+	if offsite == nil {
+		t.Fatal("TransitionNotification(offsite) = nil, want the check-out notice")
+	}
+	human := domain.TransitionNotification(domain.VisitStatusCompleted, false, "VST-0000000001", "")
+	if human == nil {
+		t.Fatal("test setup: human check-out template is nil")
+	}
+	if offsite.Type != domain.NotificationVisitCheckOut || offsite.Type != human.Type {
+		t.Fatalf("offsite type = %q, want %q", offsite.Type, domain.NotificationVisitCheckOut)
+	}
+	if offsite.Title != human.Title || offsite.Message != human.Message {
+		t.Fatalf("offsite copy = %+v, want the human check-out copy %+v", offsite, human)
+	}
+	if offsite.Audience != domain.NotificationAudienceStaff {
+		t.Fatalf("offsite audience = %q, want staff", offsite.Audience)
+	}
+}
+
 // TestStaffLegNotifications_MirrorTypeWithStaffAudience proves the staff
 // copies of the reminder and the auto-cancel carry the same type/title/message
 // as their vendor rows and differ only in audience.

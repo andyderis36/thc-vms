@@ -210,6 +210,11 @@ type Querier interface {
 	// the users join (NULL uploaded_by, e.g. a removed account, renders "").
 	// A missing (visit, kind) pair surfaces pgx.ErrNoRows (-> first attach).
 	GetWorkPhoto(ctx context.Context, arg GetWorkPhotoParams) (GetWorkPhotoRow, error)
+	// Admin-only fan-out for visit_requested in_app: every active super_admin
+	// (national, including the hidden dev-superadmin) plus the active admin whose
+	// primary OR coverage union holds the visit's branch — and deliberately NO
+	// security role. ON CONFLICT is a no-op (visit_requested never refreshes).
+	InsertAdminNotifications(ctx context.Context, arg InsertAdminNotificationsParams) error
 	// =============================================================================
 	// audit.sql - Append-only audit trail (ERD L172-182, migration 000007).
 	//
@@ -371,8 +376,6 @@ type Querier interface {
 	// conflict, while a repeat visit_rescheduled REFRESHES message + created_at
 	// to the latest emission (WHERE guard on the upsert below).
 	InsertStaffNotifications(ctx context.Context, arg InsertStaffNotificationsParams) error
-	// Admin-only fan-out for visit_requested in_app (no security role).
-	InsertAdminNotifications(ctx context.Context, arg InsertAdminNotificationsParams) error
 	// Atomic audit append (PRD L129). changed_by is NULL for the background
 	// auto-rule worker, which has no acting user.
 	InsertStatusHistory(ctx context.Context, arg InsertStatusHistoryParams) (StatusHistory, error)
@@ -387,6 +390,18 @@ type Querier interface {
 	// no-op for other types, while a repeat visit_rescheduled REFRESHES message +
 	// created_at to the latest emission (WHERE guard on the upsert below).
 	InsertVendorNotification(ctx context.Context, arg InsertVendorNotificationParams) error
+	// =============================================================================
+	// visit_logs.sql - Multi-entry permit entry timeline (plan
+	// .omo/plans/multi-entry-permit.md section 4, migration 000033).
+	//
+	// One row per gate entry: check-in writes direction 'in', check-out writes
+	// 'out'. The writer is the Wave-2 UpdateStatus path, which inserts the log
+	// row in the SAME transaction as the status move, so a log row can never
+	// exist without its status edge and vice versa. Readers order by
+	// (created_at, id): created_at carries the timeline, id breaks same-instant
+	// ties deterministically.
+	// =============================================================================
+	InsertVisitLog(ctx context.Context, arg InsertVisitLogParams) (VisitLog, error)
 	// visit_purpose is a pure join table (ERD L107-110) whose composite primary key
 	// already rejects a duplicate (visit, purpose) pair.
 	InsertVisitPurpose(ctx context.Context, arg InsertVisitPurposeParams) error
@@ -605,6 +620,7 @@ type Querier interface {
 	// "vendors with at least one visit in scope" rule; a global caller gets every
 	// source row. q is a trimmed prefix filter (NULL = unfiltered).
 	ListVendorSuggestionSources(ctx context.Context, arg ListVendorSuggestionSourcesParams) ([]ListVendorSuggestionSourcesRow, error)
+	ListVisitLogsByVisit(ctx context.Context, arg ListVisitLogsByVisitParams) ([]VisitLog, error)
 	ListVisitPurposes(ctx context.Context, arg ListVisitPurposesParams) ([]ListVisitPurposesRow, error)
 	// Suggestion source for the roster "Jabatan" combobox (openapi GET /jabatan).
 	// Jabatan is free text, never a catalogue: the distinct values actually typed
@@ -657,10 +673,15 @@ type Querier interface {
 	// status = 'pending' guard makes a repeated decision a no-op instead of
 	// re-stamping: an already resolved (or missing) row affects zero rows.
 	ResolveVendorRegistrationNotice(ctx context.Context, arg ResolveVendorRegistrationNoticeParams) (int64, error)
-	// R2: any pre-arrival status, past end_date + 2h (domain.NoShowGrace), and
-	// check_in has no row for the visit. Uses idx_visit_status for the status scan
-	// and the UNIQUE index on check_in(visit_request_id) for the anti-join probe.
-	// Capped at 500 rows per tick (S4), same as its sibling sweeps.
+	// R2: a permit whose end datetime has arrived with no check_in row and which
+	// never became an entry (plan §7: a permit never entered is an unused permit
+	// -> cancelled). Covers every pre-arrival status: approved and rescheduled
+	// unconditionally at end, requested only once R1's 2h end guard has also
+	// expired (end_date <= now()-2h) so the two sweeps never claim the same
+	// requested row. Uses idx_visit_status for the status scan and the UNIQUE
+	// index on check_in(visit_request_id) for the anti-join probe. Visiting and
+	// offsite rows are NOT listed here: they belong to R3. Capped at 500 rows per
+	// tick (S4).
 	SweepNoShowVisits(ctx context.Context) ([]SweepNoShowVisitsRow, error)
 	// =============================================================================
 	// worker.sql - Auto-rule background sweeps (PRD L48-57 "Auto-Rule Background
@@ -671,8 +692,9 @@ type Querier interface {
 	//   mutate anything. The worker then, inside the SAME transaction per batch:
 	//     1. runs the sweep        -> the rows are already locked, so the ids cannot
 	//                                be re-selected by a second worker instance;
-	//     2. UpdateVisitStatus     -> requested->cancelled | (requested|approved|
-	//                                rescheduled)->not_visit | visiting->completed;
+	//     2. UpdateVisitStatus     -> requested->cancelled (R1) |
+	//                                approved->cancelled (R2) |
+	//                                visiting|offsite->completed (R3);
 	//     3. InsertStatusHistory   -> changed_by = NULL, notes = the rule id.
 	//   Keeping the mutation out of the query file is what lets the caller batch the
 	//   whole sweep into one atomic, auditable transaction (PRD L129).
@@ -681,32 +703,36 @@ type Querier interface {
 	//   on - or double-process - rows another instance is already migrating.
 	//
 	// R1  requested with a started window   -> cancelled   (start_date <= now(), never approved)
-	// R2  pre-arrival (requested | approved | rescheduled),
-	//     window already closed,
-	//     never checked in                   -> not_visit   (PRD L142 "No Show")
-	// R3  visiting, end_date + 24h elapsed   -> completed   (PRD L148 "Auto-Complete")
+	// R2  approved | rescheduled, end datetime reached,
+	//     never checked in; requested once it
+	//     leaves R1's 2h end guard            -> cancelled   (plan §7: unused permit)
+	// R3  visiting | offsite, end datetime reached
+	//                                       -> completed   (plan §7: permit fully used)
 	//
-	// R2 derives its 2-hour grace from the check-in validity window
-	// [start_date - 2h, end_date + 2h] (AGENTS.md rule 6.2, PRD L121-123, QA
-	// GATE-05): once now() > end_date + 2h the guard can no longer perform a
-	// legitimate check-in, so the visit is definitively a no-show. The grace is
-	// domain.NoShowGrace; keep the two in step.
+	// R2 and R3 both fire at the exact end datetime: no 2-hour grace and no
+	// 24-hour delay. Thresholds(now) returns (now, now) and the Go re-checks in
+	// autorule_repository.go mirror these predicates exactly.
 	//
-	// R1 and R2 predicates are DISJOINT on end_date: R2 owns end_date <= now()-2h,
-	// R1 owns end_date > now()-2h, together partitioning every requested row.
+	// R1 keeps its original start_date <= now() predicate and its end_date >
+	// now()-2h guard, so a requested visit whose window closed inside that guard
+	// stays R1's. R2 therefore claims a requested visit only once end_date <=
+	// now()-2h (the guard's complement), which keeps the two rules disjoint on
+	// end_date for the requested status and sweeps the requests R1 can no longer
+	// reach. Rescheduled permits are R2's unconditionally at end.
 	// =============================================================================
 	// R1: a request still unanswered once its visit window has started (start_date
-	// <= now()) is abandoned. Only requests whose window has NOT fully closed are
-	// R1's business: an overdue request is claimed by R2 instead, so
-	// end_date > now()-2h keeps the two sweeps disjoint.
+	// <= now()) is abandoned. The end_date > now()-2h guard is retained verbatim
+	// from the prior split; R2's requested branch is its exact complement, so the
+	// two sweeps are disjoint on end_date for requested rows.
 	// Capped at 500 rows per tick (S4): one sweep locks and migrates at most one
 	// batch, never the whole table.
 	SweepStaleRequestedVisits(ctx context.Context) ([]SweepStaleRequestedVisitsRow, error)
-	// R3: still 'visiting' a full day after the scheduled end (PRD L148). idx_visit_date
-	// does not cover end_date, so this sweep relies on the status index plus the
-	// row count of a single overnight window - deliberately not adding a 5th index
-	// beyond the four PRD L206-209 mandates, since the sweep runs once per tick.
-	// Capped at 500 rows per tick (S4), same as its sibling sweeps.
+	// R3: still on site (visiting or offsite) at the exact end datetime (plan §7:
+	// a permit with at least one entry is completed when its window closes). No
+	// +24h delay. idx_visit_date does not cover end_date, so this sweep relies on
+	// the status index plus the row count of a single tick's window - deliberately
+	// not adding a 5th index beyond the four PRD L206-209 mandates, since the
+	// sweep runs once per tick. Capped at 500 rows per tick (S4).
 	SweepStaleVisitingVisits(ctx context.Context) ([]SweepStaleVisitingVisitsRow, error)
 	// R4  approved, starts within the reminder window -> notify (no status change)
 	// R4 differs from R1-R3 in one decisive way: it MUTATES NOTHING. It only needs

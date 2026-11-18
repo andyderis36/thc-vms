@@ -29,6 +29,7 @@ import (
 	"thc-vms/backend/internal/infrastructure/migrate"
 	"thc-vms/backend/internal/infrastructure/storage"
 	"thc-vms/backend/internal/repository"
+	"thc-vms/backend/internal/repository/db"
 	"thc-vms/backend/internal/usecase/auth"
 	"thc-vms/backend/internal/usecase/avatar"
 	"thc-vms/backend/internal/usecase/gate"
@@ -231,7 +232,8 @@ func run(ctx context.Context) error {
 		middleware.NewEmailChangeRateLimiter(middleware.DefaultEmailChangeLimits()))
 	passwordResetHandler := handlers.NewPasswordResetHandler(authSvc,
 		middleware.NewPasswordResetRateLimiter(middleware.DefaultPasswordResetLimits()))
-	visitHandler := handlers.NewVisitHandler(visitSvc)
+	visitHandler := handlers.NewVisitHandler(visitSvc).
+		WithLogs(handlers.NewDBVisitLogReader(db.New(pool)))
 	gateHandler := handlers.NewGateHandler(gateSvc)
 	masterHandler := handlers.NewMasterHandler(master)
 	userHandler := handlers.NewUserHandler(users, master, securityRoleID)
@@ -324,9 +326,11 @@ func run(ctx context.Context) error {
 			VendorSuggestions:    visitHandler.ListVendorSuggestions,
 			MemberSuggestions:    visitHandler.ListMemberSuggestions,
 			MemberSuggestion:     visitHandler.GetMemberSuggestion,
+			Logs:                 visitHandler.Logs,
 		},
 		Gate: deliveryhttp.GateRoutes{
 			CheckIn: gateHandler.CheckIn, CheckOut: gateHandler.CheckOut,
+			Complete: gateHandler.Complete,
 		},
 		Upload: deliveryhttp.UploadRoutes{Upload: uploadHandler.Upload},
 		File:   deliveryhttp.FileRoutes{File: fileHandler.File},

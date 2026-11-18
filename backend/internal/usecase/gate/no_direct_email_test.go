@@ -67,9 +67,9 @@ func TestCheckOut_PerformsNoDirectEmailSend(t *testing.T) {
 	if _, err := svc.CheckOut(t.Context(), actor, visit.ID); err != nil {
 		t.Fatalf("expected check-out to succeed, got %v", err)
 	}
-	// Then: exactly one status write reached completed, and the gate sent zero emails.
-	if len(visits.writes) != 1 || visits.writes[0].status != domain.VisitStatusCompleted {
-		t.Fatalf("writes = %+v, want exactly one move to completed", visits.writes)
+	// Then: exactly one status write reached offsite, and the gate sent zero emails.
+	if len(visits.writes) != 1 || visits.writes[0].status != domain.VisitStatusOffsite {
+		t.Fatalf("writes = %+v, want exactly one move to offsite", visits.writes)
 	}
 	if len(fake.Calls) != 0 {
 		t.Fatalf("gate email calls = %d, want 0 (no separate hook)", len(fake.Calls))

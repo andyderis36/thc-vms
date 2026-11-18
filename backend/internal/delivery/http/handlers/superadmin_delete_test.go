@@ -90,7 +90,7 @@ func (s *stubVisitRepos) DeleteVisit(_ context.Context, id domain.UUID) error {
 	return nil
 }
 
-func (s *stubVisitRepos) AttachWorkPhoto(_ context.Context, _ domain.UUID, _ domain.WorkPhotoKind, _ string, _ domain.UUID) (domain.WorkPhoto, bool, error) {
+func (s *stubVisitRepos) AttachWorkPhoto(_ context.Context, _ domain.UUID, _ domain.WorkPhotoKind, _ string, _ domain.UUID, _ *domain.UUID) (domain.WorkPhoto, bool, error) {
 	return domain.WorkPhoto{}, false, domain.ErrNotFound
 }
 

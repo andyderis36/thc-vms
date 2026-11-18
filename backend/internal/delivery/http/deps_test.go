@@ -34,8 +34,9 @@ func fullyWiredDeps() Deps {
 		VendorSuggestions:    wired(),
 		MemberSuggestions:    wired(),
 		MemberSuggestion:     wired(),
+		Logs:                 wired(),
 	}
-	gate := GateRoutes{CheckIn: wired(), CheckOut: wired()}
+	gate := GateRoutes{CheckIn: wired(), CheckOut: wired(), Complete: wired()}
 	upload := UploadRoutes{Upload: wired()}
 	file := FileRoutes{File: wired()}
 	avatar := AvatarRoutes{Avatar: wired()}
