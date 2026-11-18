@@ -35,7 +35,7 @@ interface ScalarFieldSpec {
 /** Field manifest sebelum blok anggota (urutan visual 1–5). */
 const SCALAR_FIELDS_BEFORE_TECHNICIANS: readonly ScalarFieldSpec[] = [
   { path: 'location_id', label: 'Fasilitas Tujuan', anchorId: 'visit-location' },
-  { path: 'purpose_ids', label: 'Tujuan Kunjungan', anchorId: 'visit-purpose' },
+  { path: 'purpose_ids', label: 'Keperluan Kunjungan', anchorId: 'visit-purpose' },
   { path: 'purpose_note', label: 'Keperluan lain', anchorId: 'visit-purpose-note' },
   { path: 'start_date', label: 'Waktu Mulai', anchorId: 'visit-start-date' },
   { path: 'end_date', label: 'Waktu Selesai', anchorId: 'visit-end-date' },

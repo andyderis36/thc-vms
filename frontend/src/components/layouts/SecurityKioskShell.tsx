@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge'
 import { NotificationsMenu } from '@/components/ui/NotificationsMenu'
 import { Tabs, type TabItem } from '@/components/ui/Tabs'
 import { UserAvatar } from '@/components/ui/UserAvatar'
+import { userLocationIds } from '@/features/users/managed-user-filters'
 import { useSession } from '@/lib/auth/session'
 import { getGuardShiftLabel } from '@/lib/guard-shift'
 import type { NotificationItem } from '@/lib/api/types'
@@ -108,6 +109,8 @@ export function SecurityKioskShell({
 
   const guardName = user?.name ?? 'Petugas Jaga'
   const locationName = user?.location_name ?? 'Lokasi Terkunci'
+  const coverageCount = user !== undefined && user !== null ? userLocationIds(user).length : 0
+  const showBranchBadge = coverageCount <= 1
 
   const desktopTabs: TabItem[] = KIOSK_TABS.map((tab) => ({
     id: tab.id,
@@ -160,10 +163,12 @@ export function SecurityKioskShell({
                 tampil sehingga baris padat: `md:min-w-24` memberi badge lantai
                 96px agar tak terlipat jadi sliver, sisanya diserap nama yang
                 memang `truncate`. */}
-            <Badge tone="info" className="hidden min-w-0 max-w-full gap-1.5 md:inline-flex md:max-w-56 md:min-w-24 xl:max-w-48">
-              <MapPin aria-hidden="true" className="size-3 shrink-0" />
-              <span className="truncate" title={locationName}>{locationName}</span>
-            </Badge>
+            {showBranchBadge ? (
+              <Badge tone="info" className="hidden min-w-0 max-w-full gap-1.5 md:inline-flex md:max-w-56 md:min-w-24 xl:max-w-48">
+                <MapPin aria-hidden="true" className="size-3 shrink-0" />
+                <span className="truncate" title={locationName}>{locationName}</span>
+              </Badge>
+            ) : null}
           </div>
 
           {/* Tengah: jam live WIB + counter teknisi on-site.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"thc-vms/backend/internal/domain"
 )
@@ -36,6 +37,30 @@ func TestCreateVisit_ValidRequestCreatesRequestedVisit(t *testing.T) {
 	}
 	if repo.createdVisit.VendorUserID != actor.ID {
 		t.Errorf("VendorUserID = %q, want %q", repo.createdVisit.VendorUserID, actor.ID)
+	}
+}
+
+func TestCreateVisit_RejectsStartInThePast(t *testing.T) {
+	repo := newFakeVisitRepo(t)
+	now := testNow()
+	svc := newTestService(repo, nil, now)
+	actor := testActor(domain.RoleVendor, "vendor-1", "")
+
+	in := validCreateInput()
+	in.StartDate = now.Add(-time.Hour)
+	in.EndDate = now.Add(time.Hour)
+	_, err := svc.CreateVisit(context.Background(), actor, in)
+	if err == nil {
+		t.Fatal("past start must be rejected, got nil error")
+	}
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("past start error = %v, want validation failure", err)
+	}
+	if !strings.Contains(err.Error(), "masa lampau") {
+		t.Errorf("past start message %q must name the past-start rule", err.Error())
+	}
+	if repo.createCalls != 0 {
+		t.Errorf("createCalls = %d, want 0", repo.createCalls)
 	}
 }
 
