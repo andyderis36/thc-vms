@@ -35,7 +35,7 @@ var openapiKeys = map[string]map[string]bool{
 		"start_date": true, "end_date": true, "assignment_letter_url": true,
 		"notes": true, "purpose_note": true, "status_note": true, "visitors": true, "created_at": true,
 		"check_in_at": true, "check_out_at": true, "checked_in_by": true,
-		"created_by_name": true, "created_by_role_label": true,
+		"created_by": true, "created_by_name": true, "created_by_role_label": true,
 		"checked_in_by_name": true, "checked_out_by_name": true,
 		"history": true,
 		"work_photos": true,
@@ -45,7 +45,7 @@ var openapiKeys = map[string]map[string]bool{
 	},
 	"WorkPhoto": {
 		"kind": true, "url": true, "uploaded_by": true, "uploaded_by_name": true,
-		"uploaded_at": true,
+		"uploaded_at": true, "visit_log_id": true,
 	},
 	"VisitList": {"items": true, "total": true, "page": true, "limit": true},
 	"PendingRegistrationList": {

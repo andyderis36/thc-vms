@@ -20,6 +20,7 @@ import (
 type GateService interface {
 	CheckIn(ctx context.Context, actor gate.Actor, visitIDOrCode string, in gate.CheckInInput) (domain.CheckIn, error)
 	CheckOut(ctx context.Context, actor gate.Actor, visitID domain.UUID) (domain.CheckOut, error)
+	CompleteVisit(ctx context.Context, actor gate.Actor, visitID domain.UUID) error
 }
 
 // Compile-time proof that the production service wires into the handler.
@@ -93,6 +94,30 @@ func (h *GateHandler) CheckOut(c *gin.Context) {
 		return
 	}
 	if _, err := h.gate.CheckOut(c.Request.Context(), actor, domain.UUID(key)); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK[any](c, nil)
+}
+
+// Complete serves POST /visits/{id}/complete: the manual "Selesaikan" action
+// that closes an active permit. The role and branch guards live in the
+// CompleteVisit usecase (admin/super_admin of the visit's branch only), so this
+// handler only maps the HTTP id and the error envelope — it never narrows or
+// widens the usecase's authorization. Like its check-in/out siblings it carries
+// no body and writes no audit row of its own.
+func (h *GateHandler) Complete(c *gin.Context) {
+	actor, err := gateActor(c)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	key := strings.TrimSpace(c.Param("id"))
+	if key == "" {
+		response.Fail(c, domain.NotFoundEntity("Kunjungan"))
+		return
+	}
+	if err := h.gate.CompleteVisit(c.Request.Context(), actor, domain.UUID(key)); err != nil {
 		response.Fail(c, err)
 		return
 	}

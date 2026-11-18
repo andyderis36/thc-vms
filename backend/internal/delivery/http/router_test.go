@@ -111,7 +111,7 @@ func (fakeVisitService) UpdateVisitorContact(_ context.Context, _ visit.Actor, _
 	return domain.Visitor{}, domain.NotFoundEntity("Kunjungan")
 }
 
-func (fakeVisitService) AttachWorkPhoto(_ context.Context, _ visit.Actor, _ domain.UUID, _, _ string) (domain.WorkPhoto, bool, error) {
+func (fakeVisitService) AttachWorkPhoto(_ context.Context, _ visit.Actor, _ domain.UUID, _, _ string, _ *domain.UUID) (domain.WorkPhoto, bool, error) {
 	return domain.WorkPhoto{}, false, domain.NotFoundEntity("Kunjungan")
 }
 
@@ -140,6 +140,10 @@ func (fakeGateService) CheckIn(_ context.Context, _ gate.Actor, _ string, _ gate
 
 func (fakeGateService) CheckOut(_ context.Context, _ gate.Actor, _ domain.UUID) (domain.CheckOut, error) {
 	return domain.CheckOut{}, domain.NotFoundEntity("Kunjungan")
+}
+
+func (fakeGateService) CompleteVisit(_ context.Context, _ gate.Actor, _ domain.UUID) error {
+	return domain.NotFoundEntity("Kunjungan")
 }
 
 // fakeMaster answers the catalogues with empty lists.
@@ -250,9 +254,11 @@ func testEngine() *gin.Engine {
 			Approve: visits.Approve, Reject: visits.Reject,
 			UpdateVisitorContact: visits.UpdateVisitorContact,
 			AttachWorkPhoto:      visits.AttachWorkPhoto,
+			Logs:                 visits.Logs,
 		},
 		Gate: deliveryhttp.GateRoutes{
 			CheckIn: gate.CheckIn, CheckOut: gate.CheckOut,
+			Complete: gate.Complete,
 		},
 		Upload: deliveryhttp.UploadRoutes{Upload: upload.Upload},
 		Health: deliveryhttp.HealthProbes{Health: health.Health, Ready: health.Ready},
@@ -323,6 +329,7 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/visits"},
 		{http.MethodPost, "/api/v1/visits"},
 		{http.MethodGet, "/api/v1/visits/some-id"},
+		{http.MethodGet, "/api/v1/visits/some-id/logs"},
 		{http.MethodGet, "/api/v1/visits/some-id/file"},
 		{http.MethodGet, "/api/v1/avatars/some-id"},
 		{http.MethodPost, "/api/v1/visits/some-id/approve"},
@@ -334,14 +341,15 @@ func TestRouter_RegistersExactlyTheMVPContract(t *testing.T) {
 		{http.MethodGet, "/api/v1/visits/some-id/qr"},
 		{http.MethodPost, "/api/v1/visits/some-id/checkin"},
 		{http.MethodPost, "/api/v1/visits/some-id/checkout"},
+		{http.MethodPost, "/api/v1/visits/some-id/complete"},
 		{http.MethodDelete, "/api/v1/visits/some-id"},
 		{http.MethodGet, "/api/v1/audit-logs"},
 		{http.MethodGet, "/api/v1/notifications"},
 		{http.MethodGet, "/api/v1/notifications/pending-registrations"},
 		{http.MethodPost, "/api/v1/uploads"},
 	}
-	if len(wired) != 51 {
-		t.Fatalf("contract drift: wired routes = %d, want 51", len(wired))
+	if len(wired) != 53 {
+		t.Fatalf("contract drift: wired routes = %d, want 53", len(wired))
 	}
 	for _, route := range wired {
 		rec := serve(engine, route.method, route.path)

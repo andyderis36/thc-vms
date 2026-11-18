@@ -81,7 +81,7 @@ func TestRule1_BoundaryWindowStart(t *testing.T) {
 
 func TestRule2_NoShowAfterWindowCloses(t *testing.T) {
 	t.Parallel()
-	// Given: an approved visit whose window closed (end 3h ago) with no check-in.
+	// Given: an approved permit whose end datetime has passed with no entry.
 	noShow := mkVisit("visit-r2", domain.VisitStatusApproved,
 		workerNow.Add(-24*time.Hour), workerNow.Add(-5*time.Hour), workerNow.Add(-3*time.Hour))
 	visits := newFakeVisitRepo(noShow)
@@ -89,12 +89,12 @@ func TestRule2_NoShowAfterWindowCloses(t *testing.T) {
 	svc := workerService(visits, rules, newFakeCheckInOutRepo())
 	// When: the sweep runs.
 	summary := svc.Run(t.Context())
-	// Then: approved -> not_visit.
+	// Then: approved -> cancelled (the visit_auto_cancelled notice), not not_visit.
 	if summary.NoShow != 1 {
 		t.Fatalf("expected 1 no-show, got %+v", summary)
 	}
-	if visits.visits[noShow.ID].Status != domain.VisitStatusNotVisit {
-		t.Fatalf("expected status not_visit, got %q", visits.visits[noShow.ID].Status)
+	if visits.visits[noShow.ID].Status != domain.VisitStatusCancelled {
+		t.Fatalf("expected status cancelled, got %q", visits.visits[noShow.ID].Status)
 	}
 }
 
@@ -127,9 +127,11 @@ func TestRule2_VisitWithCheckInRowIsNotFlipped(t *testing.T) {
 	}
 }
 
-func TestRule2_NoShowFromOverdueRequested(t *testing.T) {
+func TestRule2_OverdueRequestedIsR2Source(t *testing.T) {
 	t.Parallel()
-	// Given: a requested visit whose window closed (end 3h ago), never approved.
+	// Given: a requested visit that ended three hours ago — one hour past R1's
+	// end_date > now()-2h guard, so R1 can no longer list it. R2 must claim it
+	// instead, otherwise the row is swept by no rule at all.
 	v := mkVisit("visit-r2req", domain.VisitStatusRequested,
 		workerNow.Add(-24*time.Hour), workerNow.Add(-5*time.Hour), workerNow.Add(-3*time.Hour))
 	visits := newFakeVisitRepo(v)
@@ -137,18 +139,22 @@ func TestRule2_NoShowFromOverdueRequested(t *testing.T) {
 	svc := workerService(visits, rules, newFakeCheckInOutRepo())
 	// When: the sweep runs.
 	summary := svc.Run(t.Context())
-	// Then: requested -> not_visit, counted as a no-show.
+	// Then: R2 cancels it (zero entries) with the R2 note.
 	if summary.NoShow != 1 {
 		t.Fatalf("expected 1 no-show, got %+v", summary)
 	}
-	if visits.visits[v.ID].Status != domain.VisitStatusNotVisit {
-		t.Fatalf("expected status not_visit, got %q", visits.visits[v.ID].Status)
+	if visits.visits[v.ID].Status != domain.VisitStatusCancelled {
+		t.Fatalf("expected status cancelled, got %q", visits.visits[v.ID].Status)
+	}
+	if len(visits.writes) != 1 || visits.writes[0].notes != "Otomatis dibatalkan: tidak ada check-in hingga akhir jadwal (R2)." {
+		t.Fatalf("writes = %+v, want one R2 auto-cancel note", visits.writes)
 	}
 }
 
-func TestRule2_NoShowFromOverdueRescheduled(t *testing.T) {
+func TestRule2_RescheduledIsR2Source(t *testing.T) {
 	t.Parallel()
-	// Given: a rescheduled visit whose window closed (end 3h ago), never checked in.
+	// Given: a rescheduled visit whose end datetime has passed with no entry.
+	// Rescheduling without a re-approval must not leave the permit open forever.
 	v := mkVisit("visit-r2resched", domain.VisitStatusRescheduled,
 		workerNow.Add(-24*time.Hour), workerNow.Add(-5*time.Hour), workerNow.Add(-3*time.Hour))
 	visits := newFakeVisitRepo(v)
@@ -156,27 +162,61 @@ func TestRule2_NoShowFromOverdueRescheduled(t *testing.T) {
 	svc := workerService(visits, rules, newFakeCheckInOutRepo())
 	// When: the sweep runs.
 	summary := svc.Run(t.Context())
-	// Then: rescheduled -> not_visit.
+	// Then: R2 cancels it with the R2 note.
 	if summary.NoShow != 1 {
 		t.Fatalf("expected 1 no-show, got %+v", summary)
 	}
-	if visits.visits[v.ID].Status != domain.VisitStatusNotVisit {
-		t.Fatalf("expected status not_visit, got %q", visits.visits[v.ID].Status)
+	if visits.visits[v.ID].Status != domain.VisitStatusCancelled {
+		t.Fatalf("expected status cancelled, got %q", visits.visits[v.ID].Status)
+	}
+	if len(visits.writes) != 1 || visits.writes[0].notes != "Otomatis dibatalkan: tidak ada check-in hingga akhir jadwal (R2)." {
+		t.Fatalf("writes = %+v, want one R2 auto-cancel note", visits.writes)
 	}
 }
 
-func TestRule2_BoundaryAtGraceIsInclusive(t *testing.T) {
+// TestRule2_RequestedGuardBoundary pins the R1/R2 split on end_date for the
+// requested status: R1's guard owns (now-2h, now], R2 owns everything at or
+// before now-2h. Rescheduled and approved are R2's from the exact end instant.
+func TestRule2_RequestedGuardBoundary(t *testing.T) {
 	t.Parallel()
-	// Given: the R2 cut-off (now - NoShowGrace) derived from the frozen clock.
+	r2, _ := worker.Thresholds(workerNow)
+	guardEdge := r2.Add(-domain.NoShowGrace)
+	cases := []struct {
+		name    string
+		status  domain.VisitStatus
+		endDate time.Time
+		want    bool
+	}{
+		{"requested at the guard edge leaves R1", domain.VisitStatusRequested, guardEdge, true},
+		{"requested one second inside the guard stays R1's", domain.VisitStatusRequested, guardEdge.Add(time.Second), false},
+		{"requested one second past the guard is R2's", domain.VisitStatusRequested, guardEdge.Add(-time.Second), true},
+		{"rescheduled at the exact end is R2's", domain.VisitStatusRescheduled, r2, true},
+		{"rescheduled one second before end is not yet R2's", domain.VisitStatusRescheduled, r2.Add(time.Second), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			v := mkVisit("visit-r2guard", tc.status,
+				workerNow.Add(-24*time.Hour), tc.endDate.Add(-time.Hour), tc.endDate)
+			if got := worker.ShouldMarkNoShow(v, r2, false); got != tc.want {
+				t.Fatalf("ShouldMarkNoShow(status=%s, end=%v) = %v, want %v", tc.status, tc.endDate, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRule2_BoundaryAtEndIsInclusive(t *testing.T) {
+	t.Parallel()
+	// Given: the R2 cut-off is the frozen clock itself (no grace).
 	r2, _ := worker.Thresholds(workerNow)
 	cases := []struct {
 		name    string
 		endDate time.Time
 		want    bool
 	}{
-		{"exactly end+grace closes the window", r2, true},
-		{"one second before end+grace is still open", r2.Add(time.Second), false},
-		{"three hours past end is a no-show", workerNow.Add(-3 * time.Hour), true},
+		{"end exactly now auto-cancels", r2, true},
+		{"end one second ahead is still active", r2.Add(time.Second), false},
+		{"end one second ago auto-cancels", r2.Add(-time.Second), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -226,12 +266,13 @@ func TestRule1_FutureWindowRequestSurvives(t *testing.T) {
 	}
 }
 
-func TestRules_OverdueStaleRequestBecomesNoShowNotCancelled(t *testing.T) {
+func TestRules_OverdueStaleRequestIsR1NotR2(t *testing.T) {
 	t.Parallel()
-	// Given: a requested visit whose window BOTH started AND closed, so it
-	// appears on the R1 and R2 candidate lists at once.
+	// Given: a requested visit whose window BOTH started AND closed one hour
+	// ago, so it sits inside R1's end guard and the two fake candidate lists
+	// both carry it.
 	both := mkVisit("visit-both", domain.VisitStatusRequested,
-		workerNow.Add(-8*24*time.Hour), workerNow.Add(-5*time.Hour), workerNow.Add(-3*time.Hour))
+		workerNow.Add(-8*24*time.Hour), workerNow.Add(-5*time.Hour), workerNow.Add(-time.Hour))
 	visits := newFakeVisitRepo(both)
 	rules := &fakeAutoRules{
 		stale:  []domain.VisitRequest{both},
@@ -240,27 +281,29 @@ func TestRules_OverdueStaleRequestBecomesNoShowNotCancelled(t *testing.T) {
 	svc := workerService(visits, rules, newFakeCheckInOutRepo())
 	// When: the sweep runs.
 	summary := svc.Run(t.Context())
-	// Then: R2 claims it first (not_visit); R1 then sees the flipped row and
-	// skips it, so it is never cancelled.
-	if summary.NoShow != 1 {
-		t.Fatalf("expected 1 no-show, got %+v", summary)
+	// Then: R2 skips it (inside R1's guard) and R1 cancels it with the R1 note.
+	if summary.NoShow != 0 {
+		t.Fatalf("expected 0 no-shows, got %+v", summary)
 	}
-	if summary.Cancelled != 0 {
-		t.Fatalf("expected 0 cancellations, got %+v", summary)
+	if summary.Cancelled != 1 {
+		t.Fatalf("expected 1 cancellation, got %+v", summary)
 	}
-	if visits.visits[both.ID].Status != domain.VisitStatusNotVisit {
-		t.Fatalf("expected status not_visit, got %q", visits.visits[both.ID].Status)
+	if visits.visits[both.ID].Status != domain.VisitStatusCancelled {
+		t.Fatalf("expected status cancelled, got %q", visits.visits[both.ID].Status)
+	}
+	if len(visits.writes) != 1 || visits.writes[0].notes != "Otomatis dibatalkan: jadwal kunjungan telah dimulai tanpa persetujuan (R1)." {
+		t.Fatalf("writes = %+v, want one R1 auto-cancel note", visits.writes)
 	}
 	if summary.Skipped < 1 {
-		t.Fatalf("expected R1 to skip the flipped row, got %+v", summary)
+		t.Fatalf("expected R2 to skip the requested row, got %+v", summary)
 	}
 }
 
-func TestRule3_AutoCompletesAfterTwentyFourHours(t *testing.T) {
+func TestRule3_AutoCompletesAtEndDatetime(t *testing.T) {
 	t.Parallel()
-	// Given: a visiting visit whose end was 25h ago.
+	// Given: a visiting permit whose end datetime has arrived (no 24h grace).
 	v := mkVisit("visit-r3", domain.VisitStatusVisiting,
-		workerNow.Add(-48*time.Hour), workerNow.Add(-30*time.Hour), workerNow.Add(-25*time.Hour))
+		workerNow.Add(-48*time.Hour), workerNow.Add(-30*time.Hour), workerNow.Add(-time.Second))
 	visits := newFakeVisitRepo(v)
 	rules := &fakeAutoRules{overstayed: []domain.VisitRequest{v}}
 	svc := workerService(visits, rules, newFakeCheckInOutRepo())
@@ -275,18 +318,18 @@ func TestRule3_AutoCompletesAfterTwentyFourHours(t *testing.T) {
 	}
 }
 
-func TestRule3_BoundaryTwentyFourHours(t *testing.T) {
+func TestRule3_BoundaryAtEndDatetime(t *testing.T) {
 	t.Parallel()
-	// Given: the R3 cut-off derived from the frozen clock.
+	// Given: the R3 cut-off is the frozen clock itself (no 24h grace).
 	_, r3 := worker.Thresholds(workerNow)
 	cases := []struct {
 		name    string
 		endDate time.Time
 		want    bool
 	}{
-		{"exactly 24h is completed", r3, true},
-		{"24h minus 1s is not yet completed", r3.Add(time.Second), false},
-		{"25h is completed", workerNow.Add(-25 * time.Hour), true},
+		{"end exactly now is completed", r3, true},
+		{"end one second ahead is not yet completed", r3.Add(time.Second), false},
+		{"end one second ago is completed", r3.Add(-time.Second), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

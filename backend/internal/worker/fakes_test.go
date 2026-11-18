@@ -119,7 +119,7 @@ func (f *fakeVisitRepo) DeleteVisit(_ context.Context, id domain.UUID) error {
 }
 
 // AttachWorkPhoto satisfies domain.VisitRepository; the worker never uses it.
-func (f *fakeVisitRepo) AttachWorkPhoto(_ context.Context, _ domain.UUID, _ domain.WorkPhotoKind, _ string, _ domain.UUID) (domain.WorkPhoto, bool, error) {
+func (f *fakeVisitRepo) AttachWorkPhoto(_ context.Context, _ domain.UUID, _ domain.WorkPhotoKind, _ string, _ domain.UUID, _ *domain.UUID) (domain.WorkPhoto, bool, error) {
 	return domain.WorkPhoto{}, false, fmt.Errorf("fakeVisitRepo: unimplemented: %w", domain.ErrNotFound)
 }
 

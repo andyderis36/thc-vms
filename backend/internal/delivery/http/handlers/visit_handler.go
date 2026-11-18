@@ -29,7 +29,7 @@ type VisitService interface {
 	Cancel(ctx context.Context, actor visit.Actor, visitID domain.UUID, note string) error
 	Reschedule(ctx context.Context, actor visit.Actor, visitID domain.UUID, start, end time.Time, reason string) error
 	UpdateVisitorContact(ctx context.Context, actor visit.Actor, visitID, visitorID domain.UUID, phone, idNumber *string) (domain.Visitor, error)
-	AttachWorkPhoto(ctx context.Context, actor visit.Actor, visitID domain.UUID, kind, url string) (domain.WorkPhoto, bool, error)
+	AttachWorkPhoto(ctx context.Context, actor visit.Actor, visitID domain.UUID, kind, url string, visitLogID *domain.UUID) (domain.WorkPhoto, bool, error)
 	ListJabatan(ctx context.Context) ([]string, error)
 	ListVendorSuggestions(ctx context.Context, actor visit.Actor, query string) ([]domain.VendorSuggestion, error)
 	ListMemberSuggestions(ctx context.Context, actor visit.Actor, in visit.MemberSuggestionsInput) ([]domain.MemberSuggestion, error)
@@ -44,11 +44,18 @@ var _ VisitService = (*visit.Service)(nil)
 // rules all live in the usecase, never here.
 type VisitHandler struct {
 	visits VisitService
+	logs   VisitLogReader
 }
 
 // NewVisitHandler wires the handler to its usecase port.
 func NewVisitHandler(svc VisitService) *VisitHandler {
 	return &VisitHandler{visits: svc}
+}
+
+// WithLogs wires the read-only gate-timeline port used by Logs.
+func (h *VisitHandler) WithLogs(reader VisitLogReader) *VisitHandler {
+	h.logs = reader
+	return h
 }
 
 // List serves GET /visits. The actor travels through so the usecase applies

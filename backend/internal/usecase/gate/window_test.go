@@ -59,7 +59,7 @@ func TestInCheckInWindow_RejectsThreeHoursEarly(t *testing.T) {
 
 func TestInCheckInWindow_RejectsThreeHoursAfterEnd(t *testing.T) {
 	t.Parallel()
-	// Given: a visit whose end was 3h before now (window closed 1h ago).
+	// Given: a visit whose end was 3h before now (window closed at end).
 	start := fixedNow.Add(-6 * time.Hour)
 	end := fixedNow.Add(-3 * time.Hour)
 	visit := visitFixture("visit-late", domain.VisitStatusApproved, start, end)
@@ -94,9 +94,9 @@ func TestInCheckInWindow_BoundariesAreInclusive(t *testing.T) {
 	start := fixedNow.Add(-time.Hour)
 	end := fixedNow.Add(time.Hour)
 	openAt := start.Add(-2 * time.Hour)
-	closeAt := end.Add(2 * time.Hour)
-	// When/Then: exactly start-2h and exactly end+2h are allowed (inclusive),
-	// one second outside either edge is refused.
+	// When/Then: exactly start-2h and exactly end are allowed (inclusive),
+	// one second outside either edge is refused. There is no post-end grace:
+	// R3/Selesaikan owns completion, not a late gate scan (plan §3/§5).
 	cases := []struct {
 		name string
 		now  time.Time
@@ -104,8 +104,8 @@ func TestInCheckInWindow_BoundariesAreInclusive(t *testing.T) {
 	}{
 		{"exactly start-2h allowed", openAt, true},
 		{"one second before start-2h refused", openAt.Add(-time.Second), false},
-		{"exactly end+2h allowed", closeAt, true},
-		{"one second after end+2h refused", closeAt.Add(time.Second), false},
+		{"exactly end allowed", end, true},
+		{"one second after end refused", end.Add(time.Second), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -273,7 +273,7 @@ func (f *fakeVisitService) GetMemberSuggestion(_ context.Context, _ visit.Actor,
 	return f.memberDetail, nil
 }
 
-func (f *fakeVisitService) AttachWorkPhoto(_ context.Context, _ visit.Actor, id domain.UUID, kind, url string) (domain.WorkPhoto, bool, error) {
+func (f *fakeVisitService) AttachWorkPhoto(_ context.Context, _ visit.Actor, id domain.UUID, kind, url string, _ *domain.UUID) (domain.WorkPhoto, bool, error) {
 	f.lastAttachID = id
 	f.lastAttachKind = kind
 	f.lastAttachURL = url
@@ -320,6 +320,9 @@ type fakeGateService struct {
 	checkOutResult domain.CheckOut
 	checkOutErr    error
 	lastOutID      domain.UUID
+
+	completeErr    error
+	lastCompleteID domain.UUID
 }
 
 func (f *fakeGateService) CheckIn(_ context.Context, _ gate.Actor, key string, in gate.CheckInInput) (domain.CheckIn, error) {
@@ -337,6 +340,26 @@ func (f *fakeGateService) CheckOut(_ context.Context, _ gate.Actor, id domain.UU
 		return domain.CheckOut{}, f.checkOutErr
 	}
 	return f.checkOutResult, nil
+}
+
+func (f *fakeGateService) CompleteVisit(_ context.Context, _ gate.Actor, id domain.UUID) error {
+	f.lastCompleteID = id
+	return f.completeErr
+}
+
+// fakeVisitLogReader is a hand-written fake for handlers.VisitLogReader.
+type fakeVisitLogReader struct {
+	items []handlers.VisitLogDTO
+	err   error
+	last  domain.UUID
+}
+
+func (f *fakeVisitLogReader) ListVisitLogsByVisit(_ context.Context, id domain.UUID) ([]handlers.VisitLogDTO, error) {
+	f.last = id
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.items, nil
 }
 
 // fakeStorage is a hand-written fake for domain.IStorageService.
