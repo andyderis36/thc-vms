@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/Input'
 import { Pagination } from '@/components/ui/Pagination'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Select, type SelectOption } from '@/components/ui/Select'
+import { Tabs, type TabItem } from '@/components/ui/Tabs'
 import { RequireRole } from '@/lib/auth/guards'
 import { isSuperAdminRole } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
@@ -51,6 +52,36 @@ const TAB_STATUS: Record<KioskTabId, VisitStatus> = {
   upcoming: 'approved',
   'on-site': 'visiting',
   completed: 'completed',
+}
+
+/**
+ * Tab antrean gerbang versi AdminBranchShell: label sama dengan
+ * `KIOSK_TABS` di SecurityKioskShell (Akan Hadir / Sedang di Lokasi /
+ * Selesai) supaya admin mendapat filter tab yang setara tanpa pindah
+ * ke shell kios. Dirender di dalam `gateContent` hanya untuk role admin.
+ */
+const GATE_TABS: TabItem[] = [
+  { id: 'upcoming', label: 'Akan Hadir' },
+  { id: 'on-site', label: 'Sedang di Lokasi' },
+  { id: 'completed', label: 'Selesai' },
+]
+
+export function GateTabs({
+  value,
+  onChange,
+}: {
+  value: KioskTabId
+  onChange: (id: KioskTabId) => void
+}): React.JSX.Element {
+  return (
+    <Tabs
+      tabs={GATE_TABS}
+      value={value}
+      onChange={(id) => onChange(id as KioskTabId)}
+      size="gate"
+      ariaLabel="Filter antrean kunjungan"
+    />
+  )
 }
 
 const GATE_SEARCH_ID = 'thc-gate-visit-search'
@@ -412,10 +443,16 @@ function GateContent() {
   // bukan dari query tab — supaya navbar kios selalu bicara dengan angka yang
   // sama apa pun tab yang aktif.
   const gateContent = (
-    <div className="flex flex-col gap-4 lg:flex-row">
-      <div className="min-w-0 lg:w-[42%]">
-        <ScannerPanel
-          phase={phase}
+    <>
+      {role === 'admin' ? (
+        <div className="mb-4">
+          <GateTabs value={tab} onChange={setTab} />
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-4 lg:flex-row">
+        <div className="min-w-0 lg:w-[42%]">
+          <ScannerPanel
+            phase={phase}
           onScan={handleScan}
           onReset={() => setPhase({ phase: 'idle' })}
           resetKey={scanResetKey}
@@ -535,7 +572,8 @@ function GateContent() {
         onClose={handleScanClose}
         onConfirm={() => void handleScanConfirm()}
       />
-    </div>
+      </div>
+    </>
   )
 
   // Shell mengikuti peran: pengawas tetap kios zero-sidebar; admin/superadmin
