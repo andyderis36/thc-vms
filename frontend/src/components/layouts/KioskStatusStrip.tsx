@@ -12,6 +12,12 @@ export interface KioskStatusStripProps {
   guardName: string
   /** Nama pos jaga (mis. "Kantor Pusat THC (Pontianak)"). */
   locationName: string
+  /**
+   * Jumlah cabang penugasan (`location_ids ?? [location_id]`).
+   * Absen = perilaku lama (chip selalu tampil). Lebih dari 1 → chip
+   * lokasi disembunyikan; 0/1 → tampil seperti biasa.
+   */
+  coverageCount?: number
   /** Foto profil petugas dari sesi; kosong → inisial. */
   avatarUrl?: string | null
   /** Label shift. Default dinamis dari jam dinding WIB, sama dengan SHELL-03. */
@@ -64,7 +70,9 @@ export function KioskStatusStrip({
   shiftLabel = getGuardShiftLabel(),
   className,
   href,
+  coverageCount,
 }: KioskStatusStripProps) {
+  const showLocationBadge = coverageCount === undefined || coverageCount <= 1
   const rootClassName = [
     // `.card` + `gap-4`/`p-4` = geometri kartu identitas vendor (K3).
     'card flex min-w-0 items-center gap-4 p-4 md:hidden',
@@ -105,19 +113,21 @@ export function KioskStatusStrip({
             {shiftLabel}
           </span>
         </p>
-        <Badge
-          tone="info"
-          className="min-w-0 max-w-full gap-1 self-end px-1.5 py-0 text-badge"
-        >
-          <MapPin aria-hidden="true" className="size-2.5 shrink-0" />
-          <span
-            data-testid="kiosk-location"
-            className="truncate"
-            title={locationName}
+        {showLocationBadge ? (
+          <Badge
+            tone="info"
+            className="min-w-0 max-w-full gap-1 self-end px-1.5 py-0 text-badge"
           >
-            {locationName}
-          </span>
-        </Badge>
+            <MapPin aria-hidden="true" className="size-2.5 shrink-0" />
+            <span
+              data-testid="kiosk-location"
+              className="truncate"
+              title={locationName}
+            >
+              {locationName}
+            </span>
+          </Badge>
+        ) : null}
       </div>
     </>
   )

@@ -14,6 +14,7 @@ erDiagram
     VISIT_REQUEST ||--o{ STATUS_HISTORY : "logs"
     VISIT_REQUEST ||--o| CHECK_IN : "records"
     VISIT_REQUEST ||--o| CHECK_OUT : "records"
+    VISIT_REQUEST ||--o{ VISIT_LOG : "records entries (multi-entry)"
     USER ||--o{ NOTIFICATION : "receives"
     VISIT_REQUEST ||--o{ NOTIFICATION : "notifies (000008)"
 
@@ -89,7 +90,7 @@ erDiagram
         timestamptz start_date "Indexed for schedule"
         timestamptz end_date "Indexed for auto-complete"
         boolean is_multi_day "Default false"
-        string status "Indexed: requested|approved|visiting|completed|not_visit|rejected|cancelled|rescheduled"
+        string status "Indexed: requested|approved|visiting|offsite|completed|not_visit|rejected|cancelled|rescheduled; offsite = check-out, permit masih aktif (multi-entry)"
         string assignment_letter_url "MinIO/S3 URL Surat Tugas/SPK (PDF/Gambar)"
         boolean is_nda_accepted "MVP digital legal agreement"
         text notes
@@ -142,6 +143,21 @@ erDiagram
         uuid visit_request_id FK UK "1 visit = 1 check-out record"
         timestamptz checked_out_at
         uuid checked_out_by FK "Security or Admin user ID"
+    }
+
+    %% VISIT_LOG is IMPLEMENTED (multi-entry permit): satu baris per entry
+    %% (check-in = 'in', check-out = 'out'), ditulis atomik bersama transisi
+    %% status. 1 permit dapat memiliki banyak pasangan in/out. Kehadiran
+    %% "sedang di lokasi" tetap status = visiting; timeline detail dibaca dari
+    %% tabel ini (BUKAN dari NOTIFICATION). Index komposit
+    %% (visit_request_id, created_at) dipakai untuk urutan timeline per permit.
+    VISIT_LOG {
+        uuid id PK
+        uuid visit_request_id FK "Indexed (composite with created_at)"
+        string direction "in | out"
+        uuid actor_user_id FK "Security/Admin/Superadmin yang mengeksekusi"
+        string actor_role "super_admin | admin | security"
+        timestamptz created_at "Default now(); index (visit_request_id, created_at)"
     }
 
     %% ============================================================

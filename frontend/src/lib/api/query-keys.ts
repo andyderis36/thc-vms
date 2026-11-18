@@ -18,6 +18,7 @@ export const queryKeys = {
     list: (params: VisitListParams) => ['visits', 'list', params] as const,
     detail: (id: string) => ['visits', 'detail', id] as const,
     qr: (id: string) => ['visits', 'qr', id] as const,
+    logs: (id: string) => ['visits', 'logs', id] as const,
   },
   locations: (activeOnly?: boolean) => ['locations', activeOnly ?? null] as const,
   purposes: () => ['purposes'] as const,

@@ -6,13 +6,13 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { PURPOSE_OPTIONS, PurposeDropdown } from './PurposeDropdown'
 
-const PLACEHOLDER = 'Pilih tujuan kunjungan'
+const PLACEHOLDER = 'Pilih keperluan kunjungan'
 
 function renderDropdown(overrides: Partial<Parameters<typeof PurposeDropdown>[0]> = {}) {
   const onToggle = vi.fn()
   const result = render(
     <PurposeDropdown
-      label="Tujuan Kunjungan"
+      label="Keperluan Kunjungan"
       selectedIds={[]}
       onToggle={onToggle}
       placeholder={PLACEHOLDER}
@@ -29,7 +29,7 @@ function openPanel() {
 }
 
 describe('PurposeDropdown', () => {
-  it('menampilkan placeholder saat belum ada tujuan yang dipilih', () => {
+  it('menampilkan placeholder saat belum ada keperluan yang dipilih', () => {
     renderDropdown()
     expect(screen.getByRole('button')).toHaveTextContent(PLACEHOLDER)
   })
@@ -49,12 +49,12 @@ describe('PurposeDropdown', () => {
     expect(screen.getAllByRole('option')).toHaveLength(4)
   })
 
-  it('menampilkan ringkasan jumlah tujuan yang dipilih', () => {
+  it('menampilkan ringkasan jumlah keperluan yang dipilih', () => {
     renderDropdown({ selectedIds: ['Survey', 'Project'] })
-    expect(screen.getByRole('button')).toHaveTextContent('2 tujuan dipilih')
+    expect(screen.getByRole('button')).toHaveTextContent('2 keperluan dipilih')
   })
 
-  it('memanggil onToggle dengan nama tujuan saat checkbox diklik lalu ringkasan ikut berubah', () => {
+  it('memanggil onToggle dengan nama keperluan saat checkbox diklik lalu ringkasan ikut berubah', () => {
     const { onToggle, rerender } = renderDropdown()
     openPanel()
 
@@ -64,7 +64,7 @@ describe('PurposeDropdown', () => {
 
     rerender(
       <PurposeDropdown
-        label="Tujuan Kunjungan"
+        label="Keperluan Kunjungan"
         selectedIds={['Survey']}
         onToggle={onToggle}
         placeholder={PLACEHOLDER}
@@ -72,7 +72,7 @@ describe('PurposeDropdown', () => {
         isError={false}
       />,
     )
-    expect(screen.getByRole('button')).toHaveTextContent('1 tujuan dipilih')
+    expect(screen.getByRole('button')).toHaveTextContent('1 keperluan dipilih')
     expect(screen.getByRole('checkbox', { name: 'Survey' })).toBeChecked()
     expect(screen.getByRole('option', { name: 'Survey' })).toHaveAttribute(
       'aria-selected',
@@ -124,27 +124,27 @@ describe('PurposeDropdown', () => {
     renderDropdown({ isLoading: true })
     const button = screen.getByRole('button')
     expect(button).toBeDisabled()
-    expect(button).toHaveTextContent('Memuat tujuan kunjungan…')
+    expect(button).toHaveTextContent('Memuat keperluan kunjungan…')
   })
 
   it('menampilkan pesan galat dan menonaktifkan tombol saat daftar gagal dimuat', () => {
     renderDropdown({ isError: true })
     expect(screen.getByRole('button')).toBeDisabled()
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Gagal memuat daftar tujuan kunjungan. Silakan muat ulang halaman.',
+      'Gagal memuat daftar keperluan kunjungan. Silakan muat ulang halaman.',
     )
   })
 
   it('menampilkan pesan galat validasi bila ada', () => {
-    renderDropdown({ error: 'Minimal pilih 1 tujuan kunjungan.' })
+    renderDropdown({ error: 'Minimal pilih 1 keperluan kunjungan.' })
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Minimal pilih 1 tujuan kunjungan.',
+      'Minimal pilih 1 keperluan kunjungan.',
     )
   })
 
   it('memakai id yang diberikan pada tombol pemicu bila prop id diisi', () => {
     renderDropdown({ id: 'visit-purpose' })
-    expect(screen.getByRole('button', { name: /Tujuan Kunjungan/ })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: /Keperluan Kunjungan/ })).toHaveAttribute(
       'id',
       'visit-purpose',
     )

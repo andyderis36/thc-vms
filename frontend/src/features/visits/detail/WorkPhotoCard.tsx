@@ -23,6 +23,12 @@ export interface WorkPhotoCardProps {
   after: WorkPhoto | null
   /** Izin unggah milik pemanggil (peran + kepemilikan) — gerbang status tetap di sini. */
   canEdit: boolean
+  /**
+   * Siklus check-in/out aktif (id baris `visit_logs` arah `in` terakhir yang
+   * belum ditutup `out`); lampiran membawa id ini sebagai `visit_log_id`.
+   * Absen = server memakai siklus `in` terakhir.
+   */
+  activeVisitLogId?: string | null
 }
 
 /** Teks per slot: label kartu, `alt` pratinjau, dan aria-label tombol aksi. */
@@ -347,6 +353,11 @@ function WorkPhotoSlot({ photo, ...rest }: WorkPhotoSlotProps) {
  * Kartu "Bukti Kerja" — dua slot foto bukti pengerjaan (Sebelum/Sesudah kerja)
  * pada detail kunjungan.
  *
+ * Baris bukti terikat ke satu siklus check-in/out via `visit_log_id`
+ * (migrasi 000034, nullable untuk baris lama). Tampilan per-siklus dihitung
+ * di klien oleh `VisitLogsTimeline` (filter `visit_log_id`, fallback jarak
+ * waktu untuk baris lama tanpa binding).
+ *
  * - Gerbang status: hanya `visiting` + `canEdit` yang boleh mengunggah/mengganti;
  *   status lain menampilkan petunjuk kunci berbahasa Indonesia dan KARTU TETAP
  *   merender foto yang sudah ada untuk dilihat.
@@ -359,9 +370,9 @@ function WorkPhotoSlot({ photo, ...rest }: WorkPhotoSlotProps) {
  * Komponen murni terkendali lewat props — integrasi ke halaman detail
  * (penerusan `work_photos` + `canEdit`) dilakukan pemanggil.
  */
-export function WorkPhotoCard({ visitId, status, before, after, canEdit }: WorkPhotoCardProps) {
-  const beforeUpload = useWorkPhotoUpload({ visitId, kind: 'before' })
-  const afterUpload = useWorkPhotoUpload({ visitId, kind: 'after' })
+export function WorkPhotoCard({ visitId, status, before, after, canEdit, activeVisitLogId }: WorkPhotoCardProps) {
+  const beforeUpload = useWorkPhotoUpload({ visitId, kind: 'before', visitLogId: activeVisitLogId })
+  const afterUpload = useWorkPhotoUpload({ visitId, kind: 'after', visitLogId: activeVisitLogId })
 
   const editable = status === 'visiting' && canEdit
   const busy = beforeUpload.isPending || afterUpload.isPending

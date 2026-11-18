@@ -392,4 +392,45 @@ describe('KioskStatusStrip — pita identitas kios ponsel', () => {
     const strip = screen.getByTestId('kiosk-status-strip')
     expect(strip.querySelector('a, button, input, select, textarea')).toBeNull()
   })
+
+  it('coverageCount 1: chip lokasi tampil seperti biasa', () => {
+    render(
+      <KioskStatusStrip
+        guardName="Joko Susilo"
+        locationName="Kantor Pusat THC (Pontianak)"
+        coverageCount={1}
+      />,
+    )
+
+    expect(screen.getByTestId('kiosk-location')).toHaveTextContent('Kantor Pusat THC (Pontianak)')
+  })
+
+  it('coverageCount > 1: chip lokasi disembunyikan, tanpa placeholder', () => {
+    render(
+      <KioskStatusStrip
+        guardName="Joko Susilo"
+        locationName="Kantor Pusat THC (Pontianak)"
+        coverageCount={2}
+      />,
+    )
+
+    expect(screen.queryByTestId('kiosk-location')).toBeNull()
+    expect(screen.queryByText('Kantor Pusat THC (Pontianak)')).toBeNull()
+    expect(screen.getByTestId('kiosk-guard-name')).toBeInTheDocument()
+  })
+
+  it('coverageCount 0/undefined: fallback tampil (defensif)', () => {
+    const zeroed = render(
+      <KioskStatusStrip
+        guardName="Joko Susilo"
+        locationName="Kantor Pusat THC (Pontianak)"
+        coverageCount={0}
+      />,
+    )
+    expect(zeroed.getByTestId('kiosk-location')).toBeInTheDocument()
+    zeroed.unmount()
+
+    render(<KioskStatusStrip guardName="Joko Susilo" locationName="Kantor Pusat THC (Pontianak)" />)
+    expect(screen.getByTestId('kiosk-location')).toBeInTheDocument()
+  })
 })

@@ -39,11 +39,16 @@ import { VisitFilePhoto } from '@/features/visits/detail/VisitFilePhoto'
 import { WorkPhotoCard } from '@/features/visits/detail/WorkPhotoCard'
 import { ApiError } from '@/lib/api/fetcher'
 import {
+  useCompleteVisitMutation,
   useDeleteVisitMutation,
   useUpdateVisitorContactMutation,
+  useVisitLogsQuery,
   useVisitQuery,
 } from '@/lib/api/hooks'
 import type { Role, VisitDetail, VisitorItem, VisitStatus } from '@/lib/api/types'
+import {
+  canCompleteVisit,
+} from '@/lib/visits/gate-status'
 import { can, getLoginRedirect } from '@/lib/auth/capabilities'
 import { RequireAuth } from '@/lib/auth/guards'
 import { useSession } from '@/lib/auth/session'
@@ -61,6 +66,7 @@ import {
 } from '@/lib/visits/visit-status'
 import { visitVendorUser } from '@/lib/visits/vendor-user'
 import { visitVendorCompany } from '@/lib/visits/visit-company'
+import { VisitLogsTimeline } from './VisitLogsTimeline'
 import { toast } from 'sonner'
 import { apiErrorMessage } from '@/features/visits/components/ApproveModal'
 
@@ -235,7 +241,12 @@ function VisitDetailScreen({ visitId }: VisitDetailScreenProps) {
       ) : visitQuery.isError ? (
         <ErrorBlock error={visitQuery.error} onRetry={() => void visitQuery.refetch()} />
       ) : visit !== undefined ? (
-        <VisitDetailView visit={visit} visitId={visitId} role={role} />
+        <VisitDetailView
+          visit={visit}
+          visitId={visitId}
+          role={role}
+          onRefresh={() => void visitQuery.refetch()}
+        />
       ) : (
         <LoadingBlock />
       )}
@@ -463,30 +474,53 @@ interface VisitDetailViewProps {
   visit: VisitDetail
   visitId: string
   role: Role
+  onRefresh: () => void
 }
 
-function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
+function VisitDetailView({ visit, visitId, role, onRefresh }: VisitDetailViewProps) {
   const { user: sessionUser } = useSession()
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [approveOpen, setApproveOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [completeOpen, setCompleteOpen] = useState(false)
   const router = useRouter()
   const deleteMutation = useDeleteVisitMutation()
+  const completeMutation = useCompleteVisitMutation()
+  const logsQuery = useVisitLogsQuery(visitId)
   const showDelete = can(role, 'deleteRecords')
+  // Siklus aktif = `in` terakhir yang belum ditutup `out` — dibawa sebagai
+  // `visit_log_id` saat mengunggah agar bukti terikat ke siklus ini.
+  const visitLogs = logsQuery.data ?? []
+  let activeVisitLogId: string | null = null
+  for (const log of visitLogs) {
+    if (log.direction === 'in') {
+      activeVisitLogId = log.id
+    } else if (log.direction === 'out') {
+      activeVisitLogId = null
+    }
+  }
 
   // Pengaju Vendor/Mitra via helper transisi Fase 1 (fallback `pic_user`).
   const vendorUser = visitVendorUser(visit)
   // Editor kontak anggota khusus pembuat: peran vendor + id sesi sama dengan
   // pengaju + status masih sebelum persetujuan (requested/rescheduled —
   // paritas dengan gerbang usecase backend; lihat isVisitorContactEditableStatus).
-  const isCreator =
+  const isOwnerVendor =
     role === 'vendor' &&
     sessionUser !== null &&
     vendorUser !== undefined &&
     vendorUser.id === sessionUser.id
-  const canEditVisitorContact = isCreator && isVisitorContactEditableStatus(visit.status)
+  // Pengunggah bukti kerja: vendor pemilik ATAU pembuat kunjungan
+  // (`created_by` = id sesi, untuk admin/super_admin pembuatnya) — paritas
+  // dengan gerbang usecase backend; security tidak pernah lolos.
+  const isCreator =
+    sessionUser !== null &&
+    visit.created_by != null &&
+    visit.created_by !== '' &&
+    visit.created_by === sessionUser.id
+  const canEditVisitorContact = isOwnerVendor && isVisitorContactEditableStatus(visit.status)
   // Kontrol aksi mengikuti matriks kapabilitas — Vendor/Mitra tidak pernah melihat
   // kontrol approval, dan pengawas tidak bisa mengubah jadwal/membatalkan.
   // Ubah Jadwal & Batal hanya dirender bila status sumbernya legal di backend:
@@ -505,7 +539,8 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
   // mereka (PRD §4 — RBAC murni).
   const canApprove = isApprovableStatus(visit.status) && can(role, 'approveVisit')
   const canReject = isRejectableStatus(visit.status) && can(role, 'rejectVisit')
-  const showActions = canReschedule || canCancel || canApprove || canReject
+  const canComplete = canCompleteVisit(visit.status, role)
+  const showActions = canReschedule || canCancel || canApprove || canReject || canComplete
   // QR tampil selama `approved` (untuk check-in) dan `visiting` (untuk
   // check-out, QR yang SAMA). `rescheduled` WAJIB disetujui ulang sebelum
   // check-in (backend menolak rescheduled->visiting), jadi QR disembunyikan
@@ -621,6 +656,17 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                         Batalkan Kunjungan
                       </Button>
                     )}
+                    {canComplete && (
+                      <Button
+                        variant="success"
+                        size="sm"
+                        aria-label={`Selesaikan kunjungan ${visit.visit_id}`}
+                        onClick={() => setCompleteOpen(true)}
+                      >
+                        <CheckCircle2 aria-hidden="true" className="size-4 shrink-0" />
+                        Selesaikan
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -646,10 +692,21 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                   checkOutAt={visit.check_out_at ?? null}
                   statusNote={visit.status_note ?? null}
                   history={visit.history ?? null}
+                  createdByName={visit.created_by_name ?? null}
                 />
               </div>
             </CardBody>
           </Card>
+
+          <VisitLogsTimeline
+            visitId={visitId}
+            logs={logsQuery.data ?? []}
+            isPending={logsQuery.isPending}
+            isError={logsQuery.isError}
+            onRetry={() => void logsQuery.refetch()}
+            before={visit.work_photos?.before ?? null}
+            after={visit.work_photos?.after ?? null}
+          />
 
           {/* Panel Informasi Lengkap */}
           <Card>
@@ -697,12 +754,9 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
                     }
                   />
                 ) : null}
-                {visit.checked_in_by_name != null && visit.checked_in_by_name !== '' ? (
-                  <InfoRow label="Check-in oleh" value={visit.checked_in_by_name} />
-                ) : null}
-                {visit.checked_out_by_name != null && visit.checked_out_by_name !== '' ? (
-                  <InfoRow label="Check-out oleh" value={visit.checked_out_by_name} />
-                ) : null}
+                {/* Pelaku check-in/out tidak ditampilkan di sini — tercatat di
+                    node gerbang Riwayat Status ("diverifikasi oleh …") dan
+                    lengkap di Riwayat Kunjungan. */}
                 <InfoRow
                   label="Catatan"
                   value={
@@ -742,13 +796,20 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
           </Card>
 
           {/* Bukti Kerja — dua slot kondisi (sebelum/sesudah). Unggah hanya
-              saat `visiting`; kartu tetap menampilkan foto lama sesudah terkunci. */}
+              saat `visiting` dan hanya oleh pemilik/pembuat: vendor pemilik
+              (`isOwnerVendor`) atau pembuat kunjungan (`isCreator`,
+              `created_by` = id sesi) — BUKAN security dan BUKAN admin lain
+              (petugas gerbang hanya verifikasi check-in/out). Kartu tetap
+              menampilkan foto lama sesudah terkunci. */}
           <WorkPhotoCard
             visitId={visit.id}
             status={visit.status}
             before={visit.work_photos?.before ?? null}
             after={visit.work_photos?.after ?? null}
-            canEdit={visit.status === 'visiting' && (isCreator || role !== 'vendor')}
+            canEdit={
+              visit.status === 'visiting' && (isOwnerVendor || isCreator)
+            }
+            activeVisitLogId={activeVisitLogId}
           />
 
           {/* Daftar Anggota — permukaan ber-tint lembut (bukan kotak
@@ -837,6 +898,31 @@ function VisitDetailView({ visit, visitId, role }: VisitDetailViewProps) {
       )}
       {rejectOpen && (
         <RejectModal visit={visit} open onClose={() => setRejectOpen(false)} />
+      )}
+      {completeOpen && (
+        <ConfirmModal
+          open
+          title={`Selesaikan ${visit.visit_id}`}
+          message={`Selesaikan kunjungan ${visit.visit_id}? Permit akan ditutup dan tidak dapat dipakai untuk check-in lagi.`}
+          confirmLabel="Ya, Selesaikan"
+          loading={completeMutation.isPending}
+          onClose={() => setCompleteOpen(false)}
+          onConfirm={() => {
+            completeMutation.mutate(
+              { visitId },
+              {
+                onSuccess: () => {
+                  toast.success(`Kunjungan ${visit.visit_id} telah diselesaikan.`)
+                  setCompleteOpen(false)
+                  onRefresh()
+                },
+                onError: (error) => {
+                  toast.error(apiErrorMessage(error))
+                },
+              },
+            )
+          }}
+        />
       )}
       {deleteOpen && (
         <ConfirmModal

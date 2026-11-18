@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
+import type { VisitStatus } from '@/lib/api/types'
 import { VISIT_STATUS_META } from '@/lib/visits/status-badge'
 
 type Tone = 'info' | 'success' | 'danger' | 'neutral' | 'warning'
 
-const EXPECTED_META: Record<string, { label: string; tone: Tone }> = {
+/**
+ * Diketik `Record<VisitStatus, ...>`: anggota union baru tanpa entri di sini
+ * (atau entri yang bukan anggota union) gagal typecheck, sehingga pin tabel
+ * tidak bisa diam-diam ketinggalan status.
+ */
+const EXPECTED_META: Record<VisitStatus, { label: string; tone: Tone }> = {
   requested: { label: 'Diminta', tone: 'info' },
   approved: { label: 'Disetujui', tone: 'success' },
   visiting: { label: 'Sedang di Lokasi', tone: 'info' },
+  offsite: { label: 'Check-out — di luar lokasi', tone: 'warning' },
   completed: { label: 'Selesai', tone: 'success' },
   not_visit: { label: 'Tidak Hadir', tone: 'warning' },
   rejected: { label: 'Ditolak', tone: 'danger' },
@@ -15,7 +22,7 @@ const EXPECTED_META: Record<string, { label: string; tone: Tone }> = {
   rescheduled: { label: 'Jadwal Digeser', tone: 'warning' },
 }
 
-const EXPECTED_STATUSES = Object.keys(EXPECTED_META)
+const EXPECTED_STATUSES = Object.keys(EXPECTED_META) as VisitStatus[]
 
 const VALID_TONES: readonly Tone[] = [
   'info',
@@ -26,8 +33,8 @@ const VALID_TONES: readonly Tone[] = [
 ]
 
 describe('VISIT_STATUS_META', () => {
-  it('is keyed by exactly the 8 visit statuses', () => {
-    expect(Object.keys(VISIT_STATUS_META)).toHaveLength(8)
+  it('is keyed by exactly the 9 visit statuses', () => {
+    expect(Object.keys(VISIT_STATUS_META)).toHaveLength(9)
   })
 
   it('has exactly the expected key set (no missing, no extra)', () => {

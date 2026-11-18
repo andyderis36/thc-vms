@@ -115,7 +115,10 @@ type visitDetailDTO struct {
 	// Actor display data for the "Diajukan oleh" / "Check-in oleh" /
 	// "Check-out oleh" info rows: filled ONLY by the single-GET enrichment
 	// (usecase withGateTimes + the read joins), omitted when unknown so the
-	// client drops the row instead of printing a bare UUID.
+	// client drops the row instead of printing a bare UUID. CreatedBy is the
+	// raw requester id the client needs for the upload-permission check
+	// (only the visit creator may attach work proofs besides the owner).
+	CreatedBy          *string `json:"created_by,omitempty"`
 	CreatedByName      *string `json:"created_by_name,omitempty"`
 	CreatedByRoleLabel *string `json:"created_by_role_label,omitempty"`
 	CheckedInByName    *string `json:"checked_in_by_name,omitempty"`
@@ -217,13 +220,15 @@ type createVisitBody struct {
 // URL on the attach echo and the presigned link on the detail member, null
 // when no link is available. uploaded_by is null when the attaching account
 // has since been removed; uploaded_by_name rides along for display and is
-// omitted when unknown.
+// omitted when unknown. visit_log_id binds the slot to one visit_logs cycle
+// (migration 000034); it is omitted on rows written before per-cycle binding.
 type workPhotoDTO struct {
 	Kind           *string `json:"kind,omitempty"`
 	URL            *string `json:"url"`
 	UploadedBy     *string `json:"uploaded_by,omitempty"`
 	UploadedByName *string `json:"uploaded_by_name,omitempty"`
 	UploadedAt     string  `json:"uploaded_at"`
+	VisitLogID     *string `json:"visit_log_id,omitempty"`
 }
 
 // workPhotosDTO mirrors the VisitDetail work_photos member: both evidence
@@ -239,6 +244,10 @@ func toWorkPhotoSlot(p *domain.WorkPhoto) *workPhotoDTO {
 		return nil
 	}
 	dto := &workPhotoDTO{UploadedAt: p.UploadedAt.Format(time.RFC3339)}
+	if p.VisitLogID != nil {
+		id := string(*p.VisitLogID)
+		dto.VisitLogID = &id
+	}
 	if strings.TrimSpace(p.URL) != "" {
 		url := p.URL
 		dto.URL = &url
@@ -259,7 +268,7 @@ func toWorkPhotoSlot(p *domain.WorkPhoto) *workPhotoDTO {
 func toAttachedWorkPhoto(p domain.WorkPhoto) workPhotoDTO {
 	dto := toWorkPhotoSlot(&p)
 	kind := string(p.Kind)
-	out := workPhotoDTO{Kind: &kind, UploadedAt: dto.UploadedAt, URL: dto.URL, UploadedBy: dto.UploadedBy, UploadedByName: dto.UploadedByName}
+	out := workPhotoDTO{Kind: &kind, UploadedAt: dto.UploadedAt, URL: dto.URL, UploadedBy: dto.UploadedBy, UploadedByName: dto.UploadedByName, VisitLogID: dto.VisitLogID}
 	return out
 }
 
@@ -390,6 +399,10 @@ func toVisitDetail(v domain.VisitRequest) visitDetailDTO {
 	// Actor display data travels straight from the domain enrichment: nil
 	// pointers stay absent (omitempty) for list items, for pre-gate visits
 	// and for an unresolved account row.
+	if v.CreatedBy != nil {
+		by := string(*v.CreatedBy)
+		detail.CreatedBy = &by
+	}
 	detail.CreatedByName = v.CreatedByName
 	detail.CreatedByRoleLabel = v.CreatedByRoleLabel
 	detail.CheckedInByName = v.CheckedInByName

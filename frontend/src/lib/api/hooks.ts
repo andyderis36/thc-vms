@@ -26,6 +26,7 @@ import {
   cancelVisit,
   checkInVisit,
   checkOutVisit,
+  completeVisit,
   confirmEmailChange,
   confirmPasswordReset,
   createLocation,
@@ -45,6 +46,7 @@ import {
   listMailLogs,
   getMailLog,
   getVisit,
+  getVisitLogs,
   getVisitQr,
   listAuditLogs,
   listJabatan,
@@ -139,8 +141,9 @@ const VISIT_LIST_REFETCH_INTERVAL = 30_000
  * Interval bersyarat resolver tiket /qr: poll 30 dtk HANYA selama kunjungan
  * belum resolved (requested/rescheduled, daftar kosong, atau galat yang
  * mengosongkan items) agar approval yang mendarat tetap auto-advance seperti
- * baseline; stop (false) begitu tiket aktif terpilih (approved/visiting —
- * halaman detail mengambil alih + redirect melepas mount) atau semua baris
+ * baseline; stop (false) begitu tiket aktif terpilih (visiting/offsite/
+ * approved — halaman detail mengambil alih + redirect melepas mount) atau
+ * semua baris
  * terminal. Satu kunci + satu owner, jadi membalik nilai ini tidak pernah
  * menciptakan timer ganda.
  */
@@ -262,6 +265,7 @@ function invalidateVisitStatus(queryClient: QueryClient, visitId: string): void 
 function invalidateVisitPresence(queryClient: QueryClient, visitId: string): void {
   invalidateVisitStatus(queryClient, visitId)
   void queryClient.invalidateQueries({ queryKey: queryKeys.visits.qr(visitId) })
+  void queryClient.invalidateQueries({ queryKey: queryKeys.visits.logs(visitId) })
 }
 
 /**
@@ -496,6 +500,22 @@ export function visitDetailQueryOptions(id: string | null) {
 }
 
 /**
+ * Timeline `visit_logs` — dibaca via `GET /visits/{id}/logs` (lihat
+ * `getVisitLogs` di client.ts). Query sengaja tanpa polling: baris log hanya
+ * berubah lewat aksi gerbang yang sudah meng-invalidasi kunci ini, jadi tidak
+ * ada request latar tambahan.
+ */
+export function visitLogsQueryOptions(id: string | null) {
+  return queryOptions({
+    queryKey: queryKeys.visits.logs(id ?? ''),
+    queryFn: () => getVisitLogs(id ?? ''),
+    enabled: id !== null && id !== '',
+    staleTime: VISIT_STALE_TIME,
+    retry: shouldRetry,
+  })
+}
+
+/**
  * `GET /visits/{id}/qr` mengembalikan `{ visit_id, qr_code_payload }` untuk
  * kunjungan apa pun yang boleh dilihat aktor (handler tidak menggerbangi status);
  * payload yang sama dipakai saat check-in (`approved`) maupun check-out
@@ -693,6 +713,10 @@ export function useVisitQuery(id: string | null) {
   return useQuery(visitDetailQueryOptions(id))
 }
 
+export function useVisitLogsQuery(id: string | null, enabled = true) {
+  return useQuery({ ...visitLogsQueryOptions(id), enabled: enabled && id !== null && id !== '' })
+}
+
 /** `enabled` berasal dari pemanggil — teruskan true untuk status `approved` (check-in) atau `visiting` (check-out, QR yang sama). */
 export function useVisitQrQuery(id: string | null, enabled = true) {
   const queryClient = useQueryClient()
@@ -847,6 +871,21 @@ export function useCheckOutVisitMutation() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ visitId }: { visitId: string }) => checkOutVisit(visitId),
+    onSuccess: (_data, variables) => {
+      invalidateVisitPresence(queryClient, variables.visitId)
+    },
+  })
+}
+
+/**
+ * Selesaikan manual (admin/super_admin) via endpoint resmi
+ * `POST /visits/{id}/complete`. Invalidasi mengikuti jalur presence agar
+ * detail, daftar, QR, dan timeline logs ikut segar setelah transisi.
+ */
+export function useCompleteVisitMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ visitId }: { visitId: string }) => completeVisit(visitId),
     onSuccess: (_data, variables) => {
       invalidateVisitPresence(queryClient, variables.visitId)
     },

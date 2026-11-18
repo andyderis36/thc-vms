@@ -203,11 +203,12 @@ Aturan pakai:
   * Jika role = `vendor`: **Wajib** di-filter ketat oleh backend:
     `WHERE vendor_user_id = auth_user.id`.
 
-### 6.2 Validasi Jadwal Check-in (Toleransi 2 Jam)
-- Pada endpoint `POST /visits/{id}/checkin`:
+### 6.2 Validasi Jadwal Check-in (`[start_date - 2 jam, end_date]`)
+- Pada endpoint `POST /visits/{id}/checkin` (termasuk re-entry dari `offsite`):
   * Backend **wajib** memeriksa apakah waktu saat ini berada dalam rentang:
-    `[visit.start_date - 2 jam] s/d [visit.end_date + 2 jam]`.
-  * Jika di luar jendela toleransi, tolak dengan HTTP `400 Bad Request` dan pesan jelas.
+    `[visit.start_date - 2 jam] s/d [visit.end_date]` (keduanya inklusif).
+  * Toleransi 2 jam di awal jendela dipertahankan agar teknisi yang datang lebih awal tetap bisa masuk; **tidak ada** toleransi +2 jam setelah `end_date` — tepat saat `end_date` tiba, permit ditutup otomatis oleh R3 (`completed`).
+  * Jika di luar jendela, tolak dengan HTTP `400 Bad Request` dan pesan jelas.
 
 ### 6.3 Dual-Role Check-in & Triple-Mode Scanner
 - Check-in diizinkan dieksekusi oleh `security` DAN `admin` cabang terkait.

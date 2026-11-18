@@ -55,7 +55,7 @@ func TestAttachWorkPhoto_CreatesThenReplacesSingleRow(t *testing.T) {
 	repos := NewVisitRepository(pool)
 	visitID, vendor := stageVisitingVisit(t, pool)
 
-	photo, created, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, vendor)
+	photo, created, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, vendor, nil)
 	if err != nil {
 		t.Fatalf("AttachWorkPhoto: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestAttachWorkPhoto_CreatesThenReplacesSingleRow(t *testing.T) {
 	}
 
 	replacement := "http://localhost:9000/thc-vms-bucket/work_photos/visit-1/before-v2.jpg"
-	photo, created, err = repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, replacement, vendor)
+	photo, created, err = repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, replacement, vendor, nil)
 	if err != nil {
 		t.Fatalf("re-attach: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestAttachWorkPhoto_PreCheckinIsConflict(t *testing.T) {
 		Start: start, End: start.Add(4 * time.Hour), Status: domain.VisitStatusApproved,
 	})
 
-	_, _, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, vendor)
+	_, _, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, vendor, nil)
 	if err == nil {
 		t.Fatal("pre-check-in attach succeeded, want 409")
 	}
@@ -127,11 +127,11 @@ func TestAttachWorkPhoto_CheckoutThenAttachCannotSucceedAfterCompletion(t *testi
 	repos := NewVisitRepository(pool)
 	visitID, vendor := stageVisitingVisit(t, pool)
 
-	if _, created, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, vendor); err != nil || !created {
+	if _, created, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, vendor, nil); err != nil || !created {
 		t.Fatalf("attach while visiting = (created=%v, err=%v), want (true, nil)", created, err)
 	}
 	after := "http://localhost:9000/thc-vms-bucket/work_photos/visit-1/after.jpg"
-	if _, created, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoAfter, after, vendor); err != nil || !created {
+	if _, created, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoAfter, after, vendor, nil); err != nil || !created {
 		t.Fatalf("attach after while visiting = (created=%v, err=%v), want (true, nil)", created, err)
 	}
 
@@ -142,7 +142,7 @@ func TestAttachWorkPhoto_CheckoutThenAttachCannotSucceedAfterCompletion(t *testi
 	}
 
 	late := "http://localhost:9000/thc-vms-bucket/work_photos/visit-1/before-late.jpg"
-	_, _, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, late, vendor)
+	_, _, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, late, vendor, nil)
 	if err == nil {
 		t.Fatal("post-check-out attach succeeded, want 409")
 	}
@@ -185,7 +185,7 @@ func TestAttachWorkPhoto_ConcurrentSameSlotKeepsSingleRow(t *testing.T) {
 			<-gun
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			_, _, errs[i] = repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, vendor)
+			_, _, errs[i] = repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, vendor, nil)
 		}(i)
 	}
 	close(gun)
@@ -212,7 +212,7 @@ func TestAttachWorkPhoto_UnknownActorRollsBack(t *testing.T) {
 	visitID, _ := stageVisitingVisit(t, pool)
 
 	ghost := domain.UUID(uuid.NewString())
-	_, _, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, ghost)
+	_, _, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, ghost, nil)
 	if err == nil {
 		t.Fatal("attach with unknown actor succeeded, want FK failure")
 	}
@@ -231,10 +231,10 @@ func TestListWorkPhotos_ReturnsBothProofsWithNames(t *testing.T) {
 	visitID, vendor := stageVisitingVisit(t, pool)
 
 	after := "http://localhost:9000/thc-vms-bucket/work_photos/visit-1/after.jpg"
-	if _, _, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, vendor); err != nil {
+	if _, _, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoBefore, workPhotoTestURL, vendor, nil); err != nil {
 		t.Fatalf("attach before: %v", err)
 	}
-	if _, _, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoAfter, after, vendor); err != nil {
+	if _, _, err := repos.AttachWorkPhoto(ctx, visitID, domain.WorkPhotoAfter, after, vendor, nil); err != nil {
 		t.Fatalf("attach after: %v", err)
 	}
 

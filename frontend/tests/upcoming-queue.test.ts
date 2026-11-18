@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { VisitDetail, VisitStatus } from '@/lib/api/types'
-import {
-  CHECKIN_CLOSE_GRACE_MS,
-  isCheckinWindowOpen,
-  mergeUpcomingQueue,
-} from '@/lib/visits/upcoming-queue'
+import { isCheckinWindowOpen, mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
 
 /** Fixture minimal — helper hanya memakai `id` + `start_date`. */
 function makeVisit(
@@ -98,14 +94,10 @@ describe('isCheckinWindowOpen (filter tab "Akan Hadir" /gate)', () => {
   /** Fixed "now": 12:00 WIB — semua fixture di bawah memakai jam ini. */
   const NOW = new Date('2026-10-18T12:00:00+07:00')
 
-  it('CHECKIN_CLOSE_GRACE_MS is the 2h check-in tolerance in milliseconds', () => {
-    expect(CHECKIN_CLOSE_GRACE_MS).toBe(2 * 3_600_000)
-  })
-
-  it('drops a row whose end_date + 2h is already in the past', () => {
-    // end 09:00 + 2h = 11:00 < 12:00 -> ditutup.
-    const closed = makeVisit('closed', '2026-10-18T09:00:00+07:00')
-    const stillOpen = makeVisit('open', '2026-10-18T11:00:00+07:00')
+  it('drops a row whose end_date is already in the past (no 2h grace)', () => {
+    // Kontrak multi-entry: jendela check-in ditutup tepat di end_date.
+    const closed = makeVisit('closed', '2026-10-18T11:00:00+07:00')
+    const stillOpen = makeVisit('open', '2026-10-18T13:00:00+07:00')
 
     expect(isCheckinWindowOpen(closed, NOW)).toBe(false)
 
@@ -115,22 +107,19 @@ describe('isCheckinWindowOpen (filter tab "Akan Hadir" /gate)', () => {
     expect(queue.map((v) => v.id)).toEqual(['open'])
   })
 
-  it('keeps a row still within the 2h grace after end_date', () => {
-    // end 11:00 + 2h = 13:00 > 12:00 -> masih dalam grace, walaupun
-    // jadwalnya sudah lewat 1 jam.
-    const withinGrace = makeVisit('grace', '2026-10-18T11:00:00+07:00')
+  it('keeps a row whose end_date is still ahead', () => {
+    const ahead = makeVisit('ahead', '2026-10-18T13:00:00+07:00')
 
-    expect(isCheckinWindowOpen(withinGrace, NOW)).toBe(true)
+    expect(isCheckinWindowOpen(ahead, NOW)).toBe(true)
 
-    const queue = mergeUpcomingQueue([withinGrace], []).filter((visit) =>
+    const queue = mergeUpcomingQueue([ahead], []).filter((visit) =>
       isCheckinWindowOpen(visit, NOW),
     )
-    expect(queue.map((v) => v.id)).toEqual(['grace'])
+    expect(queue.map((v) => v.id)).toEqual(['ahead'])
   })
 
-  it('treats end_date + 2h == now as closed (deterministic <= boundary)', () => {
-    // end 10:00 + 2h = 12:00 == NOW -> TEPAT di batas: dibuang (<=).
-    const boundary = makeVisit('boundary', '2026-10-18T10:00:00+07:00')
+  it('treats end_date == now as closed (deterministic < boundary)', () => {
+    const boundary = makeVisit('boundary', '2026-10-18T12:00:00+07:00')
 
     expect(boundary.end_date).toBeTruthy()
     expect(isCheckinWindowOpen(boundary, NOW)).toBe(false)

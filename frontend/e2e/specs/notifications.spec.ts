@@ -284,13 +284,15 @@ test('@NOTIF-05 isolasi: notifikasi pengguna lain tidak bisa ditandai (404) dan 
   const adminItem = notificationFor(adminFeed, hqVisit.id, 'visit_requested')
   expect(adminItem.is_read).toBe(false)
 
-  // Fan-out staff memberi security satu baris SENDIRI untuk kunjungan yang sama.
+  // Fan-out Diminta hanya untuk approver (super_admin + admin cabang):
+  // security TIDAK mendapat baris visit_requested (kontrak admin-only).
   const securityFeed = await listNotifications(securityToken)
-  const securityItem = notificationFor(securityFeed, hqVisit.id, 'visit_requested')
-  expect(securityItem.id).not.toBe(adminItem.id)
   expect(
-    securityFeed.items.some((candidate) => candidate.id === adminItem.id),
-    'security tidak boleh melihat/menerima id notifikasi milik admin',
+    securityFeed.items.some(
+      (candidate) =>
+        candidate.visit_request_id === hqVisit.id && candidate.type === 'visit_requested',
+    ),
+    'security tidak boleh menerima baris visit_requested (hanya approver)',
   ).toBe(false)
 
   // Akun B menandai notifikasi akun A: handler -> 404 NOT_FOUND (bukan 403).

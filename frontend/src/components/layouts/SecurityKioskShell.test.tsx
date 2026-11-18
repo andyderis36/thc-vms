@@ -16,6 +16,26 @@ let fetchMock: Mock<typeof fetch>
 /** State mutable agar tiap kasus uji bisa menguji visibilitas rute berbeda. */
 const pathnameState = vi.hoisted(() => ({ value: '/gate' }))
 
+const sessionUserState: {
+  value: {
+    name: string
+    role: string
+    location_id: string | null
+    location_ids: string[]
+    location_name: string | null
+    avatar_url: string
+  }
+} = vi.hoisted(() => ({
+  value: {
+    name: 'Joko Susilo',
+    role: 'security',
+    location_id: 'loc-pontianak',
+    location_ids: ['loc-pontianak'],
+    location_name: 'POP Pontianak',
+    avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
+  },
+}))
+
 vi.mock('next/navigation', () => ({ usePathname: () => pathnameState.value }))
 
 /** Ganti `next/image` dengan `<img>` polos: jsdom tidak menjalankan loader optimasi. */
@@ -25,12 +45,7 @@ vi.mock('next/image', () => ({
 
 vi.mock('@/lib/auth/session', () => ({
   useSession: () => ({
-    user: {
-      name: 'Joko Susilo',
-      role: 'security',
-      location_name: 'POP Pontianak',
-      avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
-    },
+    user: sessionUserState.value,
     status: 'authenticated',
     signOut: vi.fn(),
   }),
@@ -47,6 +62,14 @@ afterEach(() => {
 
 beforeEach(() => {
   pathnameState.value = '/gate'
+  sessionUserState.value = {
+    name: 'Joko Susilo',
+    role: 'security',
+    location_id: 'loc-pontianak',
+    location_ids: ['loc-pontianak'],
+    location_name: 'POP Pontianak',
+    avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
+  }
   fetchMock = installAvatarFetchStubs().fetchMock
 })
 
@@ -308,5 +331,43 @@ describe('visibilitas rute', () => {
     }
     const classes = (container.querySelector('main')?.getAttribute('class') ?? '').split(/\s+/)
     expect(classes).toContain('pb-4')
+  })
+})
+
+describe('visibilitas lencana cabang multi-branch', () => {
+  it('satu cabang: badge lokasi tampil', () => {
+    render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    const badge = document.querySelector('[title="POP Pontianak"]')?.closest('.status-badge')
+    expect(badge).not.toBeNull()
+  })
+
+  it('lebih dari satu cabang: badge lokasi disembunyikan, tanpa placeholder', () => {
+    sessionUserState.value = {
+      name: 'Joko Susilo',
+      role: 'security',
+      location_id: 'loc-pontianak',
+      location_ids: ['loc-pontianak', 'loc-singkawang'],
+      location_name: 'POP Pontianak',
+      avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
+    }
+    render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    expect(document.querySelector('[title="POP Pontianak"]')).toBeNull()
+    expect(screen.queryByText('POP Pontianak')).toBeNull()
+  })
+
+  it('cakupan kosong: fallback lama tetap tampil', () => {
+    sessionUserState.value = {
+      name: 'Joko Susilo',
+      role: 'security',
+      location_id: null,
+      location_ids: [],
+      location_name: null,
+      avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
+    }
+    render(<SecurityKioskShell>konten kios</SecurityKioskShell>)
+
+    expect(screen.getByText('Lokasi Terkunci')).toBeInTheDocument()
   })
 })

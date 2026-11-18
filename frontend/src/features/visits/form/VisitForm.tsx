@@ -66,6 +66,20 @@ const SOP_STATEMENT =
   'Saya menyatakan seluruh data anggota akurat dan menyetujui seluruh Standar Operasional Prosedur (SOP) dan keselamatan kerja fasilitas jaringan THC.'
 
 /**
+ * Format tanggal-waktu lokal menjadi nilai `datetime-local` (YYYY-MM-DDTHH:MM).
+ * Dipakai sebagai batas bawah picker agar tanggal lampau tidak bisa dipilih;
+ * validasi zod + backend tetap menjadi penegak utama (atribut `min` hanya
+ * memengaruhi UI picker, bukan submit yang memakai `noValidate`).
+ */
+function toLocalInputValue(date: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  )
+}
+
+/**
  * SCR-03 — Formulir Pengajuan Kunjungan.
  * React Hook Form + zod; seluruh pesan galat berbahasa Indonesia.
  * Tombol kirim berada di aliran normal SETELAH bagian SOP keselamatan —
@@ -99,7 +113,6 @@ export function VisitForm() {
       purpose_note: '',
       start_date: '',
       end_date: '',
-      is_multi_day: false,
       assignment_letter: null,
       notes: '',
       technicians: [
@@ -119,6 +132,18 @@ export function VisitForm() {
   })
 
   const purposeIds = useWatch({ control, name: 'purpose_ids' }) ?? []
+  const startValue = useWatch({ control, name: 'start_date' }) ?? ''
+  // Batas bawah picker: mulai tidak boleh lampau dari menit berjalan;
+  // selesai mengikuti mulai bila mulai sudah di masa depan. `nowTick`
+  // disegarkan tiap 30 detik agar `min` tidak basi bila halaman dibiarkan
+  // terbuka melewati pergantian menit.
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 30_000)
+    return () => clearInterval(timer)
+  }, [])
+  const nowInputMin = toLocalInputValue(new Date(nowTick))
+  const endInputMin = startValue !== '' && startValue > nowInputMin ? startValue : nowInputMin
 
   /*
    * Saran "Vendor Pengaju": feed DB-backed `GET /vendors/suggestions`
@@ -269,7 +294,7 @@ export function VisitForm() {
     const vendors = vendorsQuery.data ?? []
     const purposes = purposesQuery.data ?? []
     const selectedPurposes = values.purpose_ids ?? []
-    // Pemetaan tujuan keras → katalog: yang cocok persis namanya mengirim
+    // Pemetaan keperluan keras → katalog: yang cocok persis namanya mengirim
     // purpose_id; yang tidak cocok (katalog kosong setelah wipe DB) serta
     // "Other" jatuh ke purpose_note. Tidak pernah mengirim purpose_id dan
     // purpose_note untuk pilihan yang sama.
@@ -322,7 +347,6 @@ export function VisitForm() {
       ...(purposeNote !== '' ? { purpose_note: purposeNote } : {}),
       start_date: new Date(values.start_date).toISOString(),
       end_date: new Date(values.end_date).toISOString(),
-      is_multi_day: values.is_multi_day,
       is_nda_accepted: true,
       notes:
         values.notes !== undefined && values.notes !== ''
@@ -439,7 +463,7 @@ export function VisitForm() {
           </CardTitle>
         </CardHeader>
         <CardBody className="flex flex-col gap-4">
-          {/* 1 kolom di ponsel, 2 kolom >= sm: Fasilitas | Tujuan Kunjungan */}
+          {/* 1 kolom di ponsel, 2 kolom >= sm: Fasilitas | Keperluan Kunjungan */}
           <div className="grid gap-4 sm:grid-cols-2">
             <>
               <Input
@@ -484,16 +508,16 @@ export function VisitForm() {
             <div className="flex flex-col gap-2">
               <PurposeDropdown
                 id="visit-purpose"
-                label="Tujuan Kunjungan"
+                label="Keperluan Kunjungan"
                 required
-                placeholder="Pilih tujuan kunjungan"
+                placeholder="Pilih keperluan kunjungan"
                 selectedIds={purposeIds}
                 onToggle={togglePurpose}
                 error={errors.purpose_ids?.message}
               />
 
 {/* Keperluan bebas-teks — memetakan ke `purpose_note`. Teks di sini
-                   TIDAK pernah menjadi saran/salinan tujuan dari katalog. */}
+                   TIDAK pernah menjadi saran/salinan keperluan dari katalog. */}
               <Input
                 id="visit-purpose-note"
                 label="Keperluan lain (opsional)"
@@ -554,7 +578,7 @@ export function VisitForm() {
                 placeholder={
                   vendorsQuery.isPending
                     ? 'Memuat vendor…'
-                    : 'Pilih dari daftar atau ketik nama vendor/mitra'
+                    : 'Pilih atau ketik vendor/mitra'
                 }
                 hint="Opsional — maksimal 120 karakter. Tampil sebagai Vendor/Mitra pada detail kunjungan."
                 error={
@@ -595,6 +619,7 @@ export function VisitForm() {
               type="datetime-local"
               required
               fieldSize="gate"
+              min={nowInputMin}
               error={errors.start_date?.message}
               {...register('start_date')}
             />
@@ -604,27 +629,11 @@ export function VisitForm() {
               type="datetime-local"
               required
               fieldSize="gate"
+              min={endInputMin}
               error={errors.end_date?.message}
               {...register('end_date')}
             />
           </div>
-
-          <Controller
-            control={control}
-            name="is_multi_day"
-            render={({ field }) => (
-              <Checkbox
-                label="Pekerjaan Multi-Hari"
-                name={field.name}
-                checked={field.value}
-                onChange={field.onChange}
-              />
-            )}
-          />
-          <p className="text-xs text-ink-secondary">
-            Aktifkan bila pekerjaan berlangsung lebih dari satu hari kalender.
-            Waktu selesai wajib setelah waktu mulai.
-          </p>
         </CardBody>
       </Card>
 

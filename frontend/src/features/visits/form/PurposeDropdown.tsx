@@ -6,7 +6,7 @@ import { FIELD_BASE_CLASS, FIELD_HEIGHT } from '@/components/ui/Input'
 import { Spinner } from '@/components/ui/Spinner'
 
 /**
- * Opsi "Tujuan Kunjungan" — keputusan produk: empat label hardcoded.
+ * Opsi "Keperluan Kunjungan" — keputusan produk: empat label hardcoded.
  * Katalog `GET /purposes` tetap dipakai `VisitForm` untuk pemetaan
  * label -> purpose_id saat submit, tetapi dropdown TIDAK merender katalog.
  */
@@ -22,7 +22,7 @@ export type PurposeOption = (typeof PURPOSE_OPTIONS)[number]
 export interface PurposeDropdownProps {
   id?: string
   label: string
-  /** Nama tujuan yang dipilih (label hardcoded, dicocokkan ke katalog saat submit). */
+  /** Nama keperluan yang dipilih (label hardcoded, dicocokkan ke katalog saat submit). */
   selectedIds: readonly string[]
   onToggle: (purposeName: string) => void
   placeholder: string
@@ -33,19 +33,19 @@ export interface PurposeDropdownProps {
 }
 
 /**
- * Multi-select "Tujuan Kunjungan" yang divisualkan sebagai dropdown — sama
+ * Multi-select "Keperluan Kunjungan" yang divisualkan sebagai dropdown — sama
  * seperti "Fasilitas Tujuan" (`components/ui/Select.tsx`) pada label, tinggi
- * field, dan bahasa galatnya. Katalog tujuan tidak muat sebagai `<select>`
+ * field, dan bahasa galatnya. Katalog keperluan tidak muat sebagai `<select>`
  * native maupun chip, jadi panel memakai checkbox asli: satu baris
- * `Checkbox` 44px per tujuan, persis seperti blok chip yang digantikan.
+  * `Checkbox` 44px per keperluan, persis seperti blok chip yang digantikan.
  *
  * SEMANTIK ARIA: tombol pemicu memakai `aria-haspopup="listbox"` +
  * `aria-expanded` + `aria-controls`, panel memakai `role="listbox"` +
  * `aria-multiselectable`, dan tiap baris `role="option"` dengan
  * `aria-selected` yang mencerminkan centang. Checkbox asli di dalam baris
  *_option_ tetap menjadi target fokus sungguhan (Tab → Spasi), sehingga tidak
- * diperlukan roving `aria-activedescendant` yang mudah rusak saat daftar
- * tujuan berubah.
+  * diperlukan roving `aria-activedescendant` yang mudah rusak saat daftar
+  * keperluan berubah.
  *
  * Dokumen hanya diakses di dalam effect — tidak pernah saat render — mengikuti
  * pola `components/ui/Modal.tsx`.
@@ -72,10 +72,10 @@ export function PurposeDropdown({
   const disabled = isLoading || isError
   const selectedCount = selectedIds.length
   const summary = isLoading
-    ? 'Memuat tujuan kunjungan…'
+    ? 'Memuat keperluan kunjungan…'
     : selectedCount === 0
       ? placeholder
-      : `${selectedCount} tujuan dipilih`
+      : `${selectedCount} keperluan dipilih`
 
   // Tutup saat klik/tap di luar field, atau saat Escape ditekan; Escape
   // mengembalikan fokus ke tombol pemicu (pola `Modal.tsx`).
@@ -184,7 +184,7 @@ export function PurposeDropdown({
 
       {isError ? (
         <p role="alert" className="text-xs text-danger-text">
-          Gagal memuat daftar tujuan kunjungan. Silakan muat ulang halaman.
+          Gagal memuat daftar keperluan kunjungan. Silakan muat ulang halaman.
         </p>
       ) : null}
       {error !== undefined ? (

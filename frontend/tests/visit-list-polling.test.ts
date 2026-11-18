@@ -123,9 +123,10 @@ describe('visitsQueryOptions — resolver /qr conditional polling', () => {
     expect(qrResolverRefetchInterval([])).toBe(30_000)
   })
 
-  it('resolved (approved/visiting terpilih) → stop (false)', () => {
+  it('resolved (approved/visiting/offsite terpilih) → stop (false)', () => {
     expect(qrResolverRefetchInterval([visit('approved')])).toBe(false)
     expect(qrResolverRefetchInterval([visit('visiting')])).toBe(false)
+    expect(qrResolverRefetchInterval([visit('offsite')])).toBe(false)
     expect(
       qrResolverRefetchInterval([visit('requested'), visit('approved')]),
     ).toBe(false)

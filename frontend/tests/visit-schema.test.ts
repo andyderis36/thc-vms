@@ -22,7 +22,6 @@ function baseForm(overrides: Record<string, unknown> = {}) {
     purpose_note: '',
     start_date: '2026-09-01T09:00:00.000Z',
     end_date: '2026-09-01T17:00:00.000Z',
-    is_multi_day: false,
     assignment_letter: { url: 's3://bucket/spk.pdf', name: 'spk.pdf' },
     notes: '',
     technicians: [

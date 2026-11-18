@@ -130,14 +130,14 @@ async function fillVisitForm(options: {
   fireEvent.change(screen.getByLabelText(/Fasilitas Tujuan/), {
     target: { value: 'loc-1' },
   })
-  fireEvent.click(screen.getByRole('button', { name: /Tujuan Kunjungan/ }))
+  fireEvent.click(screen.getByRole('button', { name: /Keperluan Kunjungan/ }))
   fireEvent.click(await screen.findByRole('checkbox', { name: 'Survey' }))
 
   fireEvent.change(screen.getByLabelText(/Waktu Mulai/), {
-    target: { value: '2026-09-01T09:00' },
+    target: { value: '2027-06-01T09:00' },
   })
   fireEvent.change(screen.getByLabelText(/Waktu Selesai/), {
-    target: { value: '2026-09-01T17:00' },
+    target: { value: '2027-06-01T17:00' },
   })
 
   fireEvent.change(screen.getByLabelText(/Nama Lengkap/), {
@@ -337,7 +337,42 @@ describe('VisitForm - Vendor/Mitra per kunjungan khusus admin', () => {
   })
 })
 
+describe('VisitForm - waktu mulai di masa lampau ditolak', () => {
+  it('submit dengan waktu mulai lampau diblokir: galat tampil dan permohonan tidak terkirim', async () => {
+    await fillVisitForm({ ktp: true })
+    fireEvent.change(screen.getByLabelText(/Waktu Mulai/), {
+      target: { value: '2020-01-01T09:00' },
+    })
+    submitForm()
+
+    expect(
+      await screen.findByText('Waktu mulai tidak boleh di masa lampau.'),
+    ).toBeInTheDocument()
+    expect(createVisitMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('VisitForm - batas input kanonik', () => {
+  it('picker tanggal menolak masa lampau via atribut min (menit berjalan)', () => {
+    render(<VisitForm />)
+
+    const pad = (n: number): string => String(n).padStart(2, '0')
+    const now = new Date()
+    const expectedMin =
+      `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
+      `T${pad(now.getHours())}:${pad(now.getMinutes())}`
+    const start = screen.getByLabelText<HTMLInputElement>(/Waktu Mulai/)
+    const end = screen.getByLabelText<HTMLInputElement>(/Waktu Selesai/)
+    const startMin = start.getAttribute('min')
+    const endMin = end.getAttribute('min')
+
+    expect(startMin).toBe(expectedMin)
+    expect(typeof endMin).toBe('string')
+    if (typeof startMin === 'string' && typeof endMin === 'string') {
+      expect(endMin >= startMin).toBe(true)
+    }
+  })
+
   it('menerapkan maxLength dari @/lib/limits pada isian anggota & catatan', () => {
     render(<VisitForm />)
 

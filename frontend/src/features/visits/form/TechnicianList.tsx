@@ -51,12 +51,10 @@ const VENDOR_DATALIST_ID = 'visit-vendor-datalist'
 const JABATAN_DATALIST_ID = 'visit-jabatan-datalist'
 
 /** Helper teks untuk isian vendor bebas-teks (bahasa Indonesia). */
-const VENDOR_HINT =
-  'Pilih dari daftar atau ketik manual. Nama yang diketik manual tidak masuk daftar vendor.'
+const VENDOR_HINT = 'Pilih atau ketik vendor (manual tidak masuk daftar).'
 
 /** Helper teks untuk isian jabatan bebas-teks (bahasa Indonesia). */
-const JABATAN_HINT =
-  'Pilih dari daftar atau ketik manual. Jabatan yang diketik manual tidak masuk daftar saran.'
+const JABATAN_HINT = 'Pilih atau ketik jabatan (manual tidak masuk saran).'
 
 export interface TechnicianListProps {
   control: Control<VisitFormValues>
@@ -325,9 +323,7 @@ function TechnicianRow({
           autoComplete="off"
           maxLength={JABATAN_MAX_LENGTH}
           placeholder={
-            jabatanPending
-              ? 'Memuat jabatan…'
-              : 'Pilih dari daftar atau ketik jabatan'
+            jabatanPending ? 'Memuat jabatan…' : 'Pilih atau ketik jabatan'
           }
           hint={JABATAN_HINT}
           error={
@@ -395,9 +391,7 @@ function TechnicianRow({
           autoComplete="off"
           maxLength={VENDOR_NAME_MAX_LENGTH}
           placeholder={
-            vendorsPending
-              ? 'Memuat vendor…'
-              : 'Pilih dari daftar atau ketik nama vendor'
+            vendorsPending ? 'Memuat vendor…' : 'Pilih atau ketik vendor'
           }
           hint={VENDOR_HINT}
           error={

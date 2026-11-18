@@ -12,6 +12,14 @@ describe('selectActiveQrVisit - hanya tiket yang menampilkan QR', () => {
     expect(selectActiveQrVisit([visit('a', 'approved'), visit('v', 'visiting')])?.id).toBe('v')
   })
 
+  it('memilih `visiting` lebih dulu daripada `offsite`', () => {
+    expect(selectActiveQrVisit([visit('o', 'offsite'), visit('v', 'visiting')])?.id).toBe('v')
+  })
+
+  it('memilih `offsite` (permit aktif di luar lokasi) daripada `approved`', () => {
+    expect(selectActiveQrVisit([visit('a', 'approved'), visit('o', 'offsite')])?.id).toBe('o')
+  })
+
   it('memilih `approved` bila tidak ada `visiting`', () => {
     expect(selectActiveQrVisit([visit('r', 'requested'), visit('a', 'approved')])?.id).toBe('a')
   })

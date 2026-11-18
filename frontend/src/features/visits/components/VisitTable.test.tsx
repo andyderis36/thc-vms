@@ -148,3 +148,12 @@ describe('VisitTable (desktop)', () => {
     }
   })
 })
+
+describe('VisitTable - baris status offsite (daftar "Semua")', () => {
+  it('merender baris offsite dengan badge multi-entry tanpa melempar galat', () => {
+    renderVisitTable({ visits: [buildVisit({ status: 'offsite' })] })
+
+    expect(screen.getByText('Check-out — di luar lokasi')).toBeInTheDocument()
+    expect(screen.getByText('VISIT-2026-0001')).toBeInTheDocument()
+  })
+})

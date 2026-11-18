@@ -41,7 +41,7 @@ async function openGate(page: Page): Promise<void> {
 
 /**
  * Pindai kunjungan lewat tab "Input Manual" dan kembalikan modal hasilnya.
- * Modal memiliki nama aksesibel `Hasil Pindaian — <visit_id>`.
+ * Modal memiliki nama aksesibel `Konfirmasi gerbang — <visit_id>`.
  */
 async function scanManual(page: Page, code: string) {
   await page.getByRole('tab', { name: 'Input Manual', exact: true }).click()
@@ -50,7 +50,7 @@ async function scanManual(page: Page, code: string) {
   await input.fill(code)
   await page.getByRole('button', { name: 'Proses Visit ID', exact: true }).click()
 
-  const dialog = page.getByRole('dialog', { name: `Hasil Pindaian — ${code}` })
+  const dialog = page.getByRole('dialog', { name: `Konfirmasi gerbang — ${code}` })
   await expect(dialog).toBeVisible()
   return dialog
 }
@@ -77,13 +77,13 @@ test('@GATE-07 input manual happy path: check-in sukses & status jadi visiting',
   await openGate(page)
 
   const dialog = await scanManual(page, visit.code)
-  // Tombol "Tutup" ada dua: ikon X (aria-label) di header dan tombol footer.
-  // Dipakai footer karena itu tombol "Tutup" sesuai kontrak SCR-05.
+  // Tombol "Batal" di footer menutup modal tanpa mutasi (ikon X header
+  // terkunci saat mutasi pending). Dipakai footer sebagai penutup kontrak.
   await expect(
-    dialog.locator('footer').getByRole('button', { name: 'Tutup', exact: true }),
+    dialog.locator('footer').getByRole('button', { name: 'Batal', exact: true }),
   ).toBeVisible()
 
-  const checkInButton = dialog.getByRole('button', { name: 'Check-in Masuk', exact: true })
+  const checkInButton = dialog.getByRole('button', { name: 'Ya, Catat check-in', exact: true })
   await expect(checkInButton).toBeVisible()
   await checkInButton.click()
 
@@ -163,7 +163,7 @@ test('@GATE-06 QR upload dari galeri: screenshot kartu QR vendor berhasil dipind
     'true',
   )
 
-  const modal = page.getByRole('dialog', { name: `Hasil Pindaian — ${visit.code}` })
+  const modal = page.getByRole('dialog', { name: `Konfirmasi gerbang — ${visit.code}` })
   const decodeError = page
     .getByRole('alert')
     .filter({ hasText: 'Gambar tidak terbaca' })
@@ -182,11 +182,11 @@ test('@GATE-06 QR upload dari galeri: screenshot kartu QR vendor berhasil dipind
   await expect(modal).toBeVisible()
   await expect(page.getByRole('button', { name: 'Unggah QR Code', exact: true })).toBeVisible()
   await expect(
-    modal.getByRole('button', { name: 'Check-in Masuk', exact: true }),
+    modal.getByRole('button', { name: 'Ya, Catat check-in', exact: true }),
   ).toBeVisible()
 })
 
-test('@GATE-09 check-out: kunjungan visiting dipindai ulang lalu selesai', async ({ h }) => {
+test('@GATE-09 check-out: kunjungan visiting dipindai ulang lalu menjadi offsite', async ({ h }) => {
   const visit = await h.createVisit('gate09', { withFiles: false })
   const securityToken = await h.tokenAs('security')
   const superToken = await h.tokenAs('super')
@@ -198,7 +198,7 @@ test('@GATE-09 check-out: kunjungan visiting dipindai ulang lalu selesai', async
   await openGate(page)
 
   const dialog = await scanManual(page, visit.code)
-  const checkOutButton = dialog.getByRole('button', { name: 'Check-out Keluar', exact: true })
+  const checkOutButton = dialog.getByRole('button', { name: 'Ya, Catat check-out', exact: true })
   await expect(checkOutButton).toBeVisible()
   await checkOutButton.click()
 
@@ -207,7 +207,35 @@ test('@GATE-09 check-out: kunjungan visiting dipindai ulang lalu selesai', async
 
   await expect
     .poll(async () => (await getVisitViaApi(superToken, visit.id)).status)
-    .toBe('completed')
+    .toBe('offsite')
+})
+
+test('@GATE-03 dual-role admin: admin HQ boleh check-out lewat layar gerbang', async ({ h }) => {
+  const visit = await h.createVisit('gate03', {
+    locationId: LOCATIONS.hq,
+    approve: true,
+    withFiles: false,
+  })
+  const securityToken = await h.tokenAs('security')
+  const superToken = await h.tokenAs('super')
+
+  await checkInViaApi(securityToken, visit.id)
+  expect((await getVisitViaApi(superToken, visit.id)).status).toBe('visiting')
+
+  const page = await h.openAs('admin')
+  await openGate(page)
+
+  const dialog = await scanManual(page, visit.code)
+  const checkOutButton = dialog.getByRole('button', { name: 'Ya, Catat check-out', exact: true })
+  await expect(checkOutButton).toBeVisible()
+  await checkOutButton.click()
+
+  await expect(dialog).toBeHidden()
+  await expect(page.getByText(`${visit.code} berhasil Check-out KELUAR.`)).toBeVisible()
+
+  await expect
+    .poll(async () => (await getVisitViaApi(superToken, visit.id)).status)
+    .toBe('offsite')
 })
 
 test('@GATE-04 terlalu awal: check-in ditolak jendela toleransi, status tetap approved', async ({
@@ -224,7 +252,7 @@ test('@GATE-04 terlalu awal: check-in ditolak jendela toleransi, status tetap ap
   await openGate(page)
 
   const dialog = await scanManual(page, visit.code)
-  await dialog.getByRole('button', { name: 'Check-in Masuk', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Ya, Catat check-in', exact: true }).click()
 
   const alert = dialog.getByRole('alert')
   await expect(alert).toBeVisible()
@@ -251,7 +279,7 @@ test('@GATE-05 kedaluwarsa: check-in ditolak jendela toleransi, status tetap app
   await openGate(page)
 
   const dialog = await scanManual(page, visit.code)
-  await dialog.getByRole('button', { name: 'Check-in Masuk', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Ya, Catat check-in', exact: true }).click()
 
   const alert = dialog.getByRole('alert')
   await expect(alert).toBeVisible()
@@ -287,7 +315,7 @@ test('@GATE-08 lokasi salah: security cabang lain tidak bisa memproses kunjungan
   const feedbackMessage = page.getByText(`Kode "${visit.code}" tidak terdaftar.`)
   await expect(feedbackMessage).toBeVisible()
   await expect(
-    page.getByRole('dialog', { name: `Hasil Pindaian — ${visit.code}` }),
+    page.getByRole('dialog', { name: `Konfirmasi gerbang — ${visit.code}` }),
   ).toHaveCount(0)
   console.log(
     `[GATE-08] teks penolakan UI persis: ${JSON.stringify(
@@ -324,7 +352,7 @@ test('@GATE-02 dual-role admin: admin HQ boleh check-in lewat layar gerbang', as
   await openGate(page)
 
   const dialog = await scanManual(page, visit.code)
-  await dialog.getByRole('button', { name: 'Check-in Masuk', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Ya, Catat check-in', exact: true }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByText(`${visit.code} berhasil Check-in MASUK.`)).toBeVisible()
 
@@ -357,7 +385,7 @@ test('@GATE-10 super admin lintas cabang: check-in kunjungan Sambas dari gerbang
   await openGate(page)
 
   const dialog = await scanManual(page, visit.code)
-  await dialog.getByRole('button', { name: 'Check-in Masuk', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Ya, Catat check-in', exact: true }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByText(`${visit.code} berhasil Check-in MASUK.`)).toBeVisible()
 
@@ -379,11 +407,11 @@ test('@GATE-11 klik kartu antrean membuka detail hasil pindaian', async ({ h }) 
   await expect(cardButton).toBeVisible()
   await cardButton.click()
 
-  const dialog = page.getByRole('dialog', { name: `Hasil Pindaian — ${visit.code}` })
+  const dialog = page.getByRole('dialog', { name: `Konfirmasi gerbang — ${visit.code}` })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByText(visit.code, { exact: false }).first()).toBeVisible()
   await expect(
-    dialog.getByRole('button', { name: 'Check-in Masuk', exact: true }),
+    dialog.getByRole('button', { name: 'Ya, Catat check-in', exact: true }),
   ).toBeVisible()
 })
 
@@ -515,7 +543,7 @@ test('@GATE-13 pengawas multi-cabang check-in/out di cabang sekunder, 403 di lua
       await openGate(page)
 
       const inDialog = await scanManual(page, sambasVisit.code)
-      const checkInButton = inDialog.getByRole('button', { name: 'Check-in Masuk', exact: true })
+      const checkInButton = inDialog.getByRole('button', { name: 'Ya, Catat check-in', exact: true })
       await expect(checkInButton).toBeVisible()
       await checkInButton.click()
       await expect(inDialog).toBeHidden()
@@ -525,14 +553,14 @@ test('@GATE-13 pengawas multi-cabang check-in/out di cabang sekunder, 403 di lua
         .toBe('visiting')
 
       const outDialog = await scanManual(page, sambasVisit.code)
-      const checkOutButton = outDialog.getByRole('button', { name: 'Check-out Keluar', exact: true })
+      const checkOutButton = outDialog.getByRole('button', { name: 'Ya, Catat check-out', exact: true })
       await expect(checkOutButton).toBeVisible()
       await checkOutButton.click()
       await expect(outDialog).toBeHidden()
       await expect(page.getByText(`${sambasVisit.code} berhasil Check-out KELUAR.`)).toBeVisible()
       await expect
         .poll(async () => (await getVisitViaApi(superToken, sambasVisit.id)).status)
-        .toBe('completed')
+        .toBe('offsite')
     } finally {
       await guardContext.close()
     }

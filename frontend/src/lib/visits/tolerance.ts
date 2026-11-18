@@ -1,9 +1,10 @@
 /**
  * Cerminan aturan toleransi check-in di backend (AGENTS.md §6.2).
  *
- * Backend menegakkan `[start_date - 2 jam] .. [end_date + 2 jam]`; frontend
- * hanya mencerminkannya agar tombol check-in di layar gerbang bisa
- * dinonaktifkan beserta alasan yang dapat dibaca pengguna.
+ * Backend (kontrak multi-entry) menegakkan `[start_date - 2 jam] .. [end_date]`
+ * — tidak ada grace setelah jadwal selesai. Frontend hanya mencerminkannya
+ * agar tombol check-in di layar gerbang bisa dinonaktifkan beserta alasan
+ * yang dapat dibaca pengguna.
  *
  * Modul ini murni: tanpa library tanggal, tanpa akses jaringan.
  */
@@ -28,8 +29,7 @@ export function isWithinCheckinWindow(
   endDate: DateLike,
 ): boolean {
   const nowMs = toMs(now)
-  const window = toleranceMs()
-  return nowMs >= toMs(startDate) - window && nowMs <= toMs(endDate) + window
+  return nowMs >= toMs(startDate) - toleranceMs() && nowMs <= toMs(endDate)
 }
 
 /**
@@ -47,8 +47,8 @@ export function getCheckinBlockReason(
   if (nowMs < toMs(startDate) - window) {
     return `Check-in belum dibuka. Jendela check-in dimulai ${CHECKIN_TOLERANCE_HOURS} jam sebelum jadwal kunjungan.`
   }
-  if (nowMs > toMs(endDate) + window) {
-    return `Check-in sudah ditutup. Jendela check-in berakhir ${CHECKIN_TOLERANCE_HOURS} jam setelah jadwal kunjungan.`
+  if (nowMs > toMs(endDate)) {
+    return 'Check-in sudah ditutup. Jendela check-in berakhir tepat pada jadwal selesai kunjungan.'
   }
   return null
 }

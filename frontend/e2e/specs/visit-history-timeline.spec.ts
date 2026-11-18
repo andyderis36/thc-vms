@@ -14,7 +14,8 @@
  *   "Menunggu persetujuan" / "Disetujui oleh admin", "Kedatangan di Lokasi" +
  *   "Jadwal mulai …", "Selesai" + "Jadwal selesai …".
  * - Baris riwayat berpelaku: label Indonesia ("Disetujui", "Ditolak",
- *   "Dibatalkan", "Jadwal Digeser", "Sedang di Lokasi", "Selesai") + detail
+ *   "Dibatalkan", "Jadwal Digeser", "Sedang di Lokasi",
+ *   "Check-out — di luar lokasi", "Selesai") + detail
  *   "oleh <nama> (<peran>) · <stempel>".
  * - Status terminal Timeline (`rejected`, `cancelled`, `not_visit`): hanya
  *   Pengajuan + baris riwayat, ditutup baris "Status akhir" + badge.
@@ -156,12 +157,15 @@ test('@HIST-05 reschedule lalu approved ulang: Pengajuan + Jadwal Digeser + Dise
   await expect(page.getByText('Kedatangan di Lokasi', { exact: true })).toBeVisible()
 })
 
-test('@HIST-06 visiting lalu completed: Pengajuan + Disetujui + Status akhir Selesai', async ({
+test('@HIST-06 visiting lalu offsite: Pengajuan + Disetujui + Sedang di Lokasi + Check-out di luar lokasi', async ({
   h,
 }) => {
-  // Rantai legal: approved -> visiting (check-in) -> completed (check-out).
-  // Jadwal default harness (mulai -30 mnt, selesai +180 mnt) berada di dalam
-  // jendela toleransi check-in ±2 jam (AGENTS.md 6.2), jadi gate API lolos.
+  // Rantai legal: approved -> visiting (check-in) -> offsite (check-out).
+  // Check-out multi-entry TIDAK completed: permit tetap aktif di luar lokasi,
+  // siap re-entry dengan QR yang sama; completed hanya via aksi Selesaikan
+  // manual atau worker R3 di akhir jadwal. Jadwal default harness (mulai
+  // -30 mnt, selesai +180 mnt) berada di dalam jendela toleransi check-in
+  // ±2 jam (AGENTS.md 6.2), jadi gate API lolos.
   // `not_visit` SENGAJA tidak ditempuh di sini: ia hanya ditulis worker
   // auto-rule saat jendela lewat +2 jam tanpa check-in — mustahil dibuat
   // deterministik tanpa menunggu waktu nyata.
@@ -176,5 +180,9 @@ test('@HIST-06 visiting lalu completed: Pengajuan + Disetujui + Status akhir Sel
   await expectPengajuanIntact(page)
   await expect(page.getByText('Disetujui', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Sedang di Lokasi', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('Check-out — di luar lokasi', { exact: true }).first()).toBeVisible()
+  // Offsite bukan terminal: tidak ada baris "Status akhir", dan tahap Selesai
+  // tetap dirender sebagai langkah masa depan (jadwal selesai).
+  await expect(page.getByText('Status akhir', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Selesai', { exact: true }).first()).toBeVisible()
 })

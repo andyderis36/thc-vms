@@ -16,6 +16,8 @@ export const VISIT_STATUS_META: Record<
   requested: { label: 'Diminta', tone: 'info' },
   approved: { label: 'Disetujui', tone: 'success' },
   visiting: { label: 'Sedang di Lokasi', tone: 'info' },
+  // Permit masih aktif di luar lokasi (check-out multi-entry, siap re-entry).
+  offsite: { label: 'Check-out — di luar lokasi', tone: 'warning' },
   completed: { label: 'Selesai', tone: 'success' },
   not_visit: { label: 'Tidak Hadir', tone: 'warning' },
   rejected: { label: 'Ditolak', tone: 'danger' },

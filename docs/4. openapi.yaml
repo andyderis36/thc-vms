@@ -1603,9 +1603,9 @@ paths:
   /visits/{id}/work-photos:
     post:
       tags: [Visits]
-      summary: Lampirkan bukti pengerjaan sebelum/sesudah (Vendor / Admin / Security cabang)
+      summary: Lampirkan bukti pengerjaan sebelum/sesudah (Vendor pemilik / pembuat kunjungan)
       description: |
-        Menyimpan satu foto bukti pengerjaan (`before` = kondisi sebelum mulai, `after` = kondisi sesudah selesai) untuk kunjungan yang sedang berlangsung. URL berkas berasal dari `POST /uploads` kategori `work_photos` dan wajib lolos allowlist tautan yang sama dengan payload kunjungan. Penulisan memakai UPSERT pada `UNIQUE (visit_request_id, kind)`: lampiran pertama menjawab 201, lampiran ulang pada slot yang sama MENGGANTIKAN baris (menjawab 200) tanpa menambah baris. Pemeriksaan status dan penulisan terjadi dalam SATU transaksi terkunci (`SELECT ... FOR UPDATE`), sehingga check-out yang bersamaan tidak bisa meloloskan foto setelah kunjungan selesai. Cakupan: vendor pemilik kunjungan (vendor lain dijawab 404 agar tidak membocorkan keberadaan data), admin/security dalam cabang kunjungan (luar cabang 403), super_admin global.
+        Menyimpan satu foto bukti pengerjaan (`before` = kondisi sebelum mulai, `after` = kondisi sesudah selesai) untuk kunjungan yang sedang berlangsung. URL berkas berasal dari `POST /uploads` kategori `work_photos` dan wajib lolos allowlist tautan yang sama dengan payload kunjungan. Penulisan memakai UPSERT pada `UNIQUE (visit_request_id, kind)`: lampiran pertama menjawab 201, lampiran ulang pada slot yang sama MENGGANTIKAN baris (menjawab 200) tanpa menambah baris. Baris terikat ke satu siklus check-in/out via `visit_log_id` (opsional di body; absen = siklus `in` terakhir, dihitung server). Pemeriksaan status dan penulisan terjadi dalam SATU transaksi terkunci (`SELECT ... FOR UPDATE`), sehingga check-out yang bersamaan tidak bisa meloloskan foto setelah kunjungan selesai. Cakupan: vendor pemilik kunjungan (vendor lain dijawab 404 agar tidak membocorkan keberadaan data) atau pembuat kunjungan (`created_by` = pemanggil, untuk admin/super_admin; admin wajib dalam cabang kunjungan, luar cabang 403). Security tidak boleh mengunggah (403).
       parameters:
         - name: id
           in: path
@@ -1631,6 +1631,10 @@ paths:
                   format: uri
                   maxLength: 2048
                   description: URL berkas tersimpan dari `POST /uploads` (kategori `work_photos`).
+                visit_log_id:
+                  type: string
+                  format: uuid
+                  description: Siklus check-in/out pemilik bukti (id baris visit_logs milik kunjungan ini); opsional, absen = siklus `in` terakhir.
       responses:
         '201':
           description: Bukti pengerjaan dilampirkan pertama kali; data adalah WorkPhoto slot tersebut
@@ -1659,7 +1663,7 @@ paths:
         '401':
           description: JWT tidak ada/tidak valid (kode `UNAUTHORIZED`)
         '403':
-          description: Lintas cabang untuk admin/security (kode `FORBIDDEN_BRANCH`) — tanpa membocorkan data
+          description: Lintas cabang untuk admin, peran security (tidak boleh mengunggah), atau bukan pembuat kunjungan (kode `FORBIDDEN_BRANCH`) — tanpa membocorkan data
         '404':
           description: Kunjungan tidak ditemukan atau bukan milik vendor pemanggil (kode `NOT_FOUND`)
         '409':
@@ -1759,7 +1763,7 @@ paths:
                   maxLength: 1000
       responses:
         '200':
-          description: Kunjungan dijadwalkan ulang (Status -> rescheduled). Jadwal dapat digeser berulang kali, tetapi kunjungan harus disetujui kembali oleh admin sebelum check-in.
+          description: 'Kunjungan dijadwalkan ulang (Status -> rescheduled). Jadwal dapat digeser berulang kali, tetapi kunjungan harus disetujui kembali oleh admin sebelum check-in. Bila permit tidak disetujui ulang hingga end_date, R2 membatalkannya otomatis (cancelled + visit_auto_cancelled).'
         '400':
           description: 'Validasi lapisan HTTP gagal (body JSON rusak atau tidak valid, field wajib hilang, alasan melebihi 1000 karakter, tanggal tidak berformat date-time). Amplop galat: { success: false, error: { code, message } }.'
         '413':
@@ -1884,7 +1888,7 @@ paths:
   /visits/{id}/checkin:
     post:
       tags: [SecurityGate]
-      summary: Eksekusi check-in tamu oleh Security, Admin Cabang, atau Superadmin (bypass lintas cabang saat darurat; Live Cam, Upload QR Galeri, atau Manual)
+      summary: Eksekusi check-in / re-entry tamu oleh Security, Admin Cabang, atau Superadmin (dari approved maupun offsite; Live Cam, Upload QR Galeri, atau Manual)
       parameters:
         - name: id
           in: path
@@ -1907,9 +1911,9 @@ paths:
                   maxLength: 500
       responses:
         '200':
-          description: Check-in berhasil (Status approved -> visiting; dicatat atas id pelaksana, superadmin lintas cabang saat darurat)
+          description: 'Check-in berhasil (Status approved -> visiting pada entry pertama, atau offsite -> visiting pada re-entry; jendela [start−2h, end], tanpa grace setelah end). Dicatat atas id pelaksana, superadmin lintas cabang saat darurat.'
         '400':
-          description: Di luar rentang toleransi waktu jadwal (±2 jam) atau QR tidak valid
+          description: Di luar jendela check-in `[start_date - 2 jam, end_date]` (tidak ada grace setelah end_date) atau QR tidak valid
         '403':
           description: Petugas tidak berwenang mengelola cabang kunjungan ini
         '413':
@@ -1920,7 +1924,7 @@ paths:
   /visits/{id}/checkout:
     post:
       tags: [SecurityGate]
-      summary: Eksekusi check-out tamu saat selesai kunjungan (oleh Security, Admin Cabang, atau Superadmin bypass lintas cabang saat darurat)
+      summary: Eksekusi check-out tamu (entry keluar) oleh Security, Admin Cabang, atau Superadmin bypass lintas cabang saat darurat — BUKAN penutup permit
       parameters:
         - name: id
           in: path
@@ -1929,13 +1933,70 @@ paths:
             type: string
       responses:
         '200':
-          description: Check-out berhasil (Status -> completed; dicatat atas id pelaksana, superadmin lintas cabang saat darurat)
+          description: 'Check-out berhasil (Status visiting -> offsite; permit masih aktif dan dapat re-entry, ditutup oleh R3 tepat end_date atau tombol Selesaikan). Dicatat atas id pelaksana, superadmin lintas cabang saat darurat.'
         '400':
           description: 'Validasi lapisan HTTP gagal (ID kunjungan tidak valid). Amplop galat: { success: false, error: { code, message } }.'
         '403':
           description: Petugas tidak berwenang mengelola cabang kunjungan ini
         '422':
           description: 'Validasi semantik usecase gagal (mis. status kunjungan bukan visiting). Amplop galat: { success: false, error: { code, message } }.'
+
+  /visits/{id}/complete:
+    post:
+      tags: [SecurityGate]
+      summary: Selesaikan permit kunjungan secara manual oleh Admin/Superadmin cabang (tombol "Selesaikan")
+      description: Menutup permit dari status `visiting` atau `offsite` menjadi `completed` dengan aktor staf (bukan penanda "(Otomatis)" milik worker R3). R3 otomatis tetap menutup permit (`visiting` maupun `offsite`) tepat pada `end_date` tanpa grace; endpoint ini untuk penutupan lebih awal oleh staf. Hanya admin/super_admin pada cabang permit yang diizinkan; security dan vendor ditolak.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 'Permit berhasil diselesaikan (Status visiting/offsite -> completed; amplop sukses: { success: true, data: ... }).'
+        '400':
+          description: 'Validasi lapisan HTTP gagal (ID kunjungan tidak valid). Amplop galat: { success: false, error: { code, message } }.'
+        '403':
+          description: Role bukan admin/super_admin atau cabang di luar cakupan (FORBIDDEN_BRANCH)
+        '404':
+          description: Kunjungan tidak ditemukan
+        '409':
+          description: 'Status bukan visiting/offsite (CONFLICT). Amplop galat: { success: false, error: { code, message } }.'
+
+  /visits/{id}/logs:
+    get:
+      tags: [SecurityGate]
+      summary: Ambil timeline entry kunjungan (visit_logs) untuk satu permit multi-entry
+      description: Mengembalikan satu baris per entry check-in (`in`) / check-out (`out`) yang ditulis atomik bersama transisi status, diurutkan tertua ke terbaru. Timeline ini BUKAN notifikasi; daftar kosong dikembalikan sebagai `[]` (bukan 404). Otorisasi baca mengikuti aturan `GET /visits/{id}`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Timeline entry berhasil diambil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VisitLogEntry'
+        '400':
+          description: 'Validasi lapisan HTTP gagal (ID kunjungan tidak valid). Amplop galat: { success: false, error: { code, message } }.'
+        '403':
+          description: Petugas tidak berwenang mengelola cabang kunjungan ini
+        '404':
+          description: Kunjungan tidak ditemukan
 
   # ============================================================
   # PHASE 2 EXTENSION ENDPOINTS
@@ -2027,6 +2088,7 @@ components:
         - requested
         - approved
         - visiting
+        - offsite
         - completed
         - not_visit
         - rejected
@@ -3177,6 +3239,10 @@ components:
           type: [string, "null"]
           format: uuid
           description: ID petugas (security/admin) pelaksana check-in (tabel check_in.checked_in_by); null bila belum check-in
+        created_by:
+          type: [string, "null"]
+          format: uuid
+          description: ID akun pengaju kunjungan (visit_request.created_by); diisi HANYA oleh GET /visits/{id}, dipakai klien untuk gerbang unggah bukti kerja (hanya pemilik + pembuat boleh mengunggah), absen bila tidak dikenal
         created_by_name:
           type: [string, "null"]
           description: Nama tampilan pengaju kunjungan dari join users (visit_request.created_by); diisi HANYA oleh GET /visits/{id} bila akun pengaju dikenal, absen bila tidak
@@ -3222,6 +3288,36 @@ components:
           type: [string, "null"]
           description: Label peran Bahasa Indonesia pelaku dari join role (Superadmin / Admin Cabang / Petugas Keamanan / Vendor/Mitra); null bila transisi sistem atau peran tak dikenal
 
+    VisitLogEntry:
+      type: object
+      description: Satu baris `visit_logs` — satu entry check-in/check-out pada permit multi-entry, ditulis atomik bersama transisi status. Bukan notifikasi; timeline detail dibaca dari sini.
+      properties:
+        id:
+          type: string
+          format: uuid
+        visit_request_id:
+          type: string
+          format: uuid
+          description: Permit pemilik entry (sama untuk seluruh siklus check-in/out)
+        direction:
+          type: string
+          enum: [in, out]
+          description: "'in' = check-in/re-entry, 'out' = check-out"
+        actor_user_id:
+          type: [string, "null"]
+          format: uuid
+          description: ID petugas (security/admin/superadmin) yang mengeksekusi entry; null bila akun sudah dihapus
+        actor_role:
+          type: [string, "null"]
+          description: Peran pelaku saat entry dicatat (super_admin | admin | security)
+        actor_name:
+          type: string
+          description: Nama tampilan pelaku dari join users; absen bila tidak tersedia
+        created_at:
+          type: string
+          format: date-time
+          description: Waktu entry dicatat (RFC3339Nano); dipakai untuk urutan timeline bersama id
+
     WorkPhoto:
       type: object
       description: Satu slot bukti pengerjaan kunjungan (visit_work_photo.kind). `url` pada respons lampir adalah URL tersimpan; pada detail kunjungan adalah URL presigned berumur pendek (null bila tautan tidak tersedia). `uploaded_by` null bila akun pengunggah sudah dihapus.
@@ -3244,6 +3340,10 @@ components:
           type: string
           format: date-time
           description: Waktu lampiran tersimpan (diperbarui setiap penggantian)
+        visit_log_id:
+          type: [string, "null"]
+          format: uuid
+          description: Siklus check-in/out pemilik bukti (visit_work_photo.visit_log_id, FK visit_logs); null pada baris sebelum binding per-siklus, absen bila tidak dikirim
 
     VisitDetailResponse:
       type: object

@@ -4,7 +4,7 @@
  * Kontrak mengikuti `docs/4. openapi.yaml` (CreateVisitRequest) termasuk
  * field `purpose_note` (keperluan lain, ≤200 karakter). Seluruh pesan galat
  * berbahasa Indonesia. Aturan urutan waktu (selesai setelah mulai) dan
- * "minimal satu tujuan" ditegakkan di `superRefine` di akhir rantai.
+ * "minimal satu keperluan" ditegakkan di `superRefine` di akhir rantai.
  */
 
 import { z } from 'zod'
@@ -171,10 +171,10 @@ export const visitFormSchema = z
         `Nama vendor/mitra maksimal ${VENDOR_NAME_MAX_LENGTH} karakter.`,
       )
       .optional(),
-    // Chip tujuan boleh kosong ASALKAN `purpose_note` terisi — divalidasi
+    // Chip keperluan boleh kosong ASALKAN `purpose_note` terisi — divalidasi
     // bersama di `superRefine` di akhir rantai.
     purpose_ids: z.array(z.string()),
-    // "Keperluan lain": teks bebas bila tujuan tidak ada di daftar chip.
+    // "Keperluan lain": teks bebas bila keperluan tidak ada di daftar chip.
     purpose_note: z
       .string()
       .trim()
@@ -185,7 +185,6 @@ export const visitFormSchema = z
       .optional(),
     start_date: z.string().min(1, 'Waktu mulai wajib diisi.'),
     end_date: z.string().min(1, 'Waktu selesai wajib diisi.'),
-    is_multi_day: z.boolean(),
     assignment_letter: assignmentLetterSchema
       .nullish()
       .refine(
@@ -212,13 +211,13 @@ export const visitFormSchema = z
       ),
   })
   .superRefine((value, ctx) => {
-    // Minimal satu tujuan: chip TERPILIH atau "Keperluan lain" terisi.
+    // Minimal satu keperluan: chip TERPILIH atau "Keperluan lain" terisi.
     if (value.purpose_ids.length === 0 && (value.purpose_note ?? '') === '') {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['purpose_ids'],
         message:
-          'Pilih minimal satu tujuan kunjungan atau isi kolom Keperluan lain.',
+          'Pilih minimal satu keperluan kunjungan atau isi kolom Keperluan lain.',
       })
     }
 
@@ -252,6 +251,15 @@ export const visitFormSchema = z
         message: 'Waktu selesai tidak valid.',
       })
       return
+    }
+    // Tolak waktu mulai di masa lampau (toleransi 5 menit agar pilihan
+    // menit berjalan tidak flaky saat jam berganti).
+    if (start.getTime() < Date.now() - 5 * 60 * 1000) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['start_date'],
+        message: 'Waktu mulai tidak boleh di masa lampau.',
+      })
     }
     if (end.getTime() <= start.getTime()) {
       ctx.addIssue({

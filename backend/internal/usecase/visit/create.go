@@ -113,7 +113,7 @@ func (s *Service) CreateVisit(ctx context.Context, actor Actor, in CreateVisitIn
 	if len(in.Visitors) > 10 {
 		return domain.VisitRequest{}, domain.ValidationFailure("Jumlah pengunjung maksimal 10 orang.")
 	}
-	if err := validateWindow(in.StartDate, in.EndDate); err != nil {
+	if err := validateWindow(s.clock.Now(), in.StartDate, in.EndDate); err != nil {
 		return domain.VisitRequest{}, err
 	}
 	if !in.IsNDAAccepted {
@@ -289,15 +289,20 @@ func (s *Service) validateVendorAccount(ctx context.Context, id domain.UUID) err
 	return nil
 }
 
-// validateWindow enforces that both schedule bounds are present and that the
-// end is strictly after the start. It is shared by create and reschedule so
-// both edges speak the same messages.
-func validateWindow(start time.Time, end time.Time) error {
+// validateWindow enforces that both schedule bounds are present, that the end
+// is strictly after the start, and that the start is not in the past (5-minute
+// tolerance so a request filed for the current minute never flakes). It is
+// shared by create and reschedule so both edges speak the same messages;
+// rescheduling to the past is equally invalid.
+func validateWindow(now time.Time, start time.Time, end time.Time) error {
 	if start.IsZero() {
 		return domain.ValidationFailure("Tanggal mulai kunjungan wajib diisi.")
 	}
 	if end.IsZero() {
 		return domain.ValidationFailure("Tanggal selesai kunjungan wajib diisi.")
+	}
+	if start.Before(now.Add(-5 * time.Minute)) {
+		return domain.ValidationFailure("Tanggal mulai tidak boleh di masa lampau.")
 	}
 	if !end.After(start) {
 		return domain.ValidationFailure("Tanggal selesai harus setelah tanggal mulai.")

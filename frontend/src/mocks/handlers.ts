@@ -781,7 +781,7 @@ export const handlers: RequestHandler[] = [
     if (purposeIdList.length === 0 && purposeNote === null) {
       return fail(
         'BAD_REQUEST',
-        'Pilih minimal satu tujuan kunjungan atau isi keperluan lain.',
+        'Pilih minimal satu keperluan kunjungan atau isi keperluan lain.',
         400,
       );
     }
@@ -791,7 +791,7 @@ export const handlers: RequestHandler[] = [
         db.purposes.every((purpose) => purpose.id !== id),
     );
     if (unknownPurpose) {
-      return fail('BAD_REQUEST', 'Tujuan kunjungan tidak valid.', 400);
+      return fail('BAD_REQUEST', 'Keperluan kunjungan tidak valid.', 400);
     }
     if (startDate === '' || endDate === '') {
       return fail('BAD_REQUEST', 'Tanggal mulai dan selesai wajib diisi.', 400);

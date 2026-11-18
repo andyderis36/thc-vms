@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { VisitHistoryEntry } from '@/lib/api/types'
@@ -105,6 +105,49 @@ describe('Timeline append-only — node Pengajuan tak boleh hilang', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Status akhir')).toBeInTheDocument()
     expect(screen.getByText('Berkas tidak lengkap')).toBeInTheDocument()
+  })
+})
+
+describe('Timeline - status offsite (permit aktif di luar lokasi)', () => {
+  const OFFSITE_AT = '2026-11-10T18:15:00+07:00'
+
+  it('offsite tanpa riwayat: tahap aktif tetap Kedatangan, bukan status terminal', () => {
+    render(
+      <Timeline status="offsite" createdAt={CREATED_AT} startDate={START} endDate={END} />,
+    )
+
+    const currentStep = screen.getByText('Kedatangan di Lokasi').closest('li')
+    expect(currentStep).toHaveAttribute('aria-current', 'step')
+    expect(screen.getByText('Selesai')).toBeInTheDocument()
+    expect(screen.queryByText('Status akhir')).not.toBeInTheDocument()
+  })
+
+  it('riwayat berisi offsite dirender dengan label multi-entry', () => {
+    const history: VisitHistoryEntry[] = [
+      {
+        status: 'visiting',
+        at: START,
+        actor_name: 'Bagus Prakoso',
+        actor_role_label: 'Petugas Keamanan',
+      },
+      {
+        status: 'offsite',
+        at: OFFSITE_AT,
+        actor_name: 'Bagus Prakoso',
+        actor_role_label: 'Petugas Keamanan',
+      },
+    ]
+    render(
+      <Timeline
+        status="offsite"
+        createdAt={CREATED_AT}
+        startDate={START}
+        endDate={END}
+        history={history}
+      />,
+    )
+
+    expect(screen.getByText('Check-out — di luar lokasi')).toBeInTheDocument()
   })
 })
 
@@ -382,6 +425,80 @@ describe('Timeline — cakupan semua status kunjungan', () => {
     expect(screen.getByText('Sedang di Lokasi')).toBeInTheDocument()
     expect(screen.getAllByText('Tidak Hadir').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Status akhir')).toBeInTheDocument()
+  })
+})
+
+describe('Timeline — cap 10 node + modal Lihat Semua', () => {
+  function longHistory(): VisitHistoryEntry[] {
+    const cycles = Array.from({ length: 5 }, (_, k) => [
+      {
+        status: 'visiting' as const,
+        at: `2026-11-10T1${k}:00:00+07:00`,
+        actor_name: 'Bagus Prakoso',
+        actor_role_label: 'Petugas Keamanan',
+      },
+      {
+        status: 'offsite' as const,
+        at: `2026-11-10T1${k}:30:00+07:00`,
+        actor_name: 'Bagus Prakoso',
+        actor_role_label: 'Petugas Keamanan',
+      },
+    ]).flat()
+    return [
+      {
+        status: 'requested',
+        at: CREATED_AT,
+        actor_name: 'Wulan Sari',
+        actor_role_label: 'Vendor/Mitra',
+      },
+      {
+        status: 'approved',
+        at: APPROVED_AT,
+        actor_name: 'Siti Rahayu',
+        actor_role_label: 'Admin Cabang',
+      },
+      ...cycles,
+    ]
+  }
+
+  it('history panjang: inline 10 node, sisanya dibuka lewat modal', () => {
+    const { container } = render(
+      <Timeline
+        status="offsite"
+        createdAt={CREATED_AT}
+        startDate={START}
+        endDate={END}
+        history={longHistory()}
+      />,
+    )
+
+    expect(container.querySelectorAll('ol > li')).toHaveLength(10)
+    expect(
+      screen.getByRole('button', { name: 'Lihat Semua (13)' }),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Lihat Semua (13)' }))
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.querySelectorAll('li')).toHaveLength(13)
+  })
+
+  it('history pendek: tanpa tombol Lihat Semua', () => {
+    render(
+      <Timeline
+        {...baseProps()}
+        history={[
+          {
+            status: 'approved',
+            at: APPROVED_AT,
+            actor_name: 'Siti Rahayu',
+            actor_role_label: 'Admin Cabang',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: /Lihat Semua/ })).not.toBeInTheDocument()
   })
 })
 

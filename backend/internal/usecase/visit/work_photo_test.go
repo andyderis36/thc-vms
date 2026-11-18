@@ -31,7 +31,7 @@ func TestAttachWorkPhoto_OwnerVendorCreatesBeforeProof(t *testing.T) {
 	svc := newTestService(repo, nil, testNow())
 	owner := testActor(domain.RoleVendor, "vendor-1", "")
 
-	photo, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before"))
+	photo, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before"), nil)
 	if err != nil {
 		t.Fatalf("AttachWorkPhoto returned error: %v", err)
 	}
@@ -62,11 +62,11 @@ func TestAttachWorkPhoto_ReattachReplacesSingleRow(t *testing.T) {
 	owner := testActor(domain.RoleVendor, "vendor-1", "")
 
 	first := workPhotoURL("before")
-	if _, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", first); err != nil || !created {
+	if _, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", first, nil); err != nil || !created {
 		t.Fatalf("first attach = (created=%v, err=%v), want (true, nil)", created, err)
 	}
 	second := presignTestBase + "/work_photos/visit-1/before-v2.jpg"
-	photo, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", second)
+	photo, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", second, nil)
 	if err != nil {
 		t.Fatalf("re-attach returned error: %v", err)
 	}
@@ -111,14 +111,14 @@ func TestAttachWorkPhoto_ReplaceDeletesOldObject(t *testing.T) {
 	owner := testActor(domain.RoleVendor, "vendor-1", "")
 
 	first := workPhotoURL("before")
-	if _, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", first); err != nil || !created {
+	if _, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", first, nil); err != nil || !created {
 		t.Fatalf("first attach = (created=%v, err=%v), want (true, nil)", created, err)
 	}
 	if len(files.deleted) != 0 {
 		t.Fatalf("deleted = %v on first attach, want no delete", files.deleted)
 	}
 	second := presignTestBase + "/work_photos/visit-1/before-v2.jpg"
-	if _, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", second); err != nil || created {
+	if _, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", second, nil); err != nil || created {
 		t.Fatalf("re-attach = (created=%v, err=%v), want (false, nil)", created, err)
 	}
 	if len(files.deleted) != 1 || files.deleted[0] != "work_photos/visit-1/before.jpg" {
@@ -135,10 +135,10 @@ func TestAttachWorkPhoto_ReplaceDeleteFailureStillSucceeds(t *testing.T) {
 	svc := newTestService(repo, nil, testNow()).WithFileLinks(files, 15*time.Minute)
 	owner := testActor(domain.RoleVendor, "vendor-1", "")
 
-	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before")); err != nil {
+	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before"), nil); err != nil {
 		t.Fatalf("first attach err = %v, want nil", err)
 	}
-	photo, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", presignTestBase+"/work_photos/visit-1/before-v2.jpg")
+	photo, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", presignTestBase+"/work_photos/visit-1/before-v2.jpg", nil)
 	if err != nil {
 		t.Fatalf("re-attach err = %v, want nil despite delete failure", err)
 	}
@@ -157,10 +157,10 @@ func TestAttachWorkPhoto_SameURLReattachDeletesNothing(t *testing.T) {
 	owner := testActor(domain.RoleVendor, "vendor-1", "")
 
 	url := workPhotoURL("before")
-	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", url); err != nil {
+	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", url, nil); err != nil {
 		t.Fatalf("first attach err = %v, want nil", err)
 	}
-	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", url); err != nil {
+	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", url, nil); err != nil {
 		t.Fatalf("same-URL re-attach err = %v, want nil", err)
 	}
 	if len(files.deleted) != 0 {
@@ -185,7 +185,7 @@ func TestAttachWorkPhoto_OutsideVisitingIsConflict(t *testing.T) {
 			svc := newTestService(repo, nil, testNow())
 			owner := testActor(domain.RoleVendor, "vendor-1", "")
 
-			_, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before"))
+			_, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before"), nil)
 			if err == nil {
 				t.Fatalf("attach in status %q must be refused, got nil error", status)
 			}
@@ -207,7 +207,7 @@ func TestAttachWorkPhoto_ForeignVendorIsNotFound(t *testing.T) {
 	svc := newTestService(repo, nil, testNow())
 	foreign := testActor(domain.RoleVendor, "vendor-9", "")
 
-	_, _, err := svc.AttachWorkPhoto(context.Background(), foreign, "visit-1", "before", workPhotoURL("before"))
+	_, _, err := svc.AttachWorkPhoto(context.Background(), foreign, "visit-1", "before", workPhotoURL("before"), nil)
 	if err == nil {
 		t.Fatal("foreign vendor attach must be refused, got nil error")
 	}
@@ -227,7 +227,7 @@ func TestAttachWorkPhoto_OutOfScopeAdminIsForbidden(t *testing.T) {
 	svc := newTestService(repo, nil, testNow())
 	foreign := testActor(domain.RoleAdmin, "admin-9", "loc-B")
 
-	_, _, err := svc.AttachWorkPhoto(context.Background(), foreign, "visit-1", "before", workPhotoURL("before"))
+	_, _, err := svc.AttachWorkPhoto(context.Background(), foreign, "visit-1", "before", workPhotoURL("before"), nil)
 	if err == nil {
 		t.Fatal("out-of-scope admin attach must be refused, got nil error")
 	}
@@ -239,31 +239,86 @@ func TestAttachWorkPhoto_OutOfScopeAdminIsForbidden(t *testing.T) {
 	}
 }
 
-// Given the remaining in-scope roles, when each attaches, then the write
-// lands: the branch admin, the branch security and the super_admin may all
-// file the proof.
-func TestAttachWorkPhoto_InScopeRolesMayAttach(t *testing.T) {
-	for name, actor := range map[string]Actor{
-		"branch admin":    testActor(domain.RoleAdmin, "admin-1", "loc-A"),
-		"branch security": testActor(domain.RoleSecurity, "sec-1", "loc-A"),
-		"super_admin":     testActor(domain.RoleSuperAdmin, "super-1", ""),
+// Given a visiting visit filed by admin-1, when the creator admin attaches,
+// then the write lands; a same-branch admin that did NOT file the visit, any
+// security, and a super_admin that did not file it are all refused with 403.
+func TestAttachWorkPhoto_OnlyOwnerAndCreatorMayAttach(t *testing.T) {
+	creator := domain.UUID("admin-1")
+	for name, tc := range map[string]struct {
+		actor Actor
+		want  error
+	}{
+		"creator admin":         {actor: testActor(domain.RoleAdmin, "admin-1", "loc-A")},
+		"creator super_admin":   {actor: testActor(domain.RoleSuperAdmin, "admin-1", "")},
+		"non-creator admin":     {actor: testActor(domain.RoleAdmin, "admin-9", "loc-A"), want: domain.ErrForbiddenBranch},
+		"non-creator super":     {actor: testActor(domain.RoleSuperAdmin, "super-1", ""), want: domain.ErrForbiddenBranch},
+		"in-scope security":     {actor: testActor(domain.RoleSecurity, "sec-1", "loc-A"), want: domain.ErrForbiddenBranch},
+		"out-of-scope security": {actor: testActor(domain.RoleSecurity, "sec-9", "loc-B"), want: domain.ErrForbiddenBranch},
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := newFakeVisitRepo(t)
-			seedVisitingVisit(repo)
+			visit := seedVisitingVisit(repo)
+			visit.CreatedBy = &creator
+			seedVisit(repo, visit)
 			svc := newTestService(repo, nil, testNow())
 
-			photo, created, err := svc.AttachWorkPhoto(context.Background(), actor, "visit-1", "after", workPhotoURL("after"))
+			photo, created, err := svc.AttachWorkPhoto(context.Background(), tc.actor, "visit-1", "after", workPhotoURL("after"), nil)
+			if tc.want != nil {
+				if err == nil {
+					t.Fatalf("attach by %s succeeded, want refusal", name)
+				}
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("err = %v, want %v", err, tc.want)
+				}
+				if repo.writes != 0 {
+					t.Fatalf("writes = %d, want 0", repo.writes)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("AttachWorkPhoto returned error: %v", err)
 			}
 			if !created {
 				t.Fatal("created = false, want true")
 			}
-			if photo.UploadedBy == nil || *photo.UploadedBy != actor.ID {
+			if photo.UploadedBy == nil || *photo.UploadedBy != tc.actor.ID {
 				t.Fatalf("uploaded_by = %v, want the acting %s", photo.UploadedBy, name)
 			}
 		})
+	}
+}
+
+// Given a visiting visit, when the owner attaches with an explicit cycle id,
+// then the stored proof carries it; a re-attach with another cycle id rebinds
+// the same slot instead of accumulating a row.
+func TestAttachWorkPhoto_VisitLogIDThreadsThrough(t *testing.T) {
+	repo := newFakeVisitRepo(t)
+	seedVisitingVisit(repo)
+	svc := newTestService(repo, nil, testNow())
+	owner := testActor(domain.RoleVendor, "vendor-1", "")
+
+	first := domain.UUID("log-1")
+	photo, created, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before"), &first)
+	if err != nil || !created {
+		t.Fatalf("first attach = (created=%v, err=%v), want (true, nil)", created, err)
+	}
+	if photo.VisitLogID == nil || *photo.VisitLogID != first {
+		t.Fatalf("visit_log_id = %v, want log-1", photo.VisitLogID)
+	}
+	second := domain.UUID("log-2")
+	photo, created, err = svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before"), &second)
+	if err != nil || created {
+		t.Fatalf("re-attach = (created=%v, err=%v), want (false, nil)", created, err)
+	}
+	if photo.VisitLogID == nil || *photo.VisitLogID != second {
+		t.Fatalf("visit_log_id = %v, want the rebound log-2", photo.VisitLogID)
+	}
+	photos, err := repo.ListWorkPhotos(context.Background(), "visit-1")
+	if err != nil {
+		t.Fatalf("ListWorkPhotos: %v", err)
+	}
+	if len(photos) != 1 {
+		t.Fatalf("proof rows = %d, want exactly 1 (rebind, not accumulate)", len(photos))
 	}
 }
 
@@ -288,7 +343,7 @@ func TestAttachWorkPhoto_InvalidKindOrURLIsValidationError(t *testing.T) {
 			svc := newTestService(repo, nil, testNow())
 			owner := testActor(domain.RoleVendor, "vendor-1", "")
 
-			_, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", tc.kind, tc.url)
+			_, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", tc.kind, tc.url, nil)
 			if err == nil {
 				t.Fatal("invalid attach must be refused, got nil error")
 			}
@@ -312,10 +367,10 @@ func TestGetVisit_EnrichesWorkPhotos(t *testing.T) {
 	svc := newTestService(repo, nil, testNow()).WithFileLinks(files, 15*time.Minute)
 	owner := testActor(domain.RoleVendor, "vendor-1", "")
 
-	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before")); err != nil {
+	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before"), nil); err != nil {
 		t.Fatalf("attach before: %v", err)
 	}
-	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "after", workPhotoURL("after")); err != nil {
+	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "after", workPhotoURL("after"), nil); err != nil {
 		t.Fatalf("attach after: %v", err)
 	}
 
@@ -341,7 +396,7 @@ func TestResolveFileStream_WorkProofSlots(t *testing.T) {
 	seedVisitingVisit(repo)
 	svc := newTestService(repo, nil, testNow())
 	owner := testActor(domain.RoleVendor, "vendor-1", "")
-	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before")); err != nil {
+	if _, _, err := svc.AttachWorkPhoto(context.Background(), owner, "visit-1", "before", workPhotoURL("before"), nil); err != nil {
 		t.Fatalf("attach before: %v", err)
 	}
 

@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/Input'
 import { Pagination } from '@/components/ui/Pagination'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Select, type SelectOption } from '@/components/ui/Select'
+import { Tabs, type TabItem } from '@/components/ui/Tabs'
 import { RequireRole } from '@/lib/auth/guards'
 import { isSuperAdminRole } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
@@ -33,13 +34,21 @@ import type {
   VisitSortField,
   VisitStatus,
 } from '@/lib/api/types'
+import { userLocationIds } from '@/features/users/managed-user-filters'
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { countOnSiteTechnicians, ON_SITE_COUNT_PARAMS } from '@/lib/visits/on-site-count'
 import { isCheckinWindowOpen, mergeUpcomingQueue } from '@/lib/visits/upcoming-queue'
 import { ScannerPanel, type ScanPhase } from '@/features/gate/ScannerPanel'
 import { GateQueue } from '@/features/gate/GateQueue'
 import { GuestSelectContext } from '@/features/gate/GuestCard'
-import { ScanResultModal } from '@/features/gate/ScanResultModal'
+import { ScanConfirmModal } from './ScanConfirmModal'
+import {
+  gateScanAction,
+  recentScanResult,
+  withScanResult,
+  type GateDirection,
+  type ScanResultMap,
+} from '@/lib/visits/gate-status'
 
 /**
  * Peta tab gerbang -> status utama yang queried dari API.
@@ -51,6 +60,36 @@ const TAB_STATUS: Record<KioskTabId, VisitStatus> = {
   upcoming: 'approved',
   'on-site': 'visiting',
   completed: 'completed',
+}
+
+/**
+ * Tab antrean gerbang versi AdminBranchShell: label sama dengan
+ * `KIOSK_TABS` di SecurityKioskShell (Akan Hadir / Sedang di Lokasi /
+ * Selesai) supaya admin mendapat filter tab yang setara tanpa pindah
+ * ke shell kios. Dirender di dalam `gateContent` hanya untuk role admin.
+ */
+const GATE_TABS: TabItem[] = [
+  { id: 'upcoming', label: 'Akan Hadir' },
+  { id: 'on-site', label: 'Sedang di Lokasi' },
+  { id: 'completed', label: 'Selesai' },
+]
+
+export function GateTabs({
+  value,
+  onChange,
+}: {
+  value: KioskTabId
+  onChange: (id: KioskTabId) => void
+}): React.JSX.Element {
+  return (
+    <Tabs
+      tabs={GATE_TABS}
+      value={value}
+      onChange={(id) => onChange(id as KioskTabId)}
+      size="gate"
+      ariaLabel="Filter antrean kunjungan"
+    />
+  )
 }
 
 const GATE_SEARCH_ID = 'thc-gate-visit-search'
@@ -136,9 +175,11 @@ function GateContent() {
   const [phase, setPhase] = useState<ScanPhase>({ phase: 'idle' })
   const [pendingVisitId, setPendingVisitId] = useState<string | null>(null)
   const [scanVisit, setScanVisit] = useState<VisitDetail | null>(null)
+  const [scanDirection, setScanDirection] = useState<GateDirection>('in')
   const [scanOpen, setScanOpen] = useState(false)
   const [scanPending, setScanPending] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
+  const [scanResults, setScanResults] = useState<ScanResultMap>({})
   // Dinaikkan tiap siklus pindai selesai (tutup modal / konfirmasi sukses)
   // untuk membuka kunci kamera ScannerPanel — lihat props `resetKey`.
   const [scanResetKey, setScanResetKey] = useState(0)
@@ -183,11 +224,12 @@ function GateContent() {
     GATE_LIST_REFETCH_INTERVAL,
   )
   // Badge "X Teknisi On-Site": query KHUSUS (bukan query tab) supaya angka
-  // teknisi di lokasi tetap tampil di tab mana pun. Hanya untuk role kios —
-  // badge-nya hanya dirender di SecurityKioskShell.
+  // teknisi di lokasi tetap tampil di tab mana pun. Di-fetch untuk role kios
+  // (security) DAN admin (agar siap bila dibutuhkan), tetapi badge-nya
+  // HANYA dirender di SecurityKioskShell (kios-only).
   const onSiteQuery = useVisitsQuery(
     ON_SITE_COUNT_PARAMS,
-    role === 'security',
+    role === 'security' || role === 'admin',
     GATE_LIST_REFETCH_INTERVAL,
   )
   const onSiteCount = useMemo(
@@ -204,7 +246,7 @@ function GateContent() {
    * Semantik gabungan (keputusan, terdokumentasi):
    * - `visits`: gabungan `approved` + `rescheduled` hanya di tab upcoming
    *   (dedupe by id, urut `start_date` ASC), lalu baris dengan jendela
-   *   check-in sudah ditutup (`end_date + 2 jam <= now`) dibuang oleh
+   *   check-in sudah ditutup (`now >= end_date`) dibuang oleh
    *   `isCheckinWindowOpen`; tab lain tetap daftar utama apa adanya.
    * - Loading: menunggu query UTAMA ATAU query rescheduled (saat tab
    *   upcoming) — antrean baru dirender saat kedua daftar sudah settle.
@@ -266,9 +308,34 @@ function GateContent() {
     tab !== 'upcoming'
 
   /**
+   * Buka konfirmasi untuk satu arah. Scan identik (visit + arah sama) dalam
+   * 5 menit tidak membuka modal dan tidak memutar ulang mutasi — hasil terakhir
+   * ditampilkan kembali sebagai feedback panel pemindai.
+   */
+  function openConfirm(visit: VisitDetail, direction: GateDirection): void {
+    const recent = recentScanResult(scanResults, visit.id, direction)
+    if (recent !== null) {
+      setPhase({
+        phase: 'feedback',
+        tone: 'success',
+        title: 'Pemindaian berulang',
+        message: recent.message,
+      })
+      return
+    }
+    setScanVisit(visit)
+    setScanDirection(direction)
+    setScanError(null)
+    setScanOpen(true)
+    setPhase({ phase: 'idle' })
+  }
+
+  /**
    * Hasil pemindaian memuat kode QR mentah. Payload QR dari backend bersifat
    * opaque (bukan visit_id polos), jadi kita coba dulu dengan kode tersebut,
-   * lalu fallback dengan visit_id.
+   * lalu fallback dengan visit_id. Arah konfirmasi ditentukan status permit:
+   * approved/offsite -> check-in, visiting -> check-out, sisanya ditolak
+   * beserta alasannya.
    */
   async function handleScan(raw: string) {
     const code = raw.trim()
@@ -286,18 +353,16 @@ function GateContent() {
         })
         return
       }
-      if (target.status === 'approved' || target.status === 'visiting') {
-        setScanVisit(target)
-        setScanError(null)
-        setScanOpen(true)
-        setPhase({ phase: 'idle' })
+      const action = gateScanAction(target.status)
+      if (action.kind === 'confirm') {
+        openConfirm(target, action.direction)
         return
       }
       setPhase({
         phase: 'feedback',
         tone: 'error',
         title: 'Status tidak dapat diproses',
-        message: `Status kunjungan ${target.visit_id} saat ini tidak dapat di-check-in/out.`,
+        message: `${target.visit_id}: ${action.reason}`,
       })
       return
     } catch (error) {
@@ -313,7 +378,7 @@ function GateContent() {
   /**
    * Klik Visit ID pada kartu antrean ATAU klik notifikasi kios pengawas: muat
    * ULANG data lewat `resolveVisit` (helper yang sama dengan alur pindai)
-   * lalu buka `ScanResultModal`. Baris daftar / isi notifikasi bisa basi
+   * lalu buka `ScanConfirmModal`. Baris daftar / isi notifikasi bisa basi
    * (polling tertunda / status berubah), jadi konfirmasi tidak pernah
    * bertumpu pada data cache — identik dengan hasil scan. Galat muat ->
    * toast, tanpa navigasi.
@@ -328,9 +393,12 @@ function GateContent() {
       toast.error(`Detail ${label} gagal dimuat. Coba lagi.`)
       return
     }
-    setScanVisit(fresh)
-    setScanError(null)
-    setScanOpen(true)
+    const action = gateScanAction(fresh.status)
+    if (action.kind === 'disabled') {
+      toast.error(`${label}: ${action.reason}`)
+      return
+    }
+    openConfirm(fresh, action.direction)
   }
 
   async function handleSelectVisit(visit: VisitDetail) {
@@ -341,28 +409,12 @@ function GateContent() {
     await openVisitModal(item.visit_request_id, item.visit_id || item.visit_request_id)
   }
 
-  async function handleCheckIn(visit: VisitDetail) {
-    setPendingVisitId(visit.id)
-    try {
-      await checkIn.mutateAsync({ visitId: visit.id })
-      toast.success(`${visit.visit_id} berhasil Check-in MASUK.`)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Check-in gagal.')
-    } finally {
-      setPendingVisitId(null)
-    }
+  function handleCheckIn(visit: VisitDetail) {
+    openConfirm(visit, 'in')
   }
 
-  async function handleCheckOut(visit: VisitDetail) {
-    setPendingVisitId(visit.id)
-    try {
-      await checkOut.mutateAsync({ visitId: visit.id })
-      toast.success(`${visit.visit_id} berhasil Check-out KELUAR.`)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Check-out gagal.')
-    } finally {
-      setPendingVisitId(null)
-    }
+  function handleCheckOut(visit: VisitDetail) {
+    openConfirm(visit, 'out')
   }
 
   /**
@@ -373,21 +425,26 @@ function GateContent() {
    */
   async function handleScanConfirm() {
     if (scanVisit === null || scanPending) return
+    const visit = scanVisit
+    const direction = scanDirection
     setScanPending(true)
+    setPendingVisitId(visit.id)
     setScanError(null)
     try {
-      if (scanVisit.status === 'approved') {
-        await checkIn.mutateAsync({ visitId: scanVisit.id })
-        toast.success(`${scanVisit.visit_id} berhasil Check-in MASUK.`)
-      } else if (scanVisit.status === 'visiting') {
-        await checkOut.mutateAsync({ visitId: scanVisit.id })
-        toast.success(`${scanVisit.visit_id} berhasil Check-out KELUAR.`)
+      const message =
+        direction === 'in'
+          ? `${visit.visit_id} berhasil Check-in MASUK.`
+          : `${visit.visit_id} berhasil Check-out KELUAR.`
+      if (direction === 'in') {
+        await checkIn.mutateAsync({ visitId: visit.id })
+      } else {
+        await checkOut.mutateAsync({ visitId: visit.id })
       }
+      setScanResults((previous) => withScanResult(previous, visit.id, direction, message))
+      toast.success(message)
       setScanOpen(false)
       setScanVisit(null)
       setScanError(null)
-      // Siklus sukses: buka kunci panel pemindai agar QR yang sama bisa
-      // langsung dipakai check-out (atau QR berikutnya) tanpa refresh.
       setScanResetKey((key) => key + 1)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Proses gerbang gagal.'
@@ -395,6 +452,7 @@ function GateContent() {
       toast.error(message)
     } finally {
       setScanPending(false)
+      setPendingVisitId(null)
     }
   }
 
@@ -412,7 +470,13 @@ function GateContent() {
   // bukan dari query tab — supaya navbar kios selalu bicara dengan angka yang
   // sama apa pun tab yang aktif.
   const gateContent = (
-    <div className="flex flex-col gap-4 lg:flex-row">
+    <>
+      {role === 'admin' ? (
+        <div className="mb-4">
+          <GateTabs value={tab} onChange={setTab} />
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-4 lg:flex-row">
       <div className="min-w-0 lg:w-[42%]">
         <ScannerPanel
           phase={phase}
@@ -527,19 +591,22 @@ function GateContent() {
           />
         ) : null}
       </div>
-      <ScanResultModal
+      <ScanConfirmModal
         visit={scanVisit}
+        direction={scanDirection}
         open={scanOpen}
         pending={scanPending}
         error={scanError}
         onClose={handleScanClose}
         onConfirm={() => void handleScanConfirm()}
       />
-    </div>
+      </div>
+    </>
   )
 
-  // Shell mengikuti peran: pengawas tetap kios zero-sidebar; admin/superadmin
-  // memakai shell masing-masing agar transisi dari dashboard tidak janggal.
+  // Shell mengikuti peran: pengawas tetap kios zero-sidebar (tab + jam +
+  // counter on-site + KioskStatusStrip di SecurityKioskShell); admin memakai
+  // AdminBranchShell dengan GateTabs yang sama di dalam konten /gate.
   if (role === 'admin') {
     return (
       <AdminBranchShell activeHref="/gate" pendingCount={pendingCount}>
@@ -574,6 +641,7 @@ function GateContent() {
         locationName={user?.location_name ?? 'Lokasi Terkunci'}
         avatarUrl={user?.avatar_url}
         href="/profile"
+        coverageCount={user !== null && user !== undefined ? userLocationIds(user).length : 0}
       />
       {gateContent}
     </SecurityKioskShell>

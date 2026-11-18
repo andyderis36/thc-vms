@@ -334,13 +334,32 @@ test('@AUTH-05 super_admin melihat lintas cabang dan filter location_id bekerja'
   )
   const token = await h.tokenAs('super')
 
+  // Seeder hanya membuat user (ZERO visits): buat 1 kunjungan HQ + 1 Sambas
+  // di dalam test agar daftar tidak bergantung pada state DB. Cleanup otomatis
+  // via harness teardown (tracked createdVisitIds).
+  const hqVisit = await h.createVisit('rbac-auth05-hq', {
+    locationId: LOCATIONS.hq,
+    withFiles: false,
+  })
+  const sbsVisit = await h.createVisit('rbac-auth05-sbs', {
+    locationId: LOCATIONS.sambas,
+    withFiles: false,
+  })
+
   const all = await listVisits(token)
-  expect(all.items.length, 'super_admin harus melihat kunjungan seed').toBeGreaterThan(0)
+  const allIds = new Set(all.items.map((item) => item.id))
+  expect(allIds, 'super_admin harus melihat kunjungan HQ yang baru dibuat').toContain(hqVisit.id)
+  expect(allIds, 'super_admin harus melihat kunjungan Sambas yang baru dibuat').toContain(
+    sbsVisit.id,
+  )
   const allLocations = [...new Set(all.items.map((item) => item.location?.id))]
   console.log(`[@AUTH-05] semua cabang terlihat: ${allLocations.join(',')}`)
 
   const sambas = await listVisits(token, `location_id=${LOCATIONS.sambas}&limit=100`)
-  expect(sambas.items.length, 'cabang Sambas harus punya kunjungan seed').toBeGreaterThan(0)
+  expect(
+    sambas.items.map((item) => item.id),
+    'filter Sambas harus memuat kunjungan Sambas yang baru dibuat',
+  ).toContain(sbsVisit.id)
   expect([...new Set(sambas.items.map((item) => item.location?.id))]).toEqual([LOCATIONS.sambas])
   expect(sambas.total).toBe(sambas.items.length)
 })
@@ -440,6 +459,10 @@ test('@DEL-04 super_admin tidak bisa menghapus vendor yang masih punya kunjungan
 
   // vendor1a punya kunjungan seed; login untuk memperoleh UUID akunnya.
   const vendorA = await loginViaApi(ACCOUNTS.vendor.email, ACCOUNTS.vendor.password)
+  // Seeder membuat ZERO visits: buat 1 kunjungan milik vendor1a dulu agar
+  // DELETE 409 deterministik (akun seed tidak pernah terhapus). Cleanup
+  // otomatis via harness teardown.
+  await h.createVisit('rbac-del04-guard', { withFiles: false })
   const before = await listManagedUsers(superToken, 'role=vendor')
   expect(
     before.some((user) => user.id === vendorA.user.id),
@@ -486,25 +509,54 @@ test('@EDT-04 admin cabang tidak bisa mengubah pengawas security di luar cakupan
     'live: PATCH (upaya rename) akun pengawas prod dilarang; riwayat seed luar-cakupan tidak ada di prod.',
   )
   const superToken = await h.tokenAs('super')
-  const securityUsers = await listSecurityUsers(superToken)
   const outsideId = await h.outOfScopeLocation('admin')
-  const outsideSecurity = securityUsers.find((user) => user.location_id === outsideId)
-  expect(outsideSecurity, 'seed security di luar cakupan admin harus ada').toBeDefined()
-  if (outsideSecurity === undefined) return
+  const securityUsers = await listSecurityUsers(superToken)
+  let targetSecurity = securityUsers.find((user) => user.location_id === outsideId)
+  let tempSecurityId = ''
+  try {
+    if (targetSecurity === undefined) {
+      const email = `${h.unique('edt04sec').toLowerCase()}@transhybrid.net.id`
+      const created = await apiFetchRaw<ApiEnvelope<{ id: string; name: string }>>(
+        superToken,
+        'POST',
+        '/users/security',
+        {
+          name: `E2E EDT04 Security ${h.unique('name')}`,
+          email,
+          password: 'Password123!',
+          location_id: outsideId,
+        },
+      )
+      expect(created.status, 'POST /users/security temp harus 201').toBe(201)
+      tempSecurityId = (created.body as { data: { id: string } }).data.id
+      const refreshed = await listSecurityUsers(superToken)
+      targetSecurity = refreshed.find((user) => user.id === tempSecurityId)
+      expect(targetSecurity, 'security temp di luar cakupan admin harus ada').toBeDefined()
+      if (targetSecurity === undefined) return
+    }
 
-  const result = await request(
-    await h.tokenAs('admin'),
-    'PATCH',
-    `/users/security/${encodeURIComponent(outsideSecurity.id)}`,
-    { name: 'E2E @EDT-04 perubahan tidak sah' },
-  )
-  expectFailure(result, [403], '@EDT-04')
+    const result = await request(
+      await h.tokenAs('admin'),
+      'PATCH',
+      `/users/security/${encodeURIComponent(targetSecurity.id)}`,
+      { name: 'E2E @EDT-04 perubahan tidak sah' },
+    )
+    expectFailure(result, [403], '@EDT-04')
 
-  const after = await listSecurityUsers(superToken)
-  const unchanged = after.find((user) => user.id === outsideSecurity.id)
-  expect(unchanged?.name, 'nama pengawas di luar cakupan tidak boleh berubah').toBe(
-    outsideSecurity.name,
-  )
+    const after = await listSecurityUsers(superToken)
+    const unchanged = after.find((user) => user.id === targetSecurity.id)
+    expect(unchanged?.name, 'nama pengawas di luar cakupan tidak boleh berubah').toBe(
+      targetSecurity.name,
+    )
+  } finally {
+    if (tempSecurityId !== '') {
+      try {
+        await apiFetchRaw(superToken, 'DELETE', `/users/security/${tempSecurityId}`)
+      } catch (e) {
+        console.log(`[e2e-cleanup] delete security temp ${tempSecurityId}: ${String(e)}`)
+      }
+    }
+  }
 })
 
 // ---------------------------------------------------------------------------

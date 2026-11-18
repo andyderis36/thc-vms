@@ -25,7 +25,8 @@ const QR_RESOLVER_PARAMS: VisitListParams = { limit: 50 }
  * SCR-04 entry — "Tiket QR Aktif" milik Vendor/Mitra (desain 02-design-system 6.4).
  *
  * Halaman resolver (bukan daftar): memilih tiket yang BENAR-BENAR menampilkan
- * kartu QR — sedang `visiting`, lalu `approved` — dan menggantikannya ke
+ * kartu QR — sedang `visiting`, lalu `offsite`, lalu `approved` — dan
+ * menggantikannya ke
  * `/visits/[id]` (kartu QR above-the-fold, AGENTS 6.5). Kunjungan yang belum
  * disetujui TIDAK pernah dijadikan tujuan: tab "Tiket QR" akan berakhir
  * menyala sebagai "Kunjungan Saya" di halaman detail. Tanpa tiket aktif →

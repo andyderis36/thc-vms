@@ -17,7 +17,7 @@ import (
 // again from rescheduled is legal, so the schedule can be moved repeatedly.
 // The gate agent owns check-in; this usecase never writes visiting.
 func (s *Service) Reschedule(ctx context.Context, actor Actor, visitID domain.UUID, start time.Time, end time.Time, reason string) error {
-	if err := validateWindow(start, end); err != nil {
+	if err := validateWindow(s.clock.Now(), start, end); err != nil {
 		return err
 	}
 	if strings.TrimSpace(reason) == "" {

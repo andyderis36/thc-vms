@@ -57,6 +57,7 @@ import type {
   VendorSuggestion,
   VisitDetail,
   VisitListParams,
+  VisitLog,
   VisitListResult,
   VisitorItem,
 } from '@/lib/api/types';
@@ -336,6 +337,23 @@ export function checkInVisit(id: string, body?: CheckInRequest): Promise<void> {
 
 export function checkOutVisit(id: string): Promise<void> {
   return apiFetch<void>(`/visits/${id}/checkout`, { method: 'POST' });
+}
+
+/**
+ * Timeline entry gerbang: `GET /visits/{id}/logs` mengembalikan
+ * `{success:true, data: VisitLog[]}` urut tertua -> terbaru.
+ */
+export function getVisitLogs(id: string): Promise<VisitLog[]> {
+  return apiFetch<VisitLog[]>(`/visits/${id}/logs`);
+}
+
+/**
+ * Selesaikan permit kunjungan (admin/superadmin cabang, status visiting/offsite).
+ * Endpoint resmi `POST /visits/{id}/complete` — jangan memakai `/checkout`
+ * (checkout menghasilkan `offsite`, bukan `completed`).
+ */
+export function completeVisit(id: string): Promise<void> {
+  return apiFetch<void>(`/visits/${id}/complete`, { method: 'POST' });
 }
 
 // ---------------------------------------------------------------------------

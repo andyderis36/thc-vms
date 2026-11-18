@@ -42,13 +42,12 @@ describe('isWithinCheckinWindow', () => {
     expect(isWithinCheckinWindow(now, START, END)).toBe(true)
   })
 
-  it('allows now exactly at end plus 2h (inclusive upper boundary)', () => {
-    const now = shiftHours(END, CHECKIN_TOLERANCE_HOURS)
-    expect(isWithinCheckinWindow(now, START, END)).toBe(true)
+  it('allows now exactly at end (inclusive upper boundary, no 2h grace)', () => {
+    expect(isWithinCheckinWindow(END, START, END)).toBe(true)
   })
 
-  it('rejects now at end plus 2h and 1ms', () => {
-    const now = shiftMs(shiftHours(END, CHECKIN_TOLERANCE_HOURS), 1)
+  it('rejects now at end plus 1ms', () => {
+    const now = shiftMs(END, 1)
     expect(isWithinCheckinWindow(now, START, END)).toBe(false)
   })
 
@@ -98,8 +97,7 @@ describe('getCheckinBlockReason', () => {
   })
 
   it('returns null (allowed) at the inclusive upper boundary', () => {
-    const now = shiftHours(END, CHECKIN_TOLERANCE_HOURS)
-    expect(getCheckinBlockReason(now, START, END)).toBeNull()
+    expect(getCheckinBlockReason(END, START, END)).toBeNull()
   })
 
   it('returns a non-empty string when 1ms before the lower boundary', () => {
@@ -116,7 +114,7 @@ describe('getCheckinBlockReason', () => {
   })
 
   it('returns a non-empty string when 1ms after the upper boundary', () => {
-    const now = shiftMs(shiftHours(END, CHECKIN_TOLERANCE_HOURS), 1)
+    const now = shiftMs(END, 1)
     const reason = getCheckinBlockReason(now, START, END)
     expect(typeof reason).toBe('string')
     expect(reason).not.toBe('')

@@ -20,6 +20,7 @@ import { ProfileMenu } from '@/components/ui/ProfileMenu'
 import { Spinner } from '@/components/ui/Spinner'
 import { BottomNav, SidebarNav, type SidebarNavItem } from '@/components/layouts/SidebarNav'
 import { SkipToContentLink } from '@/components/layouts/SkipToContentLink'
+import { userLocationIds } from '@/features/users/managed-user-filters'
 import { getLoginRedirect, getRoleLabel } from '@/lib/auth/capabilities'
 import { useSession } from '@/lib/auth/session'
 import { NAV_LABELS } from '@/lib/nav/labels'
@@ -75,6 +76,11 @@ export function AdminBranchShell({
 
   // Fallback netral bila `location_name` null — tidak pernah menghasilkan kontrol editabel.
   const locationName = user !== null && user.location_name !== null ? user.location_name : null
+  // Cakupan multi-cabang: `location_ids ?? [location_id]`. Lebih dari satu
+  // cabang → lencana penugasan disembunyikan (nama tunggal menyesatkan);
+  // tepat satu / nol / tak dikenal → perilaku lama (nama + fallback).
+  const coverageCount = user !== null ? userLocationIds(user).length : 0
+  const showBranchBadge = coverageCount <= 1
   const displayName = user !== null ? user.name : 'Pengguna'
   const roleLabel = user !== null ? getRoleLabel(user.role) : undefined
   const closeDrawer = (): void => setDrawerOpen(false)
@@ -230,13 +236,15 @@ export function AdminBranchShell({
           `truncate` dan disimpan utuh di `title` supaya tak pernah meluber
           dari sidebar 250px. Sifat hanya-baca dinyatakan lewat ikon gembok
           dan awalan "Penugasan:", tanpa anotasi akses tambahan yang dicetak. */}
-      <p
-        className="flex items-center gap-1.5 text-badge font-semibold text-ink-muted"
-        title={`Penugasan: ${locationName ?? 'Cabang'}`}
-      >
-        <Lock className="mt-px size-3 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 truncate">Penugasan: {locationName ?? 'Cabang'}</span>
-      </p>
+      {showBranchBadge ? (
+        <p
+          className="flex items-center gap-1.5 text-badge font-semibold text-ink-muted"
+          title={`Penugasan: ${locationName ?? 'Cabang'}`}
+        >
+          <Lock className="mt-px size-3 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">Penugasan: {locationName ?? 'Cabang'}</span>
+        </p>
+      ) : null}
       {status === 'loading' ? (
         <div className="mt-3 flex items-center gap-2 text-label text-ink-muted">
           <Spinner size="sm" />
@@ -309,18 +317,20 @@ export function AdminBranchShell({
             `sidebarFooter` — Bell & menu profil koeksis, tanpa dobel. */}
         <header className="sticky top-0 z-30 hidden h-topbar items-center gap-4 border-b border-border-light bg-surface px-6 lg:flex">
           {/* Slot 1 — identitas/konteks: lencana cabang TERKUNCI (<span> statis, bukan kontrol). */}
-          <span
-            aria-disabled="true"
-            title="Penugasan cabang terkunci — tidak dapat diubah"
-            className="inline-flex max-w-72 cursor-not-allowed items-center gap-1.5 rounded-control border border-border-light bg-neutral-bg px-3 py-2 text-label font-semibold text-ink-secondary"
-          >
-            <MapPin className="size-4 shrink-0" aria-hidden="true" />
-            <span className="truncate" title={locationName !== null ? locationName : 'Cabang'}>
-              {locationName !== null ? locationName : 'Cabang'}
+          {showBranchBadge ? (
+            <span
+              aria-disabled="true"
+              title="Penugasan cabang terkunci — tidak dapat diubah"
+              className="inline-flex max-w-72 cursor-not-allowed items-center gap-1.5 rounded-control border border-border-light bg-neutral-bg px-3 py-2 text-label font-semibold text-ink-secondary"
+            >
+              <MapPin className="size-4 shrink-0" aria-hidden="true" />
+              <span className="truncate" title={locationName !== null ? locationName : 'Cabang'}>
+                {locationName !== null ? locationName : 'Cabang'}
+              </span>
+              <Lock className="size-3 shrink-0" aria-hidden="true" />
+              <span className="sr-only">(terkunci, tidak dapat diubah)</span>
             </span>
-            <Lock className="size-3 shrink-0" aria-hidden="true" />
-            <span className="sr-only">(terkunci, tidak dapat diubah)</span>
-          </span>
+          ) : null}
 
           {/* Slot 2 — aksi cepat: DIHAPUS (tombol Buat Kunjungan & Tambah
               Pengawas; keduanya tersedia dari konten halaman & menu sidebar). */}
@@ -353,16 +363,18 @@ export function AdminBranchShell({
               diserap `ml-auto` pada chip sehingga lonceng terdorong ke tepi kanan.
               Avatar header sengaja TIDAK dirender: satu-satunya avatar di
               breakpoint mobile ada di footer laci (ProfileMenu). */}
-          <span
-            aria-disabled="true"
-            className="ml-auto inline-flex min-w-0 max-w-40 shrink-0 items-center gap-1 rounded-badge bg-brand-soft px-2.5 py-1 text-badge font-bold text-brand"
-          >
-            <MapPin className="size-3 shrink-0" aria-hidden="true" />
-            <span className="truncate" title={locationName !== null ? locationName : 'Cabang'}>
-              {locationName !== null ? locationName : 'Cabang'}
+          {showBranchBadge ? (
+            <span
+              aria-disabled="true"
+              className="ml-auto inline-flex min-w-0 max-w-40 shrink-0 items-center gap-1 rounded-badge bg-brand-soft px-2.5 py-1 text-badge font-bold text-brand"
+            >
+              <MapPin className="size-3 shrink-0" aria-hidden="true" />
+              <span className="truncate" title={locationName !== null ? locationName : 'Cabang'}>
+                {locationName !== null ? locationName : 'Cabang'}
+              </span>
+              <span className="sr-only">(terkunci)</span>
             </span>
-            <span className="sr-only">(terkunci)</span>
-          </span>
+          ) : null}
           {/* Lonceng notifikasi DI AKHIR bar (paling kanan) — aksi global
               aplikasi; tersedia di mobile DAN desktop agar fitur ini tidak
               hanya terjangkau saat layar lebar. */}

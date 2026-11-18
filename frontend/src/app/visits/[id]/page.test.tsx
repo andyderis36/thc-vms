@@ -1,18 +1,27 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Suspense, createElement, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Role, User, VisitDetail } from '@/lib/api/types'
+import type { Role, User, VisitDetail, VisitLog, VisitStatus } from '@/lib/api/types'
 import { formatTanggalWaktu } from '@/features/visits/detail/Timeline'
 
 import VisitDetailPage from './page'
 
-const { session, visit } = vi.hoisted(() => ({
+const { session, visit, logs, logsError, completeMutate, toastSuccess, toastError } = vi.hoisted(() => ({
   session: { user: null as User | null },
   visit: { current: null as VisitDetail | null },
+  logs: { current: [] as VisitLog[] },
+  logsError: { current: false },
+  completeMutate: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+}))
+
+vi.mock('sonner', () => ({
+  toast: { success: toastSuccess, error: toastError },
 }))
 
 vi.mock('next/navigation', () => ({
@@ -44,6 +53,14 @@ vi.mock('@/lib/api/hooks', () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useVisitLogsQuery: () => ({
+    data: logs.current,
+    isPending: false,
+    isError: logsError.current,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useCompleteVisitMutation: () => ({ mutate: completeMutate, isPending: false }),
   useDeleteVisitMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
   useUpdateVisitorContactMutation: () => ({
     mutateAsync: vi.fn(),
@@ -76,7 +93,8 @@ vi.mock('@/components/layouts/SecurityKioskShell', () => ({
 vi.mock('@/components/layouts/VendorMobileShell', () => ({
   VendorMobileShell: ({ children }: { children?: ReactNode }) =>
     createElement('div', { 'data-testid': 'vendor-shell' }, children),
-  isQrVisible: (status: string) => status === 'approved' || status === 'visiting',
+  isQrVisible: (status: string) =>
+    status === 'approved' || status === 'visiting' || status === 'offsite',
 }))
 
 vi.mock('@/features/visits/detail/QrCard', () => ({
@@ -188,6 +206,11 @@ async function renderDetail(): Promise<void> {
 beforeEach(() => {
   session.user = makeUser('admin')
   visit.current = makeVisit()
+  logs.current = []
+  logsError.current = false
+  completeMutate.mockReset()
+  toastSuccess.mockReset()
+  toastError.mockReset()
 })
 
 afterEach(cleanup)
@@ -253,5 +276,146 @@ describe('/visits/[id] — baris pelaku & riwayat status', () => {
     expect(screen.queryByText('Check-in oleh')).not.toBeInTheDocument()
     expect(screen.queryByText('Check-out oleh')).not.toBeInTheDocument()
     expect(screen.queryByText(/oleh Siti Rahayu/)).not.toBeInTheDocument()
+  })
+})
+
+describe('/visits/[id] — Riwayat Kunjungan (visit_logs)', () => {
+  it('merender baris check-in/check-out dengan pelaku dan waktu', async () => {
+    logs.current = [
+      {
+        id: 'log-1',
+        visit_request_id: 'visit-1',
+        direction: 'in',
+        actor_user_id: 'guard-1',
+        actor_role: 'Petugas Keamanan',
+        actor_name: 'Dewi Anggraini',
+        created_at: '2026-09-26T14:30:00+07:00',
+      },
+      {
+        id: 'log-2',
+        visit_request_id: 'visit-1',
+        direction: 'out',
+        actor_user_id: 'guard-2',
+        actor_role: 'Petugas Keamanan',
+        actor_name: 'Fajar Nugroho',
+        created_at: '2026-09-26T16:45:00+07:00',
+      },
+    ]
+
+    await renderDetail()
+
+    expect(screen.getByText('Riwayat Kunjungan')).toBeInTheDocument()
+    expect(screen.getByText('Check-in')).toBeInTheDocument()
+    expect(screen.getByText('Check-out')).toBeInTheDocument()
+    expect(screen.getByText('Dewi Anggraini')).toBeInTheDocument()
+    expect(screen.getByText('Fajar Nugroho')).toBeInTheDocument()
+    expect(screen.getByText(formatTanggalWaktu('2026-09-26T14:30:00+07:00'))).toBeInTheDocument()
+    expect(screen.getByText(formatTanggalWaktu('2026-09-26T16:45:00+07:00'))).toBeInTheDocument()
+  })
+
+  it('menampilkan keadaan kosong saat tidak ada log', async () => {
+    await renderDetail()
+
+    expect(
+      screen.getByText('Belum ada riwayat check-in atau check-out pada kunjungan ini.'),
+    ).toBeInTheDocument()
+  })
+
+  it('menampilkan keadaan galat beserta tombol coba lagi', async () => {
+    logsError.current = true
+
+    await renderDetail()
+
+    expect(screen.getByText('Riwayat kunjungan gagal dimuat')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Coba Lagi' })).toBeInTheDocument()
+  })
+
+  it('lebih dari 6 log: tampil 6 baris + Lihat Semua membuka modal berisi semua', async () => {
+    logs.current = Array.from({ length: 8 }, (_, i) => ({
+      id: `log-${i + 1}`,
+      visit_request_id: 'visit-1',
+      direction: i % 2 === 0 ? ('in' as const) : ('out' as const),
+      actor_user_id: `guard-${i + 1}`,
+      actor_role: 'Petugas Keamanan',
+      actor_name: `Petugas ${i + 1}`,
+      created_at: `2026-09-26T1${i}:00:00+07:00`,
+    }))
+
+    await renderDetail()
+
+    expect(screen.getByText('Riwayat Kunjungan')).toBeInTheDocument()
+    expect(screen.getAllByText('Check-in')).toHaveLength(3)
+    expect(screen.getAllByText('Check-out')).toHaveLength(3)
+    expect(screen.queryByText('Petugas 7')).not.toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Lihat Semua (8)' }))
+    })
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('Riwayat Kunjungan Lengkap')).toBeInTheDocument()
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getAllByText('Check-in')).toHaveLength(4)
+    expect(within(dialog).getAllByText('Check-out')).toHaveLength(4)
+    expect(within(dialog).getByText('Petugas 7')).toBeInTheDocument()
+  })
+})
+
+describe('/visits/[id] — tombol Selesaikan', () => {
+  function setVisit(status: VisitStatus): void {
+    const next = makeVisit()
+    next.status = status
+    visit.current = next
+  }
+
+  it('tampil untuk admin pada visiting dan offsite', async () => {
+    for (const status of ['visiting', 'offsite'] as VisitStatus[]) {
+      cleanup()
+      setVisit(status)
+      session.user = makeUser('admin')
+      await renderDetail()
+      expect(screen.getByRole('button', { name: /Selesaikan kunjungan VST-/ })).toBeInTheDocument()
+    }
+  })
+
+  it('tampil untuk super_admin pada offsite', async () => {
+    setVisit('offsite')
+    session.user = makeUser('super_admin')
+    await renderDetail()
+
+    expect(screen.getByRole('button', { name: /Selesaikan kunjungan VST-/ })).toBeInTheDocument()
+  })
+
+  it('tidak tampil untuk security, vendor, atau status completed', async () => {
+    for (const role of ['security', 'vendor'] as Role[]) {
+      cleanup()
+      setVisit('visiting')
+      session.user = makeUser(role)
+      await renderDetail()
+      expect(screen.queryByRole('button', { name: /Selesaikan kunjungan VST-/ })).not.toBeInTheDocument()
+    }
+
+    cleanup()
+    setVisit('completed')
+    session.user = makeUser('admin')
+    await renderDetail()
+    expect(screen.queryByRole('button', { name: /Selesaikan kunjungan VST-/ })).not.toBeInTheDocument()
+  })
+
+  it('konfirmasi memanggil mutasi lalu toast sukses', async () => {
+    setVisit('visiting')
+    session.user = makeUser('admin')
+    completeMutate.mockImplementation((_vars, options) => options?.onSuccess?.())
+    await renderDetail()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Selesaikan kunjungan VST-/ }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Ya, Selesaikan' }))
+    })
+
+    await waitFor(() => expect(completeMutate).toHaveBeenCalledTimes(1))
+    expect(toastSuccess).toHaveBeenCalledWith('Kunjungan VST-9548545669 telah diselesaikan.')
   })
 })

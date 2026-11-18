@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest'
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createElement, type ComponentProps } from 'react'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi, type Mock } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import { AVATAR_OBJECT_URL, installAvatarFetchStubs, mockAvatarImage } from '@/test-utils/avatarFetch'
 
@@ -20,14 +20,29 @@ vi.mock('next/image', () => ({
   default: (props: ComponentProps<'img'>) => createElement('img', props),
 }))
 
+const sessionUserState: {
+  value: {
+    name: string
+    role: string
+    location_id: string | null
+    location_ids: string[]
+    location_name: string | null
+    avatar_url: string
+  }
+} = vi.hoisted(() => ({
+  value: {
+    name: 'Admin Cabang',
+    role: 'admin',
+    location_id: 'loc-pontianak',
+    location_ids: ['loc-pontianak'],
+    location_name: 'POP Pontianak',
+    avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
+  },
+}))
+
 vi.mock('@/lib/auth/session', () => ({
   useSession: () => ({
-    user: {
-      name: 'Admin Cabang',
-      role: 'admin',
-      location_name: 'POP Pontianak',
-      avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
-    },
+    user: sessionUserState.value,
     status: 'authenticated',
     signOut: vi.fn(),
   }),
@@ -50,6 +65,17 @@ beforeAll(() => {
 
 afterAll(() => {
   vi.unstubAllGlobals()
+})
+
+beforeEach(() => {
+  sessionUserState.value = {
+    name: 'Admin Cabang',
+    role: 'admin',
+    location_id: 'loc-pontianak',
+    location_ids: ['loc-pontianak'],
+    location_name: 'POP Pontianak',
+    avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
+  }
 })
 
 afterEach(() => {
@@ -166,5 +192,44 @@ describe('AdminBranchShell — foto profil sesi pada pemicu akun', () => {
       expect(document.querySelector(AVATAR_IMG_SELECTOR)).not.toBeNull()
     })
     expect(document.querySelector(AVATAR_IMG_SELECTOR)).toHaveAttribute('src', AVATAR_OBJECT_URL)
+  })
+})
+
+describe('AdminBranchShell — visibilitas lencana cabang multi-branch', () => {
+  it('satu cabang: ketiga lencana tampil (sidebar, topbar desktop, pil mobile)', () => {
+    renderShell()
+
+    expect(screen.getByText('Penugasan: POP Pontianak')).toBeInTheDocument()
+    expect(screen.getAllByText('POP Pontianak').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('lebih dari satu cabang: ketiga lencana disembunyikan, tanpa placeholder', () => {
+    sessionUserState.value = {
+      name: 'Admin Cabang',
+      role: 'admin',
+      location_id: 'loc-pontianak',
+      location_ids: ['loc-pontianak', 'loc-singkawang'],
+      location_name: 'POP Pontianak',
+      avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
+    }
+    renderShell()
+
+    expect(screen.queryByText('Penugasan: POP Pontianak')).toBeNull()
+    expect(screen.queryByText('POP Pontianak')).toBeNull()
+    expect(screen.queryByText('Cabang')).toBeNull()
+  })
+
+  it('cakupan kosong: fallback lama tetap tampil', () => {
+    sessionUserState.value = {
+      name: 'Admin Cabang',
+      role: 'admin',
+      location_id: null,
+      location_ids: [],
+      location_name: null,
+      avatar_url: '/api/v1/avatars/abc?v=1a2b3c4d',
+    }
+    renderShell()
+
+    expect(screen.getByText('Penugasan: Cabang')).toBeInTheDocument()
   })
 })

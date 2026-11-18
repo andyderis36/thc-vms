@@ -136,14 +136,14 @@ async function fillVisitForm(facilityValue: string): Promise<HTMLElement> {
   fireEvent.change(screen.getByLabelText(/Fasilitas Tujuan/), {
     target: { value: facilityValue },
   })
-  fireEvent.click(screen.getByRole('button', { name: /Tujuan Kunjungan/ }))
+  fireEvent.click(screen.getByRole('button', { name: /Keperluan Kunjungan/ }))
   fireEvent.click(await screen.findByRole('checkbox', { name: 'Survey' }))
 
   fireEvent.change(screen.getByLabelText(/Waktu Mulai/), {
-    target: { value: '2026-09-01T09:00' },
+    target: { value: '2027-06-01T09:00' },
   })
   fireEvent.change(screen.getByLabelText(/Waktu Selesai/), {
-    target: { value: '2026-09-01T17:00' },
+    target: { value: '2027-06-01T17:00' },
   })
 
   fireEvent.change(screen.getByLabelText(/Nama Lengkap/), {

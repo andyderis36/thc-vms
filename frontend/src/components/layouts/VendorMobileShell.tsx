@@ -58,6 +58,9 @@ const CENTRE_NAV_ID = 'new-visit'
 const QR_VISIBLE_STATUSES: ReadonlySet<VisitStatus> = new Set<VisitStatus>([
   'approved',
   'visiting',
+  // `offsite` = permit masih aktif di luar lokasi; QR yang sama dipakai untuk
+  // check-in ulang (re-entry) di gerbang.
+  'offsite',
   // `rescheduled` SENGAJA tidak ada: kunjungan yang dijadwalkan ulang wajib
   // disetujui ulang sebelum check-in (backend menolak rescheduled->visiting),
   // jadi QR disembunyikan sampai status kembali `approved`.
@@ -75,7 +78,7 @@ export function isQrVisible(status: VisitStatus): boolean {
 /**
  * Rute detail SCR-04 (`/visits/[id]`) tidak punya pasangan di `VENDOR_NAV`,
  * jadi `aria-current` pernah kosong. Petakan: status yang menampilkan kartu
- * QR (approved/visiting) -> `/qr` (Tiket QR); selainnya -> `/dashboard`
+ * QR (approved/visiting/offsite) -> `/qr` (Tiket QR); selainnya -> `/dashboard`
  * (Kunjungan Saya). Rute lain diteruskan apa adanya.
  */
 function resolveActiveHref(activeHref: string, visitStatus: VisitStatus | undefined): string {

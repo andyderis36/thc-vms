@@ -1,21 +1,13 @@
 import type { VisitDetail } from '@/lib/api/types'
-import { CHECKIN_TOLERANCE_HOURS } from '@/lib/visits/tolerance'
-
-const HOUR_MS = 3_600_000
-
-/**
- * Grace check-in setelah `end_date` (ms). Sumber angkanya
- * `CHECKIN_TOLERANCE_HOURS` (2 jam, AGENTS.md §6.2) — jendela check-in
- * backend ditutup tepat `end_date + 2 jam`.
- */
-export const CHECKIN_CLOSE_GRACE_MS = CHECKIN_TOLERANCE_HOURS * HOUR_MS
 
 /**
  * `true` bila jendela check-in kunjungan MASIH terbuka pada `now`:
- * `now < end_date + CHECKIN_CLOSE_GRACE_MS`.
+ * `now < end_date` (kontrak multi-entry: tidak ada grace 2 jam setelah
+ * jadwal selesai — check-out yang terlambat ditutup oleh worker, bukan
+ * dengan memperpanjang jendela check-in).
  *
- * Batas deterministik — `end_date + 2 jam == now` dianggap SUDAH TERTUTUP
- * (`<=` membuang baris), sehingga tab "Akan Hadir" tidak lagi menampilkan
+ * Batas deterministik — `end_date == now` dianggap SUDAH TERTUTUP (`<`
+ * membuang baris), sehingga tab "Akan Hadir" tidak lagi menampilkan
  * kunjungan yang jendelanya lewat. `now` disuntikkan agar bisa diuji tanpa
  * jam dunia nyata. Tanggal `end_date` yang tidak terbaca TIDAK membuang
  * baris (galat parse tidak boleh menyembunyikan data dari petugas pos).
@@ -23,7 +15,7 @@ export const CHECKIN_CLOSE_GRACE_MS = CHECKIN_TOLERANCE_HOURS * HOUR_MS
 export function isCheckinWindowOpen(visit: VisitDetail, now: Date = new Date()): boolean {
   const endMs = new Date(visit.end_date).getTime()
   if (Number.isNaN(endMs)) return true
-  return now.getTime() < endMs + CHECKIN_CLOSE_GRACE_MS
+  return now.getTime() < endMs
 }
 
 /**
