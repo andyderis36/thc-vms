@@ -223,7 +223,7 @@ func (f *fakeVisitRepo) DeleteVisit(_ context.Context, id domain.UUID) error {
 // (visit, kind) so a re-attach replaces the single row instead of adding
 // one. The returned bool reports create (true) versus replace (false),
 // exactly like the production 201-vs-200 answer.
-func (f *fakeVisitRepo) AttachWorkPhoto(_ context.Context, visitID domain.UUID, kind domain.WorkPhotoKind, url string, uploadedBy domain.UUID) (domain.WorkPhoto, bool, error) {
+func (f *fakeVisitRepo) AttachWorkPhoto(_ context.Context, visitID domain.UUID, kind domain.WorkPhotoKind, url string, uploadedBy domain.UUID, visitLogID *domain.UUID) (domain.WorkPhoto, bool, error) {
 	visit, ok := f.byID[visitID]
 	if !ok {
 		return domain.WorkPhoto{}, false, domain.NotFoundEntity("Kunjungan")
@@ -246,6 +246,7 @@ func (f *fakeVisitRepo) AttachWorkPhoto(_ context.Context, visitID domain.UUID, 
 		Kind:           kind,
 		URL:            url,
 		UploadedAt:     testNow(),
+		VisitLogID:     visitLogID,
 	}
 	if uploadedBy != "" {
 		by := uploadedBy
