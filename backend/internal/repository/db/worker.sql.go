@@ -155,8 +155,11 @@ func (q *Queries) ListCheckInsByVisitIDs(ctx context.Context, arg ListCheckInsBy
 const sweepNoShowVisits = `-- name: SweepNoShowVisits :many
 SELECT vr.id, vr.visit_id, vr.status, vr.vendor_user_id, vr.location_id, vr.start_date, vr.end_date
 FROM visit_request vr
-WHERE vr.status IN ('requested', 'approved', 'rescheduled')
-  AND vr.end_date <= now() - interval '2 hours'
+WHERE vr.end_date <= now()
+  AND (
+    vr.status IN ('approved', 'rescheduled')
+    OR (vr.status = 'requested' AND vr.end_date <= now() - interval '2 hours')
+  )
   AND NOT EXISTS (SELECT 1 FROM check_in ci WHERE ci.visit_request_id = vr.id)
 ORDER BY vr.end_date ASC
 LIMIT 500
@@ -173,10 +176,15 @@ type SweepNoShowVisitsRow struct {
 	EndDate      time.Time `json:"end_date"`
 }
 
-// R2: any pre-arrival status, past end_date + 2h (domain.NoShowGrace), and
-// check_in has no row for the visit. Uses idx_visit_status for the status scan
-// and the UNIQUE index on check_in(visit_request_id) for the anti-join probe.
-// Capped at 500 rows per tick (S4), same as its sibling sweeps.
+// R2: a permit whose end datetime has arrived with no check_in row and which
+// never became an entry (plan §7: a permit never entered is an unused permit
+// -> cancelled). Covers every pre-arrival status: approved and rescheduled
+// unconditionally at end, requested only once R1's 2h end guard has also
+// expired (end_date <= now()-2h) so the two sweeps never claim the same
+// requested row. Uses idx_visit_status for the status scan and the UNIQUE
+// index on check_in(visit_request_id) for the anti-join probe. Visiting and
+// offsite rows are NOT listed here: they belong to R3. Capped at 500 rows per
+// tick (S4).
 func (q *Queries) SweepNoShowVisits(ctx context.Context) ([]SweepNoShowVisitsRow, error) {
 	rows, err := q.db.Query(ctx, sweepNoShowVisits)
 	if err != nil {
@@ -237,8 +245,9 @@ type SweepStaleRequestedVisitsRow struct {
 //	mutate anything. The worker then, inside the SAME transaction per batch:
 //	  1. runs the sweep        -> the rows are already locked, so the ids cannot
 //	                             be re-selected by a second worker instance;
-//	  2. UpdateVisitStatus     -> requested->cancelled | (requested|approved|
-//	                             rescheduled)->not_visit | visiting->completed;
+//	  2. UpdateVisitStatus     -> requested->cancelled (R1) |
+//	                             approved->cancelled (R2) |
+//	                             visiting|offsite->completed (R3);
 //	  3. InsertStatusHistory   -> changed_by = NULL, notes = the rule id.
 //	Keeping the mutation out of the query file is what lets the caller batch the
 //	whole sweep into one atomic, auditable transaction (PRD L129).
@@ -247,26 +256,30 @@ type SweepStaleRequestedVisitsRow struct {
 //	on - or double-process - rows another instance is already migrating.
 //
 // R1  requested with a started window   -> cancelled   (start_date <= now(), never approved)
-// R2  pre-arrival (requested | approved | rescheduled),
+// R2  approved | rescheduled, end datetime reached,
 //
-//	window already closed,
-//	never checked in                   -> not_visit   (PRD L142 "No Show")
+//	never checked in; requested once it
+//	leaves R1's 2h end guard            -> cancelled   (plan §7: unused permit)
 //
-// R3  visiting, end_date + 24h elapsed   -> completed   (PRD L148 "Auto-Complete")
+// R3  visiting | offsite, end datetime reached
 //
-// R2 derives its 2-hour grace from the check-in validity window
-// [start_date - 2h, end_date + 2h] (AGENTS.md rule 6.2, PRD L121-123, QA
-// GATE-05): once now() > end_date + 2h the guard can no longer perform a
-// legitimate check-in, so the visit is definitively a no-show. The grace is
-// domain.NoShowGrace; keep the two in step.
+//	-> completed   (plan §7: permit fully used)
 //
-// R1 and R2 predicates are DISJOINT on end_date: R2 owns end_date <= now()-2h,
-// R1 owns end_date > now()-2h, together partitioning every requested row.
+// R2 and R3 both fire at the exact end datetime: no 2-hour grace and no
+// 24-hour delay. Thresholds(now) returns (now, now) and the Go re-checks in
+// autorule_repository.go mirror these predicates exactly.
+//
+// R1 keeps its original start_date <= now() predicate and its end_date >
+// now()-2h guard, so a requested visit whose window closed inside that guard
+// stays R1's. R2 therefore claims a requested visit only once end_date <=
+// now()-2h (the guard's complement), which keeps the two rules disjoint on
+// end_date for the requested status and sweeps the requests R1 can no longer
+// reach. Rescheduled permits are R2's unconditionally at end.
 // =============================================================================
 // R1: a request still unanswered once its visit window has started (start_date
-// <= now()) is abandoned. Only requests whose window has NOT fully closed are
-// R1's business: an overdue request is claimed by R2 instead, so
-// end_date > now()-2h keeps the two sweeps disjoint.
+// <= now()) is abandoned. The end_date > now()-2h guard is retained verbatim
+// from the prior split; R2's requested branch is its exact complement, so the
+// two sweeps are disjoint on end_date for requested rows.
 // Capped at 500 rows per tick (S4): one sweep locks and migrates at most one
 // batch, never the whole table.
 func (q *Queries) SweepStaleRequestedVisits(ctx context.Context) ([]SweepStaleRequestedVisitsRow, error) {
@@ -300,8 +313,8 @@ func (q *Queries) SweepStaleRequestedVisits(ctx context.Context) ([]SweepStaleRe
 const sweepStaleVisitingVisits = `-- name: SweepStaleVisitingVisits :many
 SELECT vr.id, vr.visit_id, vr.status, vr.vendor_user_id, vr.location_id, vr.start_date, vr.end_date
 FROM visit_request vr
-WHERE vr.status = 'visiting'
-  AND vr.end_date < now() - interval '24 hours'
+WHERE vr.status IN ('visiting', 'offsite')
+  AND vr.end_date <= now()
 ORDER BY vr.end_date ASC
 LIMIT 500
 FOR UPDATE OF vr SKIP LOCKED
@@ -317,11 +330,12 @@ type SweepStaleVisitingVisitsRow struct {
 	EndDate      time.Time `json:"end_date"`
 }
 
-// R3: still 'visiting' a full day after the scheduled end (PRD L148). idx_visit_date
-// does not cover end_date, so this sweep relies on the status index plus the
-// row count of a single overnight window - deliberately not adding a 5th index
-// beyond the four PRD L206-209 mandates, since the sweep runs once per tick.
-// Capped at 500 rows per tick (S4), same as its sibling sweeps.
+// R3: still on site (visiting or offsite) at the exact end datetime (plan §7:
+// a permit with at least one entry is completed when its window closes). No
+// +24h delay. idx_visit_date does not cover end_date, so this sweep relies on
+// the status index plus the row count of a single tick's window - deliberately
+// not adding a 5th index beyond the four PRD L206-209 mandates, since the
+// sweep runs once per tick. Capped at 500 rows per tick (S4).
 func (q *Queries) SweepStaleVisitingVisits(ctx context.Context) ([]SweepStaleVisitingVisitsRow, error) {
 	rows, err := q.db.Query(ctx, sweepStaleVisitingVisits)
 	if err != nil {
