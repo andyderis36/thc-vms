@@ -14,18 +14,10 @@ import (
 	"thc-vms/backend/internal/domain"
 )
 
-// Automatic-rule horizons. All three are absolute durations — no timezone
-// conversion — measured against the injected clock.
+// Automatic-rule horizons. R2 and R3 both fire at the exact end datetime
+// (multi-entry plan sections 5 and 7): no grace, no 24-hour delay. R1 compares
+// start_date against now directly and R4 keeps its own lead time.
 const (
-	// NoShowGrace is the R2 horizon: once now passes end_date+NoShowGrace the
-	// check-in window has closed, so a pre-arrival visit with no check-in row
-	// is a definitive no-show. It aliases the domain value so the worker and
-	// the sweep repository cannot drift.
-	NoShowGrace = domain.NoShowGrace
-	// AutoCompleteDelay is the PRD "Auto-Complete (End Date + 24 Jam)": a
-	// visit still marked visiting a full day after its scheduled end is
-	// closed automatically (R3).
-	AutoCompleteDelay = 24 * time.Hour
 	// ReminderWindow is the R4 lead time: an approved visit whose start_date
 	// falls inside (now, now+ReminderWindow] gets one reminder to its vendor
 	// user and one to the branch staff.
@@ -44,8 +36,8 @@ const (
 // the audit trail tells a worker write apart from a manual one.
 const (
 	noteAutoCancel   = "Otomatis dibatalkan: jadwal kunjungan telah dimulai tanpa persetujuan (R1)."
-	noteNoShow       = "Otomatis ditandai tidak hadir: jadwal kunjungan terlewat tanpa kedatangan (R2)."
-	noteAutoComplete = "Otomatis diselesaikan: 24 jam setelah jadwal berakhir (R3)."
+	noteNoShow       = "Otomatis dibatalkan: tidak ada check-in hingga akhir jadwal (R2)."
+	noteAutoComplete = "Otomatis diselesaikan: akhir jadwal telah tiba (R3)."
 )
 
 // NoActor is the empty actor id carried by automatic transitions. The
@@ -53,11 +45,12 @@ const (
 const NoActor = domain.UUID("")
 
 // Thresholds derives the two end_date-based rule cut-offs from one instant so
-// they live in exactly one place. R1 needs no cut-off: it compares start_date
-// against now itself (a request still unanswered once its window has started
+// they live in exactly one place. Both are the instant itself: R2 and R3 fire
+// the moment now reaches end_date. R1 needs no cut-off: it compares start_date
+// against now directly (a request still unanswered once its window has started
 // is abandoned).
 func Thresholds(now time.Time) (noShowApproved, overstayedVisiting time.Time) {
-	return now.Add(-NoShowGrace), now.Add(-AutoCompleteDelay)
+	return now, now
 }
 
 // ShouldAutoCancel is the R1 evaluator: requested AND the visit window has
@@ -67,28 +60,36 @@ func ShouldAutoCancel(visit domain.VisitRequest, now time.Time) bool {
 	return visit.Status == domain.VisitStatusRequested && !visit.StartDate.After(now)
 }
 
-// ShouldMarkNoShow is the R2 evaluator: a pre-arrival status (requested,
-// approved or rescheduled) AND the check-in window has closed (end at or
-// before the cut-off) AND no check-in row exists.
+// ShouldMarkNoShow is the R2 evaluator: a pre-arrival permit — approved,
+// rescheduled, or a request R1 could not reach — whose end datetime has arrived
+// AND which never recorded a single entry. Such a permit is unused and is
+// auto-cancelled; a permit with at least one entry is left to R3.
+//
+// Requested visits are shared with R1 only outside R1's end_date > now()-2h
+// guard: a request that ended inside that band is R1's to cancel, so R2 claims
+// a requested visit once end+domain.NoShowGrace has also passed. The two rules
+// are therefore disjoint on end_date for the requested status.
 func ShouldMarkNoShow(visit domain.VisitRequest, cutoff time.Time, hasCheckIn bool) bool {
-	return isNoShowSource(visit.Status) && !visit.EndDate.After(cutoff) && !hasCheckIn
-}
-
-// isNoShowSource reports whether a status is one the R2 sweep may close: every
-// state a visit can hold before it checks in.
-func isNoShowSource(status domain.VisitStatus) bool {
-	switch status {
-	case domain.VisitStatusRequested, domain.VisitStatusApproved, domain.VisitStatusRescheduled:
+	if hasCheckIn || visit.EndDate.After(cutoff) {
+		return false
+	}
+	switch visit.Status {
+	case domain.VisitStatusApproved, domain.VisitStatusRescheduled:
 		return true
+	case domain.VisitStatusRequested:
+		// Complement of R1's "end_date > now()-2h": only a request whose end
+		// fell out of the guard belongs to R2.
+		return !visit.EndDate.After(cutoff.Add(-domain.NoShowGrace))
 	default:
 		return false
 	}
 }
 
-// ShouldAutoComplete is the R3 evaluator: visiting AND end at or before the
-// 24-hour cut-off. Inclusive: exactly end+24h completes.
+// ShouldAutoComplete is the R3 evaluator: a permit still on site (visiting or
+// offsite) whose end datetime has arrived. Inclusive: exactly end completes.
 func ShouldAutoComplete(visit domain.VisitRequest, cutoff time.Time) bool {
-	return visit.Status == domain.VisitStatusVisiting && !visit.EndDate.After(cutoff)
+	return (visit.Status == domain.VisitStatusVisiting || visit.Status == domain.VisitStatusOffsite) &&
+		!visit.EndDate.After(cutoff)
 }
 
 // ShouldRemind is the R4 evaluator: approved AND the scheduled start falls
@@ -213,10 +214,11 @@ func (s *Service) Run(ctx context.Context) Summary {
 			snap = loaded
 		}
 	}
-	// R2 runs before R1: an overdue request is a no-show, so the no-show sweep
-	// must claim it first. R1 then re-reads a flipped row as not_visit and
-	// skips it, which keeps the two sweeps disjoint even for a visit that is
-	// both stale and past its window.
+	// R2 owns every pre-arrival permit with no entry at end (approved,
+	// rescheduled, and requested once R1's 2-hour end guard excludes it); R1
+	// owns requested visits whose window started inside that guard. The two
+	// rules are disjoint on end_date for requested, so the order is kept only
+	// to preserve the established sweep sequence.
 	s.sweepNoShow(ctx, r2, &summary)
 	s.sweepRequested(ctx, now, &summary)
 	s.sweepOverstayed(ctx, r3, &summary)
@@ -253,8 +255,9 @@ func (s *Service) sweepRequested(ctx context.Context, now time.Time, summary *Su
 	}
 }
 
-// sweepNoShow applies R2: pre-arrival visits (requested, approved or
-// rescheduled) past the closed window with no check-in row become not_visit.
+// sweepNoShow applies R2: pre-arrival permits (approved, rescheduled, and
+// requested past R1's end guard) that reached end datetime without a single
+// entry become cancelled (the visit_auto_cancelled notice).
 func (s *Service) sweepNoShow(ctx context.Context, cutoff time.Time, summary *Summary) {
 	candidates, err := s.rules.FindNoShow(ctx, cutoff)
 	if err != nil {
@@ -283,13 +286,13 @@ func (s *Service) sweepNoShow(ctx context.Context, cutoff time.Time, summary *Su
 			summary.Skipped++
 			continue
 		}
-		s.apply(ctx, visit, domain.VisitStatusNotVisit, noteNoShow, summary, RuleNoShow, &summary.NoShow)
+		s.apply(ctx, visit, domain.VisitStatusCancelled, noteNoShow, summary, RuleNoShow, &summary.NoShow)
 	}
 }
 
-// sweepOverstayed applies R3: visiting visits a full day past end become
-// completed. There is deliberately no OVERSTAY label: R3 is the specified
-// behaviour.
+// sweepOverstayed applies R3: visiting or offsite permits at end datetime
+// become completed. There is deliberately no OVERSTAY label: R3 is the
+// specified behaviour.
 func (s *Service) sweepOverstayed(ctx context.Context, cutoff time.Time, summary *Summary) {
 	candidates, err := s.rules.FindOverstayedVisiting(ctx, cutoff)
 	if err != nil {
@@ -519,11 +522,22 @@ func (s *Service) hasCheckIn(ctx context.Context, visitID domain.UUID) (bool, er
 	return false, err
 }
 
+// canApply extends the shared state machine with the one multi-entry edge the
+// worker owns: offsite -> completed at end datetime (plan sections 5 and 7).
+// The domain table still describes the single-entry flow; every other worker
+// edge delegates to it unchanged.
+func canApply(from, to domain.VisitStatus) error {
+	if from == domain.VisitStatusOffsite && to == domain.VisitStatusCompleted {
+		return nil
+	}
+	return domain.CanTransition(from, to)
+}
+
 // apply asserts the transition still holds, then persists it with the empty
 // actor id. Transition or persistence failures are collected and counted;
 // each applied move is logged at Info and bumps its rule counter.
 func (s *Service) apply(ctx context.Context, visit domain.VisitRequest, to domain.VisitStatus, notes string, summary *Summary, rule string, counter *int) {
-	if err := domain.CanTransition(visit.Status, to); err != nil {
+	if err := canApply(visit.Status, to); err != nil {
 		summary.Failures = append(summary.Failures, Failure{Rule: rule, VisitID: visit.ID, Err: err})
 		s.logger.Error("auto-rule transition refused",
 			"rule", rule, "visit_id", visit.ID,

@@ -3,11 +3,13 @@ package repository
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"thc-vms/backend/internal/domain"
 	"thc-vms/backend/internal/repository/db"
@@ -43,6 +45,10 @@ func (r *visitRepository) UpdateStatus(
 	}
 	var pending *pendingEmail
 	var locationID, vendorUserID uuid.UUID
+	// skippedGateEntry carries the visit code of a gate edge whose email leg
+	// the frugal rule suppressed, so the skip is logged only after the
+	// transaction commits. An empty code means no skip to report.
+	var skippedGateEntry string
 	snap := domain.DefaultNotificationSettings()
 	if r.settingsLoader != nil {
 		if loaded, err := r.settingsLoader.LoadNotificationSettings(ctx); err == nil {
@@ -58,6 +64,27 @@ func (r *visitRepository) UpdateStatus(
 		if locked.Status == string(status) {
 			return fmt.Errorf("repository: visit %s already %s: %w", id, status, domain.ErrConflict)
 		}
+		// Gate entries travel the multi-entry state machine; ResolveGateTransition
+		// is the single guard for its three edges and refuses terminal exits and
+		// same-direction double scans. Non-gate moves keep the direct write.
+		direction := gateDirection(status)
+		firstEntry := false
+		if direction != "" {
+			action := domain.GateActionCheckIn
+			if direction == "out" {
+				action = domain.GateActionCheckOut
+			}
+			current := domain.VisitStatus(locked.Status)
+			if _, ok := domain.ResolveGateTransition(current, action); !ok {
+				return domain.NewInvalidTransition(current, status)
+			}
+			if direction == "in" {
+				firstEntry, err = isFirstCheckIn(ctx, q, parsed)
+				if err != nil {
+					return err
+				}
+			}
+		}
 		if _, err := q.UpdateVisitStatus(ctx, db.UpdateVisitStatusParams{
 			ID:     parsed,
 			Status: string(status),
@@ -71,6 +98,23 @@ func (r *visitRepository) UpdateStatus(
 			Notes:          pgText(notePtr(notes)),
 		}); err != nil {
 			return MapError(err)
+		}
+		// One visit_logs row per gate entry, written in this same transaction:
+		// a status edge can never exist without its timeline row (or the
+		// reverse). A failure here rolls back the status and history writes.
+		if direction != "" {
+			role, err := resolveActorRole(ctx, tx, changedBy)
+			if err != nil {
+				return err
+			}
+			if _, err := q.InsertVisitLog(ctx, db.InsertVisitLogParams{
+				VisitRequestID: parsed,
+				Direction:      direction,
+				ActorUserID:    actor,
+				ActorRole:      role,
+			}); err != nil {
+				return MapError(err)
+			}
 		}
 		locationID, vendorUserID = locked.LocationID, locked.VendorUserID
 		// Resolve the email actor rows inside the tx: who filed the request
@@ -109,32 +153,46 @@ func (r *visitRepository) UpdateStatus(
 			}
 		}
 		if first != nil {
-			v := actors.apply(emailVisit(locked, locked.StartDate, locked.EndDate, notes))
-			audiences := []domain.NotificationAudience{first.Audience}
-			if staffAuto != nil {
-				audiences = append(audiences, staffAuto.Audience)
-			}
-			if status == domain.VisitStatusCompleted && !actor.Valid {
-				name, role := domain.SystemActorName, domain.SystemActorRole
-				v.ActorName, v.ActorRoleLabel = &name, &role
-			}
-			if status == domain.VisitStatusVisiting {
-				now := time.Now()
-				v.CheckInAt = &now
-				if actor.Valid {
-					cb := changedBy
-					v.CheckedInBy = &cb
+			// Multi-entry permits are frugal with mail: ONLY the first
+			// check-in and the final completion send email. Intermediate gate
+			// edges (a re-entry check-in or an intermediate check-out) already
+			// wrote their in-app bell and visit_logs row above, but skip the
+			// email leg so one permit cannot mail on every turnstile pass.
+			// Non-gate transitions keep mailing exactly as before.
+			mailNow := direction == "" || (direction == "in" && firstEntry)
+			if !mailNow {
+				skippedGateEntry = locked.VisitID
+			} else {
+				v := actors.apply(emailVisit(locked, locked.StartDate, locked.EndDate, notes))
+				audiences := []domain.NotificationAudience{first.Audience}
+				if staffAuto != nil {
+					audiences = append(audiences, staffAuto.Audience)
 				}
-			}
-			if status == domain.VisitStatusCompleted {
-				now := time.Now()
-				v.CheckOutAt = &now
-				if actor.Valid {
-					cb := changedBy
-					v.CheckedOutBy = &cb
+				if status == domain.VisitStatusCompleted && !actor.Valid {
+					name, role := domain.SystemActorName, domain.SystemActorRole
+					v.ActorName, v.ActorRoleLabel = &name, &role
 				}
+				if status == domain.VisitStatusVisiting {
+					now := time.Now()
+					v.CheckInAt = &now
+					if actor.Valid {
+						cb := changedBy
+						v.CheckedInBy = &cb
+					}
+				}
+				// Check-out is now the offsite edge; a system completion (R3)
+				// still carries the check-out timestamp with the System actor
+				// pinned above, so both legs keep their existing email shape.
+				if status == domain.VisitStatusOffsite || status == domain.VisitStatusCompleted {
+					now := time.Now()
+					v.CheckOutAt = &now
+					if actor.Valid {
+						cb := changedBy
+						v.CheckedOutBy = &cb
+					}
+				}
+				pending = &pendingEmail{visit: v, tpl: first, audiences: audiences}
 			}
-			pending = &pendingEmail{visit: v, tpl: first, audiences: audiences}
 		}
 		// Load the roster for every pending email so check-in/out (and other)
 		// notices can carry the visitor/team names. A roster read failure
@@ -156,6 +214,9 @@ func (r *visitRepository) UpdateStatus(
 	// enqueues zero. enqueueEmail itself never fails the caller.
 	if pending != nil {
 		enqueueEmail(ctx, r.mailer, db.New(r.pool), pending.visit, pending.tpl, locationID, vendorUserID, r.frontendBaseURL, snap, pending.audiences...)
+	} else if skippedGateEntry != "" {
+		slog.Info("email skipped: intermediate gate entry (in-app bell and visit_logs row written)",
+			"visit_id", skippedGateEntry, "status", string(status))
 	}
 	return nil
 }
@@ -356,6 +417,59 @@ func resolveUserName(ctx context.Context, q *db.Queries, id domain.UUID) (string
 		return "", err
 	}
 	return strings.TrimSpace(row.Name), nil
+}
+
+// gateDirection maps a gate target status to its visit_logs direction. Every
+// other status returns "" and is not a per-entry event.
+func gateDirection(status domain.VisitStatus) string {
+	switch status {
+	case domain.VisitStatusVisiting:
+		return "in"
+	case domain.VisitStatusOffsite:
+		return "out"
+	default:
+		return ""
+	}
+}
+
+// isFirstCheckIn reports whether the 'in' row about to be written is the
+// visit's first gate entry: no earlier 'in' row exists in visit_logs. The read
+// runs inside the status-write transaction BEFORE the new row is inserted, so
+// it sees only prior entries. visit_logs is the source of truth for the frugal
+// email rule - only a first check-in mails. A read failure is a storage error
+// and rolls the status write back like any other in-transaction read.
+func isFirstCheckIn(ctx context.Context, q *db.Queries, visitID uuid.UUID) (bool, error) {
+	rows, err := q.ListVisitLogsByVisit(ctx, db.ListVisitLogsByVisitParams{VisitRequestID: visitID})
+	if err != nil {
+		return false, MapError(err)
+	}
+	for _, row := range rows {
+		if row.Direction == "in" {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// resolveActorRole resolves the acting user's raw role name for the visit_logs
+// audit row. An empty (system) actor stores SQL NULL; a missing user or role is
+// a storage error and rolls the status write back, matching the actor_user_id
+// foreign key on visit_logs.
+func resolveActorRole(ctx context.Context, tx pgx.Tx, changer domain.UUID) (pgtype.Text, error) {
+	if changer == "" {
+		return pgtype.Text{}, nil
+	}
+	parsed, err := fromDomainUUID(changer)
+	if err != nil {
+		return pgtype.Text{}, err
+	}
+	var role string
+	if err := tx.QueryRow(ctx,
+		`SELECT r.name FROM users u JOIN role r ON r.id = u.role_id WHERE u.id = $1`, parsed,
+	).Scan(&role); err != nil {
+		return pgtype.Text{}, MapError(err)
+	}
+	return pgText(&role), nil
 }
 
 // notePtr maps an empty note to NULL so history rows carry a note only when

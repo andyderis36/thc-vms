@@ -217,7 +217,7 @@ func openScratchPool(ctx context.Context) (*pgxpool.Pool, error) {
 // yields no error, because a re-applied file raises only "already there"
 // SQLSTATEs, which are the normal case on a second run.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL, migrationUserLocationsSQL, migrationAppSettingsSQL, migrationMailLogSQL, migrationMailBccSQL} {
+	for _, sql := range []string{migrationSQL, migrationNIKSQL, migrationVisitorVendorSQL, migrationManualCompanySQL, migrationRenameVendorSQL, migrationAuditSQL, migrationNotificationSQL, migrationNotificationVisitCancelledSQL, migrationSinglePusatSQL, migrationVisitorJabatanSQL, migrationUserProfileSQL, migrationAuditFKSetNullSQL, migrationVisitVendorOverrideSQL, migrationDevSuperadminSQL, migrationVendorRegistrationNoticesSQL, migrationVisitorContactEditedSQL, migrationVisitorEmailSQL, migrationUserLocationsSQL, migrationAppSettingsSQL, migrationMailLogSQL, migrationMailBccSQL, migrationVisitLogsSQL} {
 		if err := applyOne(ctx, pool, sql); err != nil {
 			return err
 		}
@@ -403,6 +403,22 @@ var migrationMailLogSQL = func() string {
 // applyOne covers it with no once-gate.
 var migrationMailBccSQL = func() string {
 	path := filepath.Join("..", "..", "migrations", "000031_mail_log_bcc.up.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)
+		return ""
+	}
+	return string(raw)
+}()
+
+// migrationVisitLogsSQL is the visit_logs table plus the offsite status
+// widening (migration 000033), loaded the same way so the scratch schema knows
+// the per-entry timeline the multi-entry UpdateStatus path writes. It is
+// re-runnable (duplicate CREATE TABLE/INDEX raise the tolerated SQLSTATEs;
+// the two CHECK rewrites drop and re-add the same constraints), so applyOne
+// covers it with no once-gate.
+var migrationVisitLogsSQL = func() string {
+	path := filepath.Join("..", "..", "migrations", "000033_visit_logs.up.sql")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "repository: cannot read %s: %v\n", path, err)

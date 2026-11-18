@@ -16,12 +16,12 @@ import (
 // domain.VisitAutoRuleRepository: the read side of the background worker.
 //
 // The three sweep queries take NO time parameter — each hard-codes its
-// threshold against now() (start_date for R1, end_date + 2h for R2, end_date
-// + 24h for R3) and locks the matched rows. The before instant the port
-// receives is therefore applied as a second, in-Go comparison on the hydrated
-// visit, so a caller can narrow the sweep to an older horizon without
-// inventing a query parameter the SQL does not support. With before == now
-// the Go comparison is a no-op and the result is exactly the SQL sweep.
+// threshold against now() (start_date for R1, end_date for R2 and R3) and
+// locks the matched rows. The before instant the port receives is therefore
+// applied as a second, in-Go comparison on the hydrated visit, so a caller can
+// narrow the sweep to an older horizon without inventing a query parameter the
+// SQL does not support. With before == now the Go comparison is a no-op and
+// the result is exactly the SQL sweep.
 //
 // Sweep rows carry only the rule's ordering key; the full visit (vendor,
 // NDA flag, notes, audit timestamps) is hydrated with ONE batched
@@ -68,11 +68,11 @@ func (r *visitAutoRuleRepository) FindStaleRequested(
 	})
 }
 
-// FindNoShow returns pre-arrival visits (requested, approved or rescheduled)
-// whose window closed before the horizon with no check-in (R2: the SQL
-// pre-filters to end_date <= now() - 2h plus the check_in anti-join; the Go
-// comparison keeps rows with end_date + domain.NoShowGrace at or before the
-// caller's horizon).
+// FindNoShow returns pre-arrival permits whose end datetime has arrived with no
+// check-in (R2: the SQL pre-filters to approved/rescheduled, plus requested past
+// R1's 2h end guard, end_date <= now() and the check_in anti-join; the Go
+// comparison mirrors it, so a requested row still inside that guard is never
+// reported here). Visiting and offsite rows are not listed: they belong to R3.
 func (r *visitAutoRuleRepository) FindNoShow(
 	ctx context.Context,
 	before time.Time,
@@ -90,13 +90,17 @@ func (r *visitAutoRuleRepository) FindNoShow(
 		domain.VisitStatusApproved,
 		domain.VisitStatusRescheduled,
 	}, func(visit domain.VisitRequest) bool {
-		return !visit.EndDate.Add(domain.NoShowGrace).After(before)
+		if visit.Status == domain.VisitStatusRequested {
+			return !visit.EndDate.After(before.Add(-domain.NoShowGrace))
+		}
+		return !visit.EndDate.After(before)
 	})
 }
 
-// FindOverstayedVisiting returns visiting visits past their grace period (R3:
-// the SQL pre-filters to end_date < now() - 24h; the Go comparison keeps rows
-// with end_date + 24h at or before the caller's horizon).
+// FindOverstayedVisiting returns visiting or offsite permits at their end
+// datetime (R3: the SQL pre-filters to status IN (visiting, offsite) and
+// end_date <= now(); the Go comparison keeps rows with end_date at or before
+// the caller's horizon). No 24-hour delay.
 func (r *visitAutoRuleRepository) FindOverstayedVisiting(
 	ctx context.Context,
 	before time.Time,
@@ -109,8 +113,8 @@ func (r *visitAutoRuleRepository) FindOverstayedVisiting(
 	for _, row := range rows {
 		ids = append(ids, row.ID)
 	}
-	return r.hydrate(ctx, ids, []domain.VisitStatus{domain.VisitStatusVisiting}, func(visit domain.VisitRequest) bool {
-		return !visit.EndDate.Add(24 * time.Hour).After(before)
+	return r.hydrate(ctx, ids, []domain.VisitStatus{domain.VisitStatusVisiting, domain.VisitStatusOffsite}, func(visit domain.VisitRequest) bool {
+		return !visit.EndDate.After(before)
 	})
 }
 
