@@ -11,8 +11,11 @@ import (
 // authorizeWorkPhotoWrite applies the attach scope of
 // POST /visits/:id/work-photos: the owning vendor (role vendor AND id ==
 // visit.VendorUserID, anything else 404 so a foreign vendor learns nothing),
-// branch isolation for admin/security (403 outside the branch), global for
-// super_admin. No other role may attach.
+// or the visit creator (visit.CreatedBy == actor id) for admin and
+// super_admin. Security never attaches: gate staff only verifies check-in/out
+// at the scanner, so any security attach is 403. An admin must additionally
+// pass branch isolation (403 outside the branch); a legacy visit without
+// CreatedBy admits no admin attach (fail closed).
 func authorizeWorkPhotoWrite(actor Actor, visit domain.VisitRequest) error {
 	switch actor.Role {
 	case domain.RoleVendor:
@@ -20,9 +23,20 @@ func authorizeWorkPhotoWrite(actor Actor, visit domain.VisitRequest) error {
 			return domain.NotFoundEntity("Kunjungan")
 		}
 		return nil
-	case domain.RoleAdmin, domain.RoleSecurity:
-		return actor.requireBranchAccess(visit.LocationID)
+	case domain.RoleAdmin:
+		if err := actor.requireBranchAccess(visit.LocationID); err != nil {
+			return err
+		}
+		if visit.CreatedBy == nil || *visit.CreatedBy != actor.ID {
+			return domain.ForbiddenBranch()
+		}
+		return nil
+	case domain.RoleSecurity:
+		return domain.ForbiddenBranch()
 	case domain.RoleSuperAdmin, domain.RoleDevSuperAdmin:
+		if visit.CreatedBy == nil || *visit.CreatedBy != actor.ID {
+			return domain.ForbiddenBranch()
+		}
 		return nil
 	default:
 		return domain.ForbiddenBranch()
@@ -38,7 +52,7 @@ func authorizeWorkPhotoWrite(actor Actor, visit domain.VisitRequest) error {
 //
 // The returned bool reports whether the row was created (true, the handler
 // answers 201) or replaced (false, the handler answers 200).
-func (s *Service) AttachWorkPhoto(ctx context.Context, actor Actor, visitID domain.UUID, kind, url string) (domain.WorkPhoto, bool, error) {
+func (s *Service) AttachWorkPhoto(ctx context.Context, actor Actor, visitID domain.UUID, kind, url string, visitLogID *domain.UUID) (domain.WorkPhoto, bool, error) {
 	visit, err := s.visits.FindByID(ctx, visitID)
 	if err != nil {
 		return domain.WorkPhoto{}, false, err
@@ -74,7 +88,7 @@ func (s *Service) AttachWorkPhoto(ctx context.Context, actor Actor, visitID doma
 			}
 		}
 	}
-	photo, created, err := s.visits.AttachWorkPhoto(ctx, visit.ID, parsed, trimmed, actor.ID)
+	photo, created, err := s.visits.AttachWorkPhoto(ctx, visit.ID, parsed, trimmed, actor.ID, visitLogID)
 	if err != nil {
 		return domain.WorkPhoto{}, false, err
 	}

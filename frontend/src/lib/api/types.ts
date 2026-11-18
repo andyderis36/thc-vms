@@ -26,11 +26,19 @@ export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
  */
 export type Role = 'super_admin' | 'dev-superadmin' | 'admin' | 'security' | 'vendor';
 
-/** Siklus hidup kunjungan. */
+/**
+ * Siklus hidup kunjungan.
+ *
+ * `offsite` = permit multi-entry yang masih AKTIF tetapi tamu sudah check-out
+ * dan berada di luar lokasi: QR yang sama dipakai untuk check-in ulang
+ * (re-entry), dan admin/super_admin masih dapat menutupnya menjadi `completed`.
+ * `completed` hanya dicapai lewat "Selesaikan", bukan lewat check-out.
+ */
 export type VisitStatus =
   | 'requested'
   | 'approved'
   | 'visiting'
+  | 'offsite'
   | 'completed'
   | 'not_visit'
   | 'rejected'
@@ -351,6 +359,12 @@ export interface VisitDetail {
    */
   assignment_letter_url: string | null;
   notes: string | null;
+  /**
+   * ID akun pengaju kunjungan (`visit_request.created_by`) — diisi HANYA
+   * oleh `GET /visits/{id}`; dipakai gerbang unggah bukti kerja (hanya
+   * pemilik + pembuat boleh mengunggah). Absen/null bila tak dikenal.
+   */
+  created_by?: string | null;
   /** "Keperluan lain" (teks bebas ≤200) — null/kosong bila tak diisi. */
   purpose_note?: string | null;
   status_note?: string | null;
@@ -404,6 +418,28 @@ export interface VisitHistoryEntry {
 }
 
 /**
+ * Satu baris timeline gerbang (`visit_logs`) — satu entry check-in (`in`)
+ * atau check-out (`out`) milik satu permit.
+ *
+ * ASSUMPTION (Wave 4): Wave 2/3 menambahkan tabel `visit_logs` + query
+ * repository `ListVisitLogsByVisit`, tetapi BELUM ada route/handler/openapi
+ * untuk membacanya. Bentuk di bawah mengikuti kolom SQL yang sebenarnya
+ * (`id, visit_request_id, direction, actor_user_id, actor_role, created_at`).
+ * `actor_name` adalah field opsional yang diharapkan dari enrichment bila
+ * endpoint akhirnya ditambahkan; tanpa itu UI jatuh ke `actor_role`.
+ */
+export interface VisitLog {
+  id: string;
+  visit_request_id: string;
+  direction: 'in' | 'out';
+  actor_user_id: string | null;
+  actor_role: string | null;
+  actor_name?: string | null;
+  /** RFC3339 waktu entry (`visit_logs.created_at`). */
+  created_at: string;
+}
+
+/**
  * Satu slot bukti pengerjaan kunjungan (`before` = kondisi sebelum mulai,
  * `after` = kondisi sesudah selesai) — kontrak `WorkPhoto` pada
  * `docs/4. openapi.yaml`.
@@ -422,6 +458,11 @@ export interface WorkPhoto {
   uploaded_by_name?: string | null;
   /** RFC3339 waktu lampiran tersimpan (diperbarui setiap penggantian). */
   uploaded_at: string;
+  /**
+   * Siklus check-in/out pemilik bukti (`visit_work_photo.visit_log_id`);
+   * `null`/absen pada baris sebelum binding per-siklus.
+   */
+  visit_log_id?: string | null;
 }
 
 /**
@@ -432,6 +473,8 @@ export interface WorkPhoto {
 export interface AttachWorkPhotoRequest {
   kind: 'before' | 'after';
   url: string;
+  /** Siklus check-in/out pemilik bukti; absen = siklus `in` terakhir. */
+  visit_log_id?: string;
 }
 
 export interface VisitListResult {
@@ -631,7 +674,6 @@ export interface CreateVisitRequest {
   purpose_note?: string | null;
   start_date: string;
   end_date: string;
-  is_multi_day?: boolean;
   assignment_letter_url?: string;
   is_nda_accepted: boolean;
   notes?: string;

@@ -1,7 +1,20 @@
+'use client'
+
+import { useState, type ReactNode } from 'react'
 import { Check, X } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 import type { VisitHistoryEntry, VisitStatus } from '@/lib/api/types'
 import { VISIT_STATUS_META } from '@/lib/visits/status-badge'
+
+/**
+ * Batas node riwayat yang dirender inline. Izin multi-entry membuat
+ * `history` tumbuh tanpa batas (siklus visiting/offsite berulang); panel
+ * SCR-04 dipotong agar tetap terbaca. Dipilih 10 node PERTAMA sesuai urutan
+ * existing (tertua -> terbaru, append-only) supaya "Pengajuan" selalu
+ * terlihat; sisanya dibuka lewat modal "Lihat Semua".
+ */
 
 /**
  * Format timestamp ISO 8601 menjadi tampilan ringkas Bahasa Indonesia.
@@ -53,6 +66,9 @@ const ACTIVE_INDEX_BY_STATUS: Record<VisitStatus, number> = {
   rescheduled: 0,
   approved: 1,
   visiting: 2,
+  // Permit masih aktif (tamu di luar lokasi, siap re-entry): tahap aktif
+  // tetap kedatangan, sama seperti visiting; langkah timeline tidak berubah.
+  offsite: 2,
   completed: 4,
   rejected: 0,
   cancelled: 0,
@@ -71,6 +87,8 @@ const TEXT_CLASS: Record<StepState, { label: string; detail: string }> = {
   future: { label: 'font-medium text-ink-muted', detail: 'text-ink-muted' },
 }
 
+export const TIMELINE_MAX_VISIBLE_NODES = 10
+
 export interface TimelineProps {
   status: VisitStatus
   createdAt: string
@@ -79,6 +97,13 @@ export interface TimelineProps {
   /** Stempel gerbang aktual dari GET /visits/{id}; null/absen = belum terjadi. */
   checkInAt?: string | null
   checkOutAt?: string | null
+  /**
+   * Nama tampilan pengaju (`VisitDetail.created_by_name`) untuk keterangan
+   * node Pengajuan ("Diajukan oleh <nama> · <stempel>"). Null/absen =
+   * fallback ke "Diajukan <stempel>" agar panel daftar tanpa enrichmen
+   * tidak pernah mencetak nama kosong.
+   */
+  createdByName?: string | null
   /** Alasan status akhir (`status_note`); hanya tampil pada status terminal. */
   statusNote?: string | null
   /**
@@ -108,6 +133,18 @@ export function historyDetail(entry: VisitHistoryEntry): string {
       ? `oleh ${entry.actor_name} (${roleLabel})`
       : `oleh ${entry.actor_name}`
   return `${by} · ${stamp}`
+}
+
+/**
+ * Keterangan node gerbang (check-in/out): sama seperti `historyDetail`,
+ * tetapi klause pelaku memakai prefix "diverifikasi oleh" — penegasan bahwa
+ * stempel dicatat pengawas di gerbang, bukan aksi tamu. Tanpa pelaku
+ * (transisi sistem) dikembalikan apa adanya (hanya stempel). Murni (pure)
+ * agar terkunci oleh unit test.
+ */
+export function verifiedGateDetail(entry: VisitHistoryEntry): string {
+  const base = historyDetail(entry)
+  return base.replace(/^oleh /, 'diverifikasi oleh ')
 }
 
 /**
@@ -158,7 +195,9 @@ export function Timeline({
   checkOutAt,
   statusNote,
   history,
+  createdByName,
 }: TimelineProps) {
+  const [fullOpen, setFullOpen] = useState(false)
   const activeIndex = ACTIVE_INDEX_BY_STATUS[status]
   const terminal = TERMINAL_STATUSES.has(status)
   const entries = history ?? []
@@ -173,7 +212,10 @@ export function Timeline({
   const requestedStep: TimelineStep = {
     id: 'requested',
     label: 'Pengajuan',
-    detail: `Diajukan ${formatTanggalWaktu(createdAt)}`,
+    detail:
+      createdByName !== null && createdByName !== undefined && createdByName !== ''
+        ? `Diajukan oleh ${createdByName} · ${formatTanggalWaktu(createdAt)}`
+        : `Diajukan ${formatTanggalWaktu(createdAt)}`,
   }
   const steps: TimelineStep[] = [
     requestedStep,
@@ -190,7 +232,14 @@ export function Timeline({
     {
       id: 'completed',
       label: 'Selesai',
-      detail: gateDetail('Keluar', checkOutAt, endDate),
+      // Selama permit masih aktif (visiting/offsite) jangan tampilkan jam
+      // check-out pertama sebagai "Keluar <jam>" pada node Selesai — itu
+      // membingungkan karena Selesai belum terjadi; tampilkan jadwal. Hanya
+      // setelah benar-benar completed baru tampilkan stempel aktual.
+      detail:
+        status === 'completed'
+          ? gateDetail('Keluar', checkOutAt, endDate)
+          : `Jadwal selesai ${formatTanggalWaktu(endDate)}`,
     },
   ]
 
@@ -201,11 +250,25 @@ export function Timeline({
   // tahap aktif yang riwayatnya belum masuk) dirender sebagai langkah.
   // `requested` yang belum tercatat diwakili baris Pengajuan sintetis, jadi
   // tidak digandakan di sini.
-  const historyStatuses = new Set(entries.map((entry) => entry.status))
+  // Izin multi-entry ringkas: node gerbang (Sedang/Di Luar) hanya relevan
+  // bila tamu sudah pernah check-in — ditandai entri `visiting` di riwayat
+  // atau stempel `checkInAt`. Belum check-in = belum ada log gerbang, panel
+  // berhenti di Disetujui; sudah check-in = Sedang saja; sudah check-out
+  // (offsite/completed) = Sedang + Di Luar sesuai riwayat.
+  const hasCheckIn =
+    entries.some((entry) => entry.status === 'visiting') ||
+    (checkInAt !== null && checkInAt !== undefined && checkInAt !== '')
+  const shownEntries = hasCheckIn
+    ? entries
+    : entries.filter((entry) => entry.status !== 'visiting' && entry.status !== 'offsite')
+  const historyStatuses = new Set(shownEntries.map((entry) => entry.status))
   const futureSteps = steps.filter((step, index) => {
     if (index < activeIndex) return false
     if (historyStatuses.has(step.id as VisitStatus)) return false
     if (step.id === 'requested' && showSyntheticRequest) return false
+    // Belum check-in: tahap gerbang (Kedatangan/Selesai) disembunyikan agar
+    // panel berhenti di Disetujui; jadwal lengkap tetap di panel Informasi.
+    if (!hasCheckIn && (step.id === 'visiting' || step.id === 'completed')) return false
     return true
   })
 
@@ -232,7 +295,11 @@ export function Timeline({
   }
 
   function renderEntryRow(entry: VisitHistoryEntry, index: number) {
-    const label = VISIT_STATUS_META[entry.status].label
+    const isGate = entry.status === 'visiting' || entry.status === 'offsite'
+    // Node gerbang ringkas: tanpa prefix "Check-out — ".
+    const label =
+      entry.status === 'offsite' ? 'Di Luar Lokasi' : VISIT_STATUS_META[entry.status].label
+    const detail = isGate ? verifiedGateDetail(entry) : historyDetail(entry)
     return (
       <li key={`${entry.status}-${entry.at}-${index}`} className="relative min-w-0">
         <span
@@ -242,7 +309,7 @@ export function Timeline({
           <Check aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />
         </span>
         <p className="text-sm font-semibold text-ink">{label}</p>
-        <p className="mt-0.5 text-label text-ink-secondary">{historyDetail(entry)}</p>
+        <p className="mt-0.5 text-label text-ink-secondary">{detail}</p>
       </li>
     )
   }
@@ -254,50 +321,96 @@ export function Timeline({
     return renderStepRow(requestedStep, 'requested-synthetic', 'done')
   }
 
-  return (
-    <ol className="relative ml-3 flex flex-col gap-6 border-l-2 border-border-light pl-6">
-      {terminal ? (
-        <>
-          {entries.length > 0 ? (
-            <>
-              {showSyntheticRequest && renderSyntheticRequestRow()}
-              {entries.map((entry, index) => renderEntryRow(entry, index))}
-            </>
-          ) : (
-            visibleSteps.map((step) => renderStepRow(step, step.id, 'done'))
-          )}
-        </>
-      ) : entries.length > 0 ? (
-        <>
-          {showSyntheticRequest && renderSyntheticRequestRow()}
-          {entries.map((entry, index) => renderEntryRow(entry, index))}
-          {futureSteps.map((step) => renderStepRow(step, `future-${step.id}`, 'future'))}
-        </>
-      ) : (
-        visibleSteps.map((step, index) => {
-          const state: StepState =
-            index < activeIndex ? 'done' : index === activeIndex ? 'current' : 'future'
-          return renderStepRow(step, step.id, state)
-        })
-      )}
+  // Daftar node riwayat penuh sesuai urutan existing (tertua -> terbaru).
+  // `null` = mode fallback langkah turunan (tanpa history, <= 4 langkah,
+  // tak perlu dipotong). Baris "Status akhir" adalah penutup struktural dan
+  // selalu dirender di luar cap.
+  let historyNodes: ReactNode[] | null = null
+  if (terminal) {
+    if (entries.length > 0) {
+      historyNodes = [
+        ...(showSyntheticRequest ? [renderSyntheticRequestRow()] : []),
+        ...shownEntries.map((entry, index) => renderEntryRow(entry, index)),
+      ]
+    }
+  } else if (entries.length > 0) {
+    historyNodes = [
+      ...(showSyntheticRequest ? [renderSyntheticRequestRow()] : []),
+      ...shownEntries.map((entry, index) => renderEntryRow(entry, index)),
+      ...futureSteps.map((step) => renderStepRow(step, `future-${step.id}`, 'future')),
+    ]
+  }
+  const visibleNodes =
+    historyNodes === null
+      ? null
+      : historyNodes.slice(0, TIMELINE_MAX_VISIBLE_NODES)
+  const hiddenCount =
+    historyNodes === null ? 0 : historyNodes.length - (visibleNodes?.length ?? 0)
 
-      {terminal && (
-        <li className="relative min-w-0">
-          <span
-            aria-hidden="true"
-            className="absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full bg-neutral-bg text-neutral-text"
+  return (
+    <>
+      <ol className="relative ml-3 flex flex-col gap-6 border-l-2 border-border-light pl-6">
+        {visibleNodes !== null ? (
+          visibleNodes
+        ) : (
+          <>
+            {terminal
+              ? visibleSteps.map((step) => renderStepRow(step, step.id, 'done'))
+              : visibleSteps.map((step, index) => {
+                  const state: StepState =
+                    index < activeIndex
+                      ? 'done'
+                      : index === activeIndex
+                        ? 'current'
+                        : 'future'
+                  return renderStepRow(step, step.id, state)
+                })}
+          </>
+        )}
+
+        {terminal && (
+          <li className="relative min-w-0">
+            <span
+              aria-hidden="true"
+              className="absolute -left-8 top-0 flex size-4 items-center justify-center rounded-full bg-neutral-bg text-neutral-text"
+            >
+              <X aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />
+            </span>
+            <p className="text-sm font-bold text-ink">Status akhir</p>
+            <div className="mt-1">
+              <StatusBadge status={status} />
+            </div>
+            {statusNote != null && statusNote.trim() !== '' && (
+              <p className="mt-1 break-words text-label text-ink-secondary">{statusNote}</p>
+            )}
+          </li>
+        )}
+      </ol>
+
+      {hiddenCount > 0 && historyNodes !== null ? (
+        <div className="mt-3">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="min-h-touch"
+            onClick={() => setFullOpen(true)}
           >
-            <X aria-hidden="true" className="size-3 shrink-0" strokeWidth={3} />
-          </span>
-          <p className="text-sm font-bold text-ink">Status akhir</p>
-          <div className="mt-1">
-            <StatusBadge status={status} />
-          </div>
-          {statusNote != null && statusNote.trim() !== '' && (
-            <p className="mt-1 break-words text-label text-ink-secondary">{statusNote}</p>
-          )}
-        </li>
-      )}
-    </ol>
+            Lihat Semua ({historyNodes.length})
+          </Button>
+        </div>
+      ) : null}
+
+      <Modal
+        open={fullOpen && historyNodes !== null}
+        onClose={() => setFullOpen(false)}
+        title="Riwayat Status Lengkap"
+        size="lg"
+      >
+        <ol className="relative ml-3 flex flex-col gap-6 border-l-2 border-border-light pl-6">
+          {historyNodes}
+        </ol>
+      </Modal>
+    </>
   )
 }

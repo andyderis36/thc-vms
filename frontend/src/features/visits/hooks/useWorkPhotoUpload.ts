@@ -17,6 +17,11 @@ export interface UseWorkPhotoUploadParams {
   visitId: string
   /** Slot yang diurus instance ini: `before` (sebelum kerja) / `after` (sesudah kerja). */
   kind: WorkPhotoKind
+  /**
+   * Siklus check-in/out pemilik bukti (id baris `visit_logs`); dikirim
+   * sebagai `visit_log_id` bila ada, absen = siklus `in` terakhir.
+   */
+  visitLogId?: string | null
 }
 
 export interface UseWorkPhotoUploadResult {
@@ -68,6 +73,7 @@ function workPhotoUploadErrorMessage(error: unknown): string {
 export function useWorkPhotoUpload({
   visitId,
   kind,
+  visitLogId,
 }: UseWorkPhotoUploadParams): UseWorkPhotoUploadResult {
   const queryClient = useQueryClient()
   const mutation = useMutation({
@@ -75,7 +81,11 @@ export function useWorkPhotoUpload({
       const uploaded = await uploadFile(file, 'work_photos')
       await apiFetch<WorkPhoto>(`/visits/${visitId}/work-photos`, {
         method: 'POST',
-        body: JSON.stringify({ kind, url: uploaded.file_url }),
+        body: JSON.stringify(
+          visitLogId != null && visitLogId !== ''
+            ? { kind, url: uploaded.file_url, visit_log_id: visitLogId }
+            : { kind, url: uploaded.file_url },
+        ),
       })
     },
     onSuccess: () => {

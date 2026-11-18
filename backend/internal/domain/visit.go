@@ -242,7 +242,10 @@ func ParseWorkPhotoKind(raw string) (WorkPhotoKind, error) {
 // photo attached to a visit while it is being executed. UploadedBy is nil
 // when the attaching account has since been removed (ON DELETE SET NULL);
 // UploadedByName is the resolved display name ("" when unknown) and is
-// display data only, never an identifier.
+// display data only, never an identifier. VisitLogID binds the proof to the
+// exact check-in/out cycle it was taken in (migration 000034, NULL on rows
+// written before per-cycle binding); the UNIQUE (visit_request_id, kind)
+// anchor is untouched, so a re-attach rebinds the slot to the current cycle.
 type WorkPhoto struct {
 	ID             UUID
 	VisitRequestID UUID
@@ -251,6 +254,7 @@ type WorkPhoto struct {
 	UploadedBy     *UUID
 	UploadedByName string
 	UploadedAt     time.Time
+	VisitLogID     *UUID
 }
 
 // WorkPhotoSet carries both evidence slots of one visit. A nil slot means
