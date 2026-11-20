@@ -5,7 +5,7 @@ flowchart TD
     R2 -- Ya --> NoShow[Update Status: not_visit & Log History]
     R2 -- Tidak --> R1
 
-    R1{Cek Kunjungan 'requested' dengan created_at sudah lewat 7 Hari DAN end_date belum lewat 2 Jam (saling lepas dengan R2)?}
+    R1{Cek Kunjungan 'requested' dengan created_at sudah lewat 7 Hari DAN end_date belum lewat 2 Jam - saling lepas dengan R2?}
     R1 -- Ya --> AutoCancel[Update Status: cancelled & Log History]
     R1 -- Tidak --> R3
 

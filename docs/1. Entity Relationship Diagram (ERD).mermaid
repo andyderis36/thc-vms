@@ -130,7 +130,7 @@ erDiagram
 
     CHECK_IN {
         uuid id PK
-        uuid visit_request_id FK UK "1 visit = 1 check-in record"
+        uuid visit_request_id FK,UK "1 visit per 1 check-in record"
         timestamptz checked_in_at
         uuid checked_in_by FK "Security or Admin user ID"
         string photo_url "MinIO/S3 URL bukti verifikasi gerbang"
@@ -139,7 +139,7 @@ erDiagram
 
     CHECK_OUT {
         uuid id PK
-        uuid visit_request_id FK UK "1 visit = 1 check-out record"
+        uuid visit_request_id FK,UK "1 visit per 1 check-out record"
         timestamptz checked_out_at
         uuid checked_out_by FK "Security or Admin user ID"
     }

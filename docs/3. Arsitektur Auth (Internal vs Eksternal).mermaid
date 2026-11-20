@@ -43,8 +43,8 @@ flowchart TD
 
     subgraph Persistence["Persistence & Object Storage Layer"]
         POOL["pgxpool Connection Pool (MaxConns: 50, Timeout: 5s)"]
-        PG[("PostgreSQL 18.6 (Indexed B-Tree)") ]
-        MINIO[("MinIO / AWS S3 (Surat Tugas, KTP, Foto)") ]
+        PG[("PostgreSQL 18.6, Indexed B-Tree")]
+        MINIO[("MinIO / AWS S3: Surat Tugas, KTP, Foto")]
         POOL --> PG
     end
 
